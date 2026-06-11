@@ -40,25 +40,49 @@ import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from secrets import token_urlsafe
 from typing import Any
 
+from kairix.connect.protocols import ConnectError
 from kairix.credentials import Credentials
 from kairix.platform.setup.service import (
     AgentConnectInfo,
+    CallbackOutcome,
     ConnectSnippet,
     FolderScan,
     HandshakeResult,
     IndexStatus,
     ProviderValidation,
+    SavedSource,
     SearchPreview,
     SearchPreviewHit,
     SetupStatus,
+    SourceAuthStart,
+    SourceAuthStatus,
     SourceHint,
+    SourceOption,
+    SourceUnit,
+    SourceUnits,
     TourBrief,
     TourPrep,
     TourRememberRoundtrip,
     TourTimeline,
     TourTimelineHit,
+)
+from kairix.platform.setup.source_oauth import (
+    DEFAULT_SOURCE_OPTIONS,
+    OAUTH_SOURCE_PROVIDERS,
+    PICKABLE_PROVIDERS,
+    PROVIDER_GITHUB,
+    PROVIDER_GMAIL,
+    PROVIDER_GOOGLE_CALENDAR,
+    PROVIDER_SLACK,
+    CapturingBrowser,
+    SourceFlowRequest,
+    WizardCallbackListener,
+    build_source_flow,
+    source_secret_leaves,
+    topology_updates_for_source,
 )
 from kairix.platform.setup.wizard import provider_plugin_name, write_config_yaml
 
@@ -194,6 +218,16 @@ _TOUR_BRIEF_NO_AGENT = (
 #: Prefix of the remember use case's invalid-agent rejection — the one
 #: failure that needs agent-setup guidance instead of retry guidance.
 _INVALID_AGENT_PREFIX = "InvalidAgent"
+#: Shared F21 tail for source-connect failures (#489).
+_SOURCE_RETRY = " next: go back to the source step and start the connection again."
+
+#: Source sign-in phases reported by :meth:`KairixSetupService.source_auth_status`.
+PHASE_IDLE = "idle"
+PHASE_STARTING = "starting"
+PHASE_CONSENT = "consent"
+PHASE_EXCHANGING = "exchanging"
+PHASE_DONE = "done"
+PHASE_FAILED = "failed"
 
 
 # ---------------------------------------------------------------------------
@@ -503,6 +537,57 @@ def _default_top_level_config() -> dict[str, Any] | None:  # pragma: no cover  #
     return load_top_level_config()
 
 
+def _default_listener_factory(origin: str, expected_state: str | None) -> Any:
+    """Production listener — fulfilled by the wizard's callback route (#489)."""
+    return WizardCallbackListener(origin=origin, expected_state=expected_state)
+
+
+def _default_persist_secret(name: str, value: str) -> Any:  # pragma: no cover  # lazy-import DI-default delegation
+    from kairix.secrets.store import set_secret
+
+    return set_secret(name, value)
+
+
+def _default_discover_units(  # pragma: no cover  # lazy-import DI-default delegation
+    provider: str,
+    client: Any,
+    tokens: Any,
+) -> tuple[SourceUnit, ...]:
+    from kairix.platform.setup.source_oauth import discover_source_units_live
+
+    return discover_source_units_live(provider, client, tokens)
+
+
+def read_config_mapping(*, overlay_path: str | None, config_path: str | None) -> dict[str, Any]:
+    """Read the wizard's write-target config file as a plain mapping.
+
+    Mirrors :func:`write_config_updates`'s target resolution (#485) so
+    the topology upsert in :meth:`KairixSetupService.save_oauth_source`
+    merges into the SAME file it writes back to. A missing or
+    non-mapping file reads as empty — the truthful fresh-install answer.
+    """
+    import yaml
+
+    target = Path(overlay_path).expanduser() if overlay_path else Path(config_path or "kairix.config.yaml")
+    if not target.exists():
+        return {}
+    loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
+    return loaded if isinstance(loaded, dict) else {}
+
+
+# pragma rationale: lazy-import DI-default delegation — the read-target
+# resolution reads KAIRIX_CONFIG_OVERLAY_PATH / KAIRIX_CONFIG_PATH
+# through kairix.paths (F4); the testable logic lives in
+# read_config_mapping.
+def _default_read_config() -> Mapping[str, Any]:  # pragma: no cover  # lazy-import DI-default delegation
+    from kairix.paths import config_overlay_path_override, config_path_override
+
+    return read_config_mapping(
+        overlay_path=config_overlay_path_override(),
+        config_path=config_path_override(),
+    )
+
+
 @dataclass
 class SetupServiceDeps:
     """Injectable collaborators for :class:`KairixSetupService`.
@@ -575,6 +660,53 @@ class SetupServiceDeps:
     )
     # tour_remember_roundtrip — monotonic clock for the round-trip timing.
     clock_fn: Callable[[], float] = field(default_factory=lambda: time.monotonic)
+    # start_source_auth (#489) — provider + typed fields → connect flow.
+    oauth_flow_factory: Callable[[SourceFlowRequest], Any] = field(
+        default_factory=lambda: build_source_flow,
+    )
+    # start_source_auth — (origin, expected_state) → CallbackListener.
+    listener_factory: Callable[[str, str | None], Any] = field(
+        default_factory=lambda: _default_listener_factory,
+    )
+    # save_oauth_source / _source_auth_worker — persist one canonical secret.
+    persist_secret_fn: Callable[[str, str], Any] = field(
+        default_factory=lambda: _default_persist_secret,
+    )
+    # discover_source_units — (provider, client, tokens) → picker rows.
+    discover_units_fn: Callable[[str, Any, Any], tuple[SourceUnit, ...]] = field(
+        default_factory=lambda: _default_discover_units,
+    )
+    # save_oauth_source — current content of the wizard's config target.
+    read_config_fn: Callable[[], Mapping[str, Any]] = field(
+        default_factory=lambda: _default_read_config,
+    )
+    # source_options — the cards on the source step.
+    source_options_fn: Callable[[], tuple[SourceOption, ...]] = field(
+        default_factory=lambda: lambda: DEFAULT_SOURCE_OPTIONS,
+    )
+
+
+@dataclass
+class _SourceAuthState:
+    """Mutable per-flow state for one source sign-in (#489).
+
+    The single-slot pending-flow registry: the service holds at most
+    ONE of these (the wizard is a single-operator tool). A replacing
+    ``start_source_auth`` swaps the pointer; a stale worker thread
+    keeps writing to ITS state object, which nothing reads any more.
+    All field mutation happens under the service's source lock.
+    """
+
+    provider: str
+    instance: str
+    expected_state: str | None
+    listener: Any
+    browser: Any
+    callback_delivered: bool = False
+    done: bool = False
+    error: str | None = None
+    tokens: Any = None
+    client: Any = None
 
 
 class KairixSetupService:
@@ -594,6 +726,10 @@ class KairixSetupService:
         self._index_state_lock = threading.Lock()
         self._index_thread: threading.Thread | None = None
         self._index_error: str | None = None
+        # Source OAuth single-slot registry (#489).
+        self._source_lock = threading.Lock()
+        self._source_state: _SourceAuthState | None = None
+        self._source_thread: threading.Thread | None = None
 
     # ------------------------------------------------------------------
     # Internal path resolution
@@ -1046,6 +1182,210 @@ class KairixSetupService:
             return TourTimeline(hits=(), message=_TOUR_TIMELINE_FAILED)
         return TourTimeline(hits=_to_tour_timeline_hits(getattr(out, "results", ()) or ()), message="")
 
+    # Source OAuth connect (#489)
+    # ------------------------------------------------------------------
+
+    def source_options(self) -> tuple[SourceOption, ...]:
+        """The source cards: folder plus the OAuth-connectable providers."""
+        return self._deps.source_options_fn()
+
+    def start_source_auth(self, provider: str, fields: Mapping[str, str], origin: str) -> SourceAuthStart:
+        """Start one provider sign-in on a background thread.
+
+        Mirrors the :meth:`start_index` worker pattern: the thread runs
+        ``flow.authorize`` + secret persistence; errors are recorded
+        behind the lock and surfaced by :meth:`source_auth_status`,
+        never raised out of the thread. Flow-construction failures
+        (unknown provider, missing credential material) surface
+        immediately so the connect form can re-render with guidance.
+        """
+        if provider not in OAUTH_SOURCE_PROVIDERS:
+            known = ", ".join(OAUTH_SOURCE_PROVIDERS)
+            return SourceAuthStart(
+                ok=False,
+                error=f"Unknown source provider {provider!r}. fix: pick one of {known}.{_SOURCE_RETRY}",
+            )
+        nonce = token_urlsafe(16)
+        # The GitHub App install redirect carries no ``state`` param, so
+        # its correlation is the single-slot registry alone; Slack and
+        # Google carry the nonce and the callback verifies it.
+        expected_state = None if provider == PROVIDER_GITHUB else nonce
+        listener = self._deps.listener_factory(origin, expected_state)
+        browser = CapturingBrowser()
+        try:
+            flow = self._deps.oauth_flow_factory(
+                SourceFlowRequest(provider=provider, fields=dict(fields), nonce=nonce, browser=browser)
+            )
+        except Exception as exc:
+            # Constructor errors are F21-shaped already and never carry
+            # the typed-in secret values (F15) — surface them verbatim.
+            return SourceAuthStart(ok=False, error=str(exc))
+        state = _SourceAuthState(
+            provider=provider,
+            instance=(fields.get("workspace") or "").strip(),
+            expected_state=expected_state,
+            listener=listener,
+            browser=browser,
+        )
+        with self._source_lock:
+            previous = self._source_state
+            if previous is not None:
+                # Single-slot registry: cancel any stale pending wait so
+                # the replaced worker thread exits instead of lingering.
+                previous.listener.close()
+            self._source_state = state
+            thread = threading.Thread(
+                target=self._source_auth_worker,
+                args=(state, flow),
+                name="setup-wizard-source-auth",
+                daemon=True,
+            )
+            self._source_thread = thread
+            thread.start()
+        return SourceAuthStart(ok=True, error=None)
+
+    def _source_auth_worker(self, state: _SourceAuthState, flow: Any) -> None:
+        """Background-thread body — records every failure as an operator message.
+
+        On success the captured tokens persist under their canonical
+        secret names (values never logged — F15) and the state flips to
+        done so the status poll advances the wizard to the picker.
+        """
+        try:
+            tokens = flow.authorize(listener=state.listener)
+            client = flow.discover_client_credentials()
+            instance = state.instance if state.provider == PROVIDER_SLACK else None
+            for name, value in source_secret_leaves(state.provider, instance, client, tokens):
+                self._deps.persist_secret_fn(name, value)
+        except ConnectError as exc:
+            # Denial / timeout — the listener's messages are already
+            # F21-shaped operator guidance.
+            with self._source_lock:
+                state.error = str(exc)
+            return
+        except Exception as exc:
+            with self._source_lock:
+                state.error = (
+                    f"The source connection failed: {exc}"
+                    f" fix: check the connection details and the provider app settings.{_SOURCE_RETRY}"
+                )
+            return
+        with self._source_lock:
+            state.tokens = tokens
+            state.client = client
+            state.done = True
+
+    def source_auth_status(self) -> SourceAuthStatus:
+        """Phase snapshot: idle → starting → consent → exchanging → done|failed."""
+        with self._source_lock:
+            state = self._source_state
+            if state is None:
+                return SourceAuthStatus(provider="", phase=PHASE_IDLE, authorize_url=None, error=None)
+            authorize_url = state.browser.authorize_url
+            phase = _source_phase(state, authorize_url)
+            return SourceAuthStatus(
+                provider=state.provider,
+                phase=phase,
+                authorize_url=authorize_url,
+                error=state.error,
+            )
+
+    def complete_source_callback(self, state: str | None, params: Mapping[str, str]) -> CallbackOutcome:
+        """Deliver the provider redirect to the pending flow — or reject it.
+
+        Security posture (the callback route is exempt from the
+        operator-token guard — a provider redirect cannot carry custom
+        headers): the protection is the single-use pending nonce. A
+        callback is rejected when no flow is pending or when the
+        redirect's ``state`` mismatches; the slot is consumed on first
+        accepted delivery. The authorization code in ``params`` is
+        never logged (F15).
+        """
+        with self._source_lock:
+            pending = self._source_state
+            if pending is None or pending.done or pending.error is not None or pending.callback_delivered:
+                return CallbackOutcome(
+                    ok=False,
+                    error=(
+                        "No source connection is waiting for a sign-in response."
+                        f" fix: start the connection from the wizard's source step.{_SOURCE_RETRY}"
+                    ),
+                )
+            if pending.expected_state is not None and state != pending.expected_state:
+                return CallbackOutcome(
+                    ok=False,
+                    error=(
+                        "The sign-in response does not match the connection this wizard started."
+                        f" fix: use the consent screen the wizard opened — not an old link.{_SOURCE_RETRY}"
+                    ),
+                )
+            pending.callback_delivered = True
+            listener = pending.listener
+        listener.deliver(params)
+        return CallbackOutcome(ok=True, error=None)
+
+    def _connected_source(self, provider: str) -> _SourceAuthState | None:
+        """The completed auth state for ``provider``, or ``None``."""
+        with self._source_lock:
+            state = self._source_state
+            if state is not None and state.done and state.provider == provider:
+                return state
+        return None
+
+    def discover_source_units(self, provider: str) -> SourceUnits:
+        """Picker payload: channels / repos for pickable providers,
+        confirm copy for the rest. Discovery failures render as F21
+        guidance, never a stack trace."""
+        pickable = provider in PICKABLE_PROVIDERS
+        state = self._connected_source(provider)
+        if state is None:
+            return SourceUnits(
+                provider=provider,
+                units=(),
+                pickable=pickable,
+                error=f"This source is not connected yet. fix: finish the sign-in first.{_SOURCE_RETRY}",
+            )
+        if not pickable:
+            return SourceUnits(provider=provider, units=(), pickable=False, note=_confirm_note(provider))
+        try:
+            units = self._deps.discover_units_fn(provider, state.client, state.tokens)
+        except Exception as exc:
+            return SourceUnits(
+                provider=provider,
+                units=(),
+                pickable=True,
+                error=(
+                    f"Could not list what this source offers: {exc}"
+                    f" fix: check the connection is still valid, then reload this page.{_SOURCE_RETRY}"
+                ),
+            )
+        return SourceUnits(provider=provider, units=units, pickable=True)
+
+    def save_oauth_source(self, provider: str, instance: str, picks: tuple[str, ...]) -> SavedSource:
+        """Emit the connector + collection config for the picked units.
+
+        Writes ``topology_v2`` entries through the overlay-aware config
+        path (#485). The returned summary states what will be fetched
+        BEFORE any spend; deep volumetrics (message counts, byte sizes)
+        are deferred to the KFEAT-022 counters. ``OSError`` from a
+        read-only config propagates so the route renders the rescue
+        banner.
+        """
+        state = self._connected_source(provider)
+        if state is None:
+            return SavedSource(
+                ok=False,
+                summary="",
+                error=f"This source is not connected yet. fix: finish the sign-in first.{_SOURCE_RETRY}",
+            )
+        resolved_instance = (instance or "").strip() or state.instance
+        validation_error = _validate_source_picks(provider, resolved_instance, picks)
+        if validation_error:
+            return SavedSource(ok=False, summary="", error=validation_error)
+        updates = topology_updates_for_source(provider, resolved_instance, picks, self._deps.read_config_fn())
+        self._deps.write_config_fn(updates)
+        return SavedSource(ok=True, summary=_source_summary(provider, resolved_instance, picks), error=None)
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -1071,6 +1411,61 @@ def _scrub_secret(text: str, secret: str) -> str:
     if secret and secret in text:
         return text.replace(secret, _REDACTED)
     return text
+
+
+def _source_phase(state: _SourceAuthState, authorize_url: str | None) -> str:
+    """Derive the operator-facing phase from one auth state's flags."""
+    if state.error is not None:
+        return PHASE_FAILED
+    if state.done:
+        return PHASE_DONE
+    if state.callback_delivered:
+        return PHASE_EXCHANGING
+    if authorize_url:
+        return PHASE_CONSENT
+    return PHASE_STARTING
+
+
+def _confirm_note(provider: str) -> str:
+    """Confirm-screen copy for sources with no sub-unit picker.
+
+    Google Drive joins Gmail/Calendar here because kairix has no Drive
+    folder/drive listing surface yet — a Drive folder picker is
+    KFEAT-022 territory.
+    """
+    if provider == PROVIDER_GMAIL:
+        return "kairix will index email from this mailbox. Enter the mailbox address to confirm."
+    if provider == PROVIDER_GOOGLE_CALENDAR:
+        return "kairix will index events from this account's calendar. Leave the calendar id blank for the main one."
+    return "kairix will index the files this Google account can see in Drive."
+
+
+def _validate_source_picks(provider: str, instance: str, picks: tuple[str, ...]) -> str | None:
+    """Reject saves that would emit an unusable connector config."""
+    if provider in PICKABLE_PROVIDERS and not picks:
+        return f"Nothing is selected yet. fix: tick at least one item to index.{_SOURCE_RETRY}"
+    if provider == PROVIDER_GMAIL and not instance:
+        return f"The mailbox address is required. fix: enter the Gmail address this sign-in belongs to.{_SOURCE_RETRY}"
+    return None
+
+
+def _source_summary(provider: str, instance: str, picks: tuple[str, ...]) -> str:
+    """Plain-language pre-spend statement of what will be fetched.
+
+    Unit counts only — deep volumetrics (message counts, byte sizes)
+    are out of scope until the KFEAT-022 counters land.
+    """
+    if provider == PROVIDER_SLACK:
+        noun = "channel" if len(picks) == 1 else "channels"
+        return f"{len(picks)} {noun} selected — kairix will fetch and index messages from these channels."
+    if provider == PROVIDER_GITHUB:
+        noun = "repository" if len(picks) == 1 else "repositories"
+        return f"{len(picks)} {noun} selected — kairix will fetch and index code and issues from them."
+    if provider == PROVIDER_GMAIL:
+        return f"Mailbox {instance} connected — kairix will fetch and index its email."
+    if provider == PROVIDER_GOOGLE_CALENDAR:
+        return f"Calendar {instance or 'primary'} connected — kairix will fetch and index its events."
+    return "Google Drive connected — kairix will fetch and index the files this account can see."
 
 
 #: Default F21 markers for a failed scan; specific failures (relative
@@ -1261,6 +1656,12 @@ __all__ = [
     "EMBED_COST_USD_PER_1K_TOKENS",
     "ENDPOINT_REQUIRED_PLUGINS",
     "FIRST_SEARCH_TOP_N",
+    "PHASE_CONSENT",
+    "PHASE_DONE",
+    "PHASE_EXCHANGING",
+    "PHASE_FAILED",
+    "PHASE_IDLE",
+    "PHASE_STARTING",
     "SCAN_FILE_SUFFIXES",
     "SCAN_MAX_FILES",
     "SCAN_SAMPLE_FILES",
@@ -1274,6 +1675,7 @@ __all__ = [
     "embed_lock_held",
     "probe_provider_roundtrip",
     "provider_from_credentials",
+    "read_config_mapping",
     "run_first_index",
     "tour_agent_from_config",
     "update_config_file",

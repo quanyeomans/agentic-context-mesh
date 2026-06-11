@@ -1,0 +1,18 @@
+{% extends "setup/base.html" %}
+{% block title %}Finishing sign-in — kairix setup{% endblock %}
+{% block content %}
+<hgroup>
+  <h2>Finishing the sign-in</h2>
+  <p>Your browser goes to the provider's approval screen, then comes back here. This page advances automatically.</p>
+</hgroup>
+<div id="source-auth-status"
+     hx-get="/setup/source/auth-status"
+     hx-trigger="load, every 1s"
+     hx-swap="innerHTML">
+  <div class="kx-skeleton kx-skeleton-progress"></div>
+  <p class="kx-muted kx-small">Preparing the sign-in…</p>
+</div>
+<div class="kx-setup-actions">
+  <a href="/setup/source" class="kx-btn-secondary">Back to sources</a>
+</div>
+{% endblock %}

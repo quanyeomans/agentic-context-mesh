@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from kairix.paths import KairixPaths
     from kairix.platform.setup.backends import SetupServiceDeps
 
@@ -211,6 +213,95 @@ class TourTimeline:
     message: str
 
 
+@dataclass(frozen=True)
+class SourceOption:
+    """One card on the wizard's source step (#489).
+
+    ``oauth=False`` rows route to existing screens (the folder step);
+    ``oauth=True`` rows start the wizard-origin OAuth connect flow.
+    """
+
+    key: str
+    label: str
+    description: str
+    oauth: bool
+
+
+@dataclass(frozen=True)
+class SourceAuthStart:
+    """Outcome of asking the backend to start a source sign-in flow."""
+
+    ok: bool
+    error: str | None
+
+
+@dataclass(frozen=True)
+class SourceAuthStatus:
+    """Snapshot of the in-flight source sign-in (#489).
+
+    ``phase`` walks ``idle → starting → consent → exchanging →
+    done | failed``. In the ``consent`` phase ``authorize_url`` carries
+    the provider consent-screen URL the operator's browser must visit;
+    the wizard's status poll redirects there. ``failed`` carries an
+    operator-facing F21 message in ``error``.
+    """
+
+    provider: str
+    phase: str
+    authorize_url: str | None
+    error: str | None
+
+
+@dataclass(frozen=True)
+class CallbackOutcome:
+    """Outcome of delivering a provider redirect to the pending flow.
+
+    ``ok=False`` covers the two rejection cases: no flow is pending, or
+    the redirect's ``state`` does not match the pending flow's nonce.
+    """
+
+    ok: bool
+    error: str | None
+
+
+@dataclass(frozen=True)
+class SourceUnit:
+    """One pickable unit (a Slack channel, a GitHub repo) in the picker."""
+
+    unit_id: str
+    name: str
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class SourceUnits:
+    """The picker payload for one connected source.
+
+    ``pickable=False`` sources (Gmail / Google Calendar / Google Drive
+    — no sub-unit listing surface) render a confirm screen instead of
+    a checkbox list; ``note`` carries the confirm copy.
+    """
+
+    provider: str
+    units: tuple[SourceUnit, ...]
+    pickable: bool
+    note: str = ""
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class SavedSource:
+    """Outcome of persisting the picked units as connector config.
+
+    ``summary`` states what will be fetched ("2 channels selected — …")
+    BEFORE any spend happens; the wizard shows it on the saved screen.
+    """
+
+    ok: bool
+    summary: str
+    error: str | None
+
+
 class SetupService(Protocol):
     """Boundary Protocol the web wizard composes against.
 
@@ -287,6 +378,40 @@ class SetupService(Protocol):
     def tour_timeline(self, query: str) -> TourTimeline:
         """Run date-aware retrieval for ``query`` (#490 — the ``timeline`` tool)."""
 
+    def source_options(self) -> tuple[SourceOption, ...]:
+        """Return the source cards the wizard's source step offers (#489)."""
+
+    def start_source_auth(self, provider: str, fields: Mapping[str, str], origin: str) -> SourceAuthStart:
+        """Start the OAuth connect flow for ``provider`` in the background.
+
+        ``fields`` carries the operator-typed connect-form values
+        (never logged — F15). ``origin`` is the scheme+host+port the
+        operator's browser used to reach the wizard, captured from the
+        live request; the flow's redirect URI derives from it.
+        """
+
+    def source_auth_status(self) -> SourceAuthStatus:
+        """Return the current source sign-in snapshot (#489)."""
+
+    def complete_source_callback(self, state: str | None, params: Mapping[str, str]) -> CallbackOutcome:
+        """Deliver a provider redirect's params to the pending flow.
+
+        Rejects (``ok=False``) when no flow is pending or ``state``
+        does not match the pending flow's single-use nonce.
+        """
+
+    def discover_source_units(self, provider: str) -> SourceUnits:
+        """List the pickable units the connected source offers (#489)."""
+
+    def save_oauth_source(self, provider: str, instance: str, picks: tuple[str, ...]) -> SavedSource:
+        """Persist the picked units as connector + collection config.
+
+        Raises:
+            OSError: when the config file cannot be written (read-only
+                mount without an overlay, #485) — the wizard renders
+                the rescue banner.
+        """
+
 
 def build_setup_service(
     *,
@@ -313,16 +438,23 @@ def build_setup_service(
 
 __all__ = [
     "AgentConnectInfo",
+    "CallbackOutcome",
     "ConnectSnippet",
     "FolderScan",
     "HandshakeResult",
     "IndexStatus",
     "ProviderValidation",
+    "SavedSource",
     "SearchPreview",
     "SearchPreviewHit",
     "SetupService",
     "SetupStatus",
+    "SourceAuthStart",
+    "SourceAuthStatus",
     "SourceHint",
+    "SourceOption",
+    "SourceUnit",
+    "SourceUnits",
     "TourBrief",
     "TourPrep",
     "TourRememberRoundtrip",

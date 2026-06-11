@@ -1,0 +1,20 @@
+{% if status.phase == "failed" %}
+<div class="kx-validation-error">
+  <p class="kx-error-msg">{{ status.error }}</p>
+  <dl class="kx-error-steps">
+    <dt>Fix</dt><dd>Check the connection details and the provider app's settings.</dd>
+    <dt>Next</dt><dd>Go back to the source step and start the connection again.</dd>
+  </dl>
+</div>
+{% elif status.phase == "done" %}
+<p class="kx-success-msg">Connected. Moving on…</p>
+{% elif status.phase == "exchanging" %}
+<p class="kx-muted kx-small">Approval received — finishing the connection…</p>
+{% elif status.phase == "consent" %}
+<p class="kx-muted kx-small">Sending you to the provider's approval screen…</p>
+{% if status.authorize_url %}
+<p class="kx-small"><a href="{{ status.authorize_url }}">Open the approval screen</a> if you are not redirected.</p>
+{% endif %}
+{% else %}
+<p class="kx-muted kx-small">Preparing the sign-in…</p>
+{% endif %}

@@ -1,0 +1,72 @@
+{% extends "setup/base.html" %}
+{% block title %}Connect {{ label }} — kairix setup{% endblock %}
+{% block card_class %} kx-setup-card-wide{% endblock %}
+{% block content %}
+<hgroup>
+  <h2>Connect {{ label }}</h2>
+  <p>kairix signs in with the app you create in {{ label }}'s settings. One-time setup: register the address below as the app's redirect URL, then fill in the details.</p>
+</hgroup>
+{% if start_error %}
+<div class="kx-validation-error">
+  <p class="kx-error-msg">{{ start_error }}</p>
+</div>
+{% endif %}
+<div class="kx-callout">
+  <p class="kx-small"><strong>Redirect URL to register with {{ label }}:</strong></p>
+  <code id="redirect-uri">{{ redirect_uri }}</code>
+  <p class="kx-muted kx-small">This is the address of this wizard — the provider sends your browser back here after you approve access.</p>
+</div>
+<form method="post" action="/setup/source/connect">
+  <input type="hidden" name="provider" value="{{ provider }}">
+  {% if provider == "slack" %}
+  <label>
+    Workspace name
+    <input type="text" name="workspace" placeholder="my-team" required>
+  </label>
+  <p class="kx-muted kx-small">A short name for this workspace — kairix files the connection under it. Use your team's Slack name.</p>
+  <label>
+    Client ID
+    <input type="text" name="client_id" required>
+  </label>
+  <label>
+    Client secret
+    <input type="password" name="client_secret" required>
+  </label>
+  <p class="kx-muted kx-small">Both come from your Slack app's Basic Information page at api.slack.com/apps. Add the redirect URL above under OAuth &amp; Permissions.</p>
+  {% elif provider == "github" %}
+  <label>
+    App ID
+    <input type="text" name="app_id" required>
+  </label>
+  <p class="kx-muted kx-small">The number on your GitHub App's About section (github.com/settings/apps).</p>
+  <label>
+    App slug
+    <input type="text" name="app_slug" placeholder="kairix-bot">
+  </label>
+  <p class="kx-muted kx-small">The short name in your App's URL: github.com/apps/&lt;slug&gt;. Set the App's Setup URL to the redirect URL above.</p>
+  <label>
+    Private key (.pem)
+    <textarea name="private_key_pem" rows="5" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea>
+  </label>
+  <label>
+    Or a server path to the .pem file
+    <input type="text" name="private_key_path" placeholder="/path/to/app.private-key.pem">
+  </label>
+  <p class="kx-muted kx-small">Generate the key on the App's settings page. Paste the file's content, or give a path kairix can read.</p>
+  {% else %}
+  <label>
+    client_secret.json content
+    <textarea name="client_secret_json" rows="5" placeholder='{"installed": {"client_id": "..."}}'></textarea>
+  </label>
+  <label>
+    Or a server path to client_secret.json
+    <input type="text" name="client_secret_path" placeholder="/path/to/client_secret.json">
+  </label>
+  <p class="kx-muted kx-small">Download this file from the Google Cloud console (APIs &amp; Services → Credentials → your OAuth client). Add the redirect URL above to the client's authorized redirect URIs, and publish the consent screen so access doesn't expire after 7 days.</p>
+  {% endif %}
+  <div class="kx-setup-actions">
+    <a href="/setup/source" class="kx-btn-secondary">Back</a>
+    <button type="submit" class="kx-btn-primary">Connect</button>
+  </div>
+</form>
+{% endblock %}

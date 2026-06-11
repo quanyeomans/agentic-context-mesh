@@ -1,0 +1,62 @@
+{% extends "setup/base.html" %}
+{% block title %}Pick what to index — kairix setup{% endblock %}
+{% block card_class %} kx-setup-card-wide{% endblock %}
+{% block content %}
+<hgroup>
+  <h2>Pick what to index</h2>
+  <p>Only what you pick here gets fetched and indexed — nothing else is read.</p>
+</hgroup>
+{% if save_error %}
+<div class="kx-validation-error">
+  <p class="kx-error-msg">{{ save_error }}</p>
+</div>
+{% endif %}
+{% if units.error %}
+<div class="kx-validation-error">
+  <p class="kx-error-msg">{{ units.error }}</p>
+</div>
+<div class="kx-setup-actions">
+  <a href="/setup/source" class="kx-btn-secondary">Back to sources</a>
+</div>
+{% else %}
+<form method="post" action="/setup/source/save">
+  <input type="hidden" name="provider" value="{{ provider }}">
+  {% if units.pickable %}
+  <fieldset class="kx-unit-list">
+    {% for unit in units.units %}
+    <label>
+      <input type="checkbox" name="unit" value="{{ unit.unit_id }}">
+      <strong>{{ unit.name }}</strong>
+      {% if unit.detail %}<span class="kx-muted kx-small"> — {{ unit.detail }}</span>{% endif %}
+    </label>
+    {% endfor %}
+  </fieldset>
+  {% if not units.units %}
+  <p class="kx-muted">Nothing to pick from yet — the connected account can't see any items.</p>
+  {% endif %}
+  {% else %}
+  <p>{{ units.note }}</p>
+  {% if provider == "gmail" %}
+  <label>
+    Mailbox address
+    <input type="email" name="instance" placeholder="you@example.com" required>
+  </label>
+  {% elif provider == "google-calendar" %}
+  <label>
+    Calendar id (optional)
+    <input type="text" name="instance" placeholder="primary">
+  </label>
+  {% elif provider == "google-drive" %}
+  <label>
+    A short name for this Drive (optional)
+    <input type="text" name="instance" placeholder="my-drive">
+  </label>
+  {% endif %}
+  {% endif %}
+  <div class="kx-setup-actions">
+    <a href="/setup/source" class="kx-btn-secondary">Back</a>
+    <button type="submit" class="kx-btn-primary">Save selection</button>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

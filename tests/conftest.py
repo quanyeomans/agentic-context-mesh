@@ -307,6 +307,9 @@ pytest_plugins = [
     # Web setup wizard (#474) — composes build_mcp_app + FakeSetupService
     # through the public seams and drives the wizard with TestClient.
     "tests.bdd.steps.setup_wizard_steps",
+    # Wizard OAuth source connect (#489) — same composition shape; the
+    # source sign-in outcomes are scripted on FakeSetupService.
+    "tests.bdd.steps.setup_wizard_source_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

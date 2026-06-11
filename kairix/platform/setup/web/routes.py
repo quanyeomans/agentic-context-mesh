@@ -27,12 +27,15 @@ from __future__ import annotations
 import hmac
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import quote
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from starlette.routing import BaseRoute, Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+from kairix.platform.setup.source_oauth import OAUTH_CALLBACK_PATH
 
 if TYPE_CHECKING:
     import jinja2
@@ -53,6 +56,22 @@ _INDEXING_URL = f"{SETUP_PATH_PREFIX}/indexing"
 # the legacy /setup/first-search path stays routable as a redirect so
 # old bookmarks and agent notes keep working.
 _TOUR_URL = f"{SETUP_PATH_PREFIX}/tour"
+_SOURCE_URL = f"{SETUP_PATH_PREFIX}/source"
+_SOURCE_CONNECT_ROUTE = "/source/connect"  # mount-relative (Route paths)
+_SOURCE_WAIT_URL = f"{SETUP_PATH_PREFIX}/source/wait"
+_SOURCE_PICKER_URL = f"{SETUP_PATH_PREFIX}/source/picker"
+
+# Mount-relative path of the OAuth callback (#489). The provider
+# redirect cannot carry the operator-token header, so this path is
+# exempted from the OperatorTokenGuard — see the guard's docstring for
+# the compensating control (single-use pending nonce in the service).
+_OAUTH_CALLBACK_MOUNT_PATH = "/oauth/callback"
+
+# Header HTMX reads to navigate the whole page from a partial response.
+_HX_REDIRECT = "HX-Redirect"
+
+# Template-context key for the inline rescue banner on a failed save.
+_CTX_SAVE_ERROR = "save_error"
 
 # Operator token header + the canonical secret identity it must match.
 OPERATOR_TOKEN_HEADER = "X-Kairix-Operator-Token"  # noqa: S105 — HTTP header NAME, not a credential value
@@ -72,6 +91,11 @@ _TPL_INDEXING = "setup/indexing.html"
 _TPL_TOUR = "setup/tour.html"
 _TPL_CONNECT_AGENT = "setup/connect_agent.html"
 _TPL_DONE = "setup/done.html"
+_TPL_SOURCE = "setup/source.html"
+_TPL_SOURCE_CONNECT = "setup/source_connect.html"
+_TPL_SOURCE_WAIT = "setup/source_wait.html"
+_TPL_SOURCE_PICKER = "setup/source_picker.html"
+_TPL_SOURCE_SAVED = "setup/source_saved.html"
 _TPL_KEY_VALIDATION = "partials/key_validation_result.html"
 _TPL_FOLDER_SCAN = "partials/folder_scan_result.html"
 _TPL_INDEXING_PROGRESS = "partials/indexing_progress.html"
@@ -81,6 +105,7 @@ _TPL_TOUR_PREP = "partials/tour_prep_result.html"
 _TPL_TOUR_REMEMBER = "partials/tour_remember_result.html"
 _TPL_TOUR_BRIEF = "partials/tour_brief_result.html"
 _TPL_TOUR_TIMELINE = "partials/tour_timeline_result.html"
+_TPL_SOURCE_AUTH_STATUS = "partials/source_auth_status.html"
 
 # Total step-indicator positions rendered by setup/base.html.
 _TOTAL_STEPS = 7
@@ -96,6 +121,15 @@ _FIELD_DEPLOYMENT = "deployment"
 # deployment-name field for these (#484). Azure routes requests by
 # deployment name, so the probe model must be one the operator deployed.
 _AZURE_PROVIDER_NAMES = frozenset({"azure_foundry", "azure_legacy"})
+
+# Source sign-in phases the status partial reacts to. These literals are
+# the SourceAuthStatus.phase contract (see
+# kairix/platform/setup/service.py) — duplicated here rather than
+# imported from the backend module so the wizard UI keeps shipping
+# independently of the backend (the same reason _default_service_factory
+# lazy-imports).
+_PHASE_CONSENT = "consent"
+_PHASE_DONE = "done"
 
 
 def _config_write_error(exc: OSError) -> str:
@@ -143,7 +177,7 @@ def _handle_key_save(
             deployment=fields.get(_FIELD_DEPLOYMENT) or None,
         )
     except OSError as exc:
-        return render(_TPL_KEY, {**_key_context(provider), "save_error": _config_write_error(exc)})
+        return render(_TPL_KEY, {**_key_context(provider), _CTX_SAVE_ERROR: _config_write_error(exc)})
     return RedirectResponse(_FOLDER_URL, status_code=303)
 
 
@@ -167,11 +201,125 @@ def _handle_folder_save(
                 "step": 4,
                 "hint": service.source_hint(),
                 _FIELD_FOLDER_PATH: path,
-                "save_error": _config_write_error(exc),
+                _CTX_SAVE_ERROR: _config_write_error(exc),
             },
         )
     service.start_index()
     return RedirectResponse(_INDEXING_URL, status_code=303)
+
+
+def _request_origin(request: Request) -> str:
+    """Scheme + host[:port] the operator's browser used to reach the wizard.
+
+    The OAuth redirect URI derives from this (never hardcoded) so
+    localhost, SSH-tunnel, and reverse-proxy origins all work — the
+    provider sends the operator's browser back to the SAME address the
+    wizard was loaded from (#489).
+    """
+    url = request.url
+    return f"{url.scheme}://{url.netloc}"
+
+
+def _oauth_provider_label(service: SetupService, provider: str) -> str | None:
+    """The display label for an OAuth source provider, or ``None``."""
+    for option in service.source_options():
+        if option.key == provider and option.oauth:
+            return option.label
+    return None
+
+
+def _source_connect_context(provider: str, label: str, origin: str) -> dict[str, Any]:
+    """Template context for the per-provider connect form.
+
+    ``redirect_uri`` is the exact value the operator must register in
+    the provider's app settings — derived from the live request origin.
+    """
+    return {
+        "step": 4,
+        "provider": provider,
+        "label": label,
+        "redirect_uri": f"{origin}{OAUTH_CALLBACK_PATH}",
+    }
+
+
+def _handle_source_connect_start(
+    request: Request,
+    fields: dict[str, str],
+    service: SetupService,
+    render: Callable[[str, dict[str, Any]], Response],
+) -> Response:
+    """Start the provider sign-in; re-render the form with F21 guidance
+    when the backend rejects the typed-in details. Module-level for the
+    same F16 reason as :func:`_handle_key_save`."""
+    provider = fields.get(_FIELD_PROVIDER, "")
+    label = _oauth_provider_label(service, provider)
+    if label is None:
+        return RedirectResponse(_SOURCE_URL, status_code=303)
+    origin = _request_origin(request)
+    started = service.start_source_auth(provider, fields, origin)
+    if not started.ok:
+        context = _source_connect_context(provider, label, origin)
+        context["start_error"] = started.error
+        return render(_TPL_SOURCE_CONNECT, context)
+    return RedirectResponse(f"{_SOURCE_WAIT_URL}?provider={quote(provider)}", status_code=303)
+
+
+def _handle_source_save(
+    provider: str,
+    instance: str,
+    picks: tuple[str, ...],
+    service: SetupService,
+    render: Callable[[str, dict[str, Any]], Response],
+) -> Response:
+    """Persist the picked units; on a read-only config (#485) or a
+    validation reject, re-render the picker with the rescue banner."""
+    try:
+        saved = service.save_oauth_source(provider, instance, picks)
+    except OSError as exc:
+        units = service.discover_source_units(provider)
+        return render(
+            _TPL_SOURCE_PICKER,
+            {"step": 4, "units": units, "provider": provider, _CTX_SAVE_ERROR: _config_write_error(exc)},
+        )
+    if not saved.ok:
+        units = service.discover_source_units(provider)
+        return render(
+            _TPL_SOURCE_PICKER,
+            {"step": 4, "units": units, "provider": provider, _CTX_SAVE_ERROR: saved.error},
+        )
+    return render(_TPL_SOURCE_SAVED, {"step": 4, "saved": saved, "provider": provider})
+
+
+def _source_status_headers(status: Any) -> dict[str, str] | None:
+    """``HX-Redirect`` choreography for the sign-in status poll.
+
+    In the consent phase the operator's browser is sent to the provider
+    consent screen (the wizard runs server-side — often in a container
+    with no browser — so the OPERATOR's browser must make this hop).
+    Once the flow finishes, the browser advances to the picker.
+    """
+    if status.phase == _PHASE_CONSENT and status.authorize_url:
+        return {_HX_REDIRECT: status.authorize_url}
+    if status.phase == _PHASE_DONE:
+        return {_HX_REDIRECT: f"{_SOURCE_PICKER_URL}?provider={quote(status.provider)}"}
+    return None
+
+
+def _handle_oauth_callback(request: Request, service: SetupService) -> Response:
+    """The wizard-origin OAuth callback (#489).
+
+    This route is exempt from the operator-token guard (a provider
+    redirect cannot carry custom headers); its protection is the
+    single-use pending nonce verified by
+    ``service.complete_source_callback`` — a callback with no pending
+    flow or a mismatched ``state`` is rejected with 409. The
+    authorization code is handed to the service and never logged (F15).
+    """
+    params = dict(request.query_params)
+    outcome = service.complete_source_callback(params.get("state"), params)
+    if not outcome.ok:
+        return PlainTextResponse(outcome.error or "Sign-in response rejected.", status_code=409)
+    return RedirectResponse(_SOURCE_WAIT_URL, status_code=303)
 
 
 def _default_service_factory() -> SetupService:
@@ -226,6 +374,20 @@ def _is_loopback_client(scope: Scope) -> bool:
     return host in _LOOPBACK_HOSTS
 
 
+def _mount_relative_path(scope: Scope) -> str:
+    """The request path relative to the wizard mount.
+
+    Starlette's ``Mount`` keeps ``scope["path"]`` absolute and records
+    the matched prefix in ``scope["root_path"]`` — strip it so the
+    guard's exemption set holds mount-relative paths.
+    """
+    path = str(scope.get("path", ""))
+    root = str(scope.get("root_path", ""))
+    if root and path.startswith(root):
+        return path[len(root) :] or "/"
+    return path
+
+
 class OperatorTokenGuard:
     """ASGI guard wrapping the wizard mount.
 
@@ -233,14 +395,33 @@ class OperatorTokenGuard:
     ``X-Kairix-Operator-Token`` matching the canonical
     ``kairix-infra-operator-token`` secret. The provided header value
     is never logged or echoed (F15).
+
+    ``exempt_paths`` (security-critical, #489): the OAuth provider's
+    consent redirect is a plain browser GET — it CANNOT carry the
+    operator-token header — so the wizard's ``/oauth/callback`` path is
+    exempted from the token check. The compensating control lives in
+    the service's single-slot pending-flow registry: a callback is only
+    accepted while a flow this wizard started is waiting, AND (for
+    flows that carry ``state``) when the redirect's ``state`` matches
+    the single-use nonce; the slot is consumed on first accepted
+    delivery. The exempted route never logs or echoes the authorization
+    code (F15).
     """
 
-    def __init__(self, app: ASGIApp, *, secrets: SecretsResolver) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        secrets: SecretsResolver,
+        exempt_paths: frozenset[str] = frozenset(),
+    ) -> None:
         self._app = app
         self._secrets = secrets
+        self._exempt_paths = exempt_paths
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope.get("type") != "http" or _is_loopback_client(scope):
+        exempt = _mount_relative_path(scope) in self._exempt_paths
+        if scope.get("type") != "http" or _is_loopback_client(scope) or exempt:
             await self._app(scope, receive, send)
             return
         expected = self._secrets.get(_TOKEN_SCOPE, _TOKEN_AREA, None, _TOKEN_LEAF)
@@ -301,7 +482,7 @@ def _string_fields(form: Mapping[str, Any]) -> dict[str, str]:
 def _progress_headers(status: Any) -> dict[str, str] | None:
     """``HX-Redirect`` header set once indexing finished cleanly."""
     if status.done and not status.error:
-        return {"HX-Redirect": _TOUR_URL}
+        return {_HX_REDIRECT: _TOUR_URL}
     return None
 
 
@@ -344,6 +525,51 @@ def _make_form_endpoint(
         return handler(_string_fields(form), service)
 
     return endpoint
+
+
+def _make_request_form_endpoint(
+    service_fn: Callable[[], SetupService],
+    handler: Callable[[Request, Any, SetupService], Response],
+) -> Callable[[Request], Any]:
+    """Like :func:`_make_screen_endpoint` but parses the form first.
+
+    The handler also sees the request (for origin derivation) and the
+    raw form (for multi-value checkbox reads via ``getlist``).
+    """
+
+    async def endpoint(request: Request) -> Response:
+        try:
+            service = service_fn()
+        except NotImplementedError as exc:
+            return PlainTextResponse(str(exc), status_code=503)
+        form = await request.form()
+        return handler(request, form, service)
+
+    return endpoint
+
+
+def _handle_key_screen(
+    request: Request,
+    render: Callable[[str, dict[str, Any]], Response],
+) -> Response:
+    """The key screen needs a provider pick — bounce back without one."""
+    provider = request.query_params.get(_FIELD_PROVIDER, "")
+    if not provider:
+        return RedirectResponse(_PROVIDER_URL, status_code=303)
+    return render(_TPL_KEY, _key_context(provider))
+
+
+def _handle_source_connect_screen(
+    request: Request,
+    service: SetupService,
+    render: Callable[[str, dict[str, Any]], Response],
+) -> Response:
+    """The connect form exists only for known OAuth providers (#489)."""
+    provider = request.query_params.get(_FIELD_PROVIDER, "")
+    label = _oauth_provider_label(service, provider)
+    if label is None:
+        return RedirectResponse(_SOURCE_URL, status_code=303)
+    return render(_TPL_SOURCE_CONNECT, _source_connect_context(provider, label, _request_origin(request)))
 
 
 def build_setup_wizard_mount(
@@ -390,6 +616,10 @@ def build_setup_wizard_mount(
     def _form_endpoint(handler: Callable[[dict[str, str], SetupService], Response]) -> Callable[[Request], Any]:
         return _make_form_endpoint(_service, handler)
 
+    def _request_form_endpoint(handler: Callable[[Request, Any, SetupService], Response]) -> Callable[[Request], Any]:
+        """Raw-form variant — the handler also sees the request."""
+        return _make_request_form_endpoint(_service, handler)
+
     def welcome(_request: Request, _service_: SetupService) -> Response:
         return _render(_TPL_WELCOME, {"step": 1})
 
@@ -397,10 +627,7 @@ def build_setup_wizard_mount(
         return _render(_TPL_PROVIDER, {"step": 2, "providers": names_fn()})
 
     def key_screen(request: Request, _service_: SetupService) -> Response:
-        provider = request.query_params.get("provider", "")
-        if not provider:
-            return RedirectResponse(_PROVIDER_URL, status_code=303)
-        return _render(_TPL_KEY, _key_context(provider))
+        return _handle_key_screen(request, _render)
 
     def key_validate(fields: dict[str, str], service: SetupService) -> Response:
         validation = service.validate_provider(
@@ -469,6 +696,37 @@ def build_setup_wizard_mount(
         status = service.index_status()
         return _render(_TPL_DONE, {"status": status})
 
+    def source_screen(_request: Request, service: SetupService) -> Response:
+        return _render(_TPL_SOURCE, {"step": 4, "options": service.source_options()})
+
+    def source_connect_screen(request: Request, service: SetupService) -> Response:
+        return _handle_source_connect_screen(request, service, _render)
+
+    def source_connect_start(request: Request, form: Any, service: SetupService) -> Response:
+        return _handle_source_connect_start(request, _string_fields(form), service, _render)
+
+    def source_wait_screen(request: Request, _service_: SetupService) -> Response:
+        provider = request.query_params.get(_FIELD_PROVIDER, "")
+        return _render(_TPL_SOURCE_WAIT, {"step": 4, "provider": provider})
+
+    def source_auth_status(_request: Request, service: SetupService) -> Response:
+        status = service.source_auth_status()
+        return _render(_TPL_SOURCE_AUTH_STATUS, {"status": status}, headers=_source_status_headers(status))
+
+    def source_picker_screen(request: Request, service: SetupService) -> Response:
+        provider = request.query_params.get(_FIELD_PROVIDER, "")
+        units = service.discover_source_units(provider)
+        return _render(_TPL_SOURCE_PICKER, {"step": 4, "units": units, "provider": provider})
+
+    def source_save(_request: Request, form: Any, service: SetupService) -> Response:
+        provider = str(form.get(_FIELD_PROVIDER) or "")
+        instance = str(form.get("instance") or "")
+        picks = tuple(str(value) for value in form.getlist("unit"))
+        return _handle_source_save(provider, instance, picks, service, _render)
+
+    def oauth_callback(request: Request, service: SetupService) -> Response:
+        return _handle_oauth_callback(request, service)
+
     routes: list[BaseRoute] = [
         Route("/", _endpoint(welcome), methods=["GET"]),
         Route("/provider", _endpoint(provider_screen), methods=["GET"]),
@@ -490,13 +748,28 @@ def build_setup_wizard_mount(
         Route("/connect-agent", _endpoint(connect_agent_screen), methods=["GET"]),
         Route("/connect-agent/verify", _form_endpoint(connect_agent_verify), methods=["POST"]),
         Route("/done", _endpoint(done_screen), methods=["GET"]),
+        Route("/source", _endpoint(source_screen), methods=["GET"]),
+        Route(_SOURCE_CONNECT_ROUTE, _endpoint(source_connect_screen), methods=["GET"]),
+        Route(_SOURCE_CONNECT_ROUTE, _request_form_endpoint(source_connect_start), methods=["POST"]),
+        Route("/source/wait", _endpoint(source_wait_screen), methods=["GET"]),
+        Route("/source/auth-status", _endpoint(source_auth_status), methods=["GET"]),
+        Route("/source/picker", _endpoint(source_picker_screen), methods=["GET"]),
+        Route("/source/save", _request_form_endpoint(source_save), methods=["POST"]),
+        Route(_OAUTH_CALLBACK_MOUNT_PATH, _endpoint(oauth_callback), methods=["GET"]),
         Mount("/static", app=StaticFiles(directory=_static_directory()), name="setup-static"),
     ]
 
     from starlette.routing import Router
 
     resolved_secrets = secrets if secrets is not None else _default_secrets_resolver()
-    guarded = OperatorTokenGuard(Router(routes=routes), secrets=resolved_secrets)
+    # The OAuth callback is the ONLY guard-exempt path — see the guard's
+    # docstring for why (provider redirects can't carry headers) and the
+    # compensating nonce control.
+    guarded = OperatorTokenGuard(
+        Router(routes=routes),
+        secrets=resolved_secrets,
+        exempt_paths=frozenset({_OAUTH_CALLBACK_MOUNT_PATH}),
+    )
     return Mount(SETUP_PATH_PREFIX, app=guarded, name="setup-wizard")
 
 
