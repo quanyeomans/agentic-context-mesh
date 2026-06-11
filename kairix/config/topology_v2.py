@@ -294,14 +294,34 @@ def _parse_one_connector(prefix: str, raw: Any) -> ConnectorConfig:
     )
 
 
+# Chunk-tag vocabulary (kairix.core.protocols.Sensitivity) → F39 tier.
+# Connectors tag chunks with the Sensitivity literal, and the example
+# config uses it too; the parser normalises onto F39 tiers via the same
+# mapping the slack/m365 connectors apply (GH #480).
+_CHUNK_SENSITIVITY_TO_F39: dict[str, F39Tier] = {
+    "client-confidential": "confidential",
+    "personal": "restricted",
+}
+
+
 def _parse_sensitivity(value: Any, *, default: F39Tier) -> F39Tier:
-    """Validate that an optional sensitivity value is one of the F39 tiers."""
+    """Validate an optional sensitivity value; accept both vocabularies.
+
+    F39 tier values pass through; chunk-tag ``Sensitivity`` values
+    (``client-confidential`` / ``personal``) normalise onto their F39
+    equivalents so configs written in either vocabulary parse (GH #480).
+    """
     if value is None:
         return default
+    mapped = _CHUNK_SENSITIVITY_TO_F39.get(value) if isinstance(value, str) else None
+    if mapped is not None:
+        return mapped
     if value not in ("public", "internal", "confidential", "restricted"):
         raise TopologyV2ParseError(
             f"sensitivity={value!r} is not a valid F39 tier. "
-            "fix: use one of public/internal/confidential/restricted. "
+            "fix: use one of public/internal/confidential/restricted "
+            "(client-confidential and personal are accepted and map to "
+            "confidential/restricted). "
             "next: run kairix config validate"
         )
     # F3-rationale: the ``in`` guard above is a closed-set check that mypy doesn't narrow to F39Tier.

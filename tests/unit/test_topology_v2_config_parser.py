@@ -13,6 +13,8 @@ colliding with the legacy top-level ``collections.shared`` dict shape.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from kairix.config import (
@@ -274,6 +276,38 @@ def test_invalid_sensitivity_raises() -> None:
             }
         )
     assert "top-secret" in str(excinfo.value) or "F39" in str(excinfo.value)
+
+
+def test_chunk_sensitivity_vocabulary_normalises_to_f39_tiers() -> None:
+    """Chunk-tag vocabulary values parse and map onto F39 tiers (GH #480).
+
+    The example config (and every connector's ``sensitivity_for``) uses the
+    ``Sensitivity`` literal; the parser accepts it and normalises via the
+    same mapping the slack/m365 connectors use (client-confidential →
+    confidential, personal → restricted).
+    """
+    cfg = parse_topology_v2(
+        {
+            "topology_v2": {
+                "connectors": [
+                    {"id": "c1", "kind": "github", "name": "c1", "default_sensitivity": "client-confidential"},
+                    {"id": "c2", "kind": "obsidian", "name": "c2", "default_sensitivity": "personal"},
+                ]
+            }
+        }
+    )
+    assert cfg.connectors[0].default_sensitivity == "confidential"
+    assert cfg.connectors[1].default_sensitivity == "restricted"
+
+
+def test_example_config_topology_block_parses_clean() -> None:
+    """The repo's own example config must parse through topology_v2 (GH #480)."""
+    import yaml
+
+    example = Path(__file__).resolve().parents[2] / "kairix.config.example.yaml"
+    data = yaml.safe_load(example.read_text(encoding="utf-8"))
+    cfg = parse_topology_v2(data)
+    assert cfg is not None
 
 
 def test_invalid_access_type_raises() -> None:
