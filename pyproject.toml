@@ -465,6 +465,18 @@ include = ["kairix*"]
 "kairix.install" = [
     "templates/*.j2",
 ]
+# The web setup wizard (#474) ships its Jinja templates + vendored
+# static assets (pico CSS, htmx, kairix.css) as package data so
+# ``kairix.platform.setup.web.routes`` can load templates via jinja2's
+# ``PackageLoader`` and serve static files via importlib.resources from
+# both source checkouts and installed wheels. Assets are vendored — no
+# CDN reference survives into the rendered pages, so the wizard works
+# in offline containers.
+"kairix.platform.setup.web" = [
+    "templates/setup/*.html",
+    "templates/partials/*.html",
+    "static/*",
+]
 
 # Benchmark gates — kairix benchmark run exits non-zero if any gate fails.
 # E2E test gate: set KAIRIX_E2E=1 to enable live Azure API tests.

@@ -1,0 +1,13 @@
+<div class="kx-search-results">
+  <p class="kx-muted kx-small">{{ preview.results|length }} results for "<strong>{{ query }}</strong>"</p>
+  {% for r in preview.results %}
+  <article class="kx-result-card">
+    <div class="kx-result-header">
+      <span class="kx-result-source">{{ r.source }}</span>
+      <span class="kx-result-score kx-muted">{{ (r.score * 100)|int }}% match</span>
+    </div>
+    <h4 class="kx-result-title">{{ r.title }}</h4>
+    <p class="kx-result-excerpt">{{ r.snippet }}</p>
+  </article>
+  {% endfor %}
+</div>

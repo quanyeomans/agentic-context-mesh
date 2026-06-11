@@ -1,0 +1,37 @@
+{% extends "setup/base.html" %}
+{% block title %}Choose folder — kairix setup{% endblock %}
+{% block content %}
+<hgroup>
+  <h2>Choose your first source</h2>
+  <p>Point kairix at a local folder to get started. You can add more sources after setup.</p>
+</hgroup>
+<form id="folder-form" method="post" action="/setup/folder">
+  <label>
+    Folder path
+    <input type="text" name="folder_path" id="folder-input" placeholder="~/Documents" required>
+  </label>
+  <button type="button" class="kx-btn-outline"
+          hx-post="/setup/folder/scan"
+          hx-target="#scan-result"
+          hx-swap="innerHTML"
+          hx-include="#folder-form"
+          hx-indicator="#scan-indicator">
+    Scan folder
+  </button>
+  <span id="scan-indicator" class="kx-indicator kx-muted" aria-busy="true" style="display:none;">Scanning…</span>
+  <div id="scan-result"></div>
+  <div class="kx-setup-actions">
+    <a href="/setup/key" class="kx-btn-secondary">Back</a>
+    <button type="submit" class="kx-btn-primary" id="start-indexing-btn" style="display:none;">Start indexing</button>
+  </div>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.addEventListener('htmx:afterSwap', function () {
+    if (document.querySelector('.kx-scan-result')) {
+      document.getElementById('start-indexing-btn').style.display = 'inline-block';
+    }
+  });
+</script>
+{% endblock %}

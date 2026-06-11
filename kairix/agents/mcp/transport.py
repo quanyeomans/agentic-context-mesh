@@ -29,13 +29,17 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+if TYPE_CHECKING:
+    from kairix.platform.setup.service import SetupService
+    from kairix.secrets.loader import SecretsResolver
 
 logger = logging.getLogger("kairix.mcp.transport")
 
@@ -48,6 +52,12 @@ _RETRY_AFTER_SECONDS = 8
 # operators and load balancers detect readiness in the first place, so
 # they must always respond regardless of warm state.
 _HEALTH_PATH_PREFIXES = ("/healthz",)
+
+# The setup wizard's mount prefix also bypasses the cold-start gate when
+# the wizard is enabled: the wizard exists precisely for first-boot
+# operators, who would otherwise stare at 503s while the retrieval stack
+# warms behind them.
+_SETUP_PATH_PREFIX = "/setup"
 
 # Module-level start timestamp captured on first build_mcp_app() call.
 # This is *implementation* of the public function — not exposed elsewhere.
@@ -213,16 +223,22 @@ class ColdStartMiddleware:
     ready/not-ready.
     """
 
-    def __init__(self, app: ASGIApp, readiness_check: Callable[[], bool]) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        readiness_check: Callable[[], bool],
+        bypass_path_prefixes: tuple[str, ...] = _HEALTH_PATH_PREFIXES,
+    ) -> None:
         self._app = app
         self._readiness_check = readiness_check
+        self._bypass_path_prefixes = bypass_path_prefixes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get("type") != "http":
             await self._app(scope, receive, send)
             return
         path = scope.get("path", "")
-        if any(path.startswith(prefix) for prefix in _HEALTH_PATH_PREFIXES):
+        if any(path.startswith(prefix) for prefix in self._bypass_path_prefixes):
             await self._app(scope, receive, send)
             return
         if self._readiness_check():
@@ -252,6 +268,31 @@ class ColdStartMiddleware:
         await response(scope, receive, send)
 
 
+def _default_setup_wizard_enabled() -> bool:
+    """Default reader for the ``setup_wizard_web`` feature flag.
+
+    Lazy-imported so MCP transport composition doesn't pay the feature
+    flag resolver import cost when the wizard stays OFF (the default).
+    """
+    from kairix.core.features import flag
+
+    return flag("setup_wizard_web")
+
+
+def _default_setup_service_factory() -> SetupService:
+    """Production default for the wizard's service seam.
+
+    Lazy so the wizard backend module is only imported when the wizard
+    flag is ON and the first ``/setup`` request arrives. While the
+    backend is the NotImplementedError stub, that first request gets
+    the stub's structured fix:/next: message instead of a half-working
+    wizard.
+    """
+    from kairix.platform.setup.service import build_setup_service
+
+    return build_setup_service()
+
+
 def _apply_settings(server: Any) -> None:
     """Set stateless_http and json_response on server.settings if present.
 
@@ -277,6 +318,9 @@ def build_mcp_app(
     healthz_ready_path: str = "/healthz/ready",
     readiness_check: Callable[[], bool] | None = None,
     capability_probe: Callable[[], dict[str, Any]] | None = None,
+    setup_service_factory: Callable[[], SetupService] = _default_setup_service_factory,
+    setup_secrets: SecretsResolver | None = None,
+    setup_wizard_enabled: Callable[[], bool] = _default_setup_wizard_enabled,
 ) -> Starlette:
     """Compose the kairix MCP ASGI app.
 
@@ -290,6 +334,10 @@ def build_mcp_app(
           ``capability_probe()`` and reports per-capability detail.
           Resolves the #167 gap where ``/healthz`` returned
           ``ready=true`` while vector search was broken.
+    - When the ``setup_wizard_web`` feature flag is ON, also mounts the
+      in-box web setup wizard at ``/setup`` (same container, same
+      port). When OFF — the default — no ``/setup`` routes exist and
+      requests there 404 exactly as before this flag landed.
 
     The composer is the only place in the codebase that knows about
     FastMCP's transport apps. CLI entry points construct via this function;
@@ -310,6 +358,16 @@ def build_mcp_app(
             capability checks (``secrets_loaded``,
             ``vector_search_capable``, ``bm25_search_capable``, plus a
             ``detail`` map). Wired into ``/healthz/ready``.
+        setup_service_factory: Callable returning the
+            :class:`SetupService` the wizard renders against. Tests pass
+            ``lambda: FakeSetupService(...)``; the production default is
+            the lazy ``kairix.platform.setup.service.build_setup_service``.
+        setup_secrets: Optional secrets resolver for the wizard's
+            operator-token guard; defaults to the production loader.
+        setup_wizard_enabled: Reader for the wizard flag — tests pass
+            ``lambda: resolver.get("setup_wizard_web")`` with a
+            ``FakeFeatureFlagResolver``; the production default reads
+            the ``setup_wizard_web`` registry flag.
 
     Returns:
         A composed :class:`starlette.applications.Starlette` instance with
@@ -328,6 +386,21 @@ def build_mcp_app(
     routes.append(_make_healthz_route(healthz_path, readiness_check))
     routes.append(_make_ready_route(healthz_ready_path, capability_probe))
 
+    # Flag-gated setup wizard (F52 — the default reader resolves the
+    # registry's ``setup_wizard_web`` entry). OFF means the mount is
+    # never appended: ``/setup/*`` 404s from Starlette's default, so
+    # merging the wizard is structurally a no-op for operators.
+    wizard_on = bool(setup_wizard_enabled())
+    if wizard_on:
+        from kairix.platform.setup.web.routes import build_setup_wizard_mount
+
+        routes.append(
+            build_setup_wizard_mount(
+                service_factory=setup_service_factory,
+                secrets=setup_secrets,
+            )
+        )
+
     # Preserve the streamable app's lifespan so FastMCP's session manager
     # starts/stops correctly when the composed app is served.
     lifespan = getattr(streamable_app.router, "lifespan_context", None)
@@ -339,9 +412,15 @@ def build_mcp_app(
     # Cold-start gate (KFEAT-020): when a readiness check is wired, every
     # non-health request returns HTTP 503 + Retry-After until ready, so MCP
     # clients see a retryable status instead of fetch_failed at the
-    # transport layer.
+    # transport layer. The setup wizard (when mounted) bypasses the gate —
+    # it exists for first-boot operators who arrive before warm completes.
     if readiness_check is not None:
-        app.add_middleware(ColdStartMiddleware, readiness_check=readiness_check)
+        bypass = _HEALTH_PATH_PREFIXES + ((_SETUP_PATH_PREFIX,) if wizard_on else ())
+        app.add_middleware(
+            ColdStartMiddleware,
+            readiness_check=readiness_check,
+            bypass_path_prefixes=bypass,
+        )
     return app
 
 

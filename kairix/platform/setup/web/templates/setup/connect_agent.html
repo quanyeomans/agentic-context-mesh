@@ -1,0 +1,29 @@
+{% extends "setup/base.html" %}
+{% block title %}Connect an agent — kairix setup{% endblock %}
+{% block card_class %} kx-setup-card-wide{% endblock %}
+{% block content %}
+<hgroup>
+  <h2>Connect your agents</h2>
+  <p>kairix speaks MCP — any agent that supports MCP over HTTP can search your knowledge. The server is running at:</p>
+</hgroup>
+<p><code class="kx-mcp-url">{{ info.mcp_url }}</code></p>
+{% for snippet in info.snippets %}
+<details class="kx-connect-snippet" {% if loop.first %}open{% endif %}>
+  <summary><strong>{{ snippet.client }}</strong></summary>
+  <pre><code>{{ snippet.config_text }}</code></pre>
+</details>
+{% endfor %}
+<div id="handshake-result"></div>
+<span id="verify-indicator" class="kx-indicator kx-muted" aria-busy="true" style="display:none;">Verifying…</span>
+<div class="kx-setup-actions">
+  <a href="/setup/first-search" class="kx-btn-secondary">Back</a>
+  <button type="button" class="kx-btn-outline"
+          hx-post="/setup/connect-agent/verify"
+          hx-target="#handshake-result"
+          hx-swap="innerHTML"
+          hx-indicator="#verify-indicator">
+    Verify connection
+  </button>
+  <a href="/setup/done" class="kx-btn-primary">Finish setup</a>
+</div>
+{% endblock %}
