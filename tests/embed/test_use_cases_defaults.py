@@ -357,6 +357,7 @@ def _build_scan_deps(
     config_path: Any = None,
     registry_agents: list[str] | None = None,
     reflib_is_dir: bool = False,
+    reflib_index_mode: str = "eager",
     raw_yaml: Any = None,
     yaml_raises: BaseException | None = None,
     rebuild_fts_count: int = 0,
@@ -402,6 +403,7 @@ def _build_scan_deps(
         build_agent_owner_resolver_fn=lambda reg: ("resolver", reg),
         document_root_fn=lambda: Path("/tmp/fake-doc-root"),
         reference_library_root_fn=lambda: _FakeReflibRoot(reflib_is_dir),
+        reflib_index_mode_fn=lambda: reflib_index_mode,
         rebuild_fts_fn=_rebuild_fts,
         yaml_safe_load_fn=_yaml_safe_load,
     )
@@ -465,6 +467,61 @@ def test_default_scan_documents_appends_reflib_when_present() -> None:
     assert "reference-library" in names
     reflib_cfg = next(c for c in scanner.collections_scanned if c.name == "reference-library")
     assert reflib_cfg.glob == "**/*.md"
+
+
+def test_default_scan_documents_skip_mode_excludes_reflib_from_walk() -> None:
+    """#475 — ``reference_library.index: skip`` keeps the bundled library
+    out of the scan walk even though its root directory exists.
+
+    Sabotage proof: removing the skip branch in
+    ``_resolve_reflib_collections`` appends the reflib collection (the
+    eager behaviour) and the not-in assertion fails.
+    """
+    report = _FakeScanReport(new=0, updated=0)
+    deps, scanner, _ = _build_scan_deps(report=report, reflib_is_dir=True, reflib_index_mode="skip")
+
+    uc_mod.default_scan_documents(object(), [], deps=deps)
+
+    names = [c.name for c in scanner.collections_scanned]
+    assert "reference-library" not in names
+    assert names == ["default"], "user collections still scan normally under skip"
+
+
+def test_default_scan_documents_skip_mode_drops_operator_declared_reflib() -> None:
+    """#475 — skip also drops an operator-declared reference-library entry,
+    so a stale YAML declaration can't re-add the library to the walk."""
+    from kairix.core.search.config_loader import CollectionDef, CollectionsConfig
+
+    cfg = CollectionsConfig(
+        shared=(
+            CollectionDef(name="alpha", path="alpha/"),
+            CollectionDef(name="reference-library", path="/opt/kairix/reference-library"),
+        ),
+    )
+    report = _FakeScanReport(new=0, updated=0)
+    deps, scanner, _ = _build_scan_deps(
+        report=report,
+        collections_cfg=cfg,
+        reflib_is_dir=True,
+        reflib_index_mode="skip",
+    )
+
+    uc_mod.default_scan_documents(object(), [], deps=deps)
+
+    names = [c.name for c in scanner.collections_scanned]
+    assert names == ["alpha"]
+
+
+def test_default_scan_documents_lazy_mode_keeps_reflib_in_walk() -> None:
+    """#475 — lazy still SCANS the library (deferral happens at embed time,
+    in ``_apply_reflib_index_mode``), so its documents are FTS-searchable."""
+    report = _FakeScanReport(new=0, updated=0)
+    deps, scanner, _ = _build_scan_deps(report=report, reflib_is_dir=True, reflib_index_mode="lazy")
+
+    uc_mod.default_scan_documents(object(), [], deps=deps)
+
+    names = [c.name for c in scanner.collections_scanned]
+    assert "reference-library" in names
 
 
 def test_default_scan_documents_rebuilds_fts_when_new_or_updated() -> None:

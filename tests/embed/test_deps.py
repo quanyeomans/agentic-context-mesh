@@ -342,6 +342,45 @@ def test_default_get_document_root_returns_string_on_success(tmp_path: Any) -> N
     assert result == str(tmp_path)
 
 
+# ── default_get_reflib_index_mode — production-default wrapper (#475) ─
+
+
+@pytest.mark.unit
+def test_default_get_reflib_index_mode_reads_cwd_config(tmp_path: Any, monkeypatch: Any) -> None:
+    """The default wrapper resolves ``reference_library.index`` through the
+    config resolution chain — a cwd kairix.config.yaml here, same seam the
+    validator's cwd test uses (no env mutation, F2-clean).
+
+    Sabotage proof: hard-coding the wrapper to return "eager" fails this.
+    """
+    (tmp_path / "kairix.config.yaml").write_text(
+        "reference_library:\n  index: skip\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    deps = EmbedDependencies()
+    assert deps.get_reflib_index_mode() == "skip"
+
+
+@pytest.mark.unit
+def test_default_get_reflib_index_mode_defaults_to_eager_without_config(tmp_path: Any, monkeypatch: Any) -> None:
+    """No config file anywhere in the chain → eager (today's behaviour)."""
+    monkeypatch.chdir(tmp_path)
+
+    deps = EmbedDependencies()
+    assert deps.get_reflib_index_mode() == "eager"
+
+
+@pytest.mark.unit
+def test_deps_default_rate_limit_sleep_is_callable() -> None:
+    """The 429 backoff sleeper defaults to a callable (time.sleep) so the
+    retry wrapper never needs a None-guard."""
+    deps = EmbedDependencies()
+    assert callable(deps.rate_limit_sleep)
+    assert callable(deps.get_reflib_index_mode)
+
+
 # ── default_open_embedding_cache — production-default wrapper ─────────
 
 

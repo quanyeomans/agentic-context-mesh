@@ -14,6 +14,7 @@ no caller needs ``assert deps.x is not None`` lines (the
 from __future__ import annotations
 
 import sqlite3
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -21,6 +22,7 @@ from kairix.core.embed._deps_defaults import (
     default_embed_batch,
     default_get_azure_config,
     default_get_document_root,
+    default_get_reflib_index_mode,
     default_migrate_content_vectors,
     default_open_embedding_cache,
     default_open_usearch_index,
@@ -64,3 +66,10 @@ class EmbedDependencies:
     open_embedding_cache: Callable[[], EmbeddingCache | None] = field(
         default_factory=lambda: default_open_embedding_cache
     )
+    # reference_library.index mode (#475) — "eager" | "lazy" | "skip".
+    get_reflib_index_mode: Callable[[], str] = field(default_factory=lambda: default_get_reflib_index_mode)
+    # Sleeper seam for the bounded 429 retry around embed_batch (#475).
+    # A real dependency (the retry helper waits between attempts), not a
+    # test-only kwarg — tests inject a recorder so backoff assertions
+    # cost zero wall-clock time (mirrors RetryPolicy's ``sleep`` param).
+    rate_limit_sleep: Callable[[float], None] = field(default_factory=lambda: time.sleep)

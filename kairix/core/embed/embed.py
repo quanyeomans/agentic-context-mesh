@@ -269,6 +269,92 @@ def embed_batch(
         return left + right
 
 
+# ── 429 resilience (#475) ─────────────────────────────────────────────────────
+
+# Bounded outer retry around the provider call. The OpenAI SDK already
+# retries 429s internally (MAX_RETRIES above); this loop catches the
+# RateLimitError that ESCAPES SDK retries — previously a raw traceback
+# that killed the whole run mid-catch-up.
+RATE_LIMIT_MAX_ATTEMPTS = 5
+RATE_LIMIT_MAX_BACKOFF_S = 60.0
+
+_RATE_LIMIT_EXHAUSTED_MSG = (
+    "Embedding provider returned HTTP 429 on every attempt ({attempts} attempts). "
+    "fix: your embedding deployment is rate-limited (HTTP 429). Raise its quota or re-run later. "
+    "next: kairix embed picks up where it left off (cache-hit on completed chunks). "
+    "run: kairix embed"
+)
+
+
+def retry_after_seconds(exc: Exception) -> float | None:
+    """Extract the Retry-After header (seconds) from an SDK error, if present.
+
+    Reads ``exc.response.headers["retry-after"]`` defensively — the
+    openai SDK attaches the httpx response to ``RateLimitError``, but
+    fakes and older SDKs may not. Returns ``None`` when the header is
+    absent or unparseable so the caller falls back to exponential backoff.
+    """
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    raw = headers.get("retry-after")
+    if raw is None:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def with_rate_limit_retry(
+    embed_batch_fn: Callable[..., list[list[float]]],
+    *,
+    max_attempts: int = RATE_LIMIT_MAX_ATTEMPTS,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    max_backoff_s: float = RATE_LIMIT_MAX_BACKOFF_S,
+) -> Callable[..., list[list[float]]]:
+    """Wrap an embed-batch callable with bounded 429 retry (#475).
+
+    A ``RateLimitError`` that escapes the SDK's own retries is caught
+    here; the wrapper waits per the response's Retry-After header (or
+    exponential backoff capped at ``max_backoff_s``) and retries up to
+    ``max_attempts`` total attempts. Exhaustion raises ``RuntimeError``
+    with an F21-shaped remediation message — the batch loop catches
+    RuntimeError, marks the batch's chunks failed, and the run continues
+    instead of dying with a raw traceback.
+
+    ``sleep_fn`` is the injectable sleeper seam (production:
+    ``time.sleep`` via ``EmbedDependencies.rate_limit_sleep``); tests
+    pass a recorder so backoff assertions pay zero wall-clock time.
+    """
+
+    def _embed_with_rate_limit_retry(*args: Any, **kwargs: Any) -> list[list[float]]:
+        import openai
+
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                return embed_batch_fn(*args, **kwargs)
+            except openai.RateLimitError as exc:
+                if attempt >= max_attempts:
+                    raise RuntimeError(_RATE_LIMIT_EXHAUSTED_MSG.format(attempts=max_attempts)) from exc
+                delay = retry_after_seconds(exc)
+                if delay is None:
+                    delay = float(2**attempt)
+                delay = min(delay, max_backoff_s)
+                logger.warning(
+                    "Embedding provider rate-limited (429) — attempt %d/%d, waiting %.1fs before retry",
+                    attempt,
+                    max_attempts,
+                    delay,
+                )
+                sleep_fn(delay)
+
+    return _embed_with_rate_limit_retry
+
+
 # ── DB writes ─────────────────────────────────────────────────────────────────
 
 
@@ -385,15 +471,68 @@ def open_default_usearch_index() -> Any:  # pragma: no cover  # prod lazy defaul
 # ── Extracted helpers (run_embed decomposition) ─────────────────────────────
 
 
+# Collection name the bundled reference library is scanned under (must
+# match kairix.core.embed.use_cases.REFERENCE_LIBRARY_NAME — the scanner
+# writes it into documents.collection).
+REFERENCE_LIBRARY_COLLECTION = "reference-library"
+
+
+def _apply_reflib_index_mode(
+    rows: list[Any],
+    reflib_index_mode: str,
+) -> list[Any]:
+    """Apply the ``reference_library.index`` mode to gathered rows (#475).
+
+    Each row's last element is ``documents.collection`` (NULL on legacy
+    fixtures without the column — treated as a user document).
+
+    * ``skip`` — reference-library rows never embed.
+    * ``lazy`` — reference-library rows embed only in a run with no
+      pending user-document rows; otherwise they're deferred so the
+      user's own documents finish first (the next run picks them up).
+    * ``eager`` (default) — no filtering; the gather's ORDER BY already
+      places user documents first within the run.
+    """
+    if reflib_index_mode not in ("skip", "lazy"):
+        return rows
+    user_rows = [r for r in rows if r[-1] != REFERENCE_LIBRARY_COLLECTION]
+    deferred = len(rows) - len(user_rows)
+    if deferred == 0:
+        return rows
+    if reflib_index_mode == "skip":
+        logger.info(
+            "reference-library: index mode 'skip' — %d bundled reference documents excluded from embedding",
+            deferred,
+        )
+        return user_rows
+    # lazy: defer only while user documents are still pending.
+    if user_rows:
+        logger.info(
+            "reference-library: index mode 'lazy' — deferring %d reference documents until your own "
+            "documents finish embedding (the next embed run picks them up)",
+            deferred,
+        )
+        return user_rows
+    return rows
+
+
 def _gather_pending_chunks(
     db: sqlite3.Connection,
     force: bool,
     doc_root: str | None,
+    reflib_index_mode: str = "eager",
 ) -> tuple[list[dict[str, Any]], int]:
     """Gather chunks that need embedding.
 
     In force mode, clears existing vectors and selects all documents.
     In incremental mode, selects only documents not yet embedded.
+
+    User-docs-first (#475): rows are ordered so reference-library
+    documents come after every other collection — the operator's own
+    documents embed (and become vector-searchable) first.
+    ``reflib_index_mode`` further filters reference-library rows per
+    the ``reference_library.index`` config (see
+    :func:`_apply_reflib_index_mode`).
 
     Returns (all_chunks, document_count) where each chunk is a dict with
     keys: hash, seq, pos, text, path, chunk_date.
@@ -413,24 +552,35 @@ def _gather_pending_chunks(
     # F63-bounded: PRAGMA table_info returns one row per column (schema-bounded, ≤O(20)).
     _doc_cols = {row[1] for row in db.execute("PRAGMA table_info(documents)").fetchall()}
     smt_select = "d.source_modified_at" if "source_modified_at" in _doc_cols else "NULL AS source_modified_at"
+    # #475 — documents.collection drives user-docs-first ordering and the
+    # reference_library.index mode. Same PRAGMA guard as above: legacy
+    # fixtures without the column behave as all-user-documents.
+    has_collection = "collection" in _doc_cols
+    col_select = "d.collection" if has_collection else "NULL AS collection"
+    order_by = (
+        f"ORDER BY CASE WHEN d.collection = '{REFERENCE_LIBRARY_COLLECTION}' THEN 1 ELSE 0 END, d.path"
+        if has_collection
+        else "ORDER BY d.path"
+    )
 
     if force:
         # F63-bounded: hourly embed worker tick consumes ALL candidates per cycle by design;
         # the per-batch chunking (`batch_size` upstream) is what bounds memory pressure, not row count.
         # Scale risk flagged for future streaming-cursor refactor — see #211 for context.
         rows = db.execute(f"""
-            SELECT c.hash, c.doc, d.path, {smt_select}
+            SELECT c.hash, c.doc, d.path, {smt_select}, {col_select}
             FROM content c
             JOIN documents d ON c.hash = d.hash
             WHERE d.active = 1
               AND c.doc IS NOT NULL
               AND length(c.doc) > 0
+            {order_by}
         """).fetchall()
     else:
         # F63-bounded: hourly embed worker tick consumes candidates needing vectors; cycle gates further work.
         # Scale risk flagged for future streaming-cursor refactor — see #211 for context.
         rows = db.execute(f"""
-            SELECT c.hash, c.doc, d.path, {smt_select}
+            SELECT c.hash, c.doc, d.path, {smt_select}, {col_select}
             FROM content c
             JOIN documents d ON c.hash = d.hash
             LEFT JOIN content_vectors v ON c.hash = v.hash AND v.seq = 0
@@ -438,10 +588,13 @@ def _gather_pending_chunks(
               AND d.active = 1
               AND c.doc IS NOT NULL
               AND length(c.doc) > 0
+            {order_by}
         """).fetchall()
 
+    rows = _apply_reflib_index_mode(rows, reflib_index_mode)
+
     all_chunks: list[dict[str, Any]] = []
-    for content_hash, body, path, source_modified_at in rows:
+    for content_hash, body, path, source_modified_at, _collection in rows:
         # Body-text extractor first (matches Obsidian frontmatter / path
         # patterns); fall back to connector envelope timestamp (#329).
         doc_date = extract_chunk_date(body, path, document_root=doc_root) or source_modified_at
@@ -1132,7 +1285,11 @@ def run_embed(
 
     deps.migrate_content_vectors(db)
 
-    all_chunks, doc_count = _gather_pending_chunks(db, force, doc_root)
+    # #475 — reference_library.index mode (eager | lazy | skip) gates how
+    # the bundled reference library participates in this run's gather.
+    reflib_index_mode = deps.get_reflib_index_mode()
+
+    all_chunks, doc_count = _gather_pending_chunks(db, force, doc_root, reflib_index_mode=reflib_index_mode)
 
     if limit:
         all_chunks = all_chunks[:limit]
@@ -1182,6 +1339,11 @@ def run_embed(
 
     cache = deps.open_embedding_cache()
 
+    # #475 — bounded outer 429 retry around every provider call. A
+    # RateLimitError that escapes SDK retries waits per Retry-After (or
+    # exponential backoff) instead of killing the run with a raw traceback.
+    embed_batch_fn = with_rate_limit_retry(deps.embed_batch, sleep_fn=deps.rate_limit_sleep)
+
     try:
         with vec_writer:
             if parallel == 1:
@@ -1196,7 +1358,7 @@ def run_embed(
                     actual_dims,
                     now,
                     total,
-                    deps.embed_batch,
+                    embed_batch_fn,
                     cache=cache,
                     wal_checkpoint_every_n_batches=wal_checkpoint_every_n_batches,
                 )
@@ -1213,7 +1375,7 @@ def run_embed(
                     actual_dims,
                     now,
                     total,
-                    deps.embed_batch,
+                    embed_batch_fn,
                     cache=cache,
                     wal_checkpoint_every_n_batches=wal_checkpoint_every_n_batches,
                 )

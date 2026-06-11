@@ -234,7 +234,10 @@ def acquire_lock(*, lockfile: Path | None = None, wait_secs: float | None = None
     # genuinely alive and working. Exit cleanly.
     lock_fh.close()
     logging.error(
-        "Could not acquire lock after %ds — another embed is still running",
+        "Could not acquire lock after %ds — another embed is still running. "
+        "fix: another embed (usually the background worker) holds the lock. "
+        "next: kairix worker status shows the active phase; re-run when idle or pause first. "
+        "run: kairix worker pause && kairix embed && kairix worker resume",
         timeout,
     )
     sys.exit(3)

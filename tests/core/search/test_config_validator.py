@@ -134,6 +134,53 @@ def test_agents_must_be_list() -> None:
 
 
 # ---------------------------------------------------------------------------
+# reference_library block (#475) — index: eager | lazy | skip
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mode", ["eager", "lazy", "skip"])
+def test_reference_library_valid_modes_pass(mode: str) -> None:
+    """Each of the three valid index modes validates cleanly."""
+    assert validate_config({"reference_library": {"index": mode}}) == []
+
+
+@pytest.mark.unit
+def test_reference_library_invalid_mode_reports_f21_error() -> None:
+    """An invalid index value yields one error naming all three options.
+
+    Sabotage proof: removing the ``mode not in _VALID_REFLIB_INDEX_MODES``
+    branch in ``_validate_reference_library`` makes this fail (no error).
+    """
+    errors = validate_config({"reference_library": {"index": "skpi"}})
+    assert len(errors) == 1
+    msg = errors[0]
+    assert "'skpi'" in msg
+    assert "eager" in msg and "lazy" in msg and "skip" in msg
+    assert "fix:" in msg and "next:" in msg and "run:" in msg
+
+
+@pytest.mark.unit
+def test_reference_library_unknown_key_reports_error() -> None:
+    """A typo'd key under reference_library is reported, not ignored."""
+    errors = validate_config({"reference_library": {"indxe": "skip"}})
+    assert any("unknown key(s) ['indxe']" in e for e in errors)
+
+
+@pytest.mark.unit
+def test_reference_library_must_be_mapping() -> None:
+    """``reference_library: skip`` (scalar) reports the mapping-shape error."""
+    errors = validate_config({"reference_library": "skip"})
+    assert any("reference_library: must be a mapping" in e for e in errors)
+
+
+@pytest.mark.unit
+def test_reference_library_absent_is_valid() -> None:
+    """Absence is valid — eager default, existing configs unchanged."""
+    assert validate_config({}) == []
+
+
+# ---------------------------------------------------------------------------
 # main() CLI — exercise the operator entry point
 # ---------------------------------------------------------------------------
 
