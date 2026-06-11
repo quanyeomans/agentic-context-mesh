@@ -77,7 +77,11 @@ def resolve_bundle_path(
     if probe_dir.is_dir():
         return probe_dir / _BUNDLE_FILENAME
     xdg = env_map.get("XDG_CONFIG_HOME")
-    config_base = Path(xdg) if xdg else (home if home is not None else Path.home()) / ".config"
+    if xdg:
+        config_base = Path(xdg)
+    else:
+        home_dir = home if home is not None else Path.home()
+        config_base = home_dir / ".config"
     return config_base / "kairix" / "secrets" / _BUNDLE_FILENAME
 
 

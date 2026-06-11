@@ -125,17 +125,27 @@ def test_container_runs_both_api_and_worker_as_uid_995() -> None:
             check=True,
             env=env,
         )
+        # The slim container ships no `ps` binary — walk /proc directly.
+        # One line per process: "<pid> <argv joined by spaces>".
         ps_proc = subprocess.run(
-            ["docker", "exec", _CONTAINER_NAME, "ps", "-ef"],
+            [
+                "docker",
+                "exec",
+                _CONTAINER_NAME,
+                "sh",
+                "-c",
+                'for p in /proc/[0-9]*; do printf "%s " "${p#/proc/}"; tr "\\0" " " < "$p/cmdline"; echo; done',
+            ],
             capture_output=True,
             text=True,
             check=True,
         )
         ps_out = ps_proc.stdout
-        assert "mcp serve" in ps_out, f"api process missing from container ps -ef:\n{ps_out}"
-        assert "worker run" in ps_out, f"worker process missing from container ps -ef:\n{ps_out}"
-        assert ("s6-supervisor" in ps_out) or ("/init" in ps_out), (
-            f"s6 supervisor not visible as pid 1 in container ps -ef:\n{ps_out}"
+        assert "mcp serve" in ps_out, f"api process missing from container /proc walk:\n{ps_out}"
+        assert "worker run" in ps_out, f"worker process missing from container /proc walk:\n{ps_out}"
+        pid1_line = next((line for line in ps_out.splitlines() if line.startswith("1 ")), "")
+        assert ("s6" in pid1_line) or ("/init" in pid1_line), (
+            f"s6 supervisor not visible as pid 1 in container /proc walk:\n{ps_out}"
         )
 
         id_proc = subprocess.run(
