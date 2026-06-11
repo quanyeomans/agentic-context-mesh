@@ -54,6 +54,20 @@ Canonical examples reference real code in this repo where available.
   ```
 - Note: the F16 baseline allow-list grandfathers existing offenders. Sonar gates *increases* in baselined files; the local script now flags those too.
 
+### `pythonsecurity:S2083` path constructed from user-controlled data
+- Local detector: none (taint analysis is server-side only) — this is why the parity check exists.
+- Recipe: when the path is the operator's own trust boundary (a CLI flag, `KAIRIX_SECRETS_FILE`, a config value), confine instead of reject: canonicalise with `Path.expanduser().resolve()` and verify the result sits under an explicit allow-list of roots, raising an F21-shaped `ValueError` before any filesystem call. Then add a `sonar.issue.ignore.multicriteria` entry citing the guard + its sabotage-proven tests — Sonar's taint engine does not recognise allow-list sanitisers. Canonical examples: `_confine_to_allowed_root` in `kairix/connect/store/file_store.py` and `kairix/secrets/store.py`.
+- Pattern:
+  ```python
+  def _confine_to_allowed_root(path: Path) -> Path:
+      resolved = path.expanduser().resolve()
+      for root in (Path.home().resolve(), Path("/etc/kairix"), Path("/run/secrets")):
+          if resolved == root or root in resolved.parents:
+              return resolved
+      raise ValueError(f"Refusing to write to {resolved} — outside allowed roots. fix: ...")
+  ```
+- Note: a main-branch BLOCKER fails this parity check repo-wide until the fix lands on main and SonarCloud re-scans. The commit carrying the fix runs its gate with `KAIRIX_SKIP_SONAR_PARITY=1` (the documented focused-series escape) and says so in its body; CI's quality gate remains the authoritative confirmation.
+
 ### `python:S5886` / `python:S5890` DataclassInstance return / assign
 - Local detector: mypy strict + this script
 - Recipe: construct the dataclass explicitly with field-by-field copy. Canonical example: `_replace_document_root` in `kairix/knowledge/wikilinks/cli.py`.

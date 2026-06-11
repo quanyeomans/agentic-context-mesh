@@ -27,6 +27,7 @@ secret value — error messages name the secret SLOT, never its value.
 from __future__ import annotations
 
 import os
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -124,6 +125,7 @@ def set_secret(
         path = bundle_path
     else:
         path = resolve_bundle_path(env=env, home=home, container_dir=container_dir)
+    path = _confine_to_allowed_root(path, home=home)
     path.parent.mkdir(parents=True, exist_ok=True)
     existing = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     merged = _upsert_line(existing, env_var, value)
@@ -139,6 +141,36 @@ def set_secret(
 
     load_secrets_file.cache_clear()
     return path
+
+
+def _confine_to_allowed_root(path: Path, *, home: Path | None = None) -> Path:
+    """Canonicalise the bundle path and verify it sits under an allowed root.
+
+    The write target must live under the operator's home, ``/etc/kairix``,
+    ``/run/secrets``, ``/run/kairix``, or the system temp dir (test
+    fixtures). Escape raises before any filesystem mutation — the S2083
+    confinement contract, mirroring
+    ``kairix.connect.store.file_store._confine_to_allowed_root``.
+    """
+    resolved = path.expanduser().resolve()
+    home_root = (home if home is not None else Path.home()).resolve()
+    allowed = (
+        home_root,
+        Path("/etc/kairix"),
+        Path("/run/secrets"),
+        Path("/run/kairix"),
+        Path(tempfile.gettempdir()).resolve(),
+    )
+    for root in allowed:
+        if resolved == root or root in resolved.parents:
+            return resolved
+    roots_text = ", ".join(str(root) for root in allowed)
+    raise ValueError(
+        f"Refusing to write secrets to {resolved} — outside the allowed roots ({roots_text}). "
+        "fix: point KAIRIX_SECRETS_FILE (or bundle_path) at a file under your home directory, "
+        "/etc/kairix, or /run/secrets. "
+        f"next: re-run kairix secrets set. {_RUN_VERIFY}"
+    )
 
 
 def _validated_env_var(name: str) -> str:

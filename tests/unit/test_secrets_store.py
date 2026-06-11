@@ -66,6 +66,27 @@ def test_resolve_bundle_path_home_fallback_without_xdg(tmp_path: Path) -> None:
 # ── set_secret: happy paths ────────────────────────────────────────
 
 
+def test_set_secret_rejects_bundle_path_outside_allowed_roots() -> None:
+    """Write targets escaping {home, /etc/kairix, /run/*, tmp} raise before any write.
+
+    The S2083 confinement contract — mirrors
+    ``kairix.connect.store.file_store._confine_to_allowed_root``.
+    """
+    with pytest.raises(ValueError, match="fix:"):
+        set_secret(_NAME, _VALUE, bundle_path=Path("/opt/kairix-escape/kairix.env"))
+
+
+def test_set_secret_env_override_outside_allowed_roots_rejected(tmp_path: Path) -> None:
+    """KAIRIX_SECRETS_FILE pointing outside the allowed roots is refused."""
+    with pytest.raises(ValueError, match="fix:"):
+        set_secret(
+            _NAME,
+            _VALUE,
+            env={"KAIRIX_SECRETS_FILE": "/opt/kairix-escape/kairix.env"},
+            container_dir=tmp_path / "absent",
+        )
+
+
 def test_set_secret_creates_file_with_0600_and_parent_dirs(tmp_path: Path) -> None:
     """A fresh bundle is created with parents and locked to 0600."""
     bundle = tmp_path / "nested" / "dir" / "kairix.env"
