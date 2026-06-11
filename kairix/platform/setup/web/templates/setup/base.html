@@ -24,6 +24,13 @@
     </div>
     {% endif %}
     {% block content %}{% endblock %}
+    {# Shared layout primitive (#488): card → content → banner slot →
+       action row, on every screen. Async results (validation, scan,
+       handshake, search, progress) render INTO this always-present
+       fixed-size slot, which always sits ABOVE the action row — so no
+       interactive element ever moves when a result arrives. #}
+    <div id="kx-banner-slot" class="kx-banner-slot{% block banner_class %}{% endblock %}" aria-live="polite">{%- block banner -%}{%- endblock -%}</div>
+    <div class="kx-setup-actions">{%- block actions -%}{%- endblock -%}</div>
   </div>
 </main>
 {% block scripts %}{% endblock %}

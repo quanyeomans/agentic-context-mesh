@@ -11,6 +11,7 @@ rendered HTML / headers (F30 spirit), not on status codes alone.
 from __future__ import annotations
 
 import logging
+import re
 
 import pytest
 
@@ -531,6 +532,151 @@ def test_done_screen_celebrates_indexed_chunks() -> None:
     assert "Your knowledge is ready" in response.text
     assert "100" in response.text
     assert "chunks indexed" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Shared layout primitive (#488)
+#
+# Structural invariant: every full screen renders card → content →
+# banner slot → action row, with every async result target INSIDE the
+# slot — so no interactive element ever moves when a result arrives.
+# ---------------------------------------------------------------------------
+
+_BANNER_SLOT_ID_MARKUP = 'id="kx-banner-slot"'
+_ACTION_ROW_CLASS = "kx-setup-actions"
+_ACTION_ROW_RE = re.compile('<div class="' + _ACTION_ROW_CLASS + '">(.*?)</div>', re.DOTALL)
+_BTN_SECONDARY = "kx-btn-secondary"
+_BTN_OUTLINE = "kx-btn-outline"
+_BTN_PRIMARY = "kx-btn-primary"
+
+# (screen id, GET path, query params) for every full screen in the wizard.
+_SCREEN_GETS: tuple[tuple[str, str, dict[str, str]], ...] = (
+    ("welcome", "/setup", {}),
+    ("provider", "/setup/provider", {}),
+    ("key", "/setup/key", {"provider": "anthropic"}),
+    ("folder", "/setup/folder", {}),
+    ("indexing", "/setup/indexing", {}),
+    ("first-search", "/setup/first-search", {}),
+    ("connect-agent", "/setup/connect-agent", {}),
+    ("done", "/setup/done", {}),
+)
+
+# Canonical action-row composition per screen: Back (secondary) leftmost,
+# helpers (outline) in the middle, the primary action rightmost.
+_CANONICAL_ROWS: dict[str, tuple[str, ...]] = {
+    "welcome": (_BTN_PRIMARY,),
+    "provider": (_BTN_SECONDARY, _BTN_PRIMARY),
+    "key": (_BTN_SECONDARY, _BTN_OUTLINE, _BTN_PRIMARY),
+    "folder": (_BTN_SECONDARY, _BTN_OUTLINE, _BTN_PRIMARY),
+    "indexing": (),
+    "first-search": (_BTN_PRIMARY,),
+    "connect-agent": (_BTN_SECONDARY, _BTN_OUTLINE, _BTN_PRIMARY),
+    "done": (_BTN_PRIMARY,),
+}
+
+# Per-screen HTMX swap target for screens that render async results.
+_ASYNC_TARGETS: dict[str, str] = {
+    "key": "validation-result",
+    "folder": "scan-result",
+    "indexing": "indexing-progress",
+    "first-search": "search-results",
+    "connect-agent": "handshake-result",
+}
+
+# (id, method, path, form data) for every partial-rendering endpoint.
+_PARTIAL_REQUESTS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
+    ("key-validate", "POST", "/setup/key/validate", _SAVE_KEY_PAYLOAD),
+    ("folder-scan", "POST", "/setup/folder/scan", {"folder_path": "~/Documents"}),
+    ("indexing-progress", "GET", "/setup/indexing/progress", {}),
+    ("search", "POST", "/setup/search", {"query": "project kickoff"}),
+    ("connect-verify", "POST", "/setup/connect-agent/verify", {}),
+)
+
+
+def _screen_html(path: str, params: dict[str, str]) -> str:
+    client = _build_client()
+    response = client.get(path, params=params, follow_redirects=True)
+    assert response.status_code == 200
+    return response.text
+
+
+def _action_row(html: str) -> str:
+    match = _ACTION_ROW_RE.search(html)
+    assert match is not None, "canonical action row missing from the screen"
+    return match.group(1)
+
+
+@pytest.mark.parametrize(
+    ("path", "params"),
+    [pytest.param(path, params, id=name) for name, path, params in _SCREEN_GETS],
+)
+def test_every_screen_renders_the_banner_slot_above_the_action_row(path: str, params: dict[str, str]) -> None:
+    html = _screen_html(path, params)
+    assert _BANNER_SLOT_ID_MARKUP in html
+    assert _ACTION_ROW_CLASS in html
+    # Document order: the banner slot always precedes the action row, so
+    # results render above the buttons, never among or below them.
+    assert html.index(_BANNER_SLOT_ID_MARKUP) < html.index(_ACTION_ROW_CLASS)
+
+
+@pytest.mark.parametrize(
+    ("name", "path", "params"),
+    [pytest.param(name, path, params, id=name) for name, path, params in _SCREEN_GETS],
+)
+def test_action_rows_share_the_canonical_composition(name: str, path: str, params: dict[str, str]) -> None:
+    row = _action_row(_screen_html(path, params))
+    found = tuple(re.findall(r"kx-btn-(?:secondary|outline|primary)", row))
+    assert found == _CANONICAL_ROWS[name]
+    # No inline styles in the row: hidden-until-revealed actions hold
+    # their slot via the kx-btn-reveal class, never display:none.
+    assert "style=" not in row
+
+
+@pytest.mark.parametrize(
+    ("path", "params", "target_id"),
+    [
+        pytest.param(path, params, _ASYNC_TARGETS[name], id=name)
+        for name, path, params in _SCREEN_GETS
+        if name in _ASYNC_TARGETS
+    ],
+)
+def test_async_result_targets_live_inside_the_banner_slot(path: str, params: dict[str, str], target_id: str) -> None:
+    html = _screen_html(path, params)
+    target_markup = f'id="{target_id}"'
+    slot_at = html.index(_BANNER_SLOT_ID_MARKUP)
+    actions_at = html.index(_ACTION_ROW_CLASS)
+    target_at = html.index(target_markup)
+    assert slot_at < target_at < actions_at, (
+        f"{target_markup} must sit inside the banner slot (after {_BANNER_SLOT_ID_MARKUP}, "
+        f"before the {_ACTION_ROW_CLASS} row) so the buttons never move when results render"
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "params"),
+    [pytest.param(path, params, id=name) for name, path, params in _SCREEN_GETS],
+)
+def test_every_screen_uses_the_uniform_card_width(path: str, params: dict[str, str]) -> None:
+    html = _screen_html(path, params)
+    assert 'class="kx-setup-card' in html
+    # The 2026-06-11 demo flagged the provider grid rendering in a wider
+    # card than the other steps. One card width across all 7 steps (#488):
+    # no screen opts into a width-variant class.
+    assert "kx-setup-card-wide" not in html
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "data"),
+    [pytest.param(method, path, data, id=name) for name, method, path, data in _PARTIAL_REQUESTS],
+)
+def test_partials_render_into_the_slot_without_layout_markup(method: str, path: str, data: dict[str, str]) -> None:
+    client = _build_client()
+    response = client.request(method, path, data=data or None)
+    assert response.status_code == 200
+    # Partials swap INTO the banner slot; they never carry their own
+    # slot or action-row scaffolding (which would nest or move buttons).
+    assert "kx-banner-slot" not in response.text
+    assert _ACTION_ROW_CLASS not in response.text
 
 
 # ---------------------------------------------------------------------------

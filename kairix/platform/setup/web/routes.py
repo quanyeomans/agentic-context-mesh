@@ -298,6 +298,47 @@ def _progress_headers(status: Any) -> dict[str, str] | None:
     return None
 
 
+def _make_screen_endpoint(
+    resolve_service: Callable[[], SetupService],
+    handler: Callable[[Request, SetupService], Response],
+) -> Callable[[Request], Response]:
+    """Wrap a screen handler with service resolution.
+
+    Every screen resolves the service — including the welcome screen,
+    which doesn't strictly need it — so a flag-ON deployment without
+    the wizard backend fails on the FIRST request with the stub's
+    structured message, not three screens into the flow. Synchronous
+    on purpose (Sonar S7503 — nothing here awaits); Starlette runs
+    sync endpoints in its threadpool.
+    """
+
+    def endpoint(request: Request) -> Response:
+        try:
+            service = resolve_service()
+        except NotImplementedError as exc:
+            return PlainTextResponse(str(exc), status_code=503)
+        return handler(request, service)
+
+    return endpoint
+
+
+def _make_form_endpoint(
+    resolve_service: Callable[[], SetupService],
+    handler: Callable[[dict[str, str], SetupService], Response],
+) -> Callable[[Request], Any]:
+    """Like :func:`_make_screen_endpoint` but parses the urlencoded form first."""
+
+    async def endpoint(request: Request) -> Response:
+        try:
+            service = resolve_service()
+        except NotImplementedError as exc:
+            return PlainTextResponse(str(exc), status_code=503)
+        form = await request.form()
+        return handler(_string_fields(form), service)
+
+    return endpoint
+
+
 def build_setup_wizard_mount(
     *,
     service_factory: Callable[[], SetupService] = _default_service_factory,
@@ -336,39 +377,11 @@ def build_setup_wizard_mount(
     def _render(template_name: str, context: dict[str, Any], **kwargs: Any) -> HTMLResponse:
         return HTMLResponse(env.get_template(template_name).render(**context), **kwargs)
 
-    def _endpoint(handler: Callable[[Request, SetupService], Response]) -> Callable[[Request], Any]:
-        """Wrap a handler with service resolution.
-
-        Every screen resolves the service — including the welcome
-        screen, which doesn't strictly need it — so a flag-ON
-        deployment without the wizard backend fails on the FIRST
-        request with the stub's structured message, not three screens
-        into the flow.
-        """
-
-        def endpoint(request: Request) -> Response:
-            # Sync on purpose (Sonar S7503 — nothing here awaits);
-            # Starlette runs sync endpoints on its threadpool.
-            try:
-                service = _service()
-            except NotImplementedError as exc:
-                return PlainTextResponse(str(exc), status_code=503)
-            return handler(request, service)
-
-        return endpoint
+    def _endpoint(handler: Callable[[Request, SetupService], Response]) -> Callable[[Request], Response]:
+        return _make_screen_endpoint(_service, handler)
 
     def _form_endpoint(handler: Callable[[dict[str, str], SetupService], Response]) -> Callable[[Request], Any]:
-        """Like :func:`_endpoint` but parses the urlencoded form first."""
-
-        async def endpoint(request: Request) -> Response:
-            try:
-                service = _service()
-            except NotImplementedError as exc:
-                return PlainTextResponse(str(exc), status_code=503)
-            form = await request.form()
-            return handler(_string_fields(form), service)
-
-        return endpoint
+        return _make_form_endpoint(_service, handler)
 
     def welcome(_request: Request, _service_: SetupService) -> Response:
         return _render(_TPL_WELCOME, {"step": 1})

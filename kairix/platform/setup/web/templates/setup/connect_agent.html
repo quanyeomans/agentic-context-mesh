@@ -1,6 +1,5 @@
 {% extends "setup/base.html" %}
 {% block title %}Connect an agent — kairix setup{% endblock %}
-{% block card_class %} kx-setup-card-wide{% endblock %}
 {% block content %}
 <hgroup>
   <h2>Connect your agents</h2>
@@ -28,17 +27,20 @@
   <pre><code>{{ snippet.config_text }}</code></pre>
 </details>
 {% endfor %}
+{% endblock %}
+{% block banner_class %} kx-banner-slot-sm{% endblock %}
+{% block banner %}
+<span id="verify-indicator" class="kx-indicator kx-muted" aria-busy="true">Verifying…</span>
 <div id="handshake-result"></div>
-<span id="verify-indicator" class="kx-indicator kx-muted" aria-busy="true" style="display:none;">Verifying…</span>
-<div class="kx-setup-actions">
-  <a href="/setup/first-search" class="kx-btn-secondary">Back</a>
-  <button type="button" class="kx-btn-outline"
-          hx-post="/setup/connect-agent/verify"
-          hx-target="#handshake-result"
-          hx-swap="innerHTML"
-          hx-indicator="#verify-indicator">
-    Verify connection
-  </button>
-  <a href="/setup/done" class="kx-btn-primary">Finish setup</a>
-</div>
+{% endblock %}
+{% block actions %}
+<a href="/setup/first-search" class="kx-btn-secondary">Back</a>
+<button type="button" class="kx-btn-outline"
+        hx-post="/setup/connect-agent/verify"
+        hx-target="#handshake-result"
+        hx-swap="innerHTML"
+        hx-indicator="#verify-indicator">
+  Verify connection
+</button>
+<a href="/setup/done" class="kx-btn-primary">Finish setup</a>
 {% endblock %}

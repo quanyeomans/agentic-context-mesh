@@ -10,7 +10,9 @@
   </div>
   <label class="kx-small">
     Model to use
-    <select name="model">
+    {# form= keeps the choice submitting with #key-form: this partial
+       renders into the shared banner slot, outside the form element. #}
+    <select name="model" form="key-form">
       {% for m in validation.models %}
       <option value="{{ m }}">{{ m }}</option>
       {% endfor %}

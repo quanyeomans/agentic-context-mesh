@@ -28,27 +28,30 @@
       deployment's name. You can find it in the Azure portal under your resource's Deployments page.</small>
   </label>
   {% endif %}
-  <div id="validation-result"></div>
-  <span id="validating-indicator" class="kx-indicator kx-muted" aria-busy="true" style="display:none;">Validating…</span>
-  <div class="kx-setup-actions">
-    <a href="/setup/provider" class="kx-btn-secondary">Back</a>
-    <button type="button" class="kx-btn-outline"
-            hx-post="/setup/key/validate"
-            hx-target="#validation-result"
-            hx-swap="innerHTML"
-            hx-include="#key-form"
-            hx-indicator="#validating-indicator">
-      Validate key
-    </button>
-    <button type="submit" class="kx-btn-primary" id="save-key-btn" style="display:none;">Save and continue</button>
-  </div>
 </form>
+{% endblock %}
+{% block banner_class %} kx-banner-slot-md{% endblock %}
+{% block banner %}
+<span id="validating-indicator" class="kx-indicator kx-muted" aria-busy="true">Validating…</span>
+<div id="validation-result"></div>
+{% endblock %}
+{% block actions %}
+<a href="/setup/provider" class="kx-btn-secondary">Back</a>
+<button type="button" class="kx-btn-outline"
+        hx-post="/setup/key/validate"
+        hx-target="#validation-result"
+        hx-swap="innerHTML"
+        hx-include="#key-form"
+        hx-indicator="#validating-indicator">
+  Validate key
+</button>
+<button type="submit" form="key-form" class="kx-btn-primary kx-btn-reveal" id="save-key-btn">Save and continue</button>
 {% endblock %}
 {% block scripts %}
 <script>
   document.addEventListener('htmx:afterSwap', function () {
     if (document.querySelector('.kx-validation-success')) {
-      document.getElementById('save-key-btn').style.display = 'inline-block';
+      document.getElementById('save-key-btn').classList.add('kx-revealed');
     }
   });
 </script>

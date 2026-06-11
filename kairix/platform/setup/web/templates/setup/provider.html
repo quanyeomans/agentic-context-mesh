@@ -1,12 +1,11 @@
 {% extends "setup/base.html" %}
 {% block title %}Choose provider — kairix setup{% endblock %}
-{% block card_class %} kx-setup-card-wide{% endblock %}
 {% block content %}
 <hgroup>
   <h2>Choose an AI provider</h2>
   <p>kairix uses a language model to understand your documents and answer questions. Pick the provider you already have an account with — you bring your own key.</p>
 </hgroup>
-<form method="get" action="/setup/key">
+<form id="provider-form" method="get" action="/setup/key">
   <div class="kx-provider-grid">
     {% for p in providers %}
     <label class="kx-provider-card">
@@ -20,9 +19,9 @@
     </label>
     {% endfor %}
   </div>
-  <div class="kx-setup-actions">
-    <a href="/setup" class="kx-btn-secondary">Back</a>
-    <button type="submit" class="kx-btn-primary">Continue</button>
-  </div>
 </form>
+{% endblock %}
+{% block actions %}
+<a href="/setup" class="kx-btn-secondary">Back</a>
+<button type="submit" form="provider-form" class="kx-btn-primary">Continue</button>
 {% endblock %}

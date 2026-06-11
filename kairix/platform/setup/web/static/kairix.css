@@ -60,9 +60,12 @@ body { margin: 0; font-size: 0.9rem; }
 .kx-btn-outline:hover { background: var(--kx-accent-faint); }
 
 /* ── DL pairs ────────────────────────────────────────── */
-.kx-dl { display: grid; grid-template-columns: auto 1fr; gap: 0.35rem 1rem; font-size: 0.875rem; margin: 0; }
+/* Baseline-aligned rows; long values (folder paths) wrap INSIDE their
+   grid cell instead of overflowing the label column (#488). */
+.kx-dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; font-size: 0.875rem; margin: 0; align-items: baseline; }
 .kx-dl dt { font-weight: 500; color: var(--kx-text-muted); white-space: nowrap; }
-.kx-dl dd { margin: 0; }
+.kx-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.kx-dl dd code { display: inline-block; max-width: 100%; white-space: normal; word-break: break-all; vertical-align: top; }
 .kx-dl-compact { gap: 0.25rem 0.75rem; }
 
 /* ── Feature list ────────────────────────────────────── */
@@ -125,9 +128,12 @@ body { margin: 0; font-size: 0.9rem; }
 .kx-provider-meta { display: flex; flex-wrap: wrap; gap: 0.4rem; font-size: 0.75rem; color: var(--kx-text-muted); margin: 0.3rem 0; }
 
 /* ── Setup wizard frame ──────────────────────────────── */
-.kx-setup-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #f9fafb; padding: 2rem; }
-.kx-setup-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 2.5rem; max-width: 540px; width: 100%; box-shadow: 0 4px 20px rgba(0,0,0,0.06); }
-.kx-setup-card-wide { max-width: 780px; }
+/* The card centres via margin:auto (not align-items) so a card taller
+   than the viewport scrolls from the top instead of clipping (#488). */
+.kx-setup-page { min-height: 100vh; display: flex; justify-content: center; background: #f9fafb; padding: 2rem; }
+/* One card width for every step (#488) — the provider grid auto-fills
+   two columns inside it, so no screen needs a wider variant. */
+.kx-setup-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 2.5rem; max-width: 640px; width: 100%; margin: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.06); }
 .kx-setup-wordmark { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.5px; color: var(--kx-accent); margin-bottom: 1.5rem; }
 .kx-setup-steps { display: flex; align-items: center; gap: 0; margin-bottom: 2rem; }
 .kx-step {
@@ -140,9 +146,34 @@ body { margin: 0; font-size: 0.9rem; }
 }
 .kx-step-active { border-color: var(--kx-accent); color: var(--kx-accent); }
 .kx-step-done { border-color: var(--kx-healthy); background: var(--kx-healthy); color: #fff; font-size: 0.7rem; }
-.kx-step-line { flex: 1; height: 2px; background: #e5e7eb; }
+/* flex-basis 0 + a floor keeps all 7 connector lines the same length
+   instead of compressing unevenly between the dots (#488). */
+.kx-step-line { flex: 1 1 0; min-width: 0.5rem; height: 2px; background: #e5e7eb; margin: 0 0.25rem; }
 .kx-step-line-done { background: var(--kx-healthy); }
+
+/* ── Shared layout primitive (#488) ──────────────────── */
+/* Banner slot: an always-present, fixed-height, scrollable region
+   between the screen content and the action row. Async results render
+   inside it, so the buttons below never move when a result arrives.
+   A result taller than the reserve scrolls within the slot. */
+.kx-banner-slot { overflow-y: auto; margin-top: 0.75rem; }
+.kx-banner-slot:empty { display: none; margin: 0; }
+.kx-banner-slot > :first-child { margin-top: 0; }
+.kx-banner-slot-sm { height: 9rem; }
+.kx-banner-slot-md { height: 13rem; }
+.kx-banner-slot-tall { height: 21rem; }
+/* Canonical action row: Back (secondary) pinned left, the primary
+   action rightmost, helpers (outline) grouped before the primary. */
 .kx-setup-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; align-items: center; }
+.kx-setup-actions:empty { display: none; margin: 0; }
+.kx-setup-actions > .kx-btn-secondary { margin-right: auto; }
+/* Deliberate variant: the centred celebration card centres its lone
+   primary action under the centred copy. */
+.kx-aha-card .kx-setup-actions { justify-content: center; }
+/* Hidden-until-revealed primary actions hold their slot from first
+   paint (visibility, not display) so the row never reflows on reveal. */
+.kx-btn-reveal { visibility: hidden; }
+.kx-btn-reveal.kx-revealed { visibility: visible; }
 
 /* ── Connect-agent screen ────────────────────────────── */
 .kx-mcp-url { font-size: 0.95rem; background: var(--kx-accent-faint); padding: 0.35rem 0.6rem; border-radius: var(--kx-radius); }
@@ -163,4 +194,15 @@ body { margin: 0; font-size: 0.9rem; }
 .kx-small { font-size: 0.8rem; }
 .kx-mt { margin-top: 1.5rem; }
 .kx-mt-sm { margin-top: 0.75rem; }
-.kx-indicator { font-size: 0.8rem; display: inline-block; }
+/* In-flight indicators live in the banner slot and hold their line via
+   visibility, so showing them never shifts the layout. htmx toggles the
+   htmx-request class on the hx-indicator target while a request runs. */
+.kx-indicator { font-size: 0.8rem; display: inline-block; visibility: hidden; }
+.kx-indicator.htmx-request { visibility: visible; }
+
+/* ── Narrow screens ──────────────────────────────────── */
+@media (max-width: 520px) {
+  .kx-setup-page { padding: 1rem; }
+  .kx-setup-card { padding: 1.5rem; }
+  .kx-step { width: 24px; height: 24px; }
+}

@@ -20,27 +20,30 @@
   <p class="kx-muted kx-small">Running in Docker? This is the folder you mounted —
     with the standard compose that's /data/documents.</p>
   {% endif %}
-  <button type="button" class="kx-btn-outline"
-          hx-post="/setup/folder/scan"
-          hx-target="#scan-result"
-          hx-swap="innerHTML"
-          hx-include="#folder-form"
-          hx-indicator="#scan-indicator">
-    Scan folder
-  </button>
-  <span id="scan-indicator" class="kx-indicator kx-muted" aria-busy="true" style="display:none;">Scanning…</span>
-  <div id="scan-result"></div>
-  <div class="kx-setup-actions">
-    <a href="/setup/key" class="kx-btn-secondary">Back</a>
-    <button type="submit" class="kx-btn-primary" id="start-indexing-btn" style="display:none;">Start indexing</button>
-  </div>
 </form>
+{% endblock %}
+{% block banner_class %} kx-banner-slot-md{% endblock %}
+{% block banner %}
+<span id="scan-indicator" class="kx-indicator kx-muted" aria-busy="true">Scanning…</span>
+<div id="scan-result"></div>
+{% endblock %}
+{% block actions %}
+<a href="/setup/key" class="kx-btn-secondary">Back</a>
+<button type="button" class="kx-btn-outline"
+        hx-post="/setup/folder/scan"
+        hx-target="#scan-result"
+        hx-swap="innerHTML"
+        hx-include="#folder-form"
+        hx-indicator="#scan-indicator">
+  Scan folder
+</button>
+<button type="submit" form="folder-form" class="kx-btn-primary kx-btn-reveal" id="start-indexing-btn">Start indexing</button>
 {% endblock %}
 {% block scripts %}
 <script>
   document.addEventListener('htmx:afterSwap', function () {
     if (document.querySelector('.kx-scan-result')) {
-      document.getElementById('start-indexing-btn').style.display = 'inline-block';
+      document.getElementById('start-indexing-btn').classList.add('kx-revealed');
     }
   });
 </script>

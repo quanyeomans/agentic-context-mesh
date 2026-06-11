@@ -732,9 +732,12 @@ class KairixSetupService:
         """
         try:
             self._deps.index_runner_fn()
-        except SystemExit:
+        except SystemExit:  # NOSONAR(python:S5754) — deliberate; see rationale below.
             # acquire_lock exhausts its wait window with sys.exit(3) when a
             # concurrent embed genuinely holds the lock the whole time.
+            # Re-raising inside this daemon thread would kill only the
+            # thread, not "stop the application" — so we convert it to
+            # the operator-facing status the wizard polls instead.
             with self._index_state_lock:
                 self._index_error = (
                     "Indexing stopped: another indexing run is already in progress."
