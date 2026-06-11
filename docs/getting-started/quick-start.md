@@ -233,31 +233,30 @@ If any check fails the output names the next command to run.
 
 ## Topology v2
 
-Topology v2 unlocks the operator-config surface (connectors / credentials / cc_pairs / collections / scope_profiles / skills) plus four shipping connectors (SharePoint, Slack, GitHub, Notion). Every part is gated by a default-off feature flag so existing deployments stay bit-for-bit identical until you flip them.
+Topology v2 is the operator-config surface (connectors / credentials / cc_pairs / collections / scope_profiles / skills). The `topology_v2:` block in your config is parsed and applied on every deployment — no flag needed (the old `topology_v2_*` flags retired after the cutover completed). Individual connectors and newer behaviours stay behind default-off feature flags so existing deployments stay bit-for-bit identical until you flip them.
 
-The flags split into three groups:
+Run `kairix features status` to see the live registry. The current flags:
 
-| Group | Flag | What it does |
-|---|---|---|
-| Operator surface | `topology_v2_config` | Parse + apply the `topology_v2:` block in your config |
-| Operator surface | `topology_v2_runtime` | Route chunk writes through the per-cc_pair CollectionRouter |
-| Connector slots | `connector_sharepoint` | Enable SharePoint (Graph drive-delta + extractor dispatch) |
-| Connector slots | `connector_slack` | Enable Slack (Web API + Socket Mode live events) |
-| Connector slots | `connector_github` | Enable GitHub (REST + GraphQL + webhook listener) |
-| Connector slots | `connector_notion` | Enable Notion (workspace pages + database rows) |
-| Per-source pilots | `topology_v2_obsidian` | One Container per Obsidian folder + delta cursor |
-| Per-source pilots | `topology_v2_dex_crm` | Tenant Container for Dex CRM |
-| Per-source pilots | `topology_v2_m365_email_headers` | One Container per mailbox |
-| Per-source pilots | `topology_v2_m365_calendar` | One Container per calendar |
-| Per-source pilots | `topology_v2_sharepoint` | One Container per drive |
-| Per-source pilots | `topology_v2_slack` | One Container per channel |
-| Per-source pilots | `topology_v2_github` | One Container per repository |
-| Per-source pilots | `topology_v2_notion` | One Container per page tree |
-| Background loop | `maintenance_loop` | Periodic orphan-vector cleanup (24h default) |
+| Group | Flag | Default | What it does |
+|---|---|---|---|
+| Connector slots | `connector_sharepoint` | off | Enable SharePoint (Graph drive-delta + extractor dispatch) |
+| Connector slots | `connector_slack` | off | Enable Slack (Web API + Socket Mode live events) |
+| Connector slots | `connector_github` | off | Enable GitHub (REST + GraphQL + webhook listener) |
+| Connector slots | `connector_notion` | off | Enable Notion (workspace pages + database rows) |
+| Connector slots | `connector_gmail` | off | Enable Gmail (message body + envelope via REST API) |
+| Connector slots | `connector_m365_email_headers` | off | Enable M365 email headers (metadata only, no body) |
+| Connector slots | `connector_m365_calendar` | off | Enable M365 calendar (events → entity signals + timeline) |
+| Connector slots | `connector_dex_crm` | off | Enable Dex CRM (Person/Org entity signals) |
+| Search quality | `entity_summary_indexing_enabled` | off | Project entity summaries into a searchable collection |
+| Search quality | `intent_confidence_gated_boosts` | off | Skip ranking boosts when intent classification is ambiguous |
+| Background loop | `maintenance_loop` | off | Periodic orphan-vector cleanup (24h default) |
+| Observability | `pipeline_status_emit` | off | Write per-item per-stage status rows for `kairix worker inspect` |
+| Agent queue | `agent_query_queue` | off | Queue slow searches and carry results to the agent's next call |
+| CLI routing | `cli_routes_through_warm_mcp` | **on** | Text-mode CLI subcommands route through a warm MCP when one is responsive |
 
-To turn the alpha on:
+To turn a connector on:
 
-1. **Author the YAML.** Copy [`kairix.config.example.yaml`](https://github.com/three-cubes/kairix/blob/main/kairix.config.example.yaml) at the repo root into your config path (Docker overlay: `kairix.config.local.yaml`; pip: `~/.kairix/kairix.config.yaml`). The example shape parses cleanly and `kairix config validate` reports zero failures against it.
+1. **Author the YAML.** Copy [`kairix.config.example.yaml`](https://github.com/three-cubes/kairix/blob/main/kairix.config.example.yaml) at the repo root into your config path (Docker overlay: `kairix.config.local.yaml`; pip: `~/.kairix/kairix.config.yaml`). Run `kairix config validate` after editing to catch shape errors.
 2. **Flip the flags.** Add only the flags for the surfaces you want active. The example config's `features:` block lists every flag with a comment beside each.
 3. **Set the secrets** for each connector you enabled. See the per-connector recipe in [`how-to-upgrade-kairix`](../operations/runbooks/how-to-upgrade-kairix.md) — each connector lists the exact env-var names + where to put them for Docker and pip.
 4. **Apply + verify.** Declared cc_pairs register on worker startup — restart the worker after editing the YAML, then validate:
@@ -268,7 +267,7 @@ To turn the alpha on:
     kairix onboard check             # all 18 checks should pass
     ```
 
-The connector-credentials onboard checks skip with `ok=True` when their flag is off — the alpha is reversible at any time by removing the flag entry from the `features:` block.
+The connector-credentials onboard checks skip with `ok=True` when their flag is off — a connector is reversible at any time by removing its flag entry from the `features:` block.
 
 ---
 

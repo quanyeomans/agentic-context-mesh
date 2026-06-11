@@ -101,7 +101,7 @@ It works with any agent platform that supports [MCP](https://modelcontextprotoco
 - **[Claude Code](https://claude.ai/claude-code)** / **Claude Desktop** — add kairix to your MCP config. Claude searches your knowledge store during conversations and coding sessions.
 - **[OpenClaw](https://openclaw.ai)** — register kairix as an MCP server and every agent gets search tools automatically. Runs on the same VM — adds ~200MB RAM.
 - **[LangGraph](https://github.com/langchain-ai/langgraph)** / **[CrewAI](https://github.com/crewAIInc/crewAI)** — the `research` tool does iterative multi-turn search, refining its own queries until it finds a good answer.
-- **Any MCP-compatible agent** — stdio or SSE transport, no custom integration code.
+- **Any MCP-compatible agent** — stdio or streamable HTTP transport, no custom integration code.
 
 ---
 
@@ -320,6 +320,23 @@ ruff check kairix/ tests/          # lint only
 ```
 
 `scripts/safe-commit.sh` is the single entry point — it runs every gate the CI runs in the same order before letting the commit through; failing gates print the exact fix command. See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture and PR process, and [docs/architecture/fitness-functions.md](docs/architecture/fitness-functions.md) for the F1–F24 architecture fitness functions that enforce structural invariants.
+
+---
+
+## Support
+
+Stuck, or found a bug?
+
+- **[GitHub Issues](https://github.com/three-cubes/kairix/issues)** — report a bug or request a feature.
+- **[GitHub Discussions](https://github.com/three-cubes/kairix/discussions)** — ask questions, share how your team uses kairix, follow the roadmap.
+
+When you report a problem, attach the output of:
+
+```bash
+kairix onboard check --json
+```
+
+It captures the state of your deployment (install, secrets, document store, search, knowledge graph) in one machine-readable block — most problems can be diagnosed from it without back-and-forth.
 
 ---
 

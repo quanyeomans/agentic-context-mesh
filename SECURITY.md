@@ -22,10 +22,10 @@ Kairix requires these secrets to operate:
 
 | Secret | Environment variable | Sensitivity |
 |---|---|---|
-| LLM API key | `KAIRIX_LLM_API_KEY` | HIGH — rotate on any suspected exposure |
-| LLM endpoint URL | `KAIRIX_LLM_ENDPOINT` | MEDIUM |
-| Embedding model name | `KAIRIX_EMBED_MODEL` | LOW |
-| Chat model name | `KAIRIX_LLM_MODEL` | LOW |
+| LLM API key | `KAIRIX_PROVIDER_LLM_API_KEY` | HIGH — rotate on any suspected exposure |
+| LLM endpoint URL | `KAIRIX_PROVIDER_LLM_ENDPOINT` | MEDIUM |
+| Embedding model name | `KAIRIX_PROVIDER_EMBED_MODEL` | LOW |
+| Chat model name | `KAIRIX_PROVIDER_LLM_MODEL` | LOW |
 | Neo4j password | `KAIRIX_NEO4J_PASSWORD` | HIGH (if Neo4j installed) |
 
 ### Production: tmpfs via systemd oneshot unit (recommended)
@@ -49,13 +49,13 @@ source "${KAIRIX_SECRETS_FILE:-/run/secrets/kairix.env}"
 kairix embed
 
 # Wrong — secrets fetched inline, appear in cron log, require az CLI auth per-run
-export KAIRIX_LLM_API_KEY=$(az keyvault secret show ...)
+export KAIRIX_PROVIDER_LLM_API_KEY=$(az keyvault secret show ...)
 ```
 
 ### Local development
 
 ```bash
-cp env.example .env    # .env is gitignored
+cp .env.example .env    # .env is gitignored
 # Edit with your values, then:
 source .env && kairix search "test query"
 ```
@@ -94,14 +94,14 @@ Neo4j is an **optional** dependency (`pip install "kairix[neo4j]"`). If Neo4j is
 
 ## API Key Rotation
 
-Rotate `KAIRIX_LLM_API_KEY` when:
+Rotate `KAIRIX_PROVIDER_LLM_API_KEY` when:
 - Any team member with access leaves
 - Suspected exposure (logs, debug output, screenshots)
 - Quarterly as standard hygiene
 
 Rotation steps:
 1. Generate new key in Azure Portal → Azure OpenAI resource → Keys and Endpoint
-2. Update the Key Vault secret: `az keyvault secret set --vault-name <vault> --name kairix-llm-api-key --value "<new-key>"`
+2. Update the Key Vault secret: `az keyvault secret set --vault-name <vault> --name kairix-provider-llm-api-key --value "<new-key>"`
 3. Restart `kairix-fetch-secrets.service` to refresh `/run/secrets/kairix.env`: `sudo systemctl restart kairix-fetch-secrets.service`
 4. Verify the next scheduled embed cron picks up the new key (check log output within 1 hour)
 5. Disable the old key in Azure Portal
@@ -110,11 +110,11 @@ Rotation steps:
 
 ## Data Residency
 
-Vault content is sent to **Azure OpenAI** for:
+Knowledge-store content is sent to **Azure OpenAI** for:
 - Embedding (all indexed chunks) — `text-embedding-3-large`
 - Synthesis (briefing, classification, benchmark judging) — `gpt-4o-mini`
 
-No vault content is stored by Azure beyond the API call. Azure OpenAI does not use customer data for model training by default (see Microsoft's Data Privacy terms).
+No knowledge-store content is stored by Azure beyond the API call. Azure OpenAI does not use customer data for model training by default (see Microsoft's Data Privacy terms).
 
 All vectors, entity data, and search indexes live in SQLite and Neo4j on your own infrastructure:
 - `~/.cache/kairix/index.sqlite` — Kairix FTS index
@@ -126,7 +126,7 @@ All vectors, entity data, and search indexes live in SQLite and Neo4j on your ow
 ## Access Control
 
 The service account running kairix requires:
-- Read access to the Obsidian vault directory
+- Read access to the document root (your knowledge store)
 - Read/write to `${KAIRIX_DATA_DIR}/` and `~/.cache/kairix/`
 - Read access to `/run/secrets/kairix.env` (group membership)
 - `az` CLI authenticated via managed identity (no stored credentials)

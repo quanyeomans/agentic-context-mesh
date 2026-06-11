@@ -78,7 +78,7 @@ The reference SDK behaviour and the parsing recipe for stdio / SSE clients live 
 
 ## How to reproduce locally
 
-The drill recipe is reproducible against any kairix HTTP deployment. Substitute `your-vm.example.com` and the deployment's HTTP port (default `8090`) for your environment.
+The drill recipe is reproducible against any kairix HTTP deployment. Substitute `your-vm.example.com` and the deployment's HTTP port (default `8080`; the 2026-06-06 drill VM used a `KAIRIX_HOST_PORT=8090` override) for your environment.
 
 ```bash
 # 1. SSH to the host running the kairix container.
@@ -90,7 +90,7 @@ mkdir -p "$outdir"
 
 # 3. Capture a warm baseline so you can compare timings later.
 curl -sS -o /dev/null -w 'warm: HTTP %{http_code} time %{time_total}s\n' \
-  http://127.0.0.1:8090/mcp | tee "$outdir/log.txt"
+  http://127.0.0.1:8080/mcp | tee "$outdir/log.txt"
 
 # 4. Trigger the restart. The container takes 5-10s to re-bind the port.
 docker compose restart kairix
@@ -100,7 +100,7 @@ docker compose restart kairix
 for i in $(seq 1 10); do
   status=$(curl -sS -o "$outdir/attempt_${i}_body.json" \
     -D "$outdir/attempt_${i}_headers.txt" \
-    -w '%{http_code}' http://127.0.0.1:8090/mcp || echo 000)
+    -w '%{http_code}' http://127.0.0.1:8080/mcp || echo 000)
   printf '  attempt %d: HTTP %s\n' "$i" "$status" | tee -a "$outdir/log.txt"
   [ "$status" != "000" ] && break
   sleep 1
