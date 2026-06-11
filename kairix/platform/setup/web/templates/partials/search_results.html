@@ -1,5 +1,10 @@
 <div class="kx-search-results">
+  {% if not preview.results %}
+  <p class="kx-muted">No matches for "<strong>{{ query }}</strong>" yet. Try different words —
+    and check that indexing finished without errors on the indexing step.</p>
+  {% else %}
   <p class="kx-muted kx-small">{{ preview.results|length }} results for "<strong>{{ query }}</strong>"</p>
+  {% endif %}
   {% for r in preview.results %}
   <article class="kx-result-card">
     <div class="kx-result-header">

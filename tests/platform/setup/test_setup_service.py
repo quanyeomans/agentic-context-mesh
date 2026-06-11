@@ -38,7 +38,7 @@ from kairix.platform.setup.backends import (
     update_config_file,
     write_config_updates,
 )
-from kairix.platform.setup.service import SetupService, build_setup_service
+from kairix.platform.setup.service import SecretsWriteError, SetupService, build_setup_service
 from kairix.providers import AuthError, EmbedNotSupported, ProviderNotRegistered, TimeoutExceeded
 from tests.fakes import FakePaths, FakeProvider, FakeSearchPipeline
 
@@ -453,6 +453,35 @@ def test_save_provider_chosen_model_wins_over_the_deployment(tmp_path: Path) -> 
     assert recorder.persisted == [(_FAKE_KEY, "https://res.services.ai.azure.com", "chosen-model")]
 
 
+def test_save_provider_secrets_write_failure_raises_the_typed_error(tmp_path: Path) -> None:
+    """Review M2 — a read-only secrets bundle surfaces as
+    ``SecretsWriteError`` naming the bundle path, and the config write
+    never runs after the failed persist."""
+    recorder = _Recorder()
+
+    def persist(_key: str, _endpoint: str, _model: str) -> Path | None:
+        raise OSError(30, "Read-only file system", "/run/secrets/kairix.env")
+
+    service = _service(tmp_path, persist_credentials_fn=persist, write_config_fn=recorder.write_config)
+    with pytest.raises(SecretsWriteError) as excinfo:
+        service.save_provider("openai", _FAKE_KEY, None, "model-alpha")
+    assert excinfo.value.bundle_path == "/run/secrets/kairix.env"
+    assert recorder.config_updates == []
+
+
+def test_save_provider_secrets_write_failure_without_a_filename(tmp_path: Path) -> None:
+    """An OSError with no filename still maps to the typed error — the
+    wizard's banner falls back to naming the configured location."""
+
+    def persist(_key: str, _endpoint: str, _model: str) -> Path | None:
+        raise OSError(30, "Read-only file system")
+
+    service = _service(tmp_path, persist_credentials_fn=persist)
+    with pytest.raises(SecretsWriteError) as excinfo:
+        service.save_provider("openai", _FAKE_KEY, None, "model-alpha")
+    assert excinfo.value.bundle_path == ""
+
+
 # ---------------------------------------------------------------------------
 # scan_folder
 # ---------------------------------------------------------------------------
@@ -718,7 +747,11 @@ def test_start_index_runs_in_background_then_reports_done(tmp_path: Path) -> Non
     service = _service(tmp_path, index_runner_fn=runner, index_counts_fn=lambda db: (4, 0))
     service.start_index()
     assert started.wait(timeout=5)
-    assert service.index_status().running is True
+    mid_run = service.index_status()
+    assert mid_run.running is True
+    # Review M1 — completion must never be claimed mid-run, even when
+    # the DB counters already read "all embedded" (4 embedded, 0 pending).
+    assert mid_run.done is False
     release.set()
     _wait_until_not_running(service)
     final = service.index_status()
@@ -796,6 +829,31 @@ def test_index_status_not_done_while_chunks_are_pending(tmp_path: Path) -> None:
     assert status.done is False
     assert status.chunks_done == 3
     assert status.chunks_total == 10
+
+
+def test_index_status_idle_before_any_run_is_not_done(tmp_path: Path) -> None:
+    """Review M1 — a fresh service over an empty index is idle, not done:
+    the 0-documents copy belongs to a finished run only."""
+    service = _service(tmp_path, index_counts_fn=lambda db: (0, 0))
+    status = service.index_status()
+    assert status.running is False
+    assert status.done is False
+    assert status.error is None
+
+
+def test_index_of_an_empty_folder_completes_with_honest_copy(tmp_path: Path) -> None:
+    """Review M1 — a run that found nothing must complete (``done=True``)
+    with the 0-documents guidance, not leave the wizard spinning forever."""
+    service = _service(tmp_path, index_runner_fn=lambda: None, index_counts_fn=lambda db: (0, 0))
+    service.start_index()
+    _wait_until_not_running(service)
+    status = service.index_status()
+    assert status.running is False
+    assert status.done is True
+    assert status.error is not None
+    assert "0 documents indexed" in status.error
+    assert "fix:" in status.error
+    assert "next:" in status.error
 
 
 def test_index_status_on_a_fresh_database_is_not_done(tmp_path: Path) -> None:

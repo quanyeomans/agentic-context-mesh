@@ -5122,6 +5122,7 @@ class FakeSetupService:
         self._chunks_done = 0
 
     def index_status(self) -> Any:
+        from kairix.platform.setup.backends import EMPTY_INDEX_MESSAGE
         from kairix.platform.setup.service import IndexStatus
 
         if self._index_statuses is not None:
@@ -5135,6 +5136,18 @@ class FakeSetupService:
                 chunks_done=self._chunks_done,
                 chunks_total=self._chunks_total,
                 error=self._index_error,
+            )
+        if self._chunks_total == 0:
+            # Mirror the real backend (review M1): an empty corpus is
+            # only "done" after a run actually happened, and it carries
+            # the honest 0-documents copy instead of a clean finish.
+            ran = self.start_index_calls > 0
+            return IndexStatus(
+                running=False,
+                done=ran,
+                chunks_done=0,
+                chunks_total=0,
+                error=EMPTY_INDEX_MESSAGE if ran else None,
             )
         if self._index_running and self._chunks_done < self._chunks_total:
             self._chunks_done = min(self._chunks_total, self._chunks_done + self._chunks_per_tick)

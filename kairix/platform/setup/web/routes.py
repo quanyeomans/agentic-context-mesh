@@ -35,6 +35,19 @@ from starlette.routing import BaseRoute, Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+# The contract module only (dataclasses + constants, no side-effect
+# machinery) — the wizard UI still ships independently of the backend
+# module, which stays lazily imported in _default_service_factory.
+from kairix.platform.setup.service import (
+    AZURE_PROVIDER_NAMES,
+    PHASE_CONSENT,
+    PHASE_DONE,
+    PHASE_EXCHANGING,
+    PHASE_FAILED,
+    AgentConnectInfo,
+    ConnectSnippet,
+    SecretsWriteError,
+)
 from kairix.platform.setup.source_oauth import OAUTH_CALLBACK_PATH
 
 if TYPE_CHECKING:
@@ -117,19 +130,11 @@ _FIELD_API_KEY = "api_key"  # pragma: allowlist secret — form FIELD NAME, not 
 _FIELD_ENDPOINT = "endpoint"
 _FIELD_DEPLOYMENT = "deployment"
 
-# Azure-shaped provider plugin names — the key screen shows the optional
-# deployment-name field for these (#484). Azure routes requests by
-# deployment name, so the probe model must be one the operator deployed.
-_AZURE_PROVIDER_NAMES = frozenset({"azure_foundry", "azure_legacy"})
-
-# Source sign-in phases the status partial reacts to. These literals are
-# the SourceAuthStatus.phase contract (see
-# kairix/platform/setup/service.py) — duplicated here rather than
-# imported from the backend module so the wizard UI keeps shipping
-# independently of the backend (the same reason _default_service_factory
-# lazy-imports).
-_PHASE_CONSENT = "consent"
-_PHASE_DONE = "done"
+# The azure provider set (the key screen's deployment-name field, #484)
+# and the source sign-in phase vocabulary both come from the contract
+# module — kairix.platform.setup.service — so there is exactly one
+# definition site (review M11). Templates read the phases via
+# env.globals (the total_steps pattern).
 
 
 def _config_write_error(exc: OSError) -> str:
@@ -150,10 +155,54 @@ def _config_write_error(exc: OSError) -> str:
     )
 
 
+def _secrets_write_error(exc: SecretsWriteError) -> str:
+    """F21-shaped banner for a failed credential write (review M2).
+
+    A vault-agent sidecar deploy mounts ``/run/secrets`` read-only, so
+    persisting the key fails before any config write is attempted. The
+    rescue is the secrets bundle, not the config overlay — prescribing
+    ``KAIRIX_CONFIG_OVERLAY_PATH`` here would send the operator down a
+    dead end.
+    """
+    target = exc.bundle_path or "its configured location"
+    return (
+        f"Could not save the API key to the secrets file at {target} — it may be mounted read-only."
+        " fix: set KAIRIX_SECRETS_FILE to a writable path on the data volume"
+        " (for example /var/lib/kairix/secrets/kairix.env) so credentials land there."
+        " next: restart the container, then save again."
+    )
+
+
+def _provider_query(provider: str) -> str:
+    """``?provider=<name>`` query suffix shared by the source screens (F17)."""
+    return f"?provider={quote(provider)}"
+
+
 def _key_context(provider: str) -> dict[str, Any]:
     """Template context for the key screen — azure picks get the
     deployment-name field (#484)."""
-    return {"step": 3, "provider": provider, "azure_provider": provider in _AZURE_PROVIDER_NAMES}
+    return {"step": 3, "provider": provider, "azure_provider": provider in AZURE_PROVIDER_NAMES}
+
+
+def _key_save_reject(provider: str, api_key: str) -> str | None:
+    """Grade-8 reject for an empty provider or key (review H4).
+
+    Without this, a header-crafted POST persists ``{"provider": ""}``
+    silently and the wizard looks finished while nothing works.
+    """
+    if not provider:
+        return (
+            "No provider is selected."
+            " fix: go back one step and pick your AI provider."
+            " next: paste the key and save again."
+        )
+    if not api_key.strip():
+        return (
+            "The API key field is empty."
+            " fix: paste your provider's API key."
+            " next: use Validate key to check it, then save."
+        )
+    return None
 
 
 def _handle_key_save(
@@ -161,24 +210,45 @@ def _handle_key_save(
     service: SetupService,
     render: Callable[[str, dict[str, Any]], Response],
 ) -> Response:
-    """Persist the provider pick; on a read-only config (#485), re-render
-    the key screen with the rescue banner instead of a raw 500.
+    """Persist the provider pick; every failure re-renders the key screen
+    with a banner instead of a raw 500 — empty fields (review H4), a
+    read-only secrets bundle (review M2), a read-only config (#485).
 
     Module-level (not a closure) so the builder stays under the F16
     complexity ceiling; ``render`` is the builder's template closure.
     """
-    provider = fields.get(_FIELD_PROVIDER, "")
+    provider = fields.get(_FIELD_PROVIDER, "").strip()
+    api_key = fields.get(_FIELD_API_KEY, "")
+
+    def rerender(message: str) -> Response:
+        return render(_TPL_KEY, {**_key_context(provider), _CTX_SAVE_ERROR: message})
+
+    reject = _key_save_reject(provider, api_key)
+    if reject is not None:
+        return rerender(reject)
     try:
         service.save_provider(
             provider,
-            fields.get(_FIELD_API_KEY, ""),
+            api_key,
             fields.get(_FIELD_ENDPOINT) or None,
             fields.get("model") or None,
             deployment=fields.get(_FIELD_DEPLOYMENT) or None,
         )
+    except SecretsWriteError as exc:
+        return rerender(_secrets_write_error(exc))
     except OSError as exc:
-        return render(_TPL_KEY, {**_key_context(provider), _CTX_SAVE_ERROR: _config_write_error(exc)})
+        return rerender(_config_write_error(exc))
     return RedirectResponse(_FOLDER_URL, status_code=303)
+
+
+def _folder_save_context(service: SetupService, path: str, message: str) -> dict[str, Any]:
+    """Folder-screen re-render context carrying the save-error banner."""
+    return {
+        "step": 4,
+        "hint": service.source_hint(),
+        _FIELD_FOLDER_PATH: path,
+        _CTX_SAVE_ERROR: message,
+    }
 
 
 def _handle_folder_save(
@@ -186,24 +256,21 @@ def _handle_folder_save(
     service: SetupService,
     render: Callable[[str, dict[str, Any]], Response],
 ) -> Response:
-    """Persist the folder pick and start indexing; on a read-only config
-    (#485) re-render with the rescue banner — indexing must NOT start
-    on a failed save. Module-level for the same F16 reason as
-    :func:`_handle_key_save`.
+    """Persist the folder pick and start indexing; on a rejected path
+    (review H4) or a read-only config (#485) re-render with the banner —
+    indexing must NOT start on a failed save. Module-level for the same
+    F16 reason as :func:`_handle_key_save`.
     """
     path = fields.get(_FIELD_FOLDER_PATH, "")
     try:
         service.save_source(path)
+    except ValueError as exc:
+        # save_source's documented reject (relative / missing path) is
+        # already F21-shaped — render it verbatim, never a raw 500. The
+        # path field is editable after the scan, so this is reachable.
+        return render(_TPL_FOLDER, _folder_save_context(service, path, str(exc)))
     except OSError as exc:
-        return render(
-            _TPL_FOLDER,
-            {
-                "step": 4,
-                "hint": service.source_hint(),
-                _FIELD_FOLDER_PATH: path,
-                _CTX_SAVE_ERROR: _config_write_error(exc),
-            },
-        )
+        return render(_TPL_FOLDER, _folder_save_context(service, path, _config_write_error(exc)))
     service.start_index()
     return RedirectResponse(_INDEXING_URL, status_code=303)
 
@@ -261,7 +328,7 @@ def _handle_source_connect_start(
         context = _source_connect_context(provider, label, origin)
         context["start_error"] = started.error
         return render(_TPL_SOURCE_CONNECT, context)
-    return RedirectResponse(f"{_SOURCE_WAIT_URL}?provider={quote(provider)}", status_code=303)
+    return RedirectResponse(f"{_SOURCE_WAIT_URL}{_provider_query(provider)}", status_code=303)
 
 
 def _handle_source_save(
@@ -298,10 +365,10 @@ def _source_status_headers(status: Any) -> dict[str, str] | None:
     with no browser — so the OPERATOR's browser must make this hop).
     Once the flow finishes, the browser advances to the picker.
     """
-    if status.phase == _PHASE_CONSENT and status.authorize_url:
+    if status.phase == PHASE_CONSENT and status.authorize_url:
         return {_HX_REDIRECT: status.authorize_url}
-    if status.phase == _PHASE_DONE:
-        return {_HX_REDIRECT: f"{_SOURCE_PICKER_URL}?provider={quote(status.provider)}"}
+    if status.phase == PHASE_DONE:
+        return {_HX_REDIRECT: f"{_SOURCE_PICKER_URL}{_provider_query(status.provider)}"}
     return None
 
 
@@ -314,12 +381,18 @@ def _handle_oauth_callback(request: Request, service: SetupService) -> Response:
     ``service.complete_source_callback`` — a callback with no pending
     flow or a mismatched ``state`` is rejected with 409. The
     authorization code is handed to the service and never logged (F15).
+
+    The return-to-wait redirect carries the pending flow's provider so
+    the wait screen keeps its context (review L7 — a provider-less wait
+    URL bounces back to the source cards).
     """
     params = dict(request.query_params)
     outcome = service.complete_source_callback(params.get("state"), params)
     if not outcome.ok:
         return PlainTextResponse(outcome.error or "Sign-in response rejected.", status_code=409)
-    return RedirectResponse(_SOURCE_WAIT_URL, status_code=303)
+    provider = service.source_auth_status().provider
+    suffix = _provider_query(provider) if provider else ""
+    return RedirectResponse(f"{_SOURCE_WAIT_URL}{suffix}", status_code=303)
 
 
 def _default_service_factory() -> SetupService:
@@ -362,6 +435,12 @@ def _build_template_env() -> jinja2.Environment:
         autoescape=select_autoescape(("html",)),
     )
     env.globals["total_steps"] = _TOTAL_STEPS
+    # The sign-in phase vocabulary, from the contract module (review
+    # M11) — source_auth_status.html branches on these.
+    env.globals["PHASE_CONSENT"] = PHASE_CONSENT
+    env.globals["PHASE_DONE"] = PHASE_DONE
+    env.globals["PHASE_EXCHANGING"] = PHASE_EXCHANGING
+    env.globals["PHASE_FAILED"] = PHASE_FAILED
     return env
 
 
@@ -484,6 +563,30 @@ def _progress_headers(status: Any) -> dict[str, str] | None:
     if status.done and not status.error:
         return {_HX_REDIRECT: _TOUR_URL}
     return None
+
+
+def _rebased_connect_info(info: AgentConnectInfo, origin: str) -> AgentConnectInfo:
+    """Re-anchor the displayed MCP URL on the live request origin (review L1).
+
+    ``mcp_endpoint()`` reads only ``KAIRIX_MCP_ENDPOINT``, so a pip
+    install whose port auto-shifted (advertised via ``KAIRIX_MCP_PORT``)
+    would display a URL nothing listens on. The wizard and the MCP
+    transport share one server, so the origin the operator's browser
+    reached IS the MCP origin — keep the endpoint's own path and swap
+    the host. Falls back to the service's URL when it has no host part
+    to swap.
+    """
+    from urllib.parse import urlsplit
+
+    parsed = urlsplit(info.mcp_url)
+    if not origin or not parsed.netloc:
+        return info
+    rebased = f"{origin}{parsed.path}"
+    snippets = tuple(
+        ConnectSnippet(client=snippet.client, config_text=snippet.config_text.replace(info.mcp_url, rebased))
+        for snippet in info.snippets
+    )
+    return AgentConnectInfo(mcp_url=rebased, snippets=snippets)
 
 
 def _make_screen_endpoint(
@@ -684,8 +787,8 @@ def build_setup_wizard_mount(
     def tour_timeline(fields: dict[str, str], service: SetupService) -> Response:
         return _render(_TPL_TOUR_TIMELINE, {"result": service.tour_timeline(fields.get("query", ""))})
 
-    def connect_agent_screen(_request: Request, service: SetupService) -> Response:
-        info = service.agent_connect_info()
+    def connect_agent_screen(request: Request, service: SetupService) -> Response:
+        info = _rebased_connect_info(service.agent_connect_info(), _request_origin(request))
         return _render(_TPL_CONNECT_AGENT, {"step": 7, "info": info})
 
     def connect_agent_verify(_fields: dict[str, str], service: SetupService) -> Response:
@@ -707,6 +810,10 @@ def build_setup_wizard_mount(
 
     def source_wait_screen(request: Request, _service_: SetupService) -> Response:
         provider = request.query_params.get(_FIELD_PROVIDER, "")
+        if not provider:
+            # No provider context — back to the source cards (review
+            # L7, the /setup/key convention).
+            return RedirectResponse(_SOURCE_URL, status_code=303)
         return _render(_TPL_SOURCE_WAIT, {"step": 4, "provider": provider})
 
     def source_auth_status(_request: Request, service: SetupService) -> Response:
@@ -715,6 +822,10 @@ def build_setup_wizard_mount(
 
     def source_picker_screen(request: Request, service: SetupService) -> Response:
         provider = request.query_params.get(_FIELD_PROVIDER, "")
+        if not provider:
+            # No provider context — back to the source cards (review
+            # L7, the /setup/key convention).
+            return RedirectResponse(_SOURCE_URL, status_code=303)
         units = service.discover_source_units(provider)
         return _render(_TPL_SOURCE_PICKER, {"step": 4, "units": units, "provider": provider})
 

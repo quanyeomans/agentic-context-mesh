@@ -46,6 +46,12 @@ from typing import Any
 from kairix.connect.protocols import ConnectError
 from kairix.credentials import Credentials
 from kairix.platform.setup.service import (
+    PHASE_CONSENT,
+    PHASE_DONE,
+    PHASE_EXCHANGING,
+    PHASE_FAILED,
+    PHASE_IDLE,
+    PHASE_STARTING,
     AgentConnectInfo,
     CallbackOutcome,
     ConnectSnippet,
@@ -56,6 +62,7 @@ from kairix.platform.setup.service import (
     SavedSource,
     SearchPreview,
     SearchPreviewHit,
+    SecretsWriteError,
     SetupStatus,
     SourceAuthStart,
     SourceAuthStatus,
@@ -221,13 +228,19 @@ _INVALID_AGENT_PREFIX = "InvalidAgent"
 #: Shared F21 tail for source-connect failures (#489).
 _SOURCE_RETRY = " next: go back to the source step and start the connection again."
 
-#: Source sign-in phases reported by :meth:`KairixSetupService.source_auth_status`.
-PHASE_IDLE = "idle"
-PHASE_STARTING = "starting"
-PHASE_CONSENT = "consent"
-PHASE_EXCHANGING = "exchanging"
-PHASE_DONE = "done"
-PHASE_FAILED = "failed"
+#: Honest completion copy when a first-index run found nothing to index
+#: (review M1). The wizard's indexing screen renders it instead of
+#: spinning forever; ``FakeSetupService`` mirrors it for route tests.
+EMPTY_INDEX_MESSAGE = (
+    "0 documents indexed — the folder had no readable files."
+    " fix: check you picked the right folder."
+    " next: go back to the source step and pick a folder with documents in it."
+)
+
+# The source sign-in phase vocabulary (PHASE_IDLE … PHASE_FAILED) lives
+# in kairix.platform.setup.service — the contract module — and is
+# re-imported above (review M11). Re-exported via __all__ for existing
+# importers of this module.
 
 
 # ---------------------------------------------------------------------------
@@ -832,11 +845,20 @@ class KairixSetupService:
         asked and then didn't write it. When no model was chosen, the
         Azure ``deployment`` name (#484) fills the embed-model slot so
         indexing talks to the same deployment that validated.
+
+        A failed credential write raises :class:`SecretsWriteError`
+        naming the bundle path (review M2) — distinct from the config
+        write's plain ``OSError`` so the wizard prescribes the
+        ``KAIRIX_SECRETS_FILE`` rescue, not the config overlay. The
+        config write never runs after a failed persist.
         """
         plugin = _normalise_plugin_name(provider, endpoint)
         resolved_endpoint = (endpoint or "").strip() or DEFAULT_PLUGIN_ENDPOINTS.get(plugin, "")
         resolved_model = (model or "").strip() or (deployment or "").strip()
-        self._deps.persist_credentials_fn(api_key, resolved_endpoint, resolved_model)
+        try:
+            self._deps.persist_credentials_fn(api_key, resolved_endpoint, resolved_model)
+        except OSError as exc:
+            raise SecretsWriteError(str(getattr(exc, "filename", "") or "")) from exc
         self._deps.write_config_fn({"provider": plugin})
 
     def scan_folder(self, path: str) -> FolderScan:
@@ -982,14 +1004,25 @@ class KairixSetupService:
         works identically whether this service's thread or the embed
         worker is doing the indexing. ``chunks_total`` is embedded +
         pending documents, so it grows as the scan chunkifies new files.
+
+        An empty corpus completes honestly (review M1): a run that
+        finished cleanly with nothing embedded reports ``done=True``
+        with :data:`EMPTY_INDEX_MESSAGE` in ``error``, so the indexing
+        screen stops polling and explains instead of spinning forever.
+        The message rides ``error`` deliberately — it keeps the
+        screen's auto-advance from skipping past the explanation.
         """
         with self._index_state_lock:
             thread_alive = self._index_thread is not None and self._index_thread.is_alive()
+            ran_to_completion = self._index_thread is not None and not thread_alive
             error = self._index_error
         embedded, pending = self._deps.index_counts_fn(self._db_path())
         external_run = not thread_alive and self._deps.embed_lock_probe_fn(self._lockfile())
         running = thread_alive or external_run
-        done = not running and error is None and pending == 0 and embedded > 0
+        finished_clean = not running and error is None and pending == 0
+        done = finished_clean and (embedded > 0 or ran_to_completion)
+        if done and embedded == 0:
+            error = EMPTY_INDEX_MESSAGE
         return IndexStatus(
             running=running,
             done=done,
@@ -1654,6 +1687,7 @@ __all__ = [
     "DEFAULT_PLUGIN_ENDPOINTS",
     "DEFAULT_VALIDATION_PROBE_MODEL",
     "EMBED_COST_USD_PER_1K_TOKENS",
+    "EMPTY_INDEX_MESSAGE",
     "ENDPOINT_REQUIRED_PLUGINS",
     "FIRST_SEARCH_TOP_N",
     "PHASE_CONSENT",

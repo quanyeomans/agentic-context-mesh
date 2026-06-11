@@ -167,9 +167,11 @@ def test_real_service_drives_the_full_wizard_journey(tmp_path: Path) -> None:
     assert "% match" in results.text
 
     # Connect-agent screen surfaces the MCP URL + doc-shaped snippets.
+    # The displayed URL re-anchors on the live request origin (review
+    # L1) — the test client's origin here — keeping the endpoint path.
     connect = client.get("/setup/connect-agent")
     assert connect.status_code == 200
-    assert "http://localhost:8080/mcp" in connect.text
+    assert "http://testserver/mcp" in connect.text
     assert "mcpServers" in connect.text
 
     # Handshake verification reports the in-process tool count.

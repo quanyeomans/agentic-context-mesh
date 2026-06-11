@@ -136,6 +136,11 @@ DEFAULT_SOURCE_OPTIONS: tuple[SourceOption, ...] = (
 # Shared F21 run hint for source-connect failures.
 _RETRY_HINT = "next: go back to the source step and start the connection again."
 
+#: Upper bound for pasted credential material (review L7). Real Google
+#: client_secret.json files are ~1 KB and PEM keys a few KB — anything
+#: past this is a paste mistake, never a credential.
+SECRET_MATERIAL_MAX_BYTES = 64 * 1024
+
 # Metadata key the GitHub App flow stores the installation id under
 # (see kairix/connect/oauth2/github_app.py CapturedTokens.metadata) and
 # the canonical leaf name the GitHub connector's resolver reads.
@@ -335,7 +340,17 @@ def write_secret_material(text: str, *, suffix: str) -> Path:
     the wizard from a browser paste the content instead. ``mkstemp``
     creates the file 0600 so no other local user can read it. The
     content is never logged (F15).
+
+    Pastes past :data:`SECRET_MATERIAL_MAX_BYTES` are rejected with a
+    ``ValueError`` (review L7): real client secrets are ~1 KB and PEM
+    keys a few KB, so an oversized paste is a mistake, not a
+    credential — and it must not land on disk.
     """
+    if len(text.encode("utf-8")) > SECRET_MATERIAL_MAX_BYTES:
+        raise ValueError(
+            "The pasted credential is too large to be a client secret or key (over 64 KB)."
+            f" fix: paste only the credential file's content. {_RETRY_HINT}"
+        )
     fd, raw_path = tempfile.mkstemp(prefix="kairix-wizard-", suffix=suffix)
     try:
         os.write(fd, text.encode("utf-8"))
@@ -719,6 +734,7 @@ __all__ = [
     "PROVIDER_GOOGLE_CALENDAR",
     "PROVIDER_GOOGLE_DRIVE",
     "PROVIDER_SLACK",
+    "SECRET_MATERIAL_MAX_BYTES",
     "CapturingBrowser",
     "SourceFlowRequest",
     "WizardCallbackListener",

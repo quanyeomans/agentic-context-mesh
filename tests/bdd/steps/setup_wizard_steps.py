@@ -270,7 +270,9 @@ def _open_connect_agent(_wizard_state: dict[str, Any]) -> None:
 def _connect_agent_shows_url(_wizard_state: dict[str, Any]) -> None:
     response = _wizard_state["response"]
     assert response.status_code == 200
-    assert "http://127.0.0.1:8765/mcp" in response.text
+    # The displayed address re-anchors on the origin the operator's
+    # browser reached (review L1) — the test client's origin here.
+    assert "http://testserver/mcp" in response.text
     assert "Claude Code" in response.text
 
 

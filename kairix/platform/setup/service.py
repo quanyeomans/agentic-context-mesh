@@ -27,6 +27,45 @@ if TYPE_CHECKING:
     from kairix.paths import KairixPaths
     from kairix.platform.setup.backends import SetupServiceDeps
 
+# ---------------------------------------------------------------------------
+# Contract constants (F17 — one definition site). The backend reports
+# these values; the wizard's routes and templates react to them. They
+# live here, not in the backend module, so the wizard UI can import
+# them without importing the backend's side-effect machinery.
+# ---------------------------------------------------------------------------
+
+#: Source sign-in phases — the ``SourceAuthStatus.phase`` vocabulary (#489).
+PHASE_IDLE = "idle"
+PHASE_STARTING = "starting"
+PHASE_CONSENT = "consent"
+PHASE_EXCHANGING = "exchanging"
+PHASE_DONE = "done"
+PHASE_FAILED = "failed"
+
+#: Azure-shaped provider plugin names (#484). The key screen shows the
+#: optional deployment-name field for these; the backend requires an
+#: endpoint and probes by deployment name for the same set.
+AZURE_PROVIDER_NAMES = frozenset({"azure_foundry", "azure_legacy"})
+
+
+class SecretsWriteError(OSError):
+    """A credential could not be written to the operator secrets bundle.
+
+    Raised by :meth:`SetupService.save_provider` when persisting the API
+    key fails — e.g. the container's ``/run/secrets`` mount is read-only
+    (vault-agent sidecar layout). Typed separately from a config-write
+    ``OSError`` so the wizard renders the ``KAIRIX_SECRETS_FILE`` rescue
+    instead of the config-overlay one, which cannot fix a secrets mount.
+
+    ``bundle_path`` names the file the write targeted — a path, never a
+    secret value (F15). Empty when the failing write carried no filename.
+    """
+
+    def __init__(self, bundle_path: str) -> None:
+        target = bundle_path or "its configured location"
+        super().__init__(f"could not write the secrets bundle at {target}")
+        self.bundle_path = bundle_path
+
 
 @dataclass(frozen=True)
 class SetupStatus:
@@ -340,6 +379,14 @@ class SetupService(Protocol):
         ``deployment`` (#484) backstops ``model``: when no model was
         chosen, the Azure deployment name is persisted as the embed
         model so indexing talks to the deployment that validated.
+
+        Raises:
+            SecretsWriteError: when the credential cannot be written to
+                the secrets bundle (read-only mount) — the wizard
+                renders the ``KAIRIX_SECRETS_FILE`` rescue banner.
+            OSError: when the config file cannot be written (read-only
+                mount without an overlay, #485) — the wizard renders
+                the config-overlay rescue banner.
         """
 
     def scan_folder(self, path: str) -> FolderScan:
@@ -437,6 +484,13 @@ def build_setup_service(
 
 
 __all__ = [
+    "AZURE_PROVIDER_NAMES",
+    "PHASE_CONSENT",
+    "PHASE_DONE",
+    "PHASE_EXCHANGING",
+    "PHASE_FAILED",
+    "PHASE_IDLE",
+    "PHASE_STARTING",
     "AgentConnectInfo",
     "CallbackOutcome",
     "ConnectSnippet",
@@ -447,6 +501,7 @@ __all__ = [
     "SavedSource",
     "SearchPreview",
     "SearchPreviewHit",
+    "SecretsWriteError",
     "SetupService",
     "SetupStatus",
     "SourceAuthStart",

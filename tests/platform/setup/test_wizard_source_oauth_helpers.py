@@ -24,6 +24,7 @@ from kairix.connect.protocols import (
 from kairix.platform.setup.service import SourceUnit
 from kairix.platform.setup.source_oauth import (
     OAUTH_CALLBACK_PATH,
+    SECRET_MATERIAL_MAX_BYTES,
     CapturingBrowser,
     SourceFlowRequest,
     WizardCallbackListener,
@@ -232,6 +233,23 @@ def test_write_secret_material_is_owner_only() -> None:
     try:
         assert path.read_text(encoding="utf-8") == "content"
         assert (path.stat().st_mode & 0o777) == 0o600
+    finally:
+        path.unlink()
+
+
+def test_write_secret_material_rejects_oversized_pastes() -> None:
+    """Review L7 — anything past 64 KB is a paste mistake, never a
+    credential; it must be refused with guidance and never land on disk."""
+    oversized = "x" * (SECRET_MATERIAL_MAX_BYTES + 1)
+    with pytest.raises(ValueError, match="fix:"):
+        write_secret_material(oversized, suffix=".json")
+
+
+def test_write_secret_material_accepts_material_at_the_size_boundary() -> None:
+    at_limit = "x" * SECRET_MATERIAL_MAX_BYTES
+    path = write_secret_material(at_limit, suffix=".pem")
+    try:
+        assert path.read_text(encoding="utf-8") == at_limit
     finally:
         path.unlink()
 

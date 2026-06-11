@@ -50,6 +50,7 @@ def _build_client(
     client_addr: tuple[str, int] = _LOOPBACK,
     use_default_factory: bool = False,
     readiness_check: object = None,
+    base_url: str = "http://testserver",
 ) -> TestClient:
     """Compose the app through the production composer with fakes."""
     resolved_service = service if service is not None else FakeSetupService()
@@ -65,7 +66,7 @@ def _build_client(
         readiness_check=readiness_check,  # type: ignore[arg-type]  # F3 rationale: None or callable; build_mcp_app accepts both.
         **kwargs,  # type: ignore[arg-type]  # F3 rationale: heterogeneous kwargs dict for an optional seam; build_mcp_app validates the shape.
     )
-    return TestClient(app, client=client_addr)
+    return TestClient(app, client=client_addr, base_url=base_url)
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +289,58 @@ def test_key_save_on_read_only_config_renders_overlay_rescue_banner() -> None:
     assert "/var/lib/kairix/kairix.config.local.yaml" in response.text
     assert "fix:" in response.text
     assert "next:" in response.text
+    # The config rescue stays config-shaped — never the secrets one (M2).
+    assert "KAIRIX_SECRETS_FILE" not in response.text
     # The operator stays on the key screen — nothing was saved.
+    assert service.saved_providers == []
+
+
+def test_key_save_on_read_only_secrets_renders_the_secrets_rescue_banner() -> None:
+    """Review M2 — failing to persist the KEY must prescribe
+    KAIRIX_SECRETS_FILE and name the bundle path; the config-overlay
+    rescue cannot fix a read-only secrets mount."""
+    from kairix.platform.setup.service import SecretsWriteError
+
+    service = FakeSetupService(save_provider_raises=SecretsWriteError("/run/secrets/kairix.env"))
+    client = _build_client(service=service)
+    response = client.post("/setup/key", data=_SAVE_KEY_PAYLOAD, follow_redirects=False)
+    assert response.status_code == 200
+    assert "Could not save the API key to the secrets file at /run/secrets/kairix.env" in response.text
+    assert "KAIRIX_SECRETS_FILE" in response.text
+    assert "KAIRIX_CONFIG_OVERLAY_PATH" not in response.text
+    assert "fix:" in response.text
+    assert "next:" in response.text
+    assert service.saved_providers == []
+
+
+def test_key_save_rejects_an_empty_api_key_with_guidance() -> None:
+    """Review H4 — an empty key must not be persisted silently."""
+    service = FakeSetupService()
+    client = _build_client(service=service)
+    response = client.post(
+        "/setup/key",
+        data={"provider": "anthropic", "api_key": "", "endpoint": ""},
+        follow_redirects=False,
+    )
+    assert response.status_code == 200
+    assert "The API key field is empty" in response.text
+    assert "fix:" in response.text
+    assert service.saved_providers == []
+
+
+def test_key_save_rejects_a_missing_provider_with_guidance() -> None:
+    """Review H4 — a crafted POST without the hidden provider field must
+    not write ``{"provider": ""}`` to the config."""
+    service = FakeSetupService()
+    client = _build_client(service=service)
+    response = client.post(
+        "/setup/key",
+        data={"api_key": "fake-key-for-tests"},  # pragma: allowlist secret
+        follow_redirects=False,
+    )
+    assert response.status_code == 200
+    assert "No provider is selected" in response.text
+    assert "fix:" in response.text
     assert service.saved_providers == []
 
 
@@ -348,6 +400,28 @@ def test_folder_save_on_read_only_config_renders_rescue_and_skips_indexing() -> 
     assert "next:" in response.text
     # The typed path survives the re-render so the operator can retry.
     assert 'value="~/Documents"' in response.text
+    assert service.start_index_calls == 0
+
+
+def test_folder_save_validation_reject_renders_banner_and_skips_indexing() -> None:
+    """Review H4 — ``save_source``'s documented ValueError (relative or
+    missing path; reachable because the field is editable after the
+    scan) renders the F21 banner instead of a raw 500, and indexing
+    must not start."""
+    message = (
+        "Folder not found or not readable: /data/typo."
+        " fix: create the folder (or fix the spelling), then scan it again."
+        " next: the scan step confirms the folder before it is saved."
+    )
+    service = FakeSetupService(save_source_raises=ValueError(message))
+    client = _build_client(service=service)
+    response = client.post("/setup/folder", data={"folder_path": "/data/typo"}, follow_redirects=False)
+    assert response.status_code == 200
+    assert "Folder not found or not readable: /data/typo" in response.text
+    assert "fix:" in response.text
+    assert "next:" in response.text
+    # The typed path survives the re-render so the operator can retry.
+    assert 'value="/data/typo"' in response.text
     assert service.start_index_calls == 0
 
 
@@ -436,6 +510,21 @@ def test_indexing_screen_polls_the_progress_endpoint() -> None:
     assert "every 1s" in response.text
 
 
+def test_indexing_an_empty_folder_explains_instead_of_spinning() -> None:
+    """Review M1 — a run over a folder with nothing readable completes
+    with the honest 0-documents copy; the screen must not auto-advance
+    to the tour, and must not spin forever."""
+    service = FakeSetupService(chunks_total=0)
+    client = _build_client(service=service)
+    client.post("/setup/folder", data={"folder_path": "/data/empty"}, follow_redirects=False)
+    response = client.get("/setup/indexing/progress")
+    assert response.status_code == 200
+    assert "0 documents indexed" in response.text
+    assert "fix:" in response.text
+    assert "HX-Redirect" not in response.headers
+    assert "Indexing in progress" not in response.text
+
+
 # ---------------------------------------------------------------------------
 # Capability tour (#490)
 # ---------------------------------------------------------------------------
@@ -476,6 +565,17 @@ def test_search_returns_result_cards() -> None:
     assert "92% match" in response.text
     assert "notes/kickoff.md" in response.text
     assert service.search_queries == ["project kickoff"]
+
+
+def test_search_with_no_hits_renders_an_honest_empty_state() -> None:
+    """Review L7 — zero hits get guidance, not a bare "0 results" count."""
+    service = FakeSetupService(search_hits=())
+    client = _build_client(service=service)
+    response = client.post("/setup/search", data={"query": "nothing matches this"})
+    assert response.status_code == 200
+    assert "No matches for" in response.text
+    assert "Try different words" in response.text
+    assert "0 results" not in response.text
 
 
 def test_tour_prep_renders_summary_and_sources() -> None:
@@ -579,10 +679,36 @@ def test_connect_agent_screen_shows_mcp_url_and_snippets() -> None:
     client = _build_client(service=service)
     response = client.get("/setup/connect-agent")
     assert response.status_code == 200
-    assert "http://127.0.0.1:8765/mcp" in response.text
+    # Review L1 — the displayed URL re-anchors on the live request
+    # origin (the wizard and the MCP transport share one server), so
+    # the endpoint default's host:port never leaks onto the page.
+    assert "http://testserver/mcp" in response.text
+    assert "127.0.0.1:8765" not in response.text
     assert "Claude Code" in response.text
     assert "mcpServers" in response.text
     assert "Verify connection" in response.text
+
+
+def test_connect_agent_screen_shows_the_port_the_browser_reached() -> None:
+    """Review L1 — a pip install whose port auto-shifted: the page must
+    advertise the live origin's port, not KAIRIX_MCP_ENDPOINT's default."""
+    service = FakeSetupService(mcp_url="http://localhost:8080/mcp")
+    client = _build_client(service=service, base_url="http://testserver:8123")
+    response = client.get("/setup/connect-agent")
+    assert response.status_code == 200
+    assert "http://testserver:8123/mcp" in response.text
+    assert "localhost:8080" not in response.text
+    # The copy-paste snippets carry the rebased URL too.
+    assert "claude mcp add --transport http kairix http://testserver:8123/mcp" in response.text
+
+
+def test_connect_agent_screen_falls_back_to_the_service_url_without_a_host() -> None:
+    """A service URL with no host part (nothing to swap) renders verbatim."""
+    service = FakeSetupService(mcp_url="run kairix mcp serve to get a URL")
+    client = _build_client(service=service)
+    response = client.get("/setup/connect-agent")
+    assert response.status_code == 200
+    assert "run kairix mcp serve to get a URL" in response.text
 
 
 def test_connect_agent_screen_explains_which_url_works_where() -> None:
@@ -603,11 +729,11 @@ def test_connect_agent_screen_explains_which_url_works_where() -> None:
 
 def test_connect_agent_screen_offers_the_claude_mcp_add_one_liner() -> None:
     """#487 — the one-command connect snippet carries the screen's real
-    resolved URL."""
+    resolved URL (origin-rebased per review L1)."""
     service = FakeSetupService(mcp_url="http://127.0.0.1:8765/mcp")
     client = _build_client(service=service)
     response = client.get("/setup/connect-agent")
-    assert "claude mcp add --transport http kairix http://127.0.0.1:8765/mcp" in response.text
+    assert "claude mcp add --transport http kairix http://testserver/mcp" in response.text
 
 
 def test_connect_agent_verify_reports_tool_count() -> None:
