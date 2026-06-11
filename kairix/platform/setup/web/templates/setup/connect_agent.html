@@ -7,6 +7,21 @@
   <p>kairix speaks MCP — any agent that supports MCP over HTTP can search your knowledge. The server is running at:</p>
 </hgroup>
 <p><code class="kx-mcp-url">{{ info.mcp_url }}</code></p>
+<div class="kx-transport-matrix">
+  <p><strong>Which URL works where</strong></p>
+  <ul class="kx-small">
+    <li><strong>Claude Code and other local CLI agents</strong> — <code>{{ info.mcp_url }}</code>
+      works as-is, including through an SSH tunnel to this machine.</li>
+    <li><strong>claude.ai and Claude Desktop connectors</strong> — these need an
+      <code>https://</code> address. Put kairix behind a reverse proxy (caddy, nginx, or
+      cloudflared) — see
+      <a href="https://github.com/three-cubes/kairix/blob/main/docs/operations/OPERATIONS.md#deploying-behind-a-reverse-proxy-caddy--nginx--cloudflared"
+         target="_blank" rel="noopener">Deploying behind a reverse proxy</a>.</li>
+    <li><strong>Agents on this same machine</strong> — plain localhost http is fine.</li>
+  </ul>
+</div>
+<p class="kx-small">Using Claude Code? One command connects it:</p>
+<pre><code>claude mcp add --transport http kairix {{ info.mcp_url }}</code></pre>
 {% for snippet in info.snippets %}
 <details class="kx-connect-snippet" {% if loop.first %}open{% endif %}>
   <summary><strong>{{ snippet.client }}</strong></summary>

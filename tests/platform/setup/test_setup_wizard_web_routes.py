@@ -20,7 +20,7 @@ starlette = pytest.importorskip("starlette")
 from starlette.testclient import TestClient  # noqa: E402
 
 from kairix.agents.mcp.transport import build_mcp_app  # noqa: E402
-from kairix.platform.setup.service import IndexStatus  # noqa: E402
+from kairix.platform.setup.service import IndexStatus, SetupService  # noqa: E402
 from tests.fakes import (  # noqa: E402
     FakeMcpTransportServer,
     FakeSecretsLoader,
@@ -43,7 +43,7 @@ _TOKEN_HEADER = "X-Kairix-Operator-Token"
 
 def _build_client(
     *,
-    service: FakeSetupService | None = None,
+    service: SetupService | None = None,
     secrets: FakeSecretsLoader | None = None,
     flag_on: bool = True,
     client_addr: tuple[str, int] = _LOOPBACK,
@@ -134,6 +134,27 @@ def test_key_screen_names_the_chosen_provider() -> None:
     assert "Validate key" in response.text
 
 
+def test_key_screen_offers_deployment_field_for_azure_providers() -> None:
+    """#484 — Azure routes requests by deployment name, so azure-shaped
+    providers get an optional deployment input with grade-8 help copy."""
+    client = _build_client()
+    for provider in ("azure_foundry", "azure_legacy"):
+        response = client.get("/setup/key", params={"provider": provider})
+        assert response.status_code == 200
+        assert "Deployment name" in response.text
+        assert 'name="deployment"' in response.text
+        assert "Azure gives each model you deploy its own name" in response.text
+
+
+def test_key_screen_hides_deployment_field_for_non_azure_providers() -> None:
+    client = _build_client()
+    for provider in ("anthropic", "openai", "ollama"):
+        response = client.get("/setup/key", params={"provider": provider})
+        assert response.status_code == 200
+        assert "Deployment name" not in response.text
+        assert 'name="deployment"' not in response.text
+
+
 def test_static_assets_are_served_from_the_package() -> None:
     client = _build_client()
     css = client.get("/setup/static/kairix.css")
@@ -160,8 +181,8 @@ def test_key_validation_success_lists_models() -> None:
     assert "model-alpha" in response.text
     assert "model-beta" in response.text
     # The wizard passed the form through to the service unchanged
-    # (empty endpoint normalised to None).
-    assert service.validate_calls == [("anthropic", "fake-key-for-tests", None)]
+    # (empty endpoint normalised to None; no deployment field posted).
+    assert service.validate_calls == [("anthropic", "fake-key-for-tests", None, None)]
 
 
 def test_key_validation_failure_renders_guided_error() -> None:
@@ -198,6 +219,46 @@ def test_api_key_never_echoed_or_logged(caplog: pytest.LogCaptureFixture) -> Non
     assert secret_key not in caplog.text
 
 
+def test_key_validate_passes_the_deployment_name_through() -> None:
+    service = FakeSetupService()
+    client = _build_client(service=service)
+    response = client.post(
+        "/setup/key/validate",
+        data={
+            "provider": "azure_foundry",
+            "api_key": "fake-key-for-tests",  # pragma: allowlist secret
+            "endpoint": "https://res.services.ai.azure.com",
+            "deployment": "my-embed-deploy",
+        },
+    )
+    assert response.status_code == 200
+    assert service.validate_calls == [
+        ("azure_foundry", "fake-key-for-tests", "https://res.services.ai.azure.com", "my-embed-deploy")
+    ]
+
+
+def test_deployment_not_found_renders_key_works_guidance() -> None:
+    """#484 — DeploymentNotFound must NOT show the generic key-blame block;
+    the key authenticated, only the deployment name is wrong."""
+    service = FakeSetupService(validate_deployment_missing=True)
+    client = _build_client(service=service)
+    response = client.post(
+        "/setup/key/validate",
+        data={
+            "provider": "azure_foundry",
+            "api_key": "fake-key-for-tests",  # pragma: allowlist secret
+            "endpoint": "https://res.services.ai.azure.com",
+            "deployment": "wrong-name",
+        },
+    )
+    assert response.status_code == 200
+    assert "Your key works" in response.text
+    assert "no deployment named" in response.text
+    assert "deployment field" in response.text
+    # The generic key-blame guidance stays out of this case.
+    assert "copied the key completely" not in response.text
+
+
 def test_key_save_persists_provider_and_advances_to_folder() -> None:
     service = FakeSetupService()
     client = _build_client(service=service)
@@ -208,7 +269,26 @@ def test_key_save_persists_provider_and_advances_to_folder() -> None:
     )
     assert response.status_code == 303
     assert response.headers["location"] == "/setup/folder"
-    assert service.saved_providers == [("anthropic", "fake-key-for-tests", None, "model-alpha")]
+    assert service.saved_providers == [("anthropic", "fake-key-for-tests", None, "model-alpha", None)]
+
+
+def test_key_save_on_read_only_config_renders_overlay_rescue_banner() -> None:
+    """#485 — a read-only config mount must NOT surface as a raw 500; the
+    banner names the failing path and the overlay rescue, F21-shaped."""
+    service = FakeSetupService(
+        save_provider_raises=OSError(30, "Read-only file system", "/etc/kairix/kairix.config.yaml"),
+    )
+    client = _build_client(service=service)
+    response = client.post("/setup/key", data=_SAVE_KEY_PAYLOAD, follow_redirects=False)
+    assert response.status_code == 200
+    assert "Could not write the config file at /etc/kairix/kairix.config.yaml" in response.text
+    assert "read-only" in response.text
+    assert "KAIRIX_CONFIG_OVERLAY_PATH" in response.text
+    assert "/var/lib/kairix/kairix.config.local.yaml" in response.text
+    assert "fix:" in response.text
+    assert "next:" in response.text
+    # The operator stays on the key screen — nothing was saved.
+    assert service.saved_providers == []
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +330,63 @@ def test_folder_save_records_source_and_starts_indexing() -> None:
     assert response.headers["location"] == "/setup/indexing"
     assert service.saved_sources == ["~/Documents"]
     assert service.start_index_calls == 1
+
+
+def test_folder_save_on_read_only_config_renders_rescue_and_skips_indexing() -> None:
+    """#485 — the folder save mirrors the key save: F21 banner, no raw
+    500, and indexing must not start on a failed config write."""
+    service = FakeSetupService(
+        save_source_raises=OSError(30, "Read-only file system", "/etc/kairix/kairix.config.yaml"),
+    )
+    client = _build_client(service=service)
+    response = client.post("/setup/folder", data={"folder_path": "~/Documents"}, follow_redirects=False)
+    assert response.status_code == 200
+    assert "Could not write the config file at /etc/kairix/kairix.config.yaml" in response.text
+    assert "KAIRIX_CONFIG_OVERLAY_PATH" in response.text
+    assert "fix:" in response.text
+    assert "next:" in response.text
+    # The typed path survives the re-render so the operator can retry.
+    assert 'value="~/Documents"' in response.text
+    assert service.start_index_calls == 0
+
+
+def test_folder_screen_prefills_the_mounted_root_in_container_mode() -> None:
+    """#486 — inside a container the folder field starts at the mounted
+    document root with Docker-aware helper copy."""
+    service = FakeSetupService(in_container=True, suggested_folder="/data/documents")
+    client = _build_client(service=service)
+    response = client.get("/setup/folder")
+    assert response.status_code == 200
+    assert 'value="/data/documents"' in response.text
+    assert "Running in Docker?" in response.text
+    assert "This is the folder you mounted" in response.text
+
+
+def test_folder_screen_stays_blank_outside_a_container() -> None:
+    service = FakeSetupService(in_container=False)
+    client = _build_client(service=service)
+    response = client.get("/setup/folder")
+    assert response.status_code == 200
+    assert 'value=""' in response.text
+    assert "Running in Docker?" not in response.text
+
+
+def test_folder_scan_rejects_relative_paths_naming_the_resolution_base() -> None:
+    """#486 — the REAL backend behind the real routes: a relative path is
+    rejected with copy that names the server's working folder instead of
+    silently joining it."""
+    from pathlib import Path
+
+    from kairix.platform.setup.backends import SetupServiceDeps
+    from kairix.platform.setup.service import build_setup_service
+
+    service = build_setup_service(deps=SetupServiceDeps(environ={}))
+    client = _build_client(service=service)
+    response = client.post("/setup/folder/scan", data={"folder_path": "notes/projects"})
+    assert response.status_code == 200
+    assert "relative path" in response.text
+    assert str(Path.cwd()) in response.text
+    assert "full path" in response.text
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +473,31 @@ def test_connect_agent_screen_shows_mcp_url_and_snippets() -> None:
     assert "Claude Code" in response.text
     assert "mcpServers" in response.text
     assert "Verify connection" in response.text
+
+
+def test_connect_agent_screen_explains_which_url_works_where() -> None:
+    """#487 — the transport matrix: local CLI agents take plain http,
+    claude.ai / Claude Desktop need https behind a reverse proxy."""
+    service = FakeSetupService(mcp_url="http://127.0.0.1:8765/mcp")
+    client = _build_client(service=service)
+    response = client.get("/setup/connect-agent")
+    assert response.status_code == 200
+    assert "Which URL works where" in response.text
+    assert "SSH tunnel" in response.text
+    assert "claude.ai" in response.text
+    assert "https://" in response.text
+    assert "reverse proxy" in response.text
+    assert "docs/operations/OPERATIONS.md#deploying-behind-a-reverse-proxy" in response.text
+    assert "localhost http is fine" in response.text
+
+
+def test_connect_agent_screen_offers_the_claude_mcp_add_one_liner() -> None:
+    """#487 — the one-command connect snippet carries the screen's real
+    resolved URL."""
+    service = FakeSetupService(mcp_url="http://127.0.0.1:8765/mcp")
+    client = _build_client(service=service)
+    response = client.get("/setup/connect-agent")
+    assert "claude mcp add --transport http kairix http://127.0.0.1:8765/mcp" in response.text
 
 
 def test_connect_agent_verify_reports_tool_count() -> None:

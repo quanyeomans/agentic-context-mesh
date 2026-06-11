@@ -52,6 +52,15 @@ services:
       KAIRIX_DOCUMENT_ROOT: /data/documents
       # Reach the bundled neo4j service by its compose DNS name.
       KAIRIX_NEO4J_URI: bolt://neo4j:7687
+      # Setup-wizard + CLI config writes land on the data volume — your
+      # kairix.config.yaml mount below stays read-only and pristine.
+      KAIRIX_CONFIG_OVERLAY_PATH: /var/lib/kairix/kairix.config.local.yaml
+      # Fresh-install corpora are small, so in-process vec-index writes are
+      # safe and give the wizard's indexing run vector search out of the box.
+      # At large scale (>= ~1M vectors) remove this and schedule
+      # `kairix index-rebuild` instead (see #335 and the
+      # worker_writes_vec_index docstring in kairix/paths.py).
+      KAIRIX_WORKER_WRITES_VEC_INDEX: "1"
       # KAIRIX_SECRETS_FILE is left at the image default — secrets arrive
       # through env_file: .env on this path.
     volumes:

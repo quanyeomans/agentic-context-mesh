@@ -37,11 +37,18 @@ class SetupStatus:
 
 @dataclass(frozen=True)
 class ProviderValidation:
-    """Outcome of validating an operator-supplied provider credential."""
+    """Outcome of validating an operator-supplied provider credential.
+
+    ``deployment_missing`` distinguishes Azure's "the key authenticated
+    but no deployment carries the probed name" failure (#484) from a
+    genuinely bad key — the wizard renders deployment guidance instead
+    of key-blame for that case.
+    """
 
     ok: bool
     models: tuple[str, ...]
     error: str | None
+    deployment_missing: bool = False
 
 
 @dataclass(frozen=True)
@@ -60,6 +67,21 @@ class FolderScan:
     words_estimate: int
     cost_estimate_usd: float
     error: str | None
+
+
+@dataclass(frozen=True)
+class SourceHint:
+    """Container-aware pre-fill for the wizard's folder step (#486).
+
+    ``in_container`` is True when kairix runs inside a container, where
+    only mounted folders are visible; ``suggested_path`` carries the
+    configured document root (stock compose: ``/data/documents``) so the
+    operator starts from the folder they actually mounted. On bare-metal
+    installs both read falsy and the folder field starts blank.
+    """
+
+    in_container: bool
+    suggested_path: str
 
 
 @dataclass(frozen=True)
@@ -126,14 +148,40 @@ class SetupService(Protocol):
     def status(self) -> SetupStatus:
         """Return which wizard steps are complete."""
 
-    def validate_provider(self, provider: str, api_key: str, endpoint: str | None) -> ProviderValidation:
-        """Check a credential against the provider; list available models."""
+    def validate_provider(
+        self,
+        provider: str,
+        api_key: str,
+        endpoint: str | None,
+        deployment: str | None = None,
+    ) -> ProviderValidation:
+        """Check a credential against the provider; list available models.
 
-    def save_provider(self, provider: str, api_key: str, endpoint: str | None, model: str | None) -> None:
-        """Persist the validated provider selection + credential."""
+        ``deployment`` (#484) is the operator's Azure deployment name —
+        when provided it is probed instead of the per-plugin default
+        model, because Azure routes requests by deployment name.
+        """
+
+    def save_provider(
+        self,
+        provider: str,
+        api_key: str,
+        endpoint: str | None,
+        model: str | None,
+        deployment: str | None = None,
+    ) -> None:
+        """Persist the validated provider selection + credential.
+
+        ``deployment`` (#484) backstops ``model``: when no model was
+        chosen, the Azure deployment name is persisted as the embed
+        model so indexing talks to the deployment that validated.
+        """
 
     def scan_folder(self, path: str) -> FolderScan:
         """Scan a candidate folder and estimate indexing size + cost."""
+
+    def source_hint(self) -> SourceHint:
+        """Container-aware pre-fill for the folder step (#486)."""
 
     def save_source(self, path: str) -> None:
         """Persist the chosen folder as the first source."""
@@ -188,5 +236,6 @@ __all__ = [
     "SearchPreviewHit",
     "SetupService",
     "SetupStatus",
+    "SourceHint",
     "build_setup_service",
 ]

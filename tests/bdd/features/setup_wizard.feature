@@ -31,3 +31,15 @@ Feature: Web setup wizard — guided first-run onboarding in the browser
     Given the setup wizard is enabled with a wizard backend that rejects provider keys
     When the operator validates their provider key
     Then the key is rejected with guidance to fix and retry
+
+  Scenario: An Azure operator validates their key with a deployment name
+    Given the setup wizard is enabled with a ready wizard backend
+    When the operator opens the key step for an Azure provider
+    Then the key step offers a deployment name field
+    When the operator validates their provider key with the deployment name "embed-deploy"
+    Then the key is accepted and the available models are shown
+
+  Scenario: A read-only config file does not strand the operator
+    Given the setup wizard is enabled with a wizard backend whose config file cannot be written
+    When the operator saves the provider key
+    Then the wizard explains the config file is read-only and how to make saves stick

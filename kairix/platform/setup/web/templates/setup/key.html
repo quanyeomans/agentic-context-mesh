@@ -5,6 +5,11 @@
   <h2>Paste your {{ provider }} key</h2>
   <p>Your key is stored locally on this machine and never leaves it.</p>
 </hgroup>
+{% if save_error %}
+<div class="kx-validation-error">
+  <p class="kx-error-msg">{{ save_error }}</p>
+</div>
+{% endif %}
 <form id="key-form" method="post" action="/setup/key">
   <input type="hidden" name="provider" value="{{ provider }}">
   <label>
@@ -15,6 +20,14 @@
     Endpoint URL <span class="kx-muted kx-small">(only if your provider needs one — Azure, Ollama, proxy)</span>
     <input type="text" name="endpoint" placeholder="https://...">
   </label>
+  {% if azure_provider %}
+  <label>
+    Deployment name <span class="kx-muted kx-small">(optional)</span>
+    <input type="text" name="deployment" placeholder="e.g. text-embedding-3-small">
+    <small class="kx-muted">Azure gives each model you deploy its own name — enter the embedding
+      deployment's name. You can find it in the Azure portal under your resource's Deployments page.</small>
+  </label>
+  {% endif %}
   <div id="validation-result"></div>
   <span id="validating-indicator" class="kx-indicator kx-muted" aria-busy="true" style="display:none;">Validating…</span>
   <div class="kx-setup-actions">

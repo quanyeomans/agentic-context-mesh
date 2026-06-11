@@ -70,6 +70,16 @@ def _wizard_enabled_rejecting(_wizard_state: dict[str, Any]) -> None:
     _compose_client(_wizard_state, flag_on=True, service=FakeSetupService(validate_ok=False))
 
 
+@given("the setup wizard is enabled with a wizard backend whose config file cannot be written")
+def _wizard_enabled_read_only_config(_wizard_state: dict[str, Any]) -> None:
+    read_only = OSError(30, "Read-only file system", "/etc/kairix/kairix.config.yaml")
+    _compose_client(
+        _wizard_state,
+        flag_on=True,
+        service=FakeSetupService(save_provider_raises=read_only, save_source_raises=read_only),
+    )
+
+
 @given("the setup wizard flag is ON")
 def _wizard_flag_on(_wizard_state: dict[str, Any]) -> None:
     _compose_client(_wizard_state, flag_on=True, service=FakeSetupService())
@@ -118,6 +128,44 @@ def _validate_key(_wizard_state: dict[str, Any]) -> None:
         "/setup/key/validate",
         data={"provider": "anthropic", "api_key": "fake-key-for-tests", "endpoint": ""},  # pragma: allowlist secret
     )
+
+
+@when("the operator opens the key step for an Azure provider")
+def _open_azure_key_step(_wizard_state: dict[str, Any]) -> None:
+    _wizard_state["response"] = _wizard_state["client"].get("/setup/key", params={"provider": "azure_foundry"})
+
+
+@then("the key step offers a deployment name field")
+def _key_step_offers_deployment_field(_wizard_state: dict[str, Any]) -> None:
+    response = _wizard_state["response"]
+    assert response.status_code == 200
+    assert "Deployment name" in response.text
+    assert "Azure gives each model you deploy its own name" in response.text
+
+
+@when(parsers.parse('the operator validates their provider key with the deployment name "{name}"'))
+def _validate_key_with_deployment(_wizard_state: dict[str, Any], name: str) -> None:
+    _wizard_state["response"] = _wizard_state["client"].post(
+        "/setup/key/validate",
+        data={
+            "provider": "azure_foundry",
+            "api_key": "fake-key-for-tests",  # pragma: allowlist secret
+            "endpoint": "https://res.services.ai.azure.com",
+            "deployment": name,
+        },
+    )
+    # The deployment name reached the service alongside the credential.
+    assert _wizard_state["service"].validate_calls[-1][3] == name
+
+
+@then("the wizard explains the config file is read-only and how to make saves stick")
+def _read_only_config_rescue(_wizard_state: dict[str, Any]) -> None:
+    response = _wizard_state["response"]
+    assert response.status_code == 200
+    assert "read-only" in response.text
+    assert "KAIRIX_CONFIG_OVERLAY_PATH" in response.text
+    assert "fix:" in response.text
+    assert "next:" in response.text
 
 
 @then("the key is accepted and the available models are shown")

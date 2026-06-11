@@ -116,6 +116,13 @@ _AGENT_KNOWLEDGE_DIR = "04-Agent-Knowledge"
 # lands).
 _KAIRIX_CONFIG_PATH_ENV = "KAIRIX_CONFIG_PATH"
 
+# Env-var name for the operator's document root + the stock container
+# mount target it points at in the standard compose. Centralised (F17)
+# — three resolvers each need both: the cached platform resolution, the
+# explicit override accessor, and the setup wizard's container pre-fill.
+_KAIRIX_DOCUMENT_ROOT_ENV = "KAIRIX_DOCUMENT_ROOT"
+_CONTAINER_DOCUMENTS_MOUNT = "/data/documents"
+
 
 def is_docker_runtime_check() -> bool:
     """Detect if running inside a Docker container."""
@@ -139,7 +146,7 @@ def default_document_root() -> Path:
     User (all platforms): ~/Documents (most common document location)
     """
     if is_docker_runtime_check():
-        return Path("/data/documents")
+        return Path(_CONTAINER_DOCUMENTS_MOUNT)
     if is_service_install():
         return Path("/var/lib/kairix/documents")
     return Path.home() / "Documents"
@@ -257,7 +264,7 @@ def _resolve_cached() -> KairixPaths:
     config_paths = load_paths_from_config()
 
     document_root = Path(
-        os.environ.get("KAIRIX_DOCUMENT_ROOT") or config_paths.get("document_root") or str(default_document_root())
+        os.environ.get(_KAIRIX_DOCUMENT_ROOT_ENV) or config_paths.get("document_root") or str(default_document_root())
     ).expanduser()
 
     db_path = Path(
@@ -343,7 +350,7 @@ def document_root(mode: Mode | None = None) -> Path:
         if mode == Mode.system:
             return Path("/var/lib/kairix/documents")
         if mode == Mode.container:
-            return Path("/data/documents")
+            return Path(_CONTAINER_DOCUMENTS_MOUNT)
         # Mode.user — sit under the user-mode data dir so the document
         # tree co-locates with the SQLite index + vector index.
         return data_dir(Mode.user) / "documents"
@@ -820,6 +827,45 @@ def config_path_override() -> str | None:
     return value if value else None
 
 
+def config_overlay_path_override(*, environ: Mapping[str, str] | None = None) -> str | None:
+    """Operator overlay config path from ``KAIRIX_CONFIG_OVERLAY_PATH``.
+
+    Returns ``None`` when unset. This is the same env var the layered
+    config loader (``kairix.core.search.config_loader.resolve_layered_paths``)
+    consumes on the READ side; surfacing it here gives the setup wizard's
+    config WRITER one F4-clean place to learn the overlay target — when
+    set, wizard saves land on the overlay file (typically on the writable
+    data volume) instead of the read-only-mounted base config.
+
+    ``environ`` mirrors :func:`mcp_endpoint`'s F2-clean test seam —
+    production callers leave it ``None`` and the live ``os.environ`` is
+    read at the paths boundary.
+    """
+    env = environ if environ is not None else os.environ
+    value = env.get("KAIRIX_CONFIG_OVERLAY_PATH")
+    return value if value else None
+
+
+def container_source_prefill(environ: Mapping[str, str] | None = None) -> str | None:
+    """Folder path the setup wizard pre-fills when running in a container.
+
+    Inside a container (``KAIRIX_CONTAINER`` set — the Dockerfile-controlled
+    signal :meth:`Mode.detect` also keys on), the operator's documents are
+    whatever folder the compose file mounted, so the wizard pre-fills the
+    configured document root: the ``KAIRIX_DOCUMENT_ROOT`` value, or the
+    stock compose mount target ``/data/documents`` when unset.
+
+    Returns ``None`` on non-container installs so the wizard leaves the
+    field blank. ``environ`` is the F2-clean test seam; production
+    callers leave it ``None`` and the live ``os.environ`` is read at
+    the paths boundary (F4).
+    """
+    env = environ if environ is not None else os.environ
+    if not env.get("KAIRIX_CONTAINER"):
+        return None
+    return env.get(_KAIRIX_DOCUMENT_ROOT_ENV) or _CONTAINER_DOCUMENTS_MOUNT
+
+
 def boards_dir_override() -> Path | None:
     """Operator override for the Kanban boards directory.
 
@@ -1118,7 +1164,7 @@ def document_root_override() -> str | None:
     using a default. The cached :func:`document_root` keeps its own
     independent read (with platform defaults) for non-CLI callers.
     """
-    value = os.environ.get("KAIRIX_DOCUMENT_ROOT")
+    value = os.environ.get(_KAIRIX_DOCUMENT_ROOT_ENV)
     return value if value else None
 
 

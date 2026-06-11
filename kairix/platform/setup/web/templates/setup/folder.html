@@ -5,11 +5,21 @@
   <h2>Choose your first source</h2>
   <p>Point kairix at a local folder to get started. You can add more sources after setup.</p>
 </hgroup>
+{% if save_error %}
+<div class="kx-validation-error">
+  <p class="kx-error-msg">{{ save_error }}</p>
+</div>
+{% endif %}
 <form id="folder-form" method="post" action="/setup/folder">
   <label>
     Folder path
-    <input type="text" name="folder_path" id="folder-input" placeholder="~/Documents" required>
+    <input type="text" name="folder_path" id="folder-input" placeholder="~/Documents" required
+           value="{{ folder_path|default('') or (hint.suggested_path if hint is defined else '') }}">
   </label>
+  {% if hint is defined and hint.in_container %}
+  <p class="kx-muted kx-small">Running in Docker? This is the folder you mounted —
+    with the standard compose that's /data/documents.</p>
+  {% endif %}
   <button type="button" class="kx-btn-outline"
           hx-post="/setup/folder/scan"
           hx-target="#scan-result"

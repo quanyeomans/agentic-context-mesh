@@ -52,6 +52,7 @@ from kairix.platform.setup.service import (
     SearchPreview,
     SearchPreviewHit,
     SetupStatus,
+    SourceHint,
 )
 from kairix.platform.setup.wizard import provider_plugin_name, write_config_yaml
 
@@ -122,6 +123,15 @@ _REDACTED = "[redacted]"
 
 #: Text embedded in the one-call validation probe.
 _VALIDATION_PROBE_TEXT = "kairix setup validation"
+
+#: Azure's error code when the resource has no deployment with the
+#: requested name. The openai-compat SDK surfaces it inside the error
+#: body, so substring detection on the provider's message is reliable.
+_AZURE_DEPLOYMENT_NOT_FOUND_CODE = "DeploymentNotFound"
+
+#: Shared reason prefix for a folder the wizard cannot use (F17 — three
+#: rejection sites: container scan, bare-metal scan, save_source).
+_FOLDER_NOT_FOUND_PREFIX = "Folder not found or not readable: "
 
 #: Shared F21 tail for validation failures (F17 — one definition site).
 _VALIDATION_FIX = (
@@ -231,6 +241,31 @@ def update_config_file(target: Path, updates: Mapping[str, Any]) -> Path:
         else:
             existing[key] = dict(value) if isinstance(value, Mapping) else value
     return write_config_yaml(target, "setup-wizard", existing)
+
+
+def write_config_updates(
+    updates: Mapping[str, Any],
+    *,
+    overlay_path: str | None,
+    config_path: str | None,
+) -> Path:
+    """Merge ``updates`` into the right config file — overlay-aware (#485).
+
+    When an overlay path is configured (``KAIRIX_CONFIG_OVERLAY_PATH``),
+    wizard saves land on the OVERLAY file — the operator's base config
+    (read-only-mounted in the stock compose) stays pristine, and the
+    layered loader (:func:`kairix.core.search.config_loader.load_config`)
+    deep-merges the overlay on top of the base at read time. Parent
+    directories are created so a first save on a fresh data volume works.
+
+    Without an overlay, the legacy single-file behaviour applies:
+    ``config_path`` (``KAIRIX_CONFIG_PATH``) or ``./kairix.config.yaml``.
+    """
+    if overlay_path:
+        target = Path(overlay_path).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return update_config_file(target, updates)
+    return update_config_file(Path(config_path or "kairix.config.yaml"), updates)
 
 
 def configured_document_root(
@@ -358,13 +393,18 @@ def _default_configured_document_root() -> Path | None:  # pragma: no cover  # l
     )
 
 
-# pragma rationale: lazy-import DI-default delegation — the write target
-# resolution reads KAIRIX_CONFIG_PATH through kairix.paths (F4).
+# pragma rationale: lazy-import DI-default delegation — the write-target
+# resolution reads KAIRIX_CONFIG_OVERLAY_PATH / KAIRIX_CONFIG_PATH
+# through kairix.paths (F4); the testable logic lives in
+# write_config_updates.
 def _default_write_config(updates: Mapping[str, Any]) -> Path:  # pragma: no cover  # lazy-import DI-default delegation
-    from kairix.paths import config_path_override
+    from kairix.paths import config_overlay_path_override, config_path_override
 
-    target = Path(config_path_override() or "kairix.config.yaml")
-    return update_config_file(target, updates)
+    return write_config_updates(
+        updates,
+        overlay_path=config_overlay_path_override(),
+        config_path=config_path_override(),
+    )
 
 
 def _default_search_pipeline(paths: Any) -> Any:  # pragma: no cover  # lazy-import DI-default delegation
@@ -500,7 +540,13 @@ class KairixSetupService:
             index_done=embedded > 0,
         )
 
-    def validate_provider(self, provider: str, api_key: str, endpoint: str | None) -> ProviderValidation:
+    def validate_provider(
+        self,
+        provider: str,
+        api_key: str,
+        endpoint: str | None,
+        deployment: str | None = None,
+    ) -> ProviderValidation:
         """One authenticated round-trip against the SUPPLIED credentials.
 
         Nothing is persisted and the process environment is never touched
@@ -508,6 +554,12 @@ class KairixSetupService:
         Failures carry the provider's error verbatim (key scrubbed, F15)
         plus an F21 affordance. The Provider Protocol exposes no model
         listing, so success returns the probe model as the models tuple.
+
+        ``deployment`` (#484): Azure routes requests by deployment name,
+        so when the operator supplies one it replaces the per-plugin
+        probe-model default. A ``DeploymentNotFound`` failure is
+        reported as "your key works, this deployment name doesn't" —
+        not as a bad key.
         """
         plugin = _normalise_plugin_name(provider, endpoint)
         resolved_endpoint = (endpoint or "").strip() or DEFAULT_PLUGIN_ENDPOINTS.get(plugin, "")
@@ -522,28 +574,45 @@ class KairixSetupService:
                     " next: validate again."
                 ),
             )
-        model = VALIDATION_PROBE_MODELS.get(plugin, DEFAULT_VALIDATION_PROBE_MODEL)
+        model = (deployment or "").strip() or VALIDATION_PROBE_MODELS.get(plugin, DEFAULT_VALIDATION_PROBE_MODEL)
         credentials = Credentials(api_key=api_key, endpoint=resolved_endpoint, model=model)
         try:
             plugin_obj = self._deps.provider_factory(plugin, credentials)
             probe_provider_roundtrip(plugin_obj)
         except Exception as exc:
             message = _scrub_secret(str(exc), api_key)
+            if _AZURE_DEPLOYMENT_NOT_FOUND_CODE in message:
+                return ProviderValidation(
+                    ok=False,
+                    models=(),
+                    error=_deployment_missing_error(model),
+                    deployment_missing=True,
+                )
             return ProviderValidation(ok=False, models=(), error=f"{message}{_VALIDATION_FIX}")
         return ProviderValidation(ok=True, models=(model,), error=None)
 
-    def save_provider(self, provider: str, api_key: str, endpoint: str | None, model: str | None) -> None:
+    def save_provider(
+        self,
+        provider: str,
+        api_key: str,
+        endpoint: str | None,
+        model: str | None,
+        deployment: str | None = None,
+    ) -> None:
         """Persist the validated selection through W1-D's canonical path.
 
         The credential lands in the operator secrets bundle via
         ``persist_llm_credentials`` (the same upsert ``kairix secrets set``
         uses) and the chosen plugin name lands in the config's
         ``provider:`` field — #474's headline defect was a wizard that
-        asked and then didn't write it.
+        asked and then didn't write it. When no model was chosen, the
+        Azure ``deployment`` name (#484) fills the embed-model slot so
+        indexing talks to the same deployment that validated.
         """
         plugin = _normalise_plugin_name(provider, endpoint)
         resolved_endpoint = (endpoint or "").strip() or DEFAULT_PLUGIN_ENDPOINTS.get(plugin, "")
-        self._deps.persist_credentials_fn(api_key, resolved_endpoint, model or "")
+        resolved_model = (model or "").strip() or (deployment or "").strip()
+        self._deps.persist_credentials_fn(api_key, resolved_endpoint, resolved_model)
         self._deps.write_config_fn({"provider": plugin})
 
     def scan_folder(self, path: str) -> FolderScan:
@@ -553,13 +622,33 @@ class KairixSetupService:
         reads at most :data:`SCAN_SAMPLE_FILES` of them to estimate words,
         and prices the extrapolated token count at
         :data:`EMBED_COST_USD_PER_1K_TOKENS`.
+
+        Relative paths are rejected with a message naming the resolution
+        base instead of silently joining the server's working directory
+        (#486); inside a container, a not-found error points at the
+        mounted document root as the candidate to try.
         """
         candidate = (path or "").strip()
         if not candidate:
             return _failed_scan("No folder path was provided.")
         folder = Path(candidate).expanduser()
+        if not folder.is_absolute():
+            return _failed_scan(
+                _relative_path_reason(candidate),
+                fix="enter the full path, starting with / (or ~ for your home folder).",
+            )
         if not folder.is_dir():
-            return _failed_scan(f"Folder not found or not readable: {folder}.")
+            mounted = self.source_hint().suggested_path
+            if mounted:
+                return _failed_scan(
+                    f"{_FOLDER_NOT_FOUND_PREFIX}{folder}.",
+                    fix=(
+                        "this kairix runs in Docker, so it only sees folders mounted"
+                        f" into the container — the standard compose mounts your documents at {mounted}."
+                    ),
+                    next_=f"try {mounted}, then scan once more.",
+                )
+            return _failed_scan(f"{_FOLDER_NOT_FOUND_PREFIX}{folder}.")
         files, words_estimate = _scan_text_files(folder)
         cost = (words_estimate * TOKENS_PER_WORD / 1000.0) * EMBED_COST_USD_PER_1K_TOKENS
         return FolderScan(
@@ -574,14 +663,22 @@ class KairixSetupService:
         """Persist the chosen folder as ``paths.document_root`` in the config.
 
         Raises:
-            ValueError: when the folder does not exist — the wizard's scan
-                step gates the happy path, so reaching here with a bad
-                path is a hard reject, not a silent write.
+            ValueError: when the path is relative or the folder does not
+                exist — the wizard's scan step gates the happy path, so
+                reaching here with a bad path is a hard reject, not a
+                silent write against the server's working directory.
         """
-        folder = Path((path or "").strip()).expanduser()
+        candidate = (path or "").strip()
+        folder = Path(candidate).expanduser()
+        if not folder.is_absolute():
+            raise ValueError(
+                f"{_relative_path_reason(candidate)}"
+                " fix: enter the full path, starting with / (or ~ for your home folder)."
+                " next: scan the folder again, then save."
+            )
         if not folder.is_dir():
             raise ValueError(
-                f"Folder not found or not readable: {folder}."
+                f"{_FOLDER_NOT_FOUND_PREFIX}{folder}."
                 " fix: create the folder (or fix the spelling), then scan it again."
                 " next: the scan step confirms the folder before it is saved."
             )
@@ -592,6 +689,20 @@ class KairixSetupService:
         from kairix.paths import clear_cache
 
         clear_cache()
+
+    def source_hint(self) -> SourceHint:
+        """Container-aware pre-fill for the folder step (#486).
+
+        Inside a container the only folders kairix can see are the ones
+        the operator mounted, so the folder field pre-fills with the
+        configured document root (stock compose: ``/data/documents``).
+        The env read lives in :func:`kairix.paths.container_source_prefill`
+        (F4); ``deps.environ`` is the F2-clean test seam.
+        """
+        from kairix.paths import container_source_prefill
+
+        prefill = container_source_prefill(self._deps.environ)
+        return SourceHint(in_container=prefill is not None, suggested_path=prefill or "")
 
     def start_index(self) -> None:
         """Kick off the first index run in a background thread.
@@ -612,7 +723,13 @@ class KairixSetupService:
             thread.start()
 
     def _index_worker(self) -> None:
-        """Background-thread body — never lets an exception escape the thread."""
+        """Background-thread body — records every failure as an operator message.
+
+        ``SystemExit`` is recorded and then re-raised (Sonar S5754): in a
+        worker thread the re-raise is harmless — ``threading`` silently
+        swallows ``SystemExit`` from non-main threads — so the interpreter
+        keeps running and ``index_status`` reports the recorded message.
+        """
         try:
             self._deps.index_runner_fn()
         except SystemExit:
@@ -624,6 +741,7 @@ class KairixSetupService:
                     " fix: wait for it to finish, then start again."
                     " next: kairix worker status shows the active phase."
                 )
+            raise
         except Exception as exc:
             with self._index_state_lock:
                 self._index_error = f"Indexing stopped: {exc}{_INDEX_FIX}"
@@ -756,18 +874,48 @@ def _scrub_secret(text: str, secret: str) -> str:
     return text
 
 
-def _failed_scan(reason: str) -> FolderScan:
-    """A failed FolderScan with the standard F21 affordance attached."""
+#: Default F21 markers for a failed scan; specific failures (relative
+#: path, container not-found) override with sharper guidance.
+_SCAN_DEFAULT_FIX = "check the folder path exists on this machine and kairix can read it."
+_SCAN_DEFAULT_NEXT = "enter the path again, then scan once more."
+
+
+def _failed_scan(reason: str, *, fix: str = _SCAN_DEFAULT_FIX, next_: str = _SCAN_DEFAULT_NEXT) -> FolderScan:
+    """A failed FolderScan with the F21 affordance attached."""
     return FolderScan(
         ok=False,
         files=0,
         words_estimate=0,
         cost_estimate_usd=0.0,
-        error=(
-            f"{reason}"
-            " fix: check the folder path exists on this machine and kairix can read it."
-            " next: enter the path again, then scan once more."
-        ),
+        error=f"{reason} fix: {fix} next: {next_}",
+    )
+
+
+def _relative_path_reason(candidate: str) -> str:
+    """Why a relative path is rejected — NAMES the resolution base (#486).
+
+    Silently joining the server's working directory surprises operators
+    (the wizard runs server-side, often inside a container, so "here"
+    is not the browser's folder).
+    """
+    return (
+        f"That looks like a relative path: {candidate!r}. kairix would resolve it"
+        f" against the server's working folder ({Path.cwd()}), which is rarely what you meant."
+    )
+
+
+def _deployment_missing_error(probe_model: str) -> str:
+    """Azure DeploymentNotFound guidance (#484) — the key WORKED.
+
+    Azure authenticated the request and then reported that no deployment
+    carries the probed name, so key-blame guidance would send the
+    operator in the wrong direction.
+    """
+    return (
+        f"Your key works, but this Azure resource has no deployment named '{probe_model}'."
+        " fix: enter one of your deployment names in the deployment field —"
+        " they are listed in the Azure portal under your resource's Deployments page."
+        " next: validate again."
     )
 
 
@@ -879,4 +1027,5 @@ __all__ = [
     "provider_from_credentials",
     "run_first_index",
     "update_config_file",
+    "write_config_updates",
 ]

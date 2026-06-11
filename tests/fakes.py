@@ -4833,11 +4833,16 @@ class FakeSetupService:
         validate_ok: bool = True,
         models: tuple[str, ...] = ("model-alpha", "model-beta"),
         validate_error: str | None = None,
+        validate_deployment_missing: bool = False,
         scan_ok: bool = True,
         scan_files: int = 533,
         scan_words: int = 3_200_000,
         scan_cost_usd: float = 0.04,
         scan_error: str | None = None,
+        save_provider_raises: Exception | None = None,
+        save_source_raises: Exception | None = None,
+        in_container: bool = False,
+        suggested_folder: str = "",
         chunks_total: int = 100,
         chunks_per_tick: int = 50,
         index_error: str | None = None,
@@ -4854,6 +4859,11 @@ class FakeSetupService:
         self._validate_ok = validate_ok
         self._models = models
         self._validate_error = validate_error
+        self._validate_deployment_missing = validate_deployment_missing
+        self._save_provider_raises = save_provider_raises
+        self._save_source_raises = save_source_raises
+        self._in_container = in_container
+        self._suggested_folder = suggested_folder
         self._scan_ok = scan_ok
         self._scan_files = scan_files
         self._scan_words = scan_words
@@ -4894,10 +4904,10 @@ class FakeSetupService:
         self._tools_count = tools_count
         self._handshake_error = handshake_error
         # Recorders + mutable wizard state.
-        self.saved_providers: list[tuple[str, str, str | None, str | None]] = []
+        self.saved_providers: list[tuple[str, str, str | None, str | None, str | None]] = []
         self.saved_sources: list[str] = []
         self.start_index_calls: int = 0
-        self.validate_calls: list[tuple[str, str, str | None]] = []
+        self.validate_calls: list[tuple[str, str, str | None, str | None]] = []
         self.search_queries: list[str] = []
         self._chunks_done = 0
         self._index_running = False
@@ -4911,17 +4921,37 @@ class FakeSetupService:
             index_done=self._chunks_done >= self._chunks_total,
         )
 
-    def validate_provider(self, provider: str, api_key: str, endpoint: str | None) -> Any:
+    def validate_provider(
+        self,
+        provider: str,
+        api_key: str,
+        endpoint: str | None,
+        deployment: str | None = None,
+    ) -> Any:
         from kairix.platform.setup.service import ProviderValidation
 
-        self.validate_calls.append((provider, api_key, endpoint))
+        self.validate_calls.append((provider, api_key, endpoint, deployment))
+        if self._validate_deployment_missing:
+            error = self._validate_error or (
+                f"Your key works, but this Azure resource has no deployment named '{deployment or 'embed-model'}'."
+            )
+            return ProviderValidation(ok=False, models=(), error=error, deployment_missing=True)
         if not self._validate_ok:
             error = self._validate_error or "Authentication failed — your key was rejected by the provider."
             return ProviderValidation(ok=False, models=(), error=error)
         return ProviderValidation(ok=True, models=self._models, error=None)
 
-    def save_provider(self, provider: str, api_key: str, endpoint: str | None, model: str | None) -> None:
-        self.saved_providers.append((provider, api_key, endpoint, model))
+    def save_provider(
+        self,
+        provider: str,
+        api_key: str,
+        endpoint: str | None,
+        model: str | None,
+        deployment: str | None = None,
+    ) -> None:
+        if self._save_provider_raises is not None:
+            raise self._save_provider_raises
+        self.saved_providers.append((provider, api_key, endpoint, model, deployment))
 
     def scan_folder(self, path: str) -> Any:
         from kairix.platform.setup.service import FolderScan
@@ -4938,7 +4968,14 @@ class FakeSetupService:
         )
 
     def save_source(self, path: str) -> None:
+        if self._save_source_raises is not None:
+            raise self._save_source_raises
         self.saved_sources.append(path)
+
+    def source_hint(self) -> Any:
+        from kairix.platform.setup.service import SourceHint
+
+        return SourceHint(in_container=self._in_container, suggested_path=self._suggested_folder)
 
     def start_index(self) -> None:
         self.start_index_calls += 1

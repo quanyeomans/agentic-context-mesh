@@ -25,7 +25,7 @@ the laptop-first install this wizard exists for — skip the token.
 from __future__ import annotations
 
 import hmac
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
 from starlette.requests import Request
@@ -83,6 +83,88 @@ _FIELD_FOLDER_PATH = "folder_path"
 _FIELD_PROVIDER = "provider"
 _FIELD_API_KEY = "api_key"  # pragma: allowlist secret — form FIELD NAME, not a credential value
 _FIELD_ENDPOINT = "endpoint"
+_FIELD_DEPLOYMENT = "deployment"
+
+# Azure-shaped provider plugin names — the key screen shows the optional
+# deployment-name field for these (#484). Azure routes requests by
+# deployment name, so the probe model must be one the operator deployed.
+_AZURE_PROVIDER_NAMES = frozenset({"azure_foundry", "azure_legacy"})
+
+
+def _config_write_error(exc: OSError) -> str:
+    """F21-shaped banner for a failed config write (#485).
+
+    The stock compose mounts the operator's ``kairix.config.yaml``
+    read-only, so a wizard save on a deployment without the overlay
+    configured raises ``OSError`` — render the rescue path instead of a
+    raw 500.
+    """
+    target = getattr(exc, "filename", None) or "its configured location"
+    return (
+        f"Could not write the config file at {target} — it may be mounted read-only."
+        " fix: the standard compose mounts kairix.config.yaml read-only; set"
+        " KAIRIX_CONFIG_OVERLAY_PATH (stock value /var/lib/kairix/kairix.config.local.yaml)"
+        " so setup writes land on the data volume."
+        " next: restart the container, then save again."
+    )
+
+
+def _key_context(provider: str) -> dict[str, Any]:
+    """Template context for the key screen — azure picks get the
+    deployment-name field (#484)."""
+    return {"step": 3, "provider": provider, "azure_provider": provider in _AZURE_PROVIDER_NAMES}
+
+
+def _handle_key_save(
+    fields: dict[str, str],
+    service: SetupService,
+    render: Callable[[str, dict[str, Any]], Response],
+) -> Response:
+    """Persist the provider pick; on a read-only config (#485), re-render
+    the key screen with the rescue banner instead of a raw 500.
+
+    Module-level (not a closure) so the builder stays under the F16
+    complexity ceiling; ``render`` is the builder's template closure.
+    """
+    provider = fields.get(_FIELD_PROVIDER, "")
+    try:
+        service.save_provider(
+            provider,
+            fields.get(_FIELD_API_KEY, ""),
+            fields.get(_FIELD_ENDPOINT) or None,
+            fields.get("model") or None,
+            deployment=fields.get(_FIELD_DEPLOYMENT) or None,
+        )
+    except OSError as exc:
+        return render(_TPL_KEY, {**_key_context(provider), "save_error": _config_write_error(exc)})
+    return RedirectResponse(_FOLDER_URL, status_code=303)
+
+
+def _handle_folder_save(
+    fields: dict[str, str],
+    service: SetupService,
+    render: Callable[[str, dict[str, Any]], Response],
+) -> Response:
+    """Persist the folder pick and start indexing; on a read-only config
+    (#485) re-render with the rescue banner — indexing must NOT start
+    on a failed save. Module-level for the same F16 reason as
+    :func:`_handle_key_save`.
+    """
+    path = fields.get(_FIELD_FOLDER_PATH, "")
+    try:
+        service.save_source(path)
+    except OSError as exc:
+        return render(
+            _TPL_FOLDER,
+            {
+                "step": 4,
+                "hint": service.source_hint(),
+                _FIELD_FOLDER_PATH: path,
+                "save_error": _config_write_error(exc),
+            },
+        )
+    service.start_index()
+    return RedirectResponse(_INDEXING_URL, status_code=303)
 
 
 def _default_service_factory() -> SetupService:
@@ -204,6 +286,18 @@ def _progress_pct(*, chunks_done: int, chunks_total: int, done: bool) -> int:
     return min(100, (chunks_done * 100) // chunks_total)
 
 
+def _string_fields(form: Mapping[str, Any]) -> dict[str, str]:
+    """String-valued form fields only — file-upload values are dropped."""
+    return {key: str(value) for key, value in form.items() if isinstance(value, str)}
+
+
+def _progress_headers(status: Any) -> dict[str, str] | None:
+    """``HX-Redirect`` header set once indexing finished cleanly."""
+    if status.done and not status.error:
+        return {"HX-Redirect": _FIRST_SEARCH_URL}
+    return None
+
+
 def build_setup_wizard_mount(
     *,
     service_factory: Callable[[], SetupService] = _default_service_factory,
@@ -252,7 +346,9 @@ def build_setup_wizard_mount(
         into the flow.
         """
 
-        async def endpoint(request: Request) -> Response:
+        def endpoint(request: Request) -> Response:
+            # Sync on purpose (Sonar S7503 — nothing here awaits);
+            # Starlette runs sync endpoints on its threadpool.
             try:
                 service = _service()
             except NotImplementedError as exc:
@@ -270,8 +366,7 @@ def build_setup_wizard_mount(
             except NotImplementedError as exc:
                 return PlainTextResponse(str(exc), status_code=503)
             form = await request.form()
-            fields = {key: str(value) for key, value in form.items() if isinstance(value, str)}
-            return handler(fields, service)
+            return handler(_string_fields(form), service)
 
         return endpoint
 
@@ -285,27 +380,22 @@ def build_setup_wizard_mount(
         provider = request.query_params.get("provider", "")
         if not provider:
             return RedirectResponse(_PROVIDER_URL, status_code=303)
-        return _render(_TPL_KEY, {"step": 3, "provider": provider})
+        return _render(_TPL_KEY, _key_context(provider))
 
     def key_validate(fields: dict[str, str], service: SetupService) -> Response:
         validation = service.validate_provider(
             fields.get(_FIELD_PROVIDER, ""),
             fields.get(_FIELD_API_KEY, ""),
             fields.get(_FIELD_ENDPOINT) or None,
+            deployment=fields.get(_FIELD_DEPLOYMENT) or None,
         )
         return _render(_TPL_KEY_VALIDATION, {"validation": validation})
 
     def key_save(fields: dict[str, str], service: SetupService) -> Response:
-        service.save_provider(
-            fields.get(_FIELD_PROVIDER, ""),
-            fields.get(_FIELD_API_KEY, ""),
-            fields.get(_FIELD_ENDPOINT) or None,
-            fields.get("model") or None,
-        )
-        return RedirectResponse(_FOLDER_URL, status_code=303)
+        return _handle_key_save(fields, service, _render)
 
-    def folder_screen(_request: Request, _service_: SetupService) -> Response:
-        return _render(_TPL_FOLDER, {"step": 4})
+    def folder_screen(_request: Request, service: SetupService) -> Response:
+        return _render(_TPL_FOLDER, {"step": 4, "hint": service.source_hint()})
 
     def folder_scan(fields: dict[str, str], service: SetupService) -> Response:
         path = fields.get(_FIELD_FOLDER_PATH, "")
@@ -313,9 +403,7 @@ def build_setup_wizard_mount(
         return _render(_TPL_FOLDER_SCAN, {"scan": scan, _FIELD_FOLDER_PATH: path})
 
     def folder_save(fields: dict[str, str], service: SetupService) -> Response:
-        service.save_source(fields.get(_FIELD_FOLDER_PATH, ""))
-        service.start_index()
-        return RedirectResponse(_INDEXING_URL, status_code=303)
+        return _handle_folder_save(fields, service, _render)
 
     def indexing_screen(_request: Request, _service_: SetupService) -> Response:
         return _render(_TPL_INDEXING, {"step": 5})
@@ -323,8 +411,7 @@ def build_setup_wizard_mount(
     def indexing_progress(_request: Request, service: SetupService) -> Response:
         status = service.index_status()
         pct = _progress_pct(chunks_done=status.chunks_done, chunks_total=status.chunks_total, done=status.done)
-        headers = {"HX-Redirect": _FIRST_SEARCH_URL} if status.done and not status.error else None
-        return _render(_TPL_INDEXING_PROGRESS, {"status": status, "pct": pct}, headers=headers)
+        return _render(_TPL_INDEXING_PROGRESS, {"status": status, "pct": pct}, headers=_progress_headers(status))
 
     def first_search_screen(_request: Request, _service_: SetupService) -> Response:
         return _render(_TPL_FIRST_SEARCH, {"step": 6})

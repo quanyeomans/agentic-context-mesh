@@ -36,6 +36,7 @@ from kairix.platform.setup.backends import (
     provider_from_credentials,
     run_first_index,
     update_config_file,
+    write_config_updates,
 )
 from kairix.platform.setup.service import SetupService, build_setup_service
 from kairix.providers import AuthError, EmbedNotSupported, ProviderNotRegistered, TimeoutExceeded
@@ -308,6 +309,91 @@ def test_validate_provider_rejects_empty_chat_reply(tmp_path: Path) -> None:
     assert "empty chat reply" in validation.error
 
 
+def test_validate_provider_probes_the_supplied_azure_deployment(tmp_path: Path) -> None:
+    """#484 — the operator's deployment name replaces the probe-model
+    literal and is returned as the validated model."""
+    seen: list[Credentials] = []
+
+    def factory(name: str, creds: Credentials) -> FakeProvider:
+        seen.append(creds)
+        return FakeProvider(name=name, vector=[0.1] * 8)
+
+    service = _service(tmp_path, provider_factory=factory)
+    validation = service.validate_provider(
+        "azure_foundry",
+        _FAKE_KEY,
+        "https://res.services.ai.azure.com",
+        deployment="my-embed-deploy",
+    )
+    assert validation.ok is True
+    assert validation.models == ("my-embed-deploy",)
+    assert seen[0].model == "my-embed-deploy"
+
+
+def test_validate_provider_blank_deployment_keeps_the_default_probe(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    validation = service.validate_provider(
+        "azure_foundry",
+        _FAKE_KEY,
+        "https://res.services.ai.azure.com",
+        deployment="   ",
+    )
+    assert validation.ok is True
+    assert validation.models == (DEFAULT_VALIDATION_PROBE_MODEL,)
+
+
+def test_deployment_not_found_reports_the_key_works(tmp_path: Path) -> None:
+    """#484 — Azure's DeploymentNotFound means the key authenticated;
+    blaming the key would send the operator the wrong way."""
+    service = _service(
+        tmp_path,
+        provider_factory=lambda name, creds: FakeProvider(
+            embed_raises=RuntimeError(
+                'Azure Foundry transport error: NotFoundError("Error code: 404 - '
+                "{'error': {'code': 'DeploymentNotFound', 'message': 'The API deployment "
+                "for this resource does not exist.'}}\")"
+            ),
+        ),
+    )
+    validation = service.validate_provider(
+        "azure_foundry",
+        _FAKE_KEY,
+        "https://res.services.ai.azure.com",
+        deployment="wrong-name",
+    )
+    assert validation.ok is False
+    assert validation.deployment_missing is True
+    assert validation.error is not None
+    assert "Your key works" in validation.error
+    assert "'wrong-name'" in validation.error
+    assert "fix:" in validation.error
+    assert "next:" in validation.error
+    # The generic "your key may be fine" tail belongs to the key-blame
+    # branch, not this one.
+    assert "your key may be fine" not in validation.error
+
+
+def test_deployment_not_found_error_never_leaks_the_key(tmp_path: Path) -> None:
+    """F15 — even when the provider echoes the key inside the
+    DeploymentNotFound body, the rendered error must not."""
+    secret = "fake-secret-do-not-echo-5556667778"  # pragma: allowlist secret
+    service = _service(
+        tmp_path,
+        provider_factory=lambda name, creds: FakeProvider(
+            embed_raises=RuntimeError(f"DeploymentNotFound for credential {secret}"),
+        ),
+    )
+    validation = service.validate_provider(
+        "azure_foundry",
+        secret,
+        "https://res.services.ai.azure.com",
+        deployment="wrong-name",
+    )
+    assert validation.deployment_missing is True
+    assert validation.error is not None
+    assert secret not in validation.error
+
+
 # ---------------------------------------------------------------------------
 # save_provider
 # ---------------------------------------------------------------------------
@@ -337,6 +423,34 @@ def test_save_provider_fills_default_endpoint_and_remaps_azure(tmp_path: Path) -
     assert recorder.persisted[0] == (_FAKE_KEY, "https://api.openai.com/v1", "")
     assert recorder.persisted[1] == (_FAKE_KEY, "https://res.openai.azure.com", "embed-3")
     assert recorder.config_updates == [{"provider": "openai"}, {"provider": "azure_legacy"}]
+
+
+def test_save_provider_persists_the_deployment_as_the_embed_model(tmp_path: Path) -> None:
+    """#484 — with no chosen model, the Azure deployment name fills the
+    embed-model slot so indexing talks to the deployment that validated."""
+    recorder = _Recorder()
+    service = _service(tmp_path, persist_credentials_fn=recorder.persist)
+    service.save_provider(
+        "azure_foundry",
+        _FAKE_KEY,
+        "https://res.services.ai.azure.com",
+        None,
+        deployment="my-embed-deploy",
+    )
+    assert recorder.persisted == [(_FAKE_KEY, "https://res.services.ai.azure.com", "my-embed-deploy")]
+
+
+def test_save_provider_chosen_model_wins_over_the_deployment(tmp_path: Path) -> None:
+    recorder = _Recorder()
+    service = _service(tmp_path, persist_credentials_fn=recorder.persist)
+    service.save_provider(
+        "azure_foundry",
+        _FAKE_KEY,
+        "https://res.services.ai.azure.com",
+        "chosen-model",
+        deployment="my-embed-deploy",
+    )
+    assert recorder.persisted == [(_FAKE_KEY, "https://res.services.ai.azure.com", "chosen-model")]
 
 
 # ---------------------------------------------------------------------------
@@ -409,6 +523,40 @@ def test_scan_folder_rejects_a_file_path(tmp_path: Path) -> None:
     assert scan.error is not None
 
 
+def test_scan_folder_rejects_relative_paths_naming_the_resolution_base(tmp_path: Path) -> None:
+    """#486 — silently joining the server cwd surprises operators; the
+    rejection names the folder a relative path would resolve against."""
+    scan = _service(tmp_path).scan_folder("notes/projects")
+    assert scan.ok is False
+    assert scan.error is not None
+    assert "relative path" in scan.error
+    assert str(Path.cwd()) in scan.error
+    assert "fix:" in scan.error
+    assert "next:" in scan.error
+
+
+def test_scan_folder_not_found_in_a_container_names_the_mounted_root(tmp_path: Path) -> None:
+    """#486 — inside a container the fix: line points at the compose-mounted
+    document root as the candidate to try."""
+    service = _service(
+        tmp_path,
+        environ={"KAIRIX_CONTAINER": "1", "KAIRIX_DOCUMENT_ROOT": "/data/documents"},
+    )
+    scan = service.scan_folder(str(tmp_path / "nowhere"))
+    assert scan.ok is False
+    assert scan.error is not None
+    assert "fix:" in scan.error
+    assert "/data/documents" in scan.error
+    assert "mounts your documents" in scan.error
+
+
+def test_scan_folder_not_found_outside_a_container_keeps_the_generic_fix(tmp_path: Path) -> None:
+    scan = _service(tmp_path).scan_folder(str(tmp_path / "nowhere"))
+    assert scan.ok is False
+    assert scan.error is not None
+    assert "mounts your documents" not in scan.error
+
+
 def test_scan_folder_handles_an_empty_folder(tmp_path: Path) -> None:
     docs = tmp_path / "docs"
     docs.mkdir()
@@ -441,6 +589,53 @@ def test_save_source_rejects_missing_folder_with_affordance(tmp_path: Path) -> N
     assert recorder.config_updates == []
 
 
+def test_save_source_rejects_relative_paths_naming_the_resolution_base(tmp_path: Path) -> None:
+    recorder = _Recorder()
+    service = _service(tmp_path, write_config_fn=recorder.write_config)
+    with pytest.raises(ValueError, match="relative path") as excinfo:
+        service.save_source("notes/projects")
+    assert str(Path.cwd()) in str(excinfo.value)
+    assert recorder.config_updates == []
+
+
+def test_save_source_rejects_a_blank_path(tmp_path: Path) -> None:
+    """A blank path expands to ``.`` — without the absolute-path guard it
+    would silently persist the server's working directory."""
+    recorder = _Recorder()
+    service = _service(tmp_path, write_config_fn=recorder.write_config)
+    with pytest.raises(ValueError, match="fix:"):
+        service.save_source("   ")
+    assert recorder.config_updates == []
+
+
+# ---------------------------------------------------------------------------
+# source_hint
+# ---------------------------------------------------------------------------
+
+
+def test_source_hint_prefills_the_mounted_root_in_a_container(tmp_path: Path) -> None:
+    service = _service(tmp_path, environ={"KAIRIX_CONTAINER": "1"})
+    hint = service.source_hint()
+    assert hint.in_container is True
+    assert hint.suggested_path == "/data/documents"
+
+
+def test_source_hint_honours_the_configured_document_root(tmp_path: Path) -> None:
+    service = _service(
+        tmp_path,
+        environ={"KAIRIX_CONTAINER": "1", "KAIRIX_DOCUMENT_ROOT": "/srv/knowledge"},
+    )
+    hint = service.source_hint()
+    assert hint.in_container is True
+    assert hint.suggested_path == "/srv/knowledge"
+
+
+def test_source_hint_is_blank_outside_a_container(tmp_path: Path) -> None:
+    hint = _service(tmp_path).source_hint()
+    assert hint.in_container is False
+    assert hint.suggested_path == ""
+
+
 def test_update_config_file_merges_paths_and_preserves_other_keys(tmp_path: Path) -> None:
     import yaml
 
@@ -461,6 +656,50 @@ def test_update_config_file_creates_a_fresh_config(tmp_path: Path) -> None:
     target = tmp_path / "kairix.config.yaml"
     update_config_file(target, {"provider": "anthropic"})
     assert yaml.safe_load(target.read_text()) == {"provider": "anthropic"}
+
+
+def test_write_config_updates_targets_the_overlay_and_creates_parents(tmp_path: Path) -> None:
+    """#485 — with an overlay configured, wizard saves land on the overlay
+    file (parents created), never on the read-only base config."""
+    import yaml
+
+    base = tmp_path / "etc" / "kairix.config.yaml"
+    base.parent.mkdir(parents=True)
+    base.write_text("provider: openai\n")
+    overlay = tmp_path / "var" / "lib" / "kairix" / "kairix.config.local.yaml"
+    written = write_config_updates(
+        {"provider": "azure_foundry"},
+        overlay_path=str(overlay),
+        config_path=str(base),
+    )
+    assert written == overlay
+    assert yaml.safe_load(overlay.read_text()) == {"provider": "azure_foundry"}
+    # The base config is untouched.
+    assert yaml.safe_load(base.read_text()) == {"provider": "openai"}
+
+
+def test_write_config_updates_merges_into_the_existing_overlay(tmp_path: Path) -> None:
+    import yaml
+
+    overlay = tmp_path / "kairix.config.local.yaml"
+    write_config_updates({"provider": "azure_foundry"}, overlay_path=str(overlay), config_path=None)
+    write_config_updates(
+        {"paths": {"document_root": "/data/documents"}},
+        overlay_path=str(overlay),
+        config_path=None,
+    )
+    loaded = yaml.safe_load(overlay.read_text())
+    assert loaded["provider"] == "azure_foundry"
+    assert loaded["paths"] == {"document_root": "/data/documents"}
+
+
+def test_write_config_updates_falls_back_to_the_single_file(tmp_path: Path) -> None:
+    import yaml
+
+    target = tmp_path / "kairix.config.yaml"
+    written = write_config_updates({"provider": "openai"}, overlay_path=None, config_path=str(target))
+    assert written == target
+    assert yaml.safe_load(target.read_text()) == {"provider": "openai"}
 
 
 # ---------------------------------------------------------------------------
