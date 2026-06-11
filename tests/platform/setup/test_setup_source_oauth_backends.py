@@ -336,6 +336,8 @@ def test_save_emits_topology_config_and_pre_spend_summary() -> None:
     assert topology["connectors"][0]["connector_specific_config"] == {"workspace": "alpha"}
     filters = [s["path_filter"] for s in topology["collections"][0]["sources"]]
     assert filters == ["slack://channel/C1/*", "slack://channel/C2/*"]
+    # #492 — the saved screen names the file the topology landed in.
+    assert saved.config_file == "recorded-config.yaml"
 
 
 def test_save_propagates_read_only_config_oserror() -> None:

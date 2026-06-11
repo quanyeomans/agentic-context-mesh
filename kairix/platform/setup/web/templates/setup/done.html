@@ -25,6 +25,9 @@
   </dl>
 </div>
 <p class="kx-muted">Add more sources anytime with the kairix CLI.</p>
+{% if config_file %}
+<p class="kx-muted kx-small">Your settings are saved in <code>{{ config_file }}</code>.</p>
+{% endif %}
 {% endblock %}
 {% block actions %}
 <a href="/setup/tour" class="kx-btn-primary">Run the tour again</a>

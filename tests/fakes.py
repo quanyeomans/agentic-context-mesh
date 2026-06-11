@@ -4948,6 +4948,7 @@ class FakeSetupService:
         save_oauth_raises: Exception | None = None,
         save_oauth_error: str | None = None,
         save_oauth_summary: str = "2 channels selected — kairix will fetch and index messages from these channels.",
+        config_file: str = "kairix.config.yaml",
     ) -> None:
         from kairix.platform.setup.service import ConnectSnippet, SearchPreviewHit, TourTimelineHit
 
@@ -5035,6 +5036,9 @@ class FakeSetupService:
         self._save_oauth_raises = save_oauth_raises
         self._save_oauth_error = save_oauth_error
         self._save_oauth_summary = save_oauth_summary
+        # The config file wizard saves land in (#492) — shown on the
+        # source-saved and done screens.
+        self._config_file = config_file
         # Recorders + mutable wizard state.
         self.saved_providers: list[tuple[str, str, str | None, str | None, str | None]] = []
         self.saved_sources: list[str] = []
@@ -5110,6 +5114,9 @@ class FakeSetupService:
         if self._save_source_raises is not None:
             raise self._save_source_raises
         self.saved_sources.append(path)
+
+    def config_file_path(self) -> str:
+        return self._config_file
 
     def source_hint(self) -> Any:
         from kairix.platform.setup.service import SourceHint
@@ -5301,7 +5308,7 @@ class FakeSetupService:
         self.saved_oauth_sources.append((provider, instance, tuple(picks)))
         if self._save_oauth_error is not None:
             return SavedSource(ok=False, summary="", error=self._save_oauth_error)
-        return SavedSource(ok=True, summary=self._save_oauth_summary, error=None)
+        return SavedSource(ok=True, summary=self._save_oauth_summary, error=None, config_file=self._config_file)
 
 
 class FakeMcpTransportServer:

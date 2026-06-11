@@ -308,29 +308,74 @@ def probe_provider_roundtrip(provider: Any) -> None:
         raise RuntimeError("The provider accepted the request but returned an empty embedding.")
 
 
+def _deep_coerce_mapping(value: Any) -> Any:
+    """Recursively coerce ``Mapping`` values to plain dicts for merging."""
+    if isinstance(value, Mapping):
+        return {key: _deep_coerce_mapping(item) for key, item in value.items()}
+    return value
+
+
 def update_config_file(target: Path, updates: Mapping[str, Any]) -> Path:
     """Merge ``updates`` into the YAML config at ``target`` and write it back.
 
-    Top-level keys are replaced, except dict values (e.g. ``paths:``)
-    which merge key-by-key so writing ``paths.document_root`` preserves an
-    existing ``paths.db_path``. The write itself goes through the terminal
-    wizard's :func:`write_config_yaml` so both setup surfaces emit one
-    file shape.
+    Merging is fully recursive (#492 — :func:`kairix.config_layers.deep_merge`,
+    the SAME semantics the layered read side applies): nested dict values
+    merge key-by-key at every depth, so writing
+    ``topology_v2.credentials.slack`` preserves an existing
+    ``topology_v2.credentials.github`` sibling; lists and scalars are
+    replaced. The write itself goes through the terminal wizard's
+    :func:`write_config_yaml` so both setup surfaces emit one file shape.
     """
     import yaml
+
+    from kairix.config_layers import deep_merge
 
     existing: dict[str, Any] = {}
     if target.exists():
         loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             existing = loaded
-    for key, value in updates.items():
-        current = existing.get(key)
-        if isinstance(value, Mapping) and isinstance(current, dict):
-            current.update(value)
-        else:
-            existing[key] = dict(value) if isinstance(value, Mapping) else value
-    return write_config_yaml(target, "setup-wizard", existing)
+    merged = deep_merge(existing, _deep_coerce_mapping(updates))
+    return write_config_yaml(target, "setup-wizard", merged)
+
+
+def wizard_config_target(
+    overlay_path: str | None,
+    config_path: str | None,
+    *,
+    env: Mapping[str, str] | None = None,
+    home: Path | None = None,
+) -> Path:
+    """The ONE config file the wizard reads AND writes (#492).
+
+    Resolution order:
+
+    1. ``overlay_path`` (``KAIRIX_CONFIG_OVERLAY_PATH``) — the shipped
+       compose: saves land on the writable overlay, the read-only base
+       stays pristine, and every layered reader merges them.
+    2. ``config_path`` (``KAIRIX_CONFIG_PATH``) — legacy single-file.
+    3. An existing ``./kairix.config.yaml`` — cwd legacy fallback, so
+       installs that already keep their config next to the process keep
+       updating that file.
+    4. ``$XDG_CONFIG_HOME/kairix/kairix.config.yaml`` (fallback
+       ``~/.config/kairix/...``) — the pip-install default, the same
+       location ``kairix init`` writes and the layered read side probes.
+
+    Used by BOTH :func:`write_config_updates` and
+    :func:`read_config_mapping` so the wizard's read-modify-write cycle
+    can never split across two files. ``env`` / ``home`` mirror the
+    secrets-store test seams.
+    """
+    if overlay_path:
+        return Path(overlay_path).expanduser()
+    if config_path:
+        return Path(config_path).expanduser()
+    cwd_candidate = Path("kairix.config.yaml")
+    if cwd_candidate.is_file():
+        return cwd_candidate
+    from kairix.config_layers import user_config_path
+
+    return user_config_path(env=dict(env) if env is not None else None, home=home)
 
 
 def write_config_updates(
@@ -338,24 +383,27 @@ def write_config_updates(
     *,
     overlay_path: str | None,
     config_path: str | None,
+    env: Mapping[str, str] | None = None,
+    home: Path | None = None,
 ) -> Path:
     """Merge ``updates`` into the right config file — overlay-aware (#485).
 
     When an overlay path is configured (``KAIRIX_CONFIG_OVERLAY_PATH``),
     wizard saves land on the OVERLAY file — the operator's base config
     (read-only-mounted in the stock compose) stays pristine, and the
-    layered loader (:func:`kairix.core.search.config_loader.load_config`)
-    deep-merges the overlay on top of the base at read time. Parent
-    directories are created so a first save on a fresh data volume works.
+    layered readers (:func:`kairix.core.search.config_loader.load_config`,
+    :func:`kairix.paths.load_top_level_config`, the worker's topology
+    boot apply) deep-merge the overlay on top of the base at read time.
+    Parent directories are created so a first save on a fresh data
+    volume (or a fresh ``~/.config/kairix/``) works.
 
-    Without an overlay, the legacy single-file behaviour applies:
-    ``config_path`` (``KAIRIX_CONFIG_PATH``) or ``./kairix.config.yaml``.
+    Without an overlay, the single-file behaviour applies — see
+    :func:`wizard_config_target` for the full resolution order,
+    including the pip-install XDG default (#492).
     """
-    if overlay_path:
-        target = Path(overlay_path).expanduser()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        return update_config_file(target, updates)
-    return update_config_file(Path(config_path or "kairix.config.yaml"), updates)
+    target = wizard_config_target(overlay_path, config_path, env=env, home=home)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    return update_config_file(target, updates)
 
 
 def configured_document_root(
@@ -497,6 +545,17 @@ def _default_write_config(updates: Mapping[str, Any]) -> Path:  # pragma: no cov
     )
 
 
+# pragma rationale: lazy-import DI-default delegation — mirrors
+# _default_write_config; the testable logic lives in wizard_config_target.
+def _default_config_target() -> Path:  # pragma: no cover  # lazy-import DI-default delegation
+    from kairix.paths import config_overlay_path_override, config_path_override
+
+    return wizard_config_target(
+        config_overlay_path_override(),
+        config_path_override(),
+    )
+
+
 def _default_search_pipeline(paths: Any) -> Any:  # pragma: no cover  # lazy-import DI-default delegation
     from kairix.core.factory import build_search_pipeline
 
@@ -571,17 +630,24 @@ def _default_discover_units(  # pragma: no cover  # lazy-import DI-default deleg
     return discover_source_units_live(provider, client, tokens)
 
 
-def read_config_mapping(*, overlay_path: str | None, config_path: str | None) -> dict[str, Any]:
+def read_config_mapping(
+    *,
+    overlay_path: str | None,
+    config_path: str | None,
+    env: Mapping[str, str] | None = None,
+    home: Path | None = None,
+) -> dict[str, Any]:
     """Read the wizard's write-target config file as a plain mapping.
 
-    Mirrors :func:`write_config_updates`'s target resolution (#485) so
-    the topology upsert in :meth:`KairixSetupService.save_oauth_source`
-    merges into the SAME file it writes back to. A missing or
-    non-mapping file reads as empty — the truthful fresh-install answer.
+    Resolves through :func:`wizard_config_target` — the SAME helper
+    :func:`write_config_updates` uses (#492) — so the topology upsert in
+    :meth:`KairixSetupService.save_oauth_source` merges into the SAME
+    file it writes back to. A missing or non-mapping file reads as
+    empty — the truthful fresh-install answer.
     """
     import yaml
 
-    target = Path(overlay_path).expanduser() if overlay_path else Path(config_path or "kairix.config.yaml")
+    target = wizard_config_target(overlay_path, config_path, env=env, home=home)
     if not target.exists():
         return {}
     loaded = yaml.safe_load(target.read_text(encoding="utf-8"))
@@ -630,6 +696,11 @@ class SetupServiceDeps:
     # save_provider / save_source — merge updates into the runtime config file.
     write_config_fn: Callable[[Mapping[str, Any]], Path] = field(
         default_factory=lambda: _default_write_config,
+    )
+    # config_file_path — the file wizard saves land in (#492); shown on
+    # the save/done screens so operators can verify where config lives.
+    config_target_fn: Callable[[], Path] = field(
+        default_factory=lambda: _default_config_target,
     )
     # status / index_status — (embedded, pending) chunk counters per db path.
     index_counts_fn: Callable[[Path], tuple[int, int]] = field(
@@ -909,10 +980,12 @@ class KairixSetupService:
         """Persist the chosen folder as ``paths.document_root`` in the config.
 
         Raises:
-            ValueError: when the path is relative or the folder does not
-                exist — the wizard's scan step gates the happy path, so
-                reaching here with a bad path is a hard reject, not a
-                silent write against the server's working directory.
+            ValueError: when the path is relative, the folder does not
+                exist, or the pick is shadowed by a ``KAIRIX_DOCUMENT_ROOT``
+                env override (#492) — the wizard's scan step gates the
+                happy path, so reaching here with a bad path is a hard
+                reject, not a silent write against the server's working
+                directory (or a save the runtime would silently ignore).
         """
         candidate = (path or "").strip()
         folder = Path(candidate).expanduser()
@@ -928,6 +1001,18 @@ class KairixSetupService:
                 " fix: create the folder (or fix the spelling), then scan it again."
                 " next: the scan step confirms the folder before it is saved."
             )
+        from kairix.paths import document_root_override
+
+        override = document_root_override(self._deps.environ)
+        if override and Path(override).expanduser() != folder:
+            raise ValueError(
+                f"This install reads its document folder from the KAIRIX_DOCUMENT_ROOT"
+                f" environment variable ({override}), which overrides anything saved here —"
+                f" the pick of {folder} would be silently ignored at runtime."
+                f" fix: pick {override}, or change KAIRIX_DOCUMENT_ROOT in your deployment's"
+                f" environment (the .env file for Docker compose) and restart kairix."
+                " next: scan the folder again, then save."
+            )
         self._deps.write_config_fn({"paths": {"document_root": str(folder)}})
         # The platform paths resolution is cached per process — drop it so
         # the very next resolve (the index run this wizard kicks off) sees
@@ -935,6 +1020,17 @@ class KairixSetupService:
         from kairix.paths import clear_cache
 
         clear_cache()
+
+    def config_file_path(self) -> str:
+        """The config file wizard saves land in (#492).
+
+        Resolution lives in :func:`wizard_config_target` (one helper for
+        the read AND write side); the env reads stay behind
+        ``kairix.paths`` accessors (F4) inside the deps default. Shown
+        on the save/done screens so the operator knows where their
+        configuration lives — and which file to bring to a new machine.
+        """
+        return str(self._deps.config_target_fn())
 
     def source_hint(self) -> SourceHint:
         """Container-aware pre-fill for the folder step (#486).
@@ -1416,8 +1512,13 @@ class KairixSetupService:
         if validation_error:
             return SavedSource(ok=False, summary="", error=validation_error)
         updates = topology_updates_for_source(provider, resolved_instance, picks, self._deps.read_config_fn())
-        self._deps.write_config_fn(updates)
-        return SavedSource(ok=True, summary=_source_summary(provider, resolved_instance, picks), error=None)
+        written = self._deps.write_config_fn(updates)
+        return SavedSource(
+            ok=True,
+            summary=_source_summary(provider, resolved_instance, picks),
+            error=None,
+            config_file=str(written),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1713,5 +1814,6 @@ __all__ = [
     "run_first_index",
     "tour_agent_from_config",
     "update_config_file",
+    "wizard_config_target",
     "write_config_updates",
 ]

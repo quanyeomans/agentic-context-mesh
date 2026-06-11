@@ -257,9 +257,11 @@ def _handle_folder_save(
     render: Callable[[str, dict[str, Any]], Response],
 ) -> Response:
     """Persist the folder pick and start indexing; on a rejected path
-    (review H4) or a read-only config (#485) re-render with the banner —
-    indexing must NOT start on a failed save. Module-level for the same
-    F16 reason as :func:`_handle_key_save`.
+    (review H4), a service-side reject (#492 — e.g. the pick is shadowed
+    by a ``KAIRIX_DOCUMENT_ROOT`` env override), or a read-only config
+    (#485) re-render with the rescue banner — indexing must NOT start on
+    a failed save. Module-level for the same F16 reason as
+    :func:`_handle_key_save`.
     """
     path = fields.get(_FIELD_FOLDER_PATH, "")
     try:
@@ -797,7 +799,7 @@ def build_setup_wizard_mount(
 
     def done_screen(_request: Request, service: SetupService) -> Response:
         status = service.index_status()
-        return _render(_TPL_DONE, {"status": status})
+        return _render(_TPL_DONE, {"status": status, "config_file": service.config_file_path()})
 
     def source_screen(_request: Request, service: SetupService) -> Response:
         return _render(_TPL_SOURCE, {"step": 4, "options": service.source_options()})

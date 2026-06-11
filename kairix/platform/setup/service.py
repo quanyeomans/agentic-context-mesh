@@ -334,11 +334,15 @@ class SavedSource:
 
     ``summary`` states what will be fetched ("2 channels selected — …")
     BEFORE any spend happens; the wizard shows it on the saved screen.
+    ``config_file`` names the file the save landed in (#492) so the
+    operator can see — and verify — where their configuration lives;
+    empty on a failed save.
     """
 
     ok: bool
     summary: str
     error: str | None
+    config_file: str = ""
 
 
 class SetupService(Protocol):
@@ -397,6 +401,9 @@ class SetupService(Protocol):
 
     def save_source(self, path: str) -> None:
         """Persist the chosen folder as the first source."""
+
+    def config_file_path(self) -> str:
+        """The config file wizard saves land in — shown on save/done screens (#492)."""
 
     def start_index(self) -> None:
         """Kick off the first index run in the background."""

@@ -6,6 +6,9 @@
   <p>Here is what kairix will fetch — nothing is downloaded until indexing runs.</p>
 </hgroup>
 <p class="kx-success-msg">{{ saved.summary }}</p>
+{% if saved.config_file %}
+<p class="kx-muted kx-small">Saved to <code>{{ saved.config_file }}</code>.</p>
+{% endif %}
 <p class="kx-muted kx-small">The background worker fetches this source on its next run. You can connect another source, or continue with setup.</p>
 {% endblock %}
 {% block actions %}
