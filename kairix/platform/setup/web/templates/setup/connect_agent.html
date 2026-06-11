@@ -1,29 +1,46 @@
 {% extends "setup/base.html" %}
 {% block title %}Connect an agent — kairix setup{% endblock %}
-{% block card_class %} kx-setup-card-wide{% endblock %}
 {% block content %}
 <hgroup>
   <h2>Connect your agents</h2>
   <p>kairix speaks MCP — any agent that supports MCP over HTTP can search your knowledge. The server is running at:</p>
 </hgroup>
 <p><code class="kx-mcp-url">{{ info.mcp_url }}</code></p>
+<div class="kx-transport-matrix">
+  <p><strong>Which URL works where</strong></p>
+  <ul class="kx-small">
+    <li><strong>Claude Code and other local CLI agents</strong> — <code>{{ info.mcp_url }}</code>
+      works as-is, including through an SSH tunnel to this machine.</li>
+    <li><strong>claude.ai and Claude Desktop connectors</strong> — these need an
+      <code>https://</code> address. Put kairix behind a reverse proxy (caddy, nginx, or
+      cloudflared) — see
+      <a href="https://github.com/three-cubes/kairix/blob/main/docs/operations/OPERATIONS.md#deploying-behind-a-reverse-proxy-caddy--nginx--cloudflared"
+         target="_blank" rel="noopener">Deploying behind a reverse proxy</a>.</li>
+    <li><strong>Agents on this same machine</strong> — plain localhost http is fine.</li>
+  </ul>
+</div>
+<p class="kx-small">Using Claude Code? One command connects it:</p>
+<pre><code>claude mcp add --transport http kairix {{ info.mcp_url }}</code></pre>
 {% for snippet in info.snippets %}
 <details class="kx-connect-snippet" {% if loop.first %}open{% endif %}>
   <summary><strong>{{ snippet.client }}</strong></summary>
   <pre><code>{{ snippet.config_text }}</code></pre>
 </details>
 {% endfor %}
+{% endblock %}
+{% block banner_class %} kx-banner-slot-sm{% endblock %}
+{% block banner %}
+<span id="verify-indicator" class="kx-indicator kx-muted" aria-busy="true">Verifying…</span>
 <div id="handshake-result"></div>
-<span id="verify-indicator" class="kx-indicator kx-muted" aria-busy="true" style="display:none;">Verifying…</span>
-<div class="kx-setup-actions">
-  <a href="/setup/first-search" class="kx-btn-secondary">Back</a>
-  <button type="button" class="kx-btn-outline"
-          hx-post="/setup/connect-agent/verify"
-          hx-target="#handshake-result"
-          hx-swap="innerHTML"
-          hx-indicator="#verify-indicator">
-    Verify connection
-  </button>
-  <a href="/setup/done" class="kx-btn-primary">Finish setup</a>
-</div>
+{% endblock %}
+{% block actions %}
+<a href="/setup/tour" class="kx-btn-secondary">Back</a>
+<button type="button" class="kx-btn-outline"
+        hx-post="/setup/connect-agent/verify"
+        hx-target="#handshake-result"
+        hx-swap="innerHTML"
+        hx-indicator="#verify-indicator">
+  Verify connection
+</button>
+<a href="/setup/done" class="kx-btn-primary">Finish setup</a>
 {% endblock %}

@@ -116,6 +116,13 @@ _AGENT_KNOWLEDGE_DIR = "04-Agent-Knowledge"
 # lands).
 _KAIRIX_CONFIG_PATH_ENV = "KAIRIX_CONFIG_PATH"
 
+# Env-var name for the operator's document root + the stock container
+# mount target it points at in the standard compose. Centralised (F17)
+# — three resolvers each need both: the cached platform resolution, the
+# explicit override accessor, and the setup wizard's container pre-fill.
+_KAIRIX_DOCUMENT_ROOT_ENV = "KAIRIX_DOCUMENT_ROOT"
+_CONTAINER_DOCUMENTS_MOUNT = "/data/documents"
+
 
 def is_docker_runtime_check() -> bool:
     """Detect if running inside a Docker container."""
@@ -139,7 +146,7 @@ def default_document_root() -> Path:
     User (all platforms): ~/Documents (most common document location)
     """
     if is_docker_runtime_check():
-        return Path("/data/documents")
+        return Path(_CONTAINER_DOCUMENTS_MOUNT)
     if is_service_install():
         return Path("/var/lib/kairix/documents")
     return Path.home() / "Documents"
@@ -257,7 +264,7 @@ def _resolve_cached() -> KairixPaths:
     config_paths = load_paths_from_config()
 
     document_root = Path(
-        os.environ.get("KAIRIX_DOCUMENT_ROOT") or config_paths.get("document_root") or str(default_document_root())
+        os.environ.get(_KAIRIX_DOCUMENT_ROOT_ENV) or config_paths.get("document_root") or str(default_document_root())
     ).expanduser()
 
     db_path = Path(
@@ -290,28 +297,34 @@ def load_paths_from_config() -> dict[str, str]:
     return raw if isinstance(raw, dict) else {}
 
 
-def load_top_level_config() -> dict[str, object] | None:
-    """Return the full parsed ``kairix.config.yaml`` as a dict, or None.
+def load_top_level_config(*, environ: Mapping[str, str] | None = None) -> dict[str, object] | None:
+    """Return the merged ``kairix.config.yaml`` view as a dict, or None.
 
     Callers that need a top-level block other than ``paths:`` (e.g. the
     ``agents:`` block consumed by
     :func:`kairix.core.agents.scope.load_agent_scopes`) use this helper
     so the env-var read + yaml parse stays inside :mod:`kairix.paths`.
-    Returns None when the file is missing or malformed — callers
-    fall back to their own default behaviour.
-    """
-    config_path = os.environ.get(_KAIRIX_CONFIG_PATH_ENV) or "kairix.config.yaml"
-    try:
-        import yaml
+    Returns None when no config file resolves or it is malformed —
+    callers fall back to their own default behaviour.
 
-        p = Path(config_path).expanduser()
-        if p.exists():
-            with open(p) as f:
-                data = yaml.safe_load(f) or {}
-            return data if isinstance(data, dict) else None
-    except Exception:  # noqa: S110 — graceful fallback when config is missing or malformed; callers tolerate None
-        pass
-    return None
+    Overlay-aware (#492): resolution + merge flow through
+    :func:`kairix.config_layers.load_merged_mapping`, the SAME layered
+    read path the retrieval loader uses — so a setup-wizard save landing
+    on the ``KAIRIX_CONFIG_OVERLAY_PATH`` file (e.g. the picked
+    ``paths.document_root``) is observed here instead of only the
+    read-only-mounted base config. ``environ`` is the F2-clean test
+    seam; production callers leave it ``None`` and the live process
+    environment is read at this paths boundary (F4).
+    """
+    from kairix.config_layers import load_merged_mapping
+
+    try:
+        env = dict(environ) if environ is not None else None
+        data = load_merged_mapping(env=env)
+    except Exception:
+        # Graceful fallback when config resolution fails; callers tolerate None.
+        return None
+    return data or None
 
 
 def clear_cache() -> None:
@@ -343,7 +356,7 @@ def document_root(mode: Mode | None = None) -> Path:
         if mode == Mode.system:
             return Path("/var/lib/kairix/documents")
         if mode == Mode.container:
-            return Path("/data/documents")
+            return Path(_CONTAINER_DOCUMENTS_MOUNT)
         # Mode.user — sit under the user-mode data dir so the document
         # tree co-locates with the SQLite index + vector index.
         return data_dir(Mode.user) / "documents"
@@ -820,6 +833,45 @@ def config_path_override() -> str | None:
     return value if value else None
 
 
+def config_overlay_path_override(*, environ: Mapping[str, str] | None = None) -> str | None:
+    """Operator overlay config path from ``KAIRIX_CONFIG_OVERLAY_PATH``.
+
+    Returns ``None`` when unset. This is the same env var the layered
+    config loader (``kairix.core.search.config_loader.resolve_layered_paths``)
+    consumes on the READ side; surfacing it here gives the setup wizard's
+    config WRITER one F4-clean place to learn the overlay target — when
+    set, wizard saves land on the overlay file (typically on the writable
+    data volume) instead of the read-only-mounted base config.
+
+    ``environ`` mirrors :func:`mcp_endpoint`'s F2-clean test seam —
+    production callers leave it ``None`` and the live ``os.environ`` is
+    read at the paths boundary.
+    """
+    env = environ if environ is not None else os.environ
+    value = env.get("KAIRIX_CONFIG_OVERLAY_PATH")
+    return value if value else None
+
+
+def container_source_prefill(environ: Mapping[str, str] | None = None) -> str | None:
+    """Folder path the setup wizard pre-fills when running in a container.
+
+    Inside a container (``KAIRIX_CONTAINER`` set — the Dockerfile-controlled
+    signal :meth:`Mode.detect` also keys on), the operator's documents are
+    whatever folder the compose file mounted, so the wizard pre-fills the
+    configured document root: the ``KAIRIX_DOCUMENT_ROOT`` value, or the
+    stock compose mount target ``/data/documents`` when unset.
+
+    Returns ``None`` on non-container installs so the wizard leaves the
+    field blank. ``environ`` is the F2-clean test seam; production
+    callers leave it ``None`` and the live ``os.environ`` is read at
+    the paths boundary (F4).
+    """
+    env = environ if environ is not None else os.environ
+    if not env.get("KAIRIX_CONTAINER"):
+        return None
+    return env.get(_KAIRIX_DOCUMENT_ROOT_ENV) or _CONTAINER_DOCUMENTS_MOUNT
+
+
 def boards_dir_override() -> Path | None:
     """Operator override for the Kanban boards directory.
 
@@ -1110,15 +1162,22 @@ def reflib_root_override() -> str | None:
     return value if value else None
 
 
-def document_root_override() -> str | None:
+def document_root_override(environ: Mapping[str, str] | None = None) -> str | None:
     """Operator override for the document-root via ``KAIRIX_DOCUMENT_ROOT``.
 
     Mirrors :func:`reflib_root_override` semantics — returns ``None`` so
     CLI handlers can show a "required flag" message instead of silently
     using a default. The cached :func:`document_root` keeps its own
     independent read (with platform defaults) for non-CLI callers.
+
+    ``environ`` mirrors :func:`container_source_prefill`'s F2-clean test
+    seam — production callers leave it ``None`` and the live
+    ``os.environ`` is read at the paths boundary (F4). The setup wizard
+    uses this to warn when a picked folder is shadowed by the env
+    override (#492).
     """
-    value = os.environ.get("KAIRIX_DOCUMENT_ROOT")
+    env = environ if environ is not None else os.environ
+    value = env.get(_KAIRIX_DOCUMENT_ROOT_ENV)
     return value if value else None
 
 
@@ -1478,36 +1537,29 @@ def feature_flag_override(name: str) -> bool | None:
     return None
 
 
-def feature_flag_config_overlay() -> dict[str, bool]:
-    """Return the ``features:`` section from ``kairix.config.yaml``.
+def feature_flag_config_overlay(*, environ: Mapping[str, str] | None = None) -> dict[str, bool]:
+    """Return the ``features:`` section from the merged ``kairix.config.yaml``.
 
-    Returns an empty dict when the section is absent or the config file
-    does not exist. Non-bool values are coerced through Python's
-    truthiness so operators who write ``features: {foo: 1}`` get the
-    intuitive interpretation; explicit ``True`` / ``False`` are
-    preserved untouched.
+    Returns an empty dict when the section is absent or no config file
+    resolves. Non-bool values are coerced through Python's truthiness so
+    operators who write ``features: {foo: 1}`` get the intuitive
+    interpretation; explicit ``True`` / ``False`` are preserved untouched.
 
-    F4 boundary: keeping the yaml read here means the resolver does not
+    Overlay-aware (#492): reads through :func:`load_top_level_config`,
+    so a ``features:`` block in the operator overlay file
+    (``KAIRIX_CONFIG_OVERLAY_PATH``) is honoured on the shipped compose
+    — not just the read-only base config. ``environ`` is the F2-clean
+    test seam.
+
+    F4 boundary: keeping the config read here means the resolver does not
     grow its own ``os.environ`` / file-system read surface. See
     ``docs/architecture/feature-flag-architecture.md`` §3.4.
     """
-    config_path = os.environ.get(_KAIRIX_CONFIG_PATH_ENV) or "kairix.config.yaml"
-    try:
-        import yaml
-
-        p = Path(config_path).expanduser()
-        if not p.exists():
-            return {}
-        with open(p) as f:
-            data = yaml.safe_load(f) or {}
-        section = data.get("features") or {}
-        if not isinstance(section, dict):
-            return {}
-        return {str(k): bool(v) for k, v in section.items()}
-    except (OSError, ImportError, AttributeError):
-        # Graceful fallback when the config file is missing, yaml is
-        # unavailable, or yaml.safe_load returns an unexpected shape.
+    data = load_top_level_config(environ=environ) or {}
+    section = data.get("features") or {}
+    if not isinstance(section, dict):
         return {}
+    return {str(k): bool(v) for k, v in section.items()}
 
 
 def agent_knowledge_dir_name(*, config: dict[str, Any] | None = None) -> str:

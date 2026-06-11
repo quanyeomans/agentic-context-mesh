@@ -344,7 +344,7 @@ REGISTRY: dict[str, FeatureFlag] = {
         description=(
             "When ON, the MCP server also serves the in-box web setup "
             "wizard at /setup (same container, same port): welcome → "
-            "provider → key → folder → indexing → first-search → "
+            "provider → key → folder → indexing → capability tour → "
             "connect-agent → done, rendered server-side against the "
             "SetupService boundary. When OFF (default), no /setup routes "
             "are mounted and requests there 404 exactly as before the "

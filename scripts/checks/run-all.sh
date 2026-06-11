@@ -229,6 +229,24 @@ python3 "${SCRIPT_DIR}/check_f76_pii_content_interpolation.py" || overall=1
 #        leak surface).
 python3 "${SCRIPT_DIR}/check_f77_sqlite_single_writer.py" || overall=1
 
+# F81 — fresh-install smoke stays wired: the smoke script + its CI workflow
+#        exist and the workflow invokes the script. The smoke itself (compose
+#        boot → healthz → MCP handshake → wizard 200 → BM25 hit) runs in
+#        .github/workflows/fresh-install-smoke.yml, not per-commit.
+python3 "${SCRIPT_DIR}/check_f81_fresh_install_smoke.py" || overall=1
+
+# F82 — wall-clock ceiling assertions banned outside soak/probe tiers
+#        (#493 flake family — `assert elapsed < N` measures host scheduling,
+#        not kairix behaviour; requires slow/soak/load/pvt marker or
+#        # F82-allowed: rationale).
+python3 "${SCRIPT_DIR}/check_f82_wall_clock_ceilings.py" || overall=1
+
+# F83 — gate-runner contract for shell gate scripts (#483 silent-death
+#        class: unguarded VAR=$(...) under set -e, bare || true, shellcheck
+#        at error severity, named stage OK/FAIL verdicts in
+#        safe-commit.sh / run-all.sh).
+python3 "${SCRIPT_DIR}/check_f83_gate_runner_contract.py" || overall=1
+
 bash "${SCRIPT_DIR}/check-f36-connector-bdd-parity.sh" || overall=1
 
 python3 "${SCRIPT_DIR}/check_f34_core_connector_layer_imports.py" || overall=1

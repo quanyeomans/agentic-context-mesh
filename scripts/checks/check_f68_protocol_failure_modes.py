@@ -11,9 +11,9 @@ throttled drive because no contract test exercised the rate-limit
 path — is the canonical example.
 
 F68 makes the failure-behaviour contract structural. For every public
-method on every Protocol declared in ``kairix/**/protocols.py``, the
-file ``tests/contracts/test_<protocol_snake>_failure_modes.py`` MUST
-exist AND contain at least one test function whose name matches::
+method on every Protocol declared anywhere under ``kairix/**/*.py``,
+the file ``tests/contracts/test_<protocol_snake>_failure_modes.py``
+MUST exist AND contain at least one test function whose name matches::
 
     test_<method>_<failure_class>_<observable_outcome>
 
@@ -28,9 +28,22 @@ where ``<failure_class>`` is one of:
 
 Detection
 ---------
-1. Walk every ``*/protocols.py`` under ``kairix/``. AST-scan for class
-   definitions whose direct bases include ``Protocol`` (with or without
-   ``@runtime_checkable`` decoration).
+1. Walk every ``*.py`` under ``kairix/``. AST-scan for class
+   definitions whose direct bases include ``Protocol`` — bare
+   ``Protocol``, ``Protocol[...]``, or attribute form
+   ``typing.Protocol`` / ``typing_extensions.Protocol`` (with or
+   without ``@runtime_checkable`` decoration).
+
+   Scope widening (#499 Phase 0, EPIC escape 2): the original detector
+   walked only ``kairix/**/protocols.py``, so any Protocol declared in
+   a regular module (``SetupService`` in
+   ``kairix/platform/setup/service.py`` being the canonical escape —
+   21 methods, zero failure-injection coverage, ``set_secret``'s
+   multi-line rejection shipped unseen) was invisible to F68. The
+   detector now discovers Protocols repo-wide; the Protocols it newly
+   surfaced enter the existing baseline as grandfathered entries
+   (paydown via F49). Method-level exclusions are unchanged: only
+   public (non-underscore-prefixed) methods are governed.
 2. For each Protocol class, enumerate every public method (no
    underscore prefix; ``FunctionDef`` or ``AsyncFunctionDef`` in the
    class body).
@@ -162,20 +175,34 @@ def _to_snake_case(name: str) -> str:
     return out.lower()
 
 
+def _base_names_protocol(base: ast.expr) -> bool:
+    """True iff a single base expression denotes ``Protocol``.
+
+    Accepted shapes: ``Protocol`` (Name), ``typing.Protocol`` /
+    ``typing_extensions.Protocol`` / any ``<mod>.Protocol`` attribute,
+    and the subscripted generic form of each (``Protocol[T]``,
+    ``typing.Protocol[T]``).
+    """
+    if isinstance(base, ast.Name):
+        return base.id == "Protocol"
+    if isinstance(base, ast.Attribute):
+        return base.attr == "Protocol"
+    if isinstance(base, ast.Subscript):
+        return _base_names_protocol(base.value)
+    return False
+
+
 def _is_protocol_class(node: ast.ClassDef) -> bool:
     """Return True iff ``node`` declares ``Protocol`` (or ``Protocol[...]``) as a base.
 
     Mirrors typing.Protocol detection without importing the source — the
-    AST tells us whether ``Protocol`` appears in the bases tuple. We
-    deliberately don't require ``@runtime_checkable`` since many
-    domain-internal Protocols skip it.
+    AST tells us whether ``Protocol`` appears in the bases tuple
+    (bare name, ``typing.Protocol`` / ``typing_extensions.Protocol``
+    attribute form, or either subscripted). We deliberately don't
+    require ``@runtime_checkable`` since many domain-internal
+    Protocols skip it — decorated-or-not, the bases decide.
     """
-    for base in node.bases:
-        if isinstance(base, ast.Name) and base.id == "Protocol":
-            return True
-        if isinstance(base, ast.Subscript) and isinstance(base.value, ast.Name) and base.value.id == "Protocol":
-            return True
-    return False
+    return any(_base_names_protocol(base) for base in node.bases)
 
 
 def _public_methods(node: ast.ClassDef) -> list[str]:
@@ -197,17 +224,19 @@ def _public_methods(node: ast.ClassDef) -> list[str]:
 
 
 def _harvest_protocols(repo_root: Path) -> dict[str, list[str]]:
-    """Walk every ``*/protocols.py`` under ``kairix/`` and return
+    """Walk every ``*.py`` under ``kairix/`` and return
     ``{ProtocolName: [method, ...]}`` for each Protocol-derived class.
 
-    Duplicate Protocol names across files collapse to one entry (last
-    write wins) — in practice kairix has no name collisions.
+    Widened from ``*/protocols.py`` to the full tree (#499 Phase 0) —
+    see the module docstring for the SetupService escape that motivated
+    it. Duplicate Protocol names across files collapse to one entry
+    (last write wins) — in practice kairix has no name collisions.
     """
     out: dict[str, list[str]] = {}
     kairix_dir = repo_root / KAIRIX_ROOT
     if not kairix_dir.exists():
         return out
-    for path in kairix_dir.rglob("protocols.py"):
+    for path in kairix_dir.rglob("*.py"):
         if "__pycache__" in path.parts:
             continue
         try:

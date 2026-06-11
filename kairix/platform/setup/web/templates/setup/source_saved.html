@@ -1,0 +1,17 @@
+{% extends "setup/base.html" %}
+{% block title %}Source saved — kairix setup{% endblock %}
+{% block content %}
+<hgroup>
+  <h2>Source saved</h2>
+  <p>Here is what kairix will fetch — nothing is downloaded until indexing runs.</p>
+</hgroup>
+<p class="kx-success-msg">{{ saved.summary }}</p>
+{% if saved.config_file %}
+<p class="kx-muted kx-small">Saved to <code>{{ saved.config_file }}</code>.</p>
+{% endif %}
+<p class="kx-muted kx-small">The background worker fetches this source on its next run. You can connect another source, or continue with setup.</p>
+{% endblock %}
+{% block actions %}
+<a href="/setup/source" class="kx-btn-secondary">Add another source</a>
+<a href="/setup/indexing" class="kx-btn-primary">Continue</a>
+{% endblock %}

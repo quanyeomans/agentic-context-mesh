@@ -1,0 +1,30 @@
+{% extends "setup/base.html" %}
+{% block title %}Choose a source — kairix setup{% endblock %}
+{% block content %}
+<hgroup>
+  <h2>Choose a source</h2>
+  <p>Pick where your knowledge lives. A folder works right away; the connected sources sign in with the account you already use.</p>
+</hgroup>
+<div class="kx-provider-grid">
+  {% for option in options %}
+  {% if option.oauth %}
+  <a class="kx-provider-card" href="/setup/source/connect?provider={{ option.key }}">
+    <div class="kx-provider-body">
+      <strong>{{ option.label }}</strong>
+      <div class="kx-provider-meta"><span>{{ option.description }}</span></div>
+    </div>
+  </a>
+  {% else %}
+  <a class="kx-provider-card" href="/setup/folder">
+    <div class="kx-provider-body">
+      <strong>{{ option.label }}</strong>
+      <div class="kx-provider-meta"><span>{{ option.description }}</span></div>
+    </div>
+  </a>
+  {% endif %}
+  {% endfor %}
+</div>
+{% endblock %}
+{% block actions %}
+<a href="/setup/key" class="kx-btn-secondary">Back</a>
+{% endblock %}

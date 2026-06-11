@@ -30,6 +30,7 @@ from typing import Any
 import pytest
 
 from kairix.config import parse_topology_v2
+from kairix.config_layers import load_merged_mapping
 from kairix.core.connectors.topology_v2_applier import (
     ApplyValidationError,
     apply_topology_v2,
@@ -112,7 +113,7 @@ def test_apply_at_boot_with_no_config_is_noop(tmp_path: Path) -> None:
         return sqlite3.connect(str(db_path))
 
     deps = TopologyV2ApplyDeps(
-        config_path_resolver=lambda: None,  # no kairix.config.yaml on disk
+        config_mapping_fn=dict,  # no kairix.config.yaml on disk -> empty mapping
         db_factory=_fake_db_factory,
     )
     result = apply_topology_v2_at_boot(deps)
@@ -135,7 +136,7 @@ def test_apply_at_boot_materialises_rows(tmp_path: Path) -> None:
     db_path = tmp_path / "kairix.sqlite"
 
     deps = TopologyV2ApplyDeps(
-        config_path_resolver=lambda: config_path,
+        config_mapping_fn=lambda: load_merged_mapping(env={"KAIRIX_CONFIG_PATH": str(config_path)}),
         db_factory=lambda: sqlite3.connect(str(db_path)),
     )
     result = apply_topology_v2_at_boot(deps)
@@ -204,7 +205,7 @@ def test_apply_at_boot_materialises_rows_at_10k_cc_pairs(tmp_path: Path) -> None
     db_path = tmp_path / "kairix.sqlite"
 
     deps = TopologyV2ApplyDeps(
-        config_path_resolver=lambda: config_path,
+        config_mapping_fn=lambda: load_merged_mapping(env={"KAIRIX_CONFIG_PATH": str(config_path)}),
         db_factory=lambda: sqlite3.connect(str(db_path)),
     )
     apply_start = time.monotonic()

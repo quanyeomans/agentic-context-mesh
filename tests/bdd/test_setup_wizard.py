@@ -18,3 +18,23 @@ def test_full_setup_journey() -> None:
 @scenario(FEATURE, "A rejected provider key shows guidance instead of jargon")
 def test_rejected_key_shows_guidance() -> None:
     """Body populated by @scenario from the .feature file."""
+
+
+@scenario(FEATURE, "An Azure operator validates their key with a deployment name")
+def test_azure_deployment_name_happy_path() -> None:
+    """Body populated by @scenario from the .feature file."""
+
+
+@scenario(FEATURE, "A read-only config file does not strand the operator")
+def test_read_only_config_save_rescue() -> None:
+    """Body populated by @scenario from the .feature file."""
+
+
+@scenario(FEATURE, "The capability tour shows the five moves")
+def test_capability_tour_five_moves() -> None:
+    """Body populated by @scenario from the .feature file."""
+
+
+@scenario(FEATURE, "A fresh knowledge store explains an empty brief honestly")
+def test_fresh_store_empty_brief_honesty() -> None:
+    """Body populated by @scenario from the .feature file."""

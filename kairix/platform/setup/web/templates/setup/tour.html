@@ -1,0 +1,108 @@
+{% extends "setup/base.html" %}
+{% block title %}See what your agents can do — kairix setup{% endblock %}
+{% block content %}
+<hgroup>
+  <h2>See what your agents can do</h2>
+  <p>Five real runs against the documents you just indexed — nothing here is canned.
+    Each card names the tool your agents call to do the same thing.</p>
+</hgroup>
+
+{# Each card owns a fixed-size result slot (kx-tour-result) that is
+   present from first paint — results render INSIDE it, so the cards
+   below never move when a run finishes (#488 layout invariant). #}
+
+<article class="kx-tour-card">
+  <div class="kx-tour-head">
+    <h4>Search</h4>
+    <code class="kx-tool-tag">search</code>
+  </div>
+  <p class="kx-tour-when">An agent reaches for this when it needs the right document fast —
+    ask in plain words, get the best matches with a source and a match score for each.</p>
+  <form hx-post="/setup/search" hx-target="#tour-search-result" hx-swap="innerHTML"
+        hx-indicator="#tour-search-indicator">
+    <div class="kx-search-row">
+      <input type="text" name="query" value="What are the main topics in my documents?" class="kx-search-input">
+      <button type="submit" class="kx-btn-outline">Run it</button>
+    </div>
+  </form>
+  <span id="tour-search-indicator" class="kx-indicator kx-muted">Searching your documents…</span>
+  <div id="tour-search-result" class="kx-tour-result"></div>
+</article>
+
+<article class="kx-tour-card">
+  <div class="kx-tour-head">
+    <h4>Context pack</h4>
+    <code class="kx-tool-tag">prep</code>
+  </div>
+  <p class="kx-tour-when">An agent calls this before starting a task — it gets back a short,
+    compact context pack on the topic, built only from your documents. This is what your agent receives.</p>
+  <form hx-post="/setup/tour/prep" hx-target="#tour-prep-result" hx-swap="innerHTML"
+        hx-indicator="#tour-prep-indicator">
+    <div class="kx-search-row">
+      <input type="text" name="query" value="What do my documents say about current projects?" class="kx-search-input">
+      <button type="submit" class="kx-btn-outline">Run it</button>
+    </div>
+  </form>
+  <span id="tour-prep-indicator" class="kx-indicator kx-muted">Building the context pack — takes up to
+    half a minute. This is a real run against your documents.</span>
+  <div id="tour-prep-result" class="kx-tour-result"></div>
+</article>
+
+<article class="kx-tour-card">
+  <div class="kx-tour-head">
+    <h4>Remember, then find it</h4>
+    <code class="kx-tool-tag">memory_write</code>
+  </div>
+  <p class="kx-tour-when">When an agent learns something worth keeping, it saves a memory —
+    the note lands in your knowledge store and search finds it seconds later.</p>
+  <form hx-post="/setup/tour/remember" hx-target="#tour-remember-result" hx-swap="innerHTML"
+        hx-indicator="#tour-remember-indicator">
+    <div class="kx-search-row">
+      <input type="text" name="content" class="kx-search-input"
+             value="Setup finished today — this knowledge store is live and agents can connect.">
+      <button type="submit" class="kx-btn-outline">Run it</button>
+    </div>
+  </form>
+  <span id="tour-remember-indicator" class="kx-indicator kx-muted">Saving it, then searching for it…</span>
+  <div id="tour-remember-result" class="kx-tour-result"></div>
+</article>
+
+<article class="kx-tour-card">
+  <div class="kx-tour-head">
+    <h4>Session brief</h4>
+    <code class="kx-tool-tag">brief</code>
+  </div>
+  <p class="kx-tour-when">An agent starts its session with this — a short summary of recent
+    activity, so it picks up where the team left off instead of starting cold.</p>
+  <form hx-post="/setup/tour/brief" hx-target="#tour-brief-result" hx-swap="innerHTML"
+        hx-indicator="#tour-brief-indicator">
+    <div class="kx-search-row kx-tour-run-row">
+      <button type="submit" class="kx-btn-outline">Run it</button>
+    </div>
+  </form>
+  <span id="tour-brief-indicator" class="kx-indicator kx-muted">Writing the briefing — takes up to
+    half a minute. This is a real run against your documents.</span>
+  <div id="tour-brief-result" class="kx-tour-result"></div>
+</article>
+
+<article class="kx-tour-card">
+  <div class="kx-tour-head">
+    <h4>Timeline</h4>
+    <code class="kx-tool-tag">timeline</code>
+  </div>
+  <p class="kx-tour-when">When the question is about time — what happened last week, what changed
+    in May — an agent uses this to get results that respect dates.</p>
+  <form hx-post="/setup/tour/timeline" hx-target="#tour-timeline-result" hx-swap="innerHTML"
+        hx-indicator="#tour-timeline-indicator">
+    <div class="kx-search-row">
+      <input type="text" name="query" value="What changed in the last week?" class="kx-search-input">
+      <button type="submit" class="kx-btn-outline">Run it</button>
+    </div>
+  </form>
+  <span id="tour-timeline-indicator" class="kx-indicator kx-muted">Looking through time…</span>
+  <div id="tour-timeline-result" class="kx-tour-result"></div>
+</article>
+{% endblock %}
+{% block actions %}
+<a href="/setup/connect-agent" class="kx-btn-primary">Continue</a>
+{% endblock %}

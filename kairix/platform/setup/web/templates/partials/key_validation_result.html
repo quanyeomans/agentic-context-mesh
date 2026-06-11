@@ -10,13 +10,24 @@
   </div>
   <label class="kx-small">
     Model to use
-    <select name="model">
+    {# form= keeps the choice submitting with #key-form: this partial
+       renders into the shared banner slot, outside the form element. #}
+    <select name="model" form="key-form">
       {% for m in validation.models %}
       <option value="{{ m }}">{{ m }}</option>
       {% endfor %}
     </select>
   </label>
   {% endif %}
+</div>
+{% elif validation.deployment_missing %}
+<div class="kx-validation-error">
+  <p class="kx-error-msg">{{ validation.error }}</p>
+  <dl class="kx-error-steps">
+    <dt>Good news</dt><dd>Your key works — Azure accepted it.</dd>
+    <dt>Fix</dt><dd>Enter one of your deployment names in the deployment field above.</dd>
+    <dt>Next</dt><dd>Validate the key again.</dd>
+  </dl>
 </div>
 {% else %}
 <div class="kx-validation-error">

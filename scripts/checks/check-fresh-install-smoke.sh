@@ -229,16 +229,23 @@ echo "stage 3 setup-wizard: OK (200)"
 # credentials the embed leg fails, which is expected here (no provider
 # secrets in CI) — the `|| true` scopes this cut to the BM25 leg.
 echo "stage 4 bm25-search: ingesting (embed leg expected to fail without provider key)"
-run_bounded 600 compose exec -T kairix kairix embed >/dev/null 2>&1 || true
+# `timeout` can only exec real binaries, not the compose() shell function
+# (first run died with "timeout: failed to run command 'compose'"), so the
+# bounded stages spell out the docker compose invocation.
+EMBED_OUT=$(run_bounded 600 docker compose --project-name "$COMPOSE_PROJECT" \
+    exec -T kairix kairix embed 2>&1 || true)
 
-SEARCH_OUT=$(run_bounded 300 compose exec -T kairix \
-    kairix search "$PROBE_TERM" --no-entity-card 2>&1 || true)
+# --json keeps the assertion immune to rich's non-TTY line wrapping.
+SEARCH_OUT=$(run_bounded 300 docker compose --project-name "$COMPOSE_PROJECT" \
+    exec -T kairix kairix search "$PROBE_TERM" --no-entity-card --json 2>&1 || true)
 if ! echo "$SEARCH_OUT" | grep -q "$SAMPLE_DOC"; then
+    echo "embed output (tail):"
+    echo "$EMBED_OUT" | tail -20
     echo "search output:"
     echo "$SEARCH_OUT" | tail -30
     fail_stage "bm25-search" \
         "kairix search '${PROBE_TERM}' did not return ${SAMPLE_DOC} — the fresh install cannot retrieve a document it just ingested over the BM25 leg." \
-        "reproduce: docker compose exec kairix kairix embed; docker compose exec kairix kairix search '${PROBE_TERM}'"
+        "reproduce: docker compose exec kairix kairix embed; docker compose exec kairix kairix search '${PROBE_TERM}' --json"
 fi
 echo "stage 4 bm25-search: OK (${SAMPLE_DOC} found)"
 

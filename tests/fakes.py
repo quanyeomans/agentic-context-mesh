@@ -4808,6 +4808,78 @@ class FakeMcpDispatchClient:
 # ---------------------------------------------------------------------------
 
 
+class FakeOAuth2Flow:
+    """In-memory ``OAuth2Flow`` with scripted outcomes (#489).
+
+    Drives the wizard's source-connect backend without any provider
+    HTTP. Knobs:
+
+    - ``tokens`` — the :class:`CapturedTokens` ``authorize`` returns;
+      defaults to a Slack-shaped set (``bot_token`` populated).
+    - ``raises`` — raised from ``authorize`` (pass a
+      ``CallbackDeniedError`` for the denial path, any exception for
+      the generic-failure path).
+    - ``browser`` — when set, ``authorize`` calls ``browser.open`` with
+      the scripted ``authorize_url`` first, mirroring the real flows so
+      the wizard's consent phase becomes observable.
+    - ``wait_for_listener`` — when True (default), ``authorize`` blocks
+      on ``listener.wait_for_callback()`` exactly like the real flows,
+      so tests exercise the full deliver/verify event dance.
+
+    Recorders: ``redirect_uris`` (one per authorize call — proves the
+    flow saw the origin-derived redirect URI) and ``callback_results``.
+    """
+
+    def __init__(
+        self,
+        *,
+        service_area: str = "slack",
+        scopes: tuple[str, ...] = ("channels:read",),
+        tokens: Any = None,
+        raises: BaseException | None = None,
+        authorize_url: str = "https://provider.test/consent",
+        browser: Any = None,
+        wait_for_listener: bool = True,
+        client_id: str = "fake-client-id",
+        client_secret: str = "fake-client-secret",  # pragma: allowlist secret — fixture value
+    ) -> None:
+        self.service_area = service_area
+        self.scopes = scopes
+        self._tokens = tokens
+        self._raises = raises
+        self._authorize_url = authorize_url
+        self._browser = browser
+        self._wait_for_listener = wait_for_listener
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self.redirect_uris: list[str] = []
+        self.callback_results: list[Any] = []
+
+    def discover_client_credentials(self) -> Any:
+        from kairix.connect.protocols import ClientCredentials
+
+        return ClientCredentials(client_id=self._client_id, client_secret=self._client_secret)
+
+    def authorize(self, *, listener: Any) -> Any:
+        from kairix.connect.protocols import CapturedTokens
+
+        self.redirect_uris.append(listener.redirect_uri)
+        if self._browser is not None:
+            self._browser.open(self._authorize_url)
+        if self._raises is not None:
+            raise self._raises
+        if self._wait_for_listener:
+            self.callback_results.append(listener.wait_for_callback())
+        if self._tokens is not None:
+            return self._tokens
+        return CapturedTokens(
+            refresh_token="",
+            access_token="",
+            token_uri="https://provider.test/token",
+            bot_token="xoxb-fake-bot-token",
+        )
+
+
 class FakeSetupService:
     """In-memory :class:`kairix.platform.setup.service.SetupService`.
 
@@ -4833,11 +4905,16 @@ class FakeSetupService:
         validate_ok: bool = True,
         models: tuple[str, ...] = ("model-alpha", "model-beta"),
         validate_error: str | None = None,
+        validate_deployment_missing: bool = False,
         scan_ok: bool = True,
         scan_files: int = 533,
         scan_words: int = 3_200_000,
         scan_cost_usd: float = 0.04,
         scan_error: str | None = None,
+        save_provider_raises: Exception | None = None,
+        save_source_raises: Exception | None = None,
+        in_container: bool = False,
+        suggested_folder: str = "",
         chunks_total: int = 100,
         chunks_per_tick: int = 50,
         index_error: str | None = None,
@@ -4848,12 +4925,41 @@ class FakeSetupService:
         handshake_ok: bool = True,
         tools_count: int = 12,
         handshake_error: str | None = None,
+        tour_agent: str = "agent-alpha",
+        tour_prep_summary: str = "Across your documents the rollout plan is the main thread, with agent-alpha leading.",
+        tour_prep_sources: tuple[str, ...] = ("notes/kickoff.md", "notes/rollout.md"),
+        tour_prep_message: str = "",
+        tour_remember_found: bool = True,
+        tour_remember_message: str = "",
+        tour_brief_preview: str = "Recent activity: the rollout kicked off and two decisions landed.",
+        tour_brief_next_action: str = "",
+        tour_brief_message: str = "",
+        tour_timeline_hits: tuple[Any, ...] | None = None,
+        tour_timeline_message: str = "",
+        source_options: tuple[Any, ...] | None = None,
+        source_auth_start_error: str | None = None,
+        source_auth_statuses: tuple[Any, ...] | None = None,
+        callback_ok: bool = True,
+        callback_error: str | None = None,
+        source_units: tuple[Any, ...] | None = None,
+        source_units_pickable: bool = True,
+        source_units_note: str = "",
+        source_units_error: str | None = None,
+        save_oauth_raises: Exception | None = None,
+        save_oauth_error: str | None = None,
+        save_oauth_summary: str = "2 channels selected — kairix will fetch and index messages from these channels.",
+        config_file: str = "kairix.config.yaml",
     ) -> None:
-        from kairix.platform.setup.service import ConnectSnippet, SearchPreviewHit
+        from kairix.platform.setup.service import ConnectSnippet, SearchPreviewHit, TourTimelineHit
 
         self._validate_ok = validate_ok
         self._models = models
         self._validate_error = validate_error
+        self._validate_deployment_missing = validate_deployment_missing
+        self._save_provider_raises = save_provider_raises
+        self._save_source_raises = save_source_raises
+        self._in_container = in_container
+        self._suggested_folder = suggested_folder
         self._scan_ok = scan_ok
         self._scan_files = scan_files
         self._scan_words = scan_words
@@ -4893,12 +4999,59 @@ class FakeSetupService:
         self._handshake_ok = handshake_ok
         self._tools_count = tools_count
         self._handshake_error = handshake_error
+        # Capability tour knobs (#490).
+        self._tour_agent = tour_agent
+        self._tour_prep_summary = tour_prep_summary
+        self._tour_prep_sources = tour_prep_sources
+        self._tour_prep_message = tour_prep_message
+        self._tour_remember_found = tour_remember_found
+        self._tour_remember_message = tour_remember_message
+        self._tour_brief_preview = tour_brief_preview
+        self._tour_brief_next_action = tour_brief_next_action
+        self._tour_brief_message = tour_brief_message
+        self._tour_timeline_hits = (
+            tour_timeline_hits
+            if tour_timeline_hits is not None
+            else (
+                TourTimelineHit(
+                    title="Sprint planning",
+                    snippet="agent-alpha agreed the rollout starts next sprint…",
+                    source="notes/kickoff.md",
+                    date="2026-06-08",
+                ),
+            )
+        )
+        self._tour_timeline_message = tour_timeline_message
+        # Source OAuth knobs (#489).
+        self._source_options = source_options
+        self._source_auth_start_error = source_auth_start_error
+        self._source_auth_statuses = source_auth_statuses
+        self._source_auth_status_calls = 0
+        self._callback_ok = callback_ok
+        self._callback_error = callback_error
+        self._source_units = source_units
+        self._source_units_pickable = source_units_pickable
+        self._source_units_note = source_units_note
+        self._source_units_error = source_units_error
+        self._save_oauth_raises = save_oauth_raises
+        self._save_oauth_error = save_oauth_error
+        self._save_oauth_summary = save_oauth_summary
+        # The config file wizard saves land in (#492) — shown on the
+        # source-saved and done screens.
+        self._config_file = config_file
         # Recorders + mutable wizard state.
-        self.saved_providers: list[tuple[str, str, str | None, str | None]] = []
+        self.saved_providers: list[tuple[str, str, str | None, str | None, str | None]] = []
         self.saved_sources: list[str] = []
         self.start_index_calls: int = 0
-        self.validate_calls: list[tuple[str, str, str | None]] = []
+        self.validate_calls: list[tuple[str, str, str | None, str | None]] = []
         self.search_queries: list[str] = []
+        self.tour_prep_queries: list[str] = []
+        self.tour_remember_contents: list[str] = []
+        self.tour_brief_calls: int = 0
+        self.tour_timeline_queries: list[str] = []
+        self.source_auth_starts: list[tuple[str, dict[str, str], str]] = []
+        self.callback_deliveries: list[tuple[str | None, dict[str, str]]] = []
+        self.saved_oauth_sources: list[tuple[str, str, tuple[str, ...]]] = []
         self._chunks_done = 0
         self._index_running = False
 
@@ -4911,17 +5064,37 @@ class FakeSetupService:
             index_done=self._chunks_done >= self._chunks_total,
         )
 
-    def validate_provider(self, provider: str, api_key: str, endpoint: str | None) -> Any:
+    def validate_provider(
+        self,
+        provider: str,
+        api_key: str,
+        endpoint: str | None,
+        deployment: str | None = None,
+    ) -> Any:
         from kairix.platform.setup.service import ProviderValidation
 
-        self.validate_calls.append((provider, api_key, endpoint))
+        self.validate_calls.append((provider, api_key, endpoint, deployment))
+        if self._validate_deployment_missing:
+            error = self._validate_error or (
+                f"Your key works, but this Azure resource has no deployment named '{deployment or 'embed-model'}'."
+            )
+            return ProviderValidation(ok=False, models=(), error=error, deployment_missing=True)
         if not self._validate_ok:
             error = self._validate_error or "Authentication failed — your key was rejected by the provider."
             return ProviderValidation(ok=False, models=(), error=error)
         return ProviderValidation(ok=True, models=self._models, error=None)
 
-    def save_provider(self, provider: str, api_key: str, endpoint: str | None, model: str | None) -> None:
-        self.saved_providers.append((provider, api_key, endpoint, model))
+    def save_provider(
+        self,
+        provider: str,
+        api_key: str,
+        endpoint: str | None,
+        model: str | None,
+        deployment: str | None = None,
+    ) -> None:
+        if self._save_provider_raises is not None:
+            raise self._save_provider_raises
+        self.saved_providers.append((provider, api_key, endpoint, model, deployment))
 
     def scan_folder(self, path: str) -> Any:
         from kairix.platform.setup.service import FolderScan
@@ -4938,7 +5111,17 @@ class FakeSetupService:
         )
 
     def save_source(self, path: str) -> None:
+        if self._save_source_raises is not None:
+            raise self._save_source_raises
         self.saved_sources.append(path)
+
+    def config_file_path(self) -> str:
+        return self._config_file
+
+    def source_hint(self) -> Any:
+        from kairix.platform.setup.service import SourceHint
+
+        return SourceHint(in_container=self._in_container, suggested_path=self._suggested_folder)
 
     def start_index(self) -> None:
         self.start_index_calls += 1
@@ -4946,6 +5129,7 @@ class FakeSetupService:
         self._chunks_done = 0
 
     def index_status(self) -> Any:
+        from kairix.platform.setup.backends import EMPTY_INDEX_MESSAGE
         from kairix.platform.setup.service import IndexStatus
 
         if self._index_statuses is not None:
@@ -4959,6 +5143,18 @@ class FakeSetupService:
                 chunks_done=self._chunks_done,
                 chunks_total=self._chunks_total,
                 error=self._index_error,
+            )
+        if self._chunks_total == 0:
+            # Mirror the real backend (review M1): an empty corpus is
+            # only "done" after a run actually happened, and it carries
+            # the honest 0-documents copy instead of a clean finish.
+            ran = self.start_index_calls > 0
+            return IndexStatus(
+                running=False,
+                done=ran,
+                chunks_done=0,
+                chunks_total=0,
+                error=EMPTY_INDEX_MESSAGE if ran else None,
             )
         if self._index_running and self._chunks_done < self._chunks_total:
             self._chunks_done = min(self._chunks_total, self._chunks_done + self._chunks_per_tick)
@@ -4991,6 +5187,128 @@ class FakeSetupService:
             error = self._handshake_error or "No agent handshake observed on the MCP endpoint."
             return HandshakeResult(ok=False, tools_count=0, error=error)
         return HandshakeResult(ok=True, tools_count=self._tools_count, error=None)
+
+    # ------------------------------------------------------------------
+    # Capability tour (#490)
+    # ------------------------------------------------------------------
+
+    def tour_prep(self, query: str) -> Any:
+        from kairix.platform.setup.service import TourPrep
+
+        self.tour_prep_queries.append(query)
+        if self._tour_prep_message:
+            return TourPrep(summary="", sources=(), message=self._tour_prep_message)
+        return TourPrep(summary=self._tour_prep_summary, sources=tuple(self._tour_prep_sources), message="")
+
+    def tour_remember_roundtrip(self, content: str) -> Any:
+        from kairix.platform.setup.service import TourRememberRoundtrip
+
+        self.tour_remember_contents.append(content)
+        if self._tour_remember_message:
+            return TourRememberRoundtrip(
+                saved=False,
+                agent=self._tour_agent,
+                path="",
+                found=False,
+                elapsed_ms=0,
+                hits=(),
+                message=self._tour_remember_message,
+            )
+        return TourRememberRoundtrip(
+            saved=True,
+            agent=self._tour_agent,
+            path=f"04-Agent-Knowledge/{self._tour_agent}/2026-06-11-setup-finished.md",
+            found=self._tour_remember_found,
+            elapsed_ms=240,
+            hits=tuple(self._search_hits) if self._tour_remember_found else (),
+            message="",
+        )
+
+    def tour_brief(self) -> Any:
+        from kairix.platform.setup.service import TourBrief
+
+        self.tour_brief_calls += 1
+        return TourBrief(
+            agent=self._tour_agent,
+            preview="" if self._tour_brief_message else self._tour_brief_preview,
+            next_action=self._tour_brief_next_action,
+            message=self._tour_brief_message,
+        )
+
+    def tour_timeline(self, query: str) -> Any:
+        from kairix.platform.setup.service import TourTimeline
+
+        self.tour_timeline_queries.append(query)
+        if self._tour_timeline_message:
+            return TourTimeline(hits=(), message=self._tour_timeline_message)
+        return TourTimeline(hits=tuple(self._tour_timeline_hits), message="")
+
+    # Source OAuth connect (#489)
+    # ------------------------------------------------------------------
+
+    def source_options(self) -> Any:
+        from kairix.platform.setup.source_oauth import DEFAULT_SOURCE_OPTIONS
+
+        return tuple(self._source_options) if self._source_options is not None else DEFAULT_SOURCE_OPTIONS
+
+    def start_source_auth(self, provider: str, fields: Any, origin: str) -> Any:
+        from kairix.platform.setup.service import SourceAuthStart
+
+        self.source_auth_starts.append((provider, dict(fields), origin))
+        if self._source_auth_start_error is not None:
+            return SourceAuthStart(ok=False, error=self._source_auth_start_error)
+        return SourceAuthStart(ok=True, error=None)
+
+    def source_auth_status(self) -> Any:
+        from kairix.platform.setup.service import SourceAuthStatus
+
+        if self._source_auth_statuses:
+            idx = min(self._source_auth_status_calls, len(self._source_auth_statuses) - 1)
+            self._source_auth_status_calls += 1
+            return self._source_auth_statuses[idx]
+        return SourceAuthStatus(provider="", phase="idle", authorize_url=None, error=None)
+
+    def complete_source_callback(self, state: str | None, params: Any) -> Any:
+        from kairix.platform.setup.service import CallbackOutcome
+
+        self.callback_deliveries.append((state, dict(params)))
+        if not self._callback_ok:
+            error = self._callback_error or (
+                "No source connection is waiting for a sign-in response."
+                " fix: start the connection from the wizard's source step."
+                " next: open the source step and pick a source."
+            )
+            return CallbackOutcome(ok=False, error=error)
+        return CallbackOutcome(ok=True, error=None)
+
+    def discover_source_units(self, provider: str) -> Any:
+        from kairix.platform.setup.service import SourceUnit, SourceUnits
+
+        units = (
+            tuple(self._source_units)
+            if self._source_units is not None
+            else (
+                SourceUnit(unit_id="C001", name="#general", detail="public channel"),
+                SourceUnit(unit_id="C002", name="#engineering", detail="public channel"),
+            )
+        )
+        return SourceUnits(
+            provider=provider,
+            units=units,
+            pickable=self._source_units_pickable,
+            note=self._source_units_note,
+            error=self._source_units_error,
+        )
+
+    def save_oauth_source(self, provider: str, instance: str, picks: tuple[str, ...]) -> Any:
+        from kairix.platform.setup.service import SavedSource
+
+        if self._save_oauth_raises is not None:
+            raise self._save_oauth_raises
+        self.saved_oauth_sources.append((provider, instance, tuple(picks)))
+        if self._save_oauth_error is not None:
+            return SavedSource(ok=False, summary="", error=self._save_oauth_error)
+        return SavedSource(ok=True, summary=self._save_oauth_summary, error=None, config_file=self._config_file)
 
 
 class FakeMcpTransportServer:

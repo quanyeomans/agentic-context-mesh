@@ -1,0 +1,17 @@
+{% if result.preview %}
+<div class="kx-tour-output">
+  <p class="kx-muted kx-small">Briefing for agent <code>{{ result.agent }}</code>:</p>
+  <pre class="kx-tour-pre">{{ result.preview }}</pre>
+</div>
+{% else %}
+<div class="kx-tour-output">
+  <p class="kx-result-excerpt">Nothing to brief on yet — your brief gets richer as your team works.
+    Here's the shape it takes: recent decisions, open work, and what changed since the last session.</p>
+  {% if result.message %}
+  <p class="kx-muted kx-small">{{ result.message }}</p>
+  {% endif %}
+  {% if result.next_action %}
+  <p class="kx-muted kx-small">{{ result.next_action }}</p>
+  {% endif %}
+</div>
+{% endif %}

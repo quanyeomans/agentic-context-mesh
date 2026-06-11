@@ -22,6 +22,16 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from kairix.config_layers import (
+    DEFAULT_IMAGE_BASE_PATH as _DEFAULT_IMAGE_BASE_PATH,
+)
+from kairix.config_layers import (
+    deep_merge,
+    resolve_layered_paths,
+)
+from kairix.config_layers import (
+    load_yaml_mapping as _load_yaml_safe,
+)
 from kairix.core.search.config import (
     ContentQualityBoostConfig,
     EntityBoostConfig,
@@ -43,16 +53,6 @@ _KEY_PROCEDURAL = "procedural"
 _KEY_RERANK_INTENTS = "rerank_intents"
 _KEY_DATE_PATH_BOOST = "date_path_boost"
 _KEY_CHUNK_DATE_BOOST = "chunk_date_boost"
-
-# The path the Docker image bundles its canonical config at. v2026.6.8+
-# unified container places this at /etc/kairix/kairix.config.yaml per
-# the FHS layout (the Dockerfile's COPY target + KAIRIX_CONFIG_PATH env).
-# Operators overlay sparse host-side overrides via
-# ``KAIRIX_CONFIG_OVERLAY_PATH``; the layered loader reads BASE from
-# this location unless ``KAIRIX_CONFIG_BASE_PATH`` is set to point
-# elsewhere. Pre-v2026.6.8 images placed it at /opt/kairix/kairix.config.yaml
-# — operators on legacy images set KAIRIX_CONFIG_BASE_PATH explicitly.
-_DEFAULT_IMAGE_BASE_PATH = Path("/etc/kairix/kairix.config.yaml")
 
 
 class ConfigValidationError(ValueError):
@@ -79,117 +79,12 @@ _VALID_RANGES: dict[str, tuple[float, float]] = {
 # ---------------------------------------------------------------------------
 # Layered config loader — base + sparse operator overlay
 # ---------------------------------------------------------------------------
-
-
-def deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """Deep-merge ``overlay`` ON TOP OF ``base``; returns a new dict.
-
-    Semantics:
-      - dict + dict  → recursive merge (operator's nested key wins at the
-        leaf; siblings at every level survive from base)
-      - list + list  → overlay REPLACES base (operator declaring their own
-        ``collections.shared`` gets exactly their list, not a concat)
-      - scalar / type-mismatch → overlay wins
-
-    Neither input is mutated; callers can safely reuse both.
-    """
-    if not isinstance(base, dict) or not isinstance(overlay, dict):
-        # Top-level call should always pass dicts; defensive return supports
-        # recursive descent into mixed-type values.
-        return overlay
-    result: dict[str, Any] = {}
-    for key in {*base.keys(), *overlay.keys()}:
-        if key in overlay:
-            if key in base and isinstance(base[key], dict) and isinstance(overlay[key], dict):
-                result[key] = deep_merge(base[key], overlay[key])
-            else:
-                result[key] = overlay[key]
-        else:
-            result[key] = base[key]
-    return result
-
-
-def _resolve_layered_base(base_value: str, image_base_default: Path) -> Path | None:
-    """Resolve the base path for layered mode.
-
-    Explicit ``KAIRIX_CONFIG_BASE_PATH`` wins; otherwise the image-bundled
-    default applies when it exists. Missing files log a warning and yield
-    ``None`` so the caller can degrade gracefully.
-    """
-    if base_value:
-        base_p = Path(base_value)
-        if base_p.is_file():
-            return base_p
-        logger.warning("config_loader: KAIRIX_CONFIG_BASE_PATH=%r not found", base_value)
-        return None
-    return image_base_default if image_base_default.is_file() else None
-
-
-def _resolve_layered_overlay(overlay_value: str) -> Path | None:
-    """Resolve the overlay path for layered mode.
-
-    Empty string → ``None`` (base-only layered mode). Missing file logs a
-    warning and yields ``None`` so the caller still loads the base alone.
-    """
-    if not overlay_value:
-        return None
-    overlay_p = Path(overlay_value)
-    if overlay_p.is_file():
-        return overlay_p
-    logger.warning(
-        "config_loader: KAIRIX_CONFIG_OVERLAY_PATH=%r not found — loading base alone",
-        overlay_value,
-    )
-    return None
-
-
-def _resolve_legacy_or_cwd(env: dict[str, str]) -> tuple[Path | None, Path | None]:
-    """Resolve the legacy single-file mode or cwd-discovery fallback."""
-    legacy_value = env.get("KAIRIX_CONFIG_PATH", "").strip()
-    if legacy_value:
-        legacy_p = Path(legacy_value)
-        if legacy_p.is_file():
-            return legacy_p, None
-        logger.warning("config_loader: KAIRIX_CONFIG_PATH=%r not found — using defaults", legacy_value)
-        return None, None
-
-    cwd_p = Path.cwd() / _DEFAULT_CONFIG_FILENAME
-    if cwd_p.is_file():
-        return cwd_p, None
-    return None, None
-
-
-def resolve_layered_paths(
-    *,
-    env: dict[str, str] | None = None,
-    image_base_default: Path = _DEFAULT_IMAGE_BASE_PATH,
-) -> tuple[Path | None, Path | None]:
-    """Return ``(base_path, overlay_path)`` — F2-clean env resolution.
-
-    Resolution matrix:
-      - ``KAIRIX_CONFIG_OVERLAY_PATH`` set → layered mode:
-          base ← ``KAIRIX_CONFIG_BASE_PATH`` or ``image_base_default``,
-          overlay ← env var.
-      - ``KAIRIX_CONFIG_PATH`` set (and overlay not set) → legacy
-        single-file mode: ``(single_path, None)``.
-      - ``./kairix.config.yaml`` exists → cwd-discovery: ``(cwd_path, None)``.
-      - Otherwise → ``(None, None)`` — caller falls back to defaults.
-
-    The ``env`` kwarg makes this F2-clean: tests pass an explicit dict
-    instead of mutating ``os.environ`` via monkeypatch.setenv.
-    """
-    if env is None:
-        import os
-
-        env = dict(os.environ)
-
-    overlay_value = env.get("KAIRIX_CONFIG_OVERLAY_PATH", "").strip()
-    base_value = env.get("KAIRIX_CONFIG_BASE_PATH", "").strip()
-
-    if overlay_value or base_value:
-        return _resolve_layered_base(base_value, image_base_default), _resolve_layered_overlay(overlay_value)
-
-    return _resolve_legacy_or_cwd(env)
+# The resolve + merge core (``deep_merge``, ``resolve_layered_paths``,
+# ``load_yaml_mapping``) lives in :mod:`kairix.config_layers` so
+# ``kairix.paths`` and the worker share the SAME layered read path the
+# wizard writes through (#492). This module re-exports the names it has
+# always shipped; schema-compat validation stays here because it is a
+# retrieval-loader concern.
 
 
 def validate_schema_compat(base_data: dict[str, Any], overlay_data: dict[str, Any] | None) -> None:
@@ -227,27 +122,6 @@ def validate_schema_compat(base_data: dict[str, Any], overlay_data: dict[str, An
             f"run: kairix probe-config to inspect the merged config the running "
             f"container would see."
         )
-
-
-def _load_yaml_safe(path: Path | None) -> dict[str, Any]:
-    """Load YAML file → dict; empty dict on missing path or parse failure."""
-    if path is None:
-        return {}
-    try:
-        import yaml  # type: ignore[import-untyped] — PyYAML ships without type stubs upstream
-    except ImportError:  # pragma: no cover — PyYAML is a hard dep in pyproject; only fires in stripped builds
-        logger.warning("config_loader: PyYAML not installed — empty config")
-        return {}
-    try:
-        with path.open(encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-    except Exception as exc:
-        logger.warning("config_loader: failed to read %s — %s", path, exc)
-        return {}
-    if not isinstance(data, dict):
-        logger.warning("config_loader: %s root is not a mapping — empty config", path)
-        return {}
-    return data
 
 
 def load_layered_yaml(

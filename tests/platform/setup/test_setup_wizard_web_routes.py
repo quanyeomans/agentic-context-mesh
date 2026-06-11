@@ -11,6 +11,7 @@ rendered HTML / headers (F30 spirit), not on status codes alone.
 from __future__ import annotations
 
 import logging
+import re
 
 import pytest
 
@@ -20,7 +21,7 @@ starlette = pytest.importorskip("starlette")
 from starlette.testclient import TestClient  # noqa: E402
 
 from kairix.agents.mcp.transport import build_mcp_app  # noqa: E402
-from kairix.platform.setup.service import IndexStatus  # noqa: E402
+from kairix.platform.setup.service import IndexStatus, SetupService  # noqa: E402
 from tests.fakes import (  # noqa: E402
     FakeMcpTransportServer,
     FakeSecretsLoader,
@@ -43,12 +44,13 @@ _TOKEN_HEADER = "X-Kairix-Operator-Token"
 
 def _build_client(
     *,
-    service: FakeSetupService | None = None,
+    service: SetupService | None = None,
     secrets: FakeSecretsLoader | None = None,
     flag_on: bool = True,
     client_addr: tuple[str, int] = _LOOPBACK,
     use_default_factory: bool = False,
     readiness_check: object = None,
+    base_url: str = "http://testserver",
 ) -> TestClient:
     """Compose the app through the production composer with fakes."""
     resolved_service = service if service is not None else FakeSetupService()
@@ -64,7 +66,7 @@ def _build_client(
         readiness_check=readiness_check,  # type: ignore[arg-type]  # F3 rationale: None or callable; build_mcp_app accepts both.
         **kwargs,  # type: ignore[arg-type]  # F3 rationale: heterogeneous kwargs dict for an optional seam; build_mcp_app validates the shape.
     )
-    return TestClient(app, client=client_addr)
+    return TestClient(app, client=client_addr, base_url=base_url)
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +136,27 @@ def test_key_screen_names_the_chosen_provider() -> None:
     assert "Validate key" in response.text
 
 
+def test_key_screen_offers_deployment_field_for_azure_providers() -> None:
+    """#484 — Azure routes requests by deployment name, so azure-shaped
+    providers get an optional deployment input with grade-8 help copy."""
+    client = _build_client()
+    for provider in ("azure_foundry", "azure_legacy"):
+        response = client.get("/setup/key", params={"provider": provider})
+        assert response.status_code == 200
+        assert "Deployment name" in response.text
+        assert 'name="deployment"' in response.text
+        assert "Azure gives each model you deploy its own name" in response.text
+
+
+def test_key_screen_hides_deployment_field_for_non_azure_providers() -> None:
+    client = _build_client()
+    for provider in ("anthropic", "openai", "ollama"):
+        response = client.get("/setup/key", params={"provider": provider})
+        assert response.status_code == 200
+        assert "Deployment name" not in response.text
+        assert 'name="deployment"' not in response.text
+
+
 def test_static_assets_are_served_from_the_package() -> None:
     client = _build_client()
     css = client.get("/setup/static/kairix.css")
@@ -160,8 +183,8 @@ def test_key_validation_success_lists_models() -> None:
     assert "model-alpha" in response.text
     assert "model-beta" in response.text
     # The wizard passed the form through to the service unchanged
-    # (empty endpoint normalised to None).
-    assert service.validate_calls == [("anthropic", "fake-key-for-tests", None)]
+    # (empty endpoint normalised to None; no deployment field posted).
+    assert service.validate_calls == [("anthropic", "fake-key-for-tests", None, None)]
 
 
 def test_key_validation_failure_renders_guided_error() -> None:
@@ -198,6 +221,46 @@ def test_api_key_never_echoed_or_logged(caplog: pytest.LogCaptureFixture) -> Non
     assert secret_key not in caplog.text
 
 
+def test_key_validate_passes_the_deployment_name_through() -> None:
+    service = FakeSetupService()
+    client = _build_client(service=service)
+    response = client.post(
+        "/setup/key/validate",
+        data={
+            "provider": "azure_foundry",
+            "api_key": "fake-key-for-tests",  # pragma: allowlist secret
+            "endpoint": "https://res.services.ai.azure.com",
+            "deployment": "my-embed-deploy",
+        },
+    )
+    assert response.status_code == 200
+    assert service.validate_calls == [
+        ("azure_foundry", "fake-key-for-tests", "https://res.services.ai.azure.com", "my-embed-deploy")
+    ]
+
+
+def test_deployment_not_found_renders_key_works_guidance() -> None:
+    """#484 — DeploymentNotFound must NOT show the generic key-blame block;
+    the key authenticated, only the deployment name is wrong."""
+    service = FakeSetupService(validate_deployment_missing=True)
+    client = _build_client(service=service)
+    response = client.post(
+        "/setup/key/validate",
+        data={
+            "provider": "azure_foundry",
+            "api_key": "fake-key-for-tests",  # pragma: allowlist secret
+            "endpoint": "https://res.services.ai.azure.com",
+            "deployment": "wrong-name",
+        },
+    )
+    assert response.status_code == 200
+    assert "Your key works" in response.text
+    assert "no deployment named" in response.text
+    assert "deployment field" in response.text
+    # The generic key-blame guidance stays out of this case.
+    assert "copied the key completely" not in response.text
+
+
 def test_key_save_persists_provider_and_advances_to_folder() -> None:
     service = FakeSetupService()
     client = _build_client(service=service)
@@ -208,7 +271,77 @@ def test_key_save_persists_provider_and_advances_to_folder() -> None:
     )
     assert response.status_code == 303
     assert response.headers["location"] == "/setup/folder"
-    assert service.saved_providers == [("anthropic", "fake-key-for-tests", None, "model-alpha")]
+    assert service.saved_providers == [("anthropic", "fake-key-for-tests", None, "model-alpha", None)]
+
+
+def test_key_save_on_read_only_config_renders_overlay_rescue_banner() -> None:
+    """#485 — a read-only config mount must NOT surface as a raw 500; the
+    banner names the failing path and the overlay rescue, F21-shaped."""
+    service = FakeSetupService(
+        save_provider_raises=OSError(30, "Read-only file system", "/etc/kairix/kairix.config.yaml"),
+    )
+    client = _build_client(service=service)
+    response = client.post("/setup/key", data=_SAVE_KEY_PAYLOAD, follow_redirects=False)
+    assert response.status_code == 200
+    assert "Could not write the config file at /etc/kairix/kairix.config.yaml" in response.text
+    assert "read-only" in response.text
+    assert "KAIRIX_CONFIG_OVERLAY_PATH" in response.text
+    assert "/var/lib/kairix/kairix.config.local.yaml" in response.text
+    assert "fix:" in response.text
+    assert "next:" in response.text
+    # The config rescue stays config-shaped — never the secrets one (M2).
+    assert "KAIRIX_SECRETS_FILE" not in response.text
+    # The operator stays on the key screen — nothing was saved.
+    assert service.saved_providers == []
+
+
+def test_key_save_on_read_only_secrets_renders_the_secrets_rescue_banner() -> None:
+    """Review M2 — failing to persist the KEY must prescribe
+    KAIRIX_SECRETS_FILE and name the bundle path; the config-overlay
+    rescue cannot fix a read-only secrets mount."""
+    from kairix.platform.setup.service import SecretsWriteError
+
+    service = FakeSetupService(save_provider_raises=SecretsWriteError("/run/secrets/kairix.env"))
+    client = _build_client(service=service)
+    response = client.post("/setup/key", data=_SAVE_KEY_PAYLOAD, follow_redirects=False)
+    assert response.status_code == 200
+    assert "Could not save the API key to the secrets file at /run/secrets/kairix.env" in response.text
+    assert "KAIRIX_SECRETS_FILE" in response.text
+    assert "KAIRIX_CONFIG_OVERLAY_PATH" not in response.text
+    assert "fix:" in response.text
+    assert "next:" in response.text
+    assert service.saved_providers == []
+
+
+def test_key_save_rejects_an_empty_api_key_with_guidance() -> None:
+    """Review H4 — an empty key must not be persisted silently."""
+    service = FakeSetupService()
+    client = _build_client(service=service)
+    response = client.post(
+        "/setup/key",
+        data={"provider": "anthropic", "api_key": "", "endpoint": ""},
+        follow_redirects=False,
+    )
+    assert response.status_code == 200
+    assert "The API key field is empty" in response.text
+    assert "fix:" in response.text
+    assert service.saved_providers == []
+
+
+def test_key_save_rejects_a_missing_provider_with_guidance() -> None:
+    """Review H4 — a crafted POST without the hidden provider field must
+    not write ``{"provider": ""}`` to the config."""
+    service = FakeSetupService()
+    client = _build_client(service=service)
+    response = client.post(
+        "/setup/key",
+        data={"api_key": "fake-key-for-tests"},  # pragma: allowlist secret
+        follow_redirects=False,
+    )
+    assert response.status_code == 200
+    assert "No provider is selected" in response.text
+    assert "fix:" in response.text
+    assert service.saved_providers == []
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +385,85 @@ def test_folder_save_records_source_and_starts_indexing() -> None:
     assert service.start_index_calls == 1
 
 
+def test_folder_save_on_read_only_config_renders_rescue_and_skips_indexing() -> None:
+    """#485 — the folder save mirrors the key save: F21 banner, no raw
+    500, and indexing must not start on a failed config write."""
+    service = FakeSetupService(
+        save_source_raises=OSError(30, "Read-only file system", "/etc/kairix/kairix.config.yaml"),
+    )
+    client = _build_client(service=service)
+    response = client.post("/setup/folder", data={"folder_path": "~/Documents"}, follow_redirects=False)
+    assert response.status_code == 200
+    assert "Could not write the config file at /etc/kairix/kairix.config.yaml" in response.text
+    assert "KAIRIX_CONFIG_OVERLAY_PATH" in response.text
+    assert "fix:" in response.text
+    assert "next:" in response.text
+    # The typed path survives the re-render so the operator can retry.
+    assert 'value="~/Documents"' in response.text
+    assert service.start_index_calls == 0
+
+
+def test_folder_save_validation_reject_renders_banner_and_skips_indexing() -> None:
+    """Review H4 — ``save_source``'s documented ValueError (relative or
+    missing path; reachable because the field is editable after the
+    scan) renders the F21 banner instead of a raw 500, and indexing
+    must not start."""
+    message = (
+        "Folder not found or not readable: /data/typo."
+        " fix: create the folder (or fix the spelling), then scan it again."
+        " next: the scan step confirms the folder before it is saved."
+    )
+    service = FakeSetupService(save_source_raises=ValueError(message))
+    client = _build_client(service=service)
+    response = client.post("/setup/folder", data={"folder_path": "/data/typo"}, follow_redirects=False)
+    assert response.status_code == 200
+    assert "Folder not found or not readable: /data/typo" in response.text
+    assert "fix:" in response.text
+    assert "next:" in response.text
+    # The typed path survives the re-render so the operator can retry.
+    assert 'value="/data/typo"' in response.text
+    assert service.start_index_calls == 0
+
+
+def test_folder_screen_prefills_the_mounted_root_in_container_mode() -> None:
+    """#486 — inside a container the folder field starts at the mounted
+    document root with Docker-aware helper copy."""
+    service = FakeSetupService(in_container=True, suggested_folder="/data/documents")
+    client = _build_client(service=service)
+    response = client.get("/setup/folder")
+    assert response.status_code == 200
+    assert 'value="/data/documents"' in response.text
+    assert "Running in Docker?" in response.text
+    assert "This is the folder you mounted" in response.text
+
+
+def test_folder_screen_stays_blank_outside_a_container() -> None:
+    service = FakeSetupService(in_container=False)
+    client = _build_client(service=service)
+    response = client.get("/setup/folder")
+    assert response.status_code == 200
+    assert 'value=""' in response.text
+    assert "Running in Docker?" not in response.text
+
+
+def test_folder_scan_rejects_relative_paths_naming_the_resolution_base() -> None:
+    """#486 — the REAL backend behind the real routes: a relative path is
+    rejected with copy that names the server's working folder instead of
+    silently joining it."""
+    from pathlib import Path
+
+    from kairix.platform.setup.backends import SetupServiceDeps
+    from kairix.platform.setup.service import build_setup_service
+
+    service = build_setup_service(deps=SetupServiceDeps(environ={}))
+    client = _build_client(service=service)
+    response = client.post("/setup/folder/scan", data={"folder_path": "notes/projects"})
+    assert response.status_code == 200
+    assert "relative path" in response.text
+    assert str(Path.cwd()) in response.text
+    assert "full path" in response.text
+
+
 # ---------------------------------------------------------------------------
 # Indexing progress
 # ---------------------------------------------------------------------------
@@ -270,7 +482,7 @@ def test_indexing_progress_advances_then_redirects() -> None:
     second = client.get("/setup/indexing/progress")
     assert "100%" in second.text
     assert "Indexing complete" in second.text
-    assert second.headers["HX-Redirect"] == "/setup/first-search"
+    assert second.headers["HX-Redirect"] == "/setup/tour"
 
 
 def test_indexing_progress_with_unknown_total_shows_zero_percent() -> None:
@@ -298,17 +510,50 @@ def test_indexing_screen_polls_the_progress_endpoint() -> None:
     assert "every 1s" in response.text
 
 
-# ---------------------------------------------------------------------------
-# First search
-# ---------------------------------------------------------------------------
-
-
-def test_first_search_screen_offers_suggested_queries() -> None:
-    client = _build_client()
-    response = client.get("/setup/first-search")
+def test_indexing_an_empty_folder_explains_instead_of_spinning() -> None:
+    """Review M1 — a run over a folder with nothing readable completes
+    with the honest 0-documents copy; the screen must not auto-advance
+    to the tour, and must not spin forever."""
+    service = FakeSetupService(chunks_total=0)
+    client = _build_client(service=service)
+    client.post("/setup/folder", data={"folder_path": "/data/empty"}, follow_redirects=False)
+    response = client.get("/setup/indexing/progress")
     assert response.status_code == 200
-    assert "Try your first search" in response.text
-    assert "kx-query-suggestion" in response.text
+    assert "0 documents indexed" in response.text
+    assert "fix:" in response.text
+    assert "HX-Redirect" not in response.headers
+    assert "Indexing in progress" not in response.text
+
+
+# ---------------------------------------------------------------------------
+# Capability tour (#490)
+# ---------------------------------------------------------------------------
+
+# The five MCP tool names the tour and the done screen surface, exactly
+# as agents call them.
+_TOUR_TOOL_NAMES = ("search", "prep", "memory_write", "brief", "timeline")
+
+
+def test_tour_screen_offers_five_runnable_cards_with_tool_names() -> None:
+    client = _build_client()
+    response = client.get("/setup/tour")
+    assert response.status_code == 200
+    assert "See what your agents can do" in response.text
+    assert response.text.count("Run it") == 5
+    for tool in _TOUR_TOOL_NAMES:
+        assert f'<code class="kx-tool-tag">{tool}</code>' in response.text
+    # Long-running cards warn honestly about the wait.
+    assert response.text.count("takes up to") == 2
+    assert "real run against your documents" in response.text
+
+
+def test_first_search_path_redirects_to_the_tour() -> None:
+    client = _build_client()
+    response = client.get("/setup/first-search", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/setup/tour"
+    followed = client.get("/setup/first-search", follow_redirects=True)
+    assert "See what your agents can do" in followed.text
 
 
 def test_search_returns_result_cards() -> None:
@@ -322,6 +567,108 @@ def test_search_returns_result_cards() -> None:
     assert service.search_queries == ["project kickoff"]
 
 
+def test_search_with_no_hits_renders_an_honest_empty_state() -> None:
+    """Review L7 — zero hits get guidance, not a bare "0 results" count."""
+    service = FakeSetupService(search_hits=())
+    client = _build_client(service=service)
+    response = client.post("/setup/search", data={"query": "nothing matches this"})
+    assert response.status_code == 200
+    assert "No matches for" in response.text
+    assert "Try different words" in response.text
+    assert "0 results" not in response.text
+
+
+def test_tour_prep_renders_summary_and_sources() -> None:
+    service = FakeSetupService()
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/prep", data={"query": "current projects"})
+    assert response.status_code == 200
+    assert "rollout plan is the main thread" in response.text
+    assert "notes/kickoff.md" in response.text
+    assert "notes/rollout.md" in response.text
+    assert service.tour_prep_queries == ["current projects"]
+
+
+def test_tour_prep_failure_renders_guidance_not_a_trace() -> None:
+    service = FakeSetupService(
+        tour_prep_message="The context pack could not be built. fix: check the provider key. next: run it again.",
+    )
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/prep", data={"query": "current projects"})
+    assert response.status_code == 200
+    assert "could not be built" in response.text
+    assert "fix:" in response.text
+    assert "next:" in response.text
+    assert "Traceback" not in response.text
+
+
+def test_tour_remember_renders_the_write_then_find_round_trip() -> None:
+    service = FakeSetupService()
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/remember", data={"content": "Setup finished today."})
+    assert response.status_code == 200
+    assert "Saved, then found by search" in response.text
+    assert "240" in response.text
+    assert "agent-alpha" in response.text
+    assert "notes/kickoff.md" in response.text  # the search leg's hit is shown
+    assert service.tour_remember_contents == ["Setup finished today."]
+
+
+def test_tour_remember_not_yet_found_is_reported_honestly() -> None:
+    service = FakeSetupService(tour_remember_found=False)
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/remember", data={"content": "Setup finished today."})
+    assert "Saved in" in response.text
+    assert "hasn't caught up with it yet" in response.text
+    assert "found by search" not in response.text
+
+
+def test_tour_brief_renders_the_briefing_preview() -> None:
+    service = FakeSetupService()
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/brief")
+    assert response.status_code == 200
+    assert "the rollout kicked off and two decisions landed" in response.text
+    assert service.tour_brief_calls == 1
+
+
+def test_tour_brief_empty_on_a_fresh_store_explains_honestly() -> None:
+    service = FakeSetupService(tour_brief_preview="", tour_brief_next_action="Try tool_search for now.")
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/brief")
+    assert "your brief gets richer as your team works" in response.text
+    assert "recent decisions, open work" in response.text
+    assert "Try tool_search for now." in response.text
+
+
+def test_tour_brief_guidance_message_renders_inside_the_honest_empty_state() -> None:
+    service = FakeSetupService(
+        tour_brief_message="Briefings are written for a named agent. fix: add your agent. next: ask it for a brief.",
+    )
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/brief")
+    assert "your brief gets richer as your team works" in response.text
+    assert "fix: add your agent" in response.text
+
+
+def test_tour_timeline_renders_dated_results() -> None:
+    service = FakeSetupService()
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/timeline", data={"query": "last week"})
+    assert response.status_code == 200
+    assert "2026-06-08" in response.text
+    assert "Sprint planning" in response.text
+    assert "notes/kickoff.md" in response.text
+    assert service.tour_timeline_queries == ["last week"]
+
+
+def test_tour_timeline_empty_corpus_explains_the_fill_in() -> None:
+    service = FakeSetupService(tour_timeline_hits=())
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/timeline", data={"query": "last week"})
+    assert "the timeline fills in" in response.text
+
+
 # ---------------------------------------------------------------------------
 # Connect agent
 # ---------------------------------------------------------------------------
@@ -332,10 +679,61 @@ def test_connect_agent_screen_shows_mcp_url_and_snippets() -> None:
     client = _build_client(service=service)
     response = client.get("/setup/connect-agent")
     assert response.status_code == 200
-    assert "http://127.0.0.1:8765/mcp" in response.text
+    # Review L1 — the displayed URL re-anchors on the live request
+    # origin (the wizard and the MCP transport share one server), so
+    # the endpoint default's host:port never leaks onto the page.
+    assert "http://testserver/mcp" in response.text
+    assert "127.0.0.1:8765" not in response.text
     assert "Claude Code" in response.text
     assert "mcpServers" in response.text
     assert "Verify connection" in response.text
+
+
+def test_connect_agent_screen_shows_the_port_the_browser_reached() -> None:
+    """Review L1 — a pip install whose port auto-shifted: the page must
+    advertise the live origin's port, not KAIRIX_MCP_ENDPOINT's default."""
+    service = FakeSetupService(mcp_url="http://localhost:8080/mcp")
+    client = _build_client(service=service, base_url="http://testserver:8123")
+    response = client.get("/setup/connect-agent")
+    assert response.status_code == 200
+    assert "http://testserver:8123/mcp" in response.text
+    assert "localhost:8080" not in response.text
+    # The copy-paste snippets carry the rebased URL too.
+    assert "claude mcp add --transport http kairix http://testserver:8123/mcp" in response.text
+
+
+def test_connect_agent_screen_falls_back_to_the_service_url_without_a_host() -> None:
+    """A service URL with no host part (nothing to swap) renders verbatim."""
+    service = FakeSetupService(mcp_url="run kairix mcp serve to get a URL")
+    client = _build_client(service=service)
+    response = client.get("/setup/connect-agent")
+    assert response.status_code == 200
+    assert "run kairix mcp serve to get a URL" in response.text
+
+
+def test_connect_agent_screen_explains_which_url_works_where() -> None:
+    """#487 — the transport matrix: local CLI agents take plain http,
+    claude.ai / Claude Desktop need https behind a reverse proxy."""
+    service = FakeSetupService(mcp_url="http://127.0.0.1:8765/mcp")
+    client = _build_client(service=service)
+    response = client.get("/setup/connect-agent")
+    assert response.status_code == 200
+    assert "Which URL works where" in response.text
+    assert "SSH tunnel" in response.text
+    assert "claude.ai" in response.text
+    assert "https://" in response.text
+    assert "reverse proxy" in response.text
+    assert "docs/operations/OPERATIONS.md#deploying-behind-a-reverse-proxy" in response.text
+    assert "localhost http is fine" in response.text
+
+
+def test_connect_agent_screen_offers_the_claude_mcp_add_one_liner() -> None:
+    """#487 — the one-command connect snippet carries the screen's real
+    resolved URL (origin-rebased per review L1)."""
+    service = FakeSetupService(mcp_url="http://127.0.0.1:8765/mcp")
+    client = _build_client(service=service)
+    response = client.get("/setup/connect-agent")
+    assert "claude mcp add --transport http kairix http://testserver/mcp" in response.text
 
 
 def test_connect_agent_verify_reports_tool_count() -> None:
@@ -369,6 +767,221 @@ def test_done_screen_celebrates_indexed_chunks() -> None:
     assert "Your knowledge is ready" in response.text
     assert "100" in response.text
     assert "chunks indexed" in response.text
+
+
+def test_done_screen_lists_the_five_mcp_tool_names() -> None:
+    """#490 — the finish screen names each capability's MCP tool so the
+    operator can repeat everything from their agent."""
+    client = _build_client()
+    response = client.get("/setup/done")
+    assert response.status_code == 200
+    for tool in _TOUR_TOOL_NAMES:
+        assert f"<code>{tool}</code>" in response.text
+    # The recap keeps the agent-connect pointer.
+    assert "MCP connection you set up" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Shared layout primitive (#488)
+#
+# Structural invariant: every full screen renders card → content →
+# banner slot → action row, with every async result target INSIDE the
+# slot — so no interactive element ever moves when a result arrives.
+# ---------------------------------------------------------------------------
+
+_BANNER_SLOT_ID_MARKUP = 'id="kx-banner-slot"'
+_ACTION_ROW_CLASS = "kx-setup-actions"
+_ACTION_ROW_RE = re.compile('<div class="' + _ACTION_ROW_CLASS + '">(.*?)</div>', re.DOTALL)
+_BTN_SECONDARY = "kx-btn-secondary"
+_BTN_OUTLINE = "kx-btn-outline"
+_BTN_PRIMARY = "kx-btn-primary"
+
+# (screen id, method, path, query params / form data) for every full
+# screen in the wizard. All screens are GETs except the saved-source
+# confirmation, which the wizard renders as the POST /setup/source/save
+# response (its only render path).
+_SCREEN_REQUESTS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
+    ("welcome", "GET", "/setup", {}),
+    ("provider", "GET", "/setup/provider", {}),
+    ("key", "GET", "/setup/key", {"provider": "anthropic"}),
+    ("folder", "GET", "/setup/folder", {}),
+    ("indexing", "GET", "/setup/indexing", {}),
+    ("tour", "GET", "/setup/tour", {}),
+    ("connect-agent", "GET", "/setup/connect-agent", {}),
+    ("done", "GET", "/setup/done", {}),
+    # OAuth source-connect screens (#489) — same primitive, same step.
+    ("source", "GET", "/setup/source", {}),
+    ("source-connect", "GET", "/setup/source/connect", {"provider": "slack"}),
+    ("source-wait", "GET", "/setup/source/wait", {"provider": "slack"}),
+    ("source-picker", "GET", "/setup/source/picker", {"provider": "slack"}),
+    ("source-saved", "POST", "/setup/source/save", {"provider": "slack", "unit": "C001"}),
+)
+
+# Canonical action-row composition per screen: Back (secondary) leftmost,
+# helpers (outline) in the middle, the primary action rightmost. The
+# tour's five per-card "Run it" buttons live in the content area (each
+# with its own fixed result slot), so its action row stays a lone
+# primary — same shape the first-search screen carried. The source and
+# source-wait screens advance through their content (provider cards /
+# the auto-advancing status poll), so their rows carry only Back.
+_CANONICAL_ROWS: dict[str, tuple[str, ...]] = {
+    "welcome": (_BTN_PRIMARY,),
+    "provider": (_BTN_SECONDARY, _BTN_PRIMARY),
+    "key": (_BTN_SECONDARY, _BTN_OUTLINE, _BTN_PRIMARY),
+    "folder": (_BTN_SECONDARY, _BTN_OUTLINE, _BTN_PRIMARY),
+    "indexing": (),
+    "tour": (_BTN_PRIMARY,),
+    "connect-agent": (_BTN_SECONDARY, _BTN_OUTLINE, _BTN_PRIMARY),
+    "done": (_BTN_PRIMARY,),
+    "source": (_BTN_SECONDARY,),
+    "source-connect": (_BTN_SECONDARY, _BTN_PRIMARY),
+    "source-wait": (_BTN_SECONDARY,),
+    "source-picker": (_BTN_SECONDARY, _BTN_PRIMARY),
+    "source-saved": (_BTN_SECONDARY, _BTN_PRIMARY),
+}
+
+# Per-screen HTMX swap target for screens that render async results
+# into the shared banner slot. The tour renders into per-card slots
+# instead — covered by test_tour_cards_own_fixed_result_slots below.
+_ASYNC_TARGETS: dict[str, str] = {
+    "key": "validation-result",
+    "folder": "scan-result",
+    "indexing": "indexing-progress",
+    "connect-agent": "handshake-result",
+    "source-wait": "source-auth-status",
+}
+
+# (id, method, path, form data) for every partial-rendering endpoint.
+_PARTIAL_REQUESTS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
+    ("key-validate", "POST", "/setup/key/validate", _SAVE_KEY_PAYLOAD),
+    ("folder-scan", "POST", "/setup/folder/scan", {"folder_path": "~/Documents"}),
+    ("indexing-progress", "GET", "/setup/indexing/progress", {}),
+    ("search", "POST", "/setup/search", {"query": "project kickoff"}),
+    ("connect-verify", "POST", "/setup/connect-agent/verify", {}),
+    ("tour-prep", "POST", "/setup/tour/prep", {"query": "current projects"}),
+    ("tour-remember", "POST", "/setup/tour/remember", {"content": "Setup finished today."}),
+    ("tour-brief", "POST", "/setup/tour/brief", {}),
+    ("tour-timeline", "POST", "/setup/tour/timeline", {"query": "last week"}),
+    ("source-auth-status", "GET", "/setup/source/auth-status", {}),
+)
+
+# The tour's per-card HTMX swap targets — each must be a fixed-size slot
+# present from first paint so the cards below never move (#488).
+_TOUR_RESULT_TARGETS = (
+    "tour-search-result",
+    "tour-prep-result",
+    "tour-remember-result",
+    "tour-brief-result",
+    "tour-timeline-result",
+)
+
+
+def _screen_html(method: str, path: str, payload: dict[str, str]) -> str:
+    client = _build_client()
+    if method == "GET":
+        response = client.get(path, params=payload, follow_redirects=True)
+    else:
+        response = client.post(path, data=payload)
+    assert response.status_code == 200
+    return response.text
+
+
+def _action_row(html: str) -> str:
+    match = _ACTION_ROW_RE.search(html)
+    assert match is not None, "canonical action row missing from the screen"
+    return match.group(1)
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [pytest.param(method, path, payload, id=name) for name, method, path, payload in _SCREEN_REQUESTS],
+)
+def test_every_screen_renders_the_banner_slot_above_the_action_row(
+    method: str, path: str, payload: dict[str, str]
+) -> None:
+    html = _screen_html(method, path, payload)
+    assert _BANNER_SLOT_ID_MARKUP in html
+    assert _ACTION_ROW_CLASS in html
+    # Document order: the banner slot always precedes the action row, so
+    # results render above the buttons, never among or below them.
+    assert html.index(_BANNER_SLOT_ID_MARKUP) < html.index(_ACTION_ROW_CLASS)
+
+
+@pytest.mark.parametrize(
+    ("name", "method", "path", "payload"),
+    [pytest.param(name, method, path, payload, id=name) for name, method, path, payload in _SCREEN_REQUESTS],
+)
+def test_action_rows_share_the_canonical_composition(
+    name: str, method: str, path: str, payload: dict[str, str]
+) -> None:
+    row = _action_row(_screen_html(method, path, payload))
+    found = tuple(re.findall(r"kx-btn-(?:secondary|outline|primary)", row))
+    assert found == _CANONICAL_ROWS[name]
+    # No inline styles in the row: hidden-until-revealed actions hold
+    # their slot via the kx-btn-reveal class, never display:none.
+    assert "style=" not in row
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload", "target_id"),
+    [
+        pytest.param(method, path, payload, _ASYNC_TARGETS[name], id=name)
+        for name, method, path, payload in _SCREEN_REQUESTS
+        if name in _ASYNC_TARGETS
+    ],
+)
+def test_async_result_targets_live_inside_the_banner_slot(
+    method: str, path: str, payload: dict[str, str], target_id: str
+) -> None:
+    html = _screen_html(method, path, payload)
+    target_markup = f'id="{target_id}"'
+    slot_at = html.index(_BANNER_SLOT_ID_MARKUP)
+    actions_at = html.index(_ACTION_ROW_CLASS)
+    target_at = html.index(target_markup)
+    assert slot_at < target_at < actions_at, (
+        f"{target_markup} must sit inside the banner slot (after {_BANNER_SLOT_ID_MARKUP}, "
+        f"before the {_ACTION_ROW_CLASS} row) so the buttons never move when results render"
+    )
+
+
+def test_tour_cards_own_fixed_result_slots_above_the_action_row() -> None:
+    """#490 — every tour card's swap target is a fixed-size slot rendered
+    from first paint, before the action row, so nothing shifts when a
+    run finishes (the per-card analogue of the banner-slot invariant)."""
+    html = _screen_html("GET", "/setup/tour", {})
+    actions_at = html.index(_ACTION_ROW_CLASS)
+    for target_id in _TOUR_RESULT_TARGETS:
+        target_markup = f'id="{target_id}" class="kx-tour-result"'
+        assert target_markup in html, f"{target_id} must hold its slot with the kx-tour-result class"
+        assert html.index(target_markup) < actions_at
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [pytest.param(method, path, payload, id=name) for name, method, path, payload in _SCREEN_REQUESTS],
+)
+def test_every_screen_uses_the_uniform_card_width(method: str, path: str, payload: dict[str, str]) -> None:
+    html = _screen_html(method, path, payload)
+    assert 'class="kx-setup-card' in html
+    # The 2026-06-11 demo flagged the provider grid rendering in a wider
+    # card than the other steps. One card width across every screen,
+    # source screens included (#488): no screen opts into a
+    # width-variant class.
+    assert "kx-setup-card-wide" not in html
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "data"),
+    [pytest.param(method, path, data, id=name) for name, method, path, data in _PARTIAL_REQUESTS],
+)
+def test_partials_render_into_the_slot_without_layout_markup(method: str, path: str, data: dict[str, str]) -> None:
+    client = _build_client()
+    response = client.request(method, path, data=data or None)
+    assert response.status_code == 200
+    # Partials swap INTO the banner slot; they never carry their own
+    # slot or action-row scaffolding (which would nest or move buttons).
+    assert "kx-banner-slot" not in response.text
+    assert _ACTION_ROW_CLASS not in response.text
 
 
 # ---------------------------------------------------------------------------

@@ -508,6 +508,21 @@ def _resolve_config_path_default() -> Path | None:
     return resolve_config_path()
 
 
+def _load_merged_config_mapping_default() -> dict[str, Any]:
+    """Default boundary read for the MERGED operator config (#492).
+
+    Resolves base + overlay through
+    :func:`kairix.config_layers.load_merged_mapping` — the same layered
+    read path the setup wizard writes through. On the shipped compose
+    the wizard's saves land on the ``KAIRIX_CONFIG_OVERLAY_PATH`` file
+    while the base config is mounted read-only; a single-file read of
+    the base would never see a wizard-saved ``topology_v2:`` block.
+    """
+    from kairix.config_layers import load_merged_mapping
+
+    return load_merged_mapping()
+
+
 def _open_db_default() -> sqlite3.Connection:
     """Default DB-factory boundary call — wraps :func:`kairix.core.db.open_db`."""
     from kairix.core.db import open_db
@@ -2265,19 +2280,23 @@ class TopologyV2ApplyDeps:
 
     F6-clean: every field has a ``default_factory`` so production callers
     construct ``TopologyV2ApplyDeps()`` and get the real boundary calls;
-    tests construct ``TopologyV2ApplyDeps(config_path_resolver=...,
+    tests construct ``TopologyV2ApplyDeps(config_mapping_fn=...,
     db_factory=...)`` and pass it as a single argument to drive the
     apply step against a tmp_path-rooted config + DB without touching
     the dev's real vault.
 
     Fields:
-      * ``config_path_resolver`` — returns the ``kairix.config.yaml``
-        path or ``None``. Default :func:`_resolve_config_path_default`.
+      * ``config_mapping_fn`` — returns the parsed + MERGED operator
+        config mapping (base + overlay, #492); ``{}`` when no config
+        resolves. Default :func:`_load_merged_config_mapping_default`.
+        Tests drive real file reads with
+        ``lambda: load_merged_mapping(env={...})`` (explicit env dict,
+        F2-clean).
       * ``db_factory`` — opens the SQLite connection the apply step
         writes through; default :func:`kairix.core.db.open_db`.
     """
 
-    config_path_resolver: Callable[[], Path | None] = field(default_factory=lambda: _resolve_config_path_default)
+    config_mapping_fn: Callable[[], dict[str, Any]] = field(default_factory=lambda: _load_merged_config_mapping_default)
     db_factory: Callable[[], sqlite3.Connection] = field(default_factory=lambda: _open_db_default)
 
 
@@ -2371,12 +2390,14 @@ def apply_topology_v2_at_boot(deps: TopologyV2ApplyDeps | None = None) -> None:
     """
     deps = deps if deps is not None else TopologyV2ApplyDeps()
 
-    config_path = deps.config_path_resolver()
-    if config_path is None or not config_path.exists():
+    try:
+        raw = deps.config_mapping_fn()
+    except Exception as exc:
+        logger.warning("worker: topology_v2 apply skipped — could not read config: %s", exc)
+        return
+    if not raw:
         logger.info("worker: topology_v2 apply skipped — no kairix.config.yaml on disk")
         return
-
-    import yaml
 
     from kairix.config import parse_topology_v2
     from kairix.core.connectors.topology_v2_applier import (
@@ -2384,13 +2405,6 @@ def apply_topology_v2_at_boot(deps: TopologyV2ApplyDeps | None = None) -> None:
         apply_topology_v2,
     )
     from kairix.core.db.schema import create_schema
-
-    try:
-        with config_path.open() as fh:
-            raw = yaml.safe_load(fh) or {}
-    except Exception as exc:
-        logger.warning("worker: topology_v2 apply skipped — could not read config: %s", exc)
-        return
 
     try:
         parsed = parse_topology_v2(raw)

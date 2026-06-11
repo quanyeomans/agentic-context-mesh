@@ -3,6 +3,7 @@ Shared pytest fixtures for the kairix test suite.
 
 Fixture hierarchy:
   no_azure_calls (autouse, all non-e2e tests) — blocks accidental Azure API calls
+  _hermetic_user_config (autouse) — hides the developer's real ~/.config/kairix
   fake_llm_backend — FakeLLM satisfying LLMBackend Protocol
   neo4j_client — FakeNeo4jClient satisfying Neo4jClient interface
   search_db / seeded_search_db — BM25 search index fixtures
@@ -307,6 +308,9 @@ pytest_plugins = [
     # Web setup wizard (#474) — composes build_mcp_app + FakeSetupService
     # through the public seams and drives the wizard with TestClient.
     "tests.bdd.steps.setup_wizard_steps",
+    # Wizard OAuth source connect (#489) — same composition shape; the
+    # source sign-in outcomes are scripted on FakeSetupService.
+    "tests.bdd.steps.setup_wizard_source_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.
@@ -355,6 +359,27 @@ def no_azure_calls(monkeypatch, request):
     if "e2e" not in request.keywords:
         monkeypatch.delenv("KAIRIX_AZURE_API_KEY", raising=False)
         monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_user_config(monkeypatch, tmp_path_factory):
+    """Hide the developer's real ``~/.config/kairix`` from every test (#492).
+
+    The config readers resolve ``$XDG_CONFIG_HOME/kairix/kairix.config.yaml``
+    — the pip-install location ``kairix init`` writes — as their final
+    fallback, so on a machine where the operator has run ``kairix init``
+    the ambient user config would leak into tests that assert
+    no-config defaults (provider-not-configured fallbacks, path
+    defaults). Redirecting XDG_CONFIG_HOME to an empty per-session dir
+    keeps the suite hermetic on any machine. CI is unaffected (clean
+    HOME). Tests that need their own XDG location still win — their
+    ``monkeypatch.setenv`` / explicit ``env=`` dicts apply on top.
+
+    XDG_CONFIG_HOME is not a KAIRIX_* var (F2-clean); like
+    ``no_azure_calls`` this is a deliberate env-boundary safety net,
+    not a test-shaping hack.
+    """
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path_factory.getbasetemp() / "hermetic-xdg-config"))
 
 
 @pytest.fixture(autouse=True)
