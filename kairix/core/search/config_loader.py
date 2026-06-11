@@ -683,6 +683,96 @@ def load_collections(config_path: Path | str | None = None) -> CollectionsConfig
         return None
 
 
+# ── Reference-library index mode (#475) ─────────────────────────────────────
+
+REFLIB_INDEX_EAGER = "eager"
+REFLIB_INDEX_LAZY = "lazy"
+REFLIB_INDEX_SKIP = "skip"
+VALID_REFLIB_INDEX_MODES = (REFLIB_INDEX_EAGER, REFLIB_INDEX_LAZY, REFLIB_INDEX_SKIP)
+
+# F17 — the YAML key appears in parser, loader, and error strings.
+_KEY_REFERENCE_LIBRARY = "reference_library"
+
+
+@dataclass(frozen=True)
+class ReferenceLibraryConfig:
+    """Parsed ``reference_library:`` block from kairix.config.yaml (#475).
+
+    ``index`` controls how the bundled reference library participates in
+    the embed/ingest walk:
+
+    * ``eager`` (default — today's behaviour): the library is scanned and
+      embedded alongside the operator's own documents. User documents
+      still embed first within a run (user-docs-first ordering).
+    * ``lazy``: the library's chunks embed only in a run where no user
+      documents are pending — a first boot embeds the user's documents,
+      and the library catches up on subsequent runs.
+    * ``skip``: the library never joins the scan walk and is never
+      embedded.
+
+    Default-safe: an absent block parses to ``eager`` so existing
+    deployments are unchanged.
+    """
+
+    index: str = REFLIB_INDEX_EAGER
+
+
+def parse_reference_library(data: dict) -> ReferenceLibraryConfig:
+    """Parse the ``reference_library:`` block. Absent block → eager default.
+
+    Raises :class:`ConfigValidationError` (with an F21-shaped remediation
+    message) when the block is present but malformed — per this module's
+    contract, invalid declared values must surface loudly rather than
+    silently falling back: an operator who asked for ``skip`` and got a
+    silent ``eager`` would re-embed the entire bundled library.
+    """
+    block = data.get(_KEY_REFERENCE_LIBRARY)
+    if block is None:
+        return ReferenceLibraryConfig()
+    if not isinstance(block, dict):
+        raise ConfigValidationError(
+            f"{_DEFAULT_CONFIG_FILENAME}: {_KEY_REFERENCE_LIBRARY} must be a mapping. "
+            f"fix: declare it as a block with an `index:` key, e.g.\n"
+            f"  {_KEY_REFERENCE_LIBRARY}:\n    index: {REFLIB_INDEX_EAGER}\n"
+            "next: kairix config validate. "
+            "run: kairix config validate"
+        )
+    mode = block.get("index", REFLIB_INDEX_EAGER)
+    if mode not in VALID_REFLIB_INDEX_MODES:
+        raise ConfigValidationError(
+            f"{_DEFAULT_CONFIG_FILENAME}: {_KEY_REFERENCE_LIBRARY}.index={mode!r} is not a valid mode — "
+            f"valid options: {REFLIB_INDEX_EAGER} | {REFLIB_INDEX_LAZY} | {REFLIB_INDEX_SKIP}. "
+            f"fix: set index to {REFLIB_INDEX_EAGER} (bundled library embeds with your documents — default), "
+            f"{REFLIB_INDEX_LAZY} (your documents embed first; the library follows on later runs), or "
+            f"{REFLIB_INDEX_SKIP} (the library is never embedded). "
+            "next: kairix config validate. "
+            "run: docker compose restart kairix kairix-worker"
+        )
+    return ReferenceLibraryConfig(index=mode)
+
+
+def load_reference_library(config_path: Path | str | None = None) -> ReferenceLibraryConfig:
+    """Load the reference-library config from YAML (#475).
+
+    Mirrors :func:`load_collections`: ``config_path`` is the F2-clean
+    test seam; ``None`` follows the env / cwd resolution chain. A missing
+    or unreadable file returns the eager default. A present-but-invalid
+    block raises :class:`ConfigValidationError` (see
+    :func:`parse_reference_library`).
+    """
+    path = resolve_config_path(config_path)
+    if path is None:
+        return ReferenceLibraryConfig()
+    try:
+        import yaml
+
+        with path.open(encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError):
+        return ReferenceLibraryConfig()
+    return parse_reference_library(data)
+
+
 def load_canonical_entities(config_path: Path | str | None = None) -> list:
     """Load the operator's ``canonical_entities:`` YAML block (#431).
 

@@ -25,7 +25,7 @@ This runbook references kairix's standard environment surface. Substitute your o
 | `${KAIRIX_DATA_DIR}` | `kairix.config.yaml` `paths.db_path` parent, or `KAIRIX_DATA_DIR` env var (default `~/.cache/kairix/`) |
 | `${KAIRIX_DOCUMENT_ROOT}` | `kairix.config.yaml` `paths.document_root`, or `KAIRIX_DOCUMENT_ROOT` env var |
 | `<your-vm-host>` | hostname of the VM running kairix, if remote |
-| `<embed-provider-creds>` | `KAIRIX_LLM_API_KEY` + `KAIRIX_LLM_ENDPOINT` (or `KAIRIX_EMBED_*` for a separate embed provider), or `OPENAI_API_KEY` for OpenAI |
+| `<embed-provider-creds>` | `KAIRIX_PROVIDER_LLM_API_KEY` + `KAIRIX_PROVIDER_LLM_ENDPOINT` (or `KAIRIX_PROVIDER_EMBED_*` for a separate embed provider), or `OPENAI_API_KEY` for OpenAI |
 
 If kairix is running in Docker, prefix host commands with `docker exec <container-name>`.
 
@@ -60,9 +60,9 @@ kairix onboard check
 # Failure:  "Embed provider: ✗ <reason>"
 
 # Inspect the env vars kairix expects
-env | grep -E "^KAIRIX_(LLM|EMBED)_" | sort
-# Required: KAIRIX_LLM_API_KEY + KAIRIX_LLM_ENDPOINT
-#       OR  KAIRIX_EMBED_API_KEY + KAIRIX_EMBED_ENDPOINT (separate embed provider)
+env | grep -E "^KAIRIX_PROVIDER_(LLM|EMBED)_" | sort
+# Required: KAIRIX_PROVIDER_LLM_API_KEY + KAIRIX_PROVIDER_LLM_ENDPOINT
+#       OR  KAIRIX_PROVIDER_EMBED_API_KEY + KAIRIX_PROVIDER_EMBED_ENDPOINT (separate embed provider)
 #       OR  OPENAI_API_KEY (OpenAI fallback)
 ```
 
@@ -83,7 +83,7 @@ echo "smoke test" | kairix embed --limit 1 2>&1 | tail -10
 #   slow the cron schedule until the cap resets.
 # If 401: credentials are present but invalid — rotate or re-fetch.
 # If connection error: check network/proxy from the kairix host to the
-#   provider endpoint listed in KAIRIX_LLM_ENDPOINT.
+#   provider endpoint listed in KAIRIX_PROVIDER_LLM_ENDPOINT.
 ```
 
 ## Fix C — No vectors indexed yet

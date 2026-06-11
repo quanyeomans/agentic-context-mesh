@@ -18,10 +18,12 @@ All four end with a `kairix mcp serve` endpoint the agent can connect to. If Doc
 For production servers + shared-knowledge-store deployments where kairix needs to run as a managed service under its own account.
 
 ```bash
-pip install kairix-agentic-knowledge-mgt
-sudo kairix init --system
+pipx install kairix-agentic-knowledge-mgt
+sudo $(which kairix) init --system
 sudo systemctl start kairix
 ```
+
+> pipx keeps kairix in its own virtualenv and puts the `kairix` command on your PATH. A bare `pip install` fails on modern distros (Ubuntu 24.04, Debian 12+) because the system Python is externally managed (PEP 668). If you'd rather manage the virtualenv yourself, `python3 -m venv` + `pip install kairix-agentic-knowledge-mgt` inside it works the same way. The `$(which kairix)` is needed because `sudo` resets PATH.
 
 What `kairix init --system` does:
 
@@ -44,8 +46,10 @@ Exit code 0 means every install element is in place. Failures print a one-line `
 To remove kairix but keep your indexed data:
 
 ```bash
-sudo kairix uninstall --system --keep-data
+sudo kairix uninstall --system
 ```
+
+Keeping data is the default. Pass `--no-keep-data` if you also want the data directory (SQLite index, vector index, documents) deleted.
 
 ---
 
@@ -54,10 +58,12 @@ sudo kairix uninstall --system --keep-data
 For an agent (or a single human) running kairix as its own private knowledge store under its own user account. No sudo, nothing system-wide.
 
 ```bash
-pip install --user kairix-agentic-knowledge-mgt
+pipx install kairix-agentic-knowledge-mgt
 kairix init --user
 systemctl --user start kairix
 ```
+
+> Why pipx? `pip install --user` fails with `externally-managed-environment` on modern distros (PEP 668 — Ubuntu 24.04, Debian 12+). pipx creates an isolated virtualenv per tool; a self-managed `python3 -m venv` works too.
 
 What `kairix init --user` does:
 
@@ -89,10 +95,10 @@ Full Docker walkthrough — including the `.env` shape, port mapping, and indexi
 
 ## On macOS / Windows
 
-Same `pip install` + `kairix init --user` pattern as Linux user mode. Paths follow each platform's conventions.
+Same `pipx install` + `kairix init --user` pattern as Linux user mode. Paths follow each platform's conventions. (Homebrew Python is also PEP 668 externally managed — pipx or a venv, not bare pip.)
 
 ```bash
-pip install --user kairix-agentic-knowledge-mgt
+pipx install kairix-agentic-knowledge-mgt
 kairix init --user
 ```
 

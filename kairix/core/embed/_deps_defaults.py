@@ -105,6 +105,21 @@ def default_open_embedding_cache() -> Any:
         return None
 
 
+def default_get_reflib_index_mode() -> str:
+    """Production default for ``EmbedDependencies.get_reflib_index_mode``.
+
+    Resolves the ``reference_library.index`` mode (#475) from
+    kairix.config.yaml. A missing or unreadable file yields the eager
+    default (today's behaviour); a present-but-invalid value raises
+    ``ConfigValidationError`` loudly inside ``load_reference_library`` —
+    an operator who asked for ``skip`` must not silently get a full
+    reference-library re-embed.
+    """
+    from kairix.core.search.config_loader import load_reference_library
+
+    return load_reference_library().index
+
+
 def default_get_document_root() -> str | None:
     """Production default for ``EmbedDependencies.get_document_root``.
 

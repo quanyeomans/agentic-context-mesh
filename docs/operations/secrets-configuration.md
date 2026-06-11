@@ -6,7 +6,7 @@ If you're standing up a brand-new deployment and just want it working, jump to [
 
 ## Mental model
 
-Kairix needs values like `KAIRIX_LLM_API_KEY` to be present in the process environment of every kairix command and service. How those values *get there* is your choice — there's no kairix-specific magic. The recommended pattern depends on where you're running:
+Kairix needs values like `KAIRIX_PROVIDER_LLM_API_KEY` to be present in the process environment of every kairix command and service. How those values *get there* is your choice — there's no kairix-specific magic. The recommended pattern depends on where you're running:
 
 | Where you run kairix | Where the secrets live | How they reach the process |
 |---|---|---|
@@ -21,7 +21,7 @@ The values are the same in every case. What changes is where the file (or the pl
 
 When a kairix process starts, it resolves each secret using this order (first hit wins):
 
-1. **Process environment** — `KAIRIX_LLM_API_KEY=…` already set in env
+1. **Process environment** — `KAIRIX_PROVIDER_LLM_API_KEY=…` already set in env
 2. **Per-file secret** — `/run/secrets/<canonical-name>` exists and is readable
 3. **Bundle file** — `KEY=VALUE` lines in the file pointed to by `$KAIRIX_SECRETS_FILE` (default `/run/secrets/kairix.env`)
 4. **Azure Key Vault CLI fallback** — `az keyvault secret show --vault-name $KAIRIX_KV_NAME --name <name>` when `KAIRIX_KV_NAME` is set
@@ -70,7 +70,7 @@ Get a kairix instance running on your laptop in 60 seconds with hardcoded local 
 
 ```bash
 cp .env.example .env
-# Edit .env — set KAIRIX_LLM_ENDPOINT + KAIRIX_LLM_API_KEY to your provider
+# Edit .env — set KAIRIX_PROVIDER_LLM_ENDPOINT + KAIRIX_PROVIDER_LLM_API_KEY to your provider
 docker compose up -d
 ```
 
@@ -79,8 +79,8 @@ Or with pip:
 ```bash
 mkdir -p ~/.config/kairix/secrets
 cat > ~/.config/kairix/secrets/kairix.env <<'EOF'
-KAIRIX_LLM_ENDPOINT=https://your-resource.openai.azure.com
-KAIRIX_LLM_API_KEY=your-key-here
+KAIRIX_PROVIDER_LLM_ENDPOINT=https://your-resource.openai.azure.com
+KAIRIX_PROVIDER_LLM_API_KEY=your-key-here
 EOF
 chmod 600 ~/.config/kairix/secrets/kairix.env
 export KAIRIX_SECRETS_FILE=~/.config/kairix/secrets/kairix.env
@@ -257,8 +257,8 @@ spec:
 ```bash
 mkdir -p ~/.config/kairix/secrets
 cat > ~/.config/kairix/secrets/kairix.env <<'EOF'
-KAIRIX_LLM_ENDPOINT=https://your-resource.openai.azure.com
-KAIRIX_LLM_API_KEY=your-key-here
+KAIRIX_PROVIDER_LLM_ENDPOINT=https://your-resource.openai.azure.com
+KAIRIX_PROVIDER_LLM_API_KEY=your-key-here
 EOF
 chmod 600 ~/.config/kairix/secrets/kairix.env
 export KAIRIX_SECRETS_FILE=~/.config/kairix/secrets/kairix.env
@@ -299,7 +299,7 @@ Combine [Docker-on-a-VM-with-KV](#docker-on-a-vm-with-azure-key-vault) and [Pip-
 
 ## Local MCP server (Claude Desktop / Cursor / Aider)
 
-When an MCP-compatible client (Claude Desktop, Claude Code, Cursor, Aider) launches kairix as a subprocess, kairix inherits the client's process environment. If you've set `KAIRIX_LLM_API_KEY` in your shell rc or via a credential helper, you're done.
+When an MCP-compatible client (Claude Desktop, Claude Code, Cursor, Aider) launches kairix as a subprocess, kairix inherits the client's process environment. If you've set `KAIRIX_PROVIDER_LLM_API_KEY` in your shell rc or via a credential helper, you're done.
 
 If the client is launched from a GUI (Claude Desktop on macOS, for example) and doesn't pick up your shell rc, the easiest fix is a wrapper script that loads the secrets file before exec-ing kairix:
 

@@ -31,8 +31,62 @@ from kairix.paths import document_root
 # Constants
 # ---------------------------------------------------------------------------
 
+# Legacy built-in agent names. Deployments that predate the config-driven
+# ``agents:`` block rely on these; :func:`valid_agents` unions them with
+# the configured names so existing setups keep working (default-safe, #472).
 VALID_AGENTS = frozenset({"builder", "shape", "growth", "consultant", "shared"})
 SHARED_AGENT = "shared"
+
+# F21 affordance appended to every invalid-agent rejection so the operator
+# (or calling agent) knows the exact fix without reading source.
+_INVALID_AGENT_ACTION = (
+    "fix: add the agent to the agents: block in kairix.config.yaml. next: re-run kairix doctor agent --all."
+)
+
+
+# ---------------------------------------------------------------------------
+# Config-driven agent allowlist (#472)
+# ---------------------------------------------------------------------------
+
+
+def _configured_agent_names(config: dict[str, object] | None) -> frozenset[str]:
+    """Return the agent names declared in the config ``agents:`` block.
+
+    Accepts both schema generations:
+
+    - mapping shape (``agents: {name: {surfaces: [...]}}``) — emitted by
+      ``kairix onboard scan --yaml`` and consumed by
+      :func:`kairix.core.agents.scope.load_agent_scopes`;
+    - legacy list shape (``agents: [{name: ..., write_path: ...}]``) —
+      consumed by :func:`kairix.core.search.registry.parse_agent_registry`.
+
+    A malformed block yields the empty set — ``kairix config validate``
+    owns reporting shape errors; the allowlist degrades to legacy names.
+    """
+    if not config:
+        return frozenset()
+    agents_raw = config.get("agents")
+    if isinstance(agents_raw, dict):
+        return frozenset(str(name) for name in agents_raw)
+    if isinstance(agents_raw, list):
+        return frozenset(str(item["name"]) for item in agents_raw if isinstance(item, dict) and item.get("name"))
+    return frozenset()
+
+
+def valid_agents(config: dict[str, object] | None = None) -> frozenset[str]:
+    """Return every acceptable agent name: configured union legacy.
+
+    ``config`` is the injection seam — tests pass a parsed dict (``{}``
+    pins the no-config legacy behaviour); production callers leave it
+    ``None`` and the loader reads ``kairix.config.yaml``.
+    """
+    cfg = config if config is not None else _load_top_level_config()
+    return VALID_AGENTS | _configured_agent_names(cfg)
+
+
+def invalid_agent_message(agent: str, allowed: frozenset[str]) -> str:
+    """F21-actionable rejection message listing the actually-valid names."""
+    return f"Invalid agent {agent!r}. Must be one of: {sorted(allowed)}. {_INVALID_AGENT_ACTION}"
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +142,8 @@ def resolve_target_path(
     Return the absolute document path for an agent + classification type.
 
     Args:
-        agent:               Agent name. Must be in VALID_AGENTS or "shared".
+        agent:               Agent name. Must be in :func:`valid_agents` (configured
+                             ``agents:`` block union the legacy built-in set) or "shared".
         classification_type: One of episodic, procedural-rule, procedural-pattern,
                              semantic-decision, semantic-fact, entity.
         date:                Date string (YYYY-MM-DD) for episodic. Defaults to today.
@@ -103,8 +158,9 @@ def resolve_target_path(
     Raises:
         ValueError: If agent is invalid or classification_type is unknown.
     """
-    if agent != SHARED_AGENT and agent not in VALID_AGENTS:
-        raise ValueError(f"Invalid agent {agent!r}. Must be one of: {sorted(VALID_AGENTS)} or 'shared'.")
+    allowed = valid_agents(config)
+    if agent != SHARED_AGENT and agent not in allowed:
+        raise ValueError(invalid_agent_message(agent, allowed))
 
     scoped_agent = "shared" if agent == SHARED_AGENT else agent
 

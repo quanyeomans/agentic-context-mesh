@@ -149,27 +149,28 @@ retrieval:
 # their value came from (env / config / default).
 #
 # features:
-#   topology_v2_config: true        # parse + apply the topology_v2 block below
-#   maintenance_loop: true          # background orphan-vector cleanup (default-OFF)
+#   # ── Connector slots — flip ON only after the matching secrets are set.
+#   # Default-off; reversible at any time by removing the entry.
+#   connector_sharepoint: true            # M365 SharePoint document libraries
+#   connector_slack: true                 # Slack workspace channels + DMs
+#   connector_github: true                # GitHub repos / issues / pull requests
+#   connector_notion: true                # Notion pages + database rows
+#   connector_gmail: true                 # Gmail message body + envelope
+#   connector_m365_email_headers: true    # M365 email metadata (no body)
+#   connector_m365_calendar: true         # M365 calendar events
+#   connector_dex_crm: true               # Dex CRM entity signals
 #
-#   # ── Connector slots — flip ON only after the matching secrets are set
-#   connector_sharepoint: true      # M365 SharePoint document libraries
-#   connector_slack: true           # Slack workspace channels + DMs
-#   connector_github: true          # GitHub repos / issues / pull requests
-#   connector_notion: true          # Notion pages + database rows
+#   # ── Search quality (default-OFF)
+#   entity_summary_indexing_enabled: true # index entity summaries for search
+#   intent_confidence_gated_boosts: true  # skip boosts on ambiguous intent
 #
-#   # ── Per-connector topology v2 pilots — emit one Container per source
-#   # unit (folder / drive / channel / repo / page tree) with its own
-#   # delta cursor. Default-off; reversible at any time by removing the
-#   # entry. Mirrors the obsidian pilot shape.
-#   topology_v2_obsidian: true            # per-folder containers (Obsidian)
-#   topology_v2_dex_crm: true             # tenant Container (Dex CRM)
-#   topology_v2_m365_email_headers: true  # per-mailbox containers
-#   topology_v2_m365_calendar: true       # per-calendar containers
-#   topology_v2_sharepoint: true          # per-drive containers
-#   topology_v2_slack: true               # per-channel containers
-#   topology_v2_github: true              # per-repo containers
-#   topology_v2_notion: true              # per-page-tree containers
+#   # ── Background + observability (default-OFF)
+#   maintenance_loop: true                # background orphan-vector cleanup
+#   pipeline_status_emit: true            # per-item per-stage status rows
+#   agent_query_queue: true               # queue slow searches, carry results forward
+#
+#   # ── CLI routing (default-ON; set false to force the in-process path)
+#   cli_routes_through_warm_mcp: false
 
 # ──────────────────────────────────────────────────────────────────────────
 # topology_v2 — connectors / collections / scope profiles / skills

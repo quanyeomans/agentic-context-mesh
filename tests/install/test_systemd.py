@@ -212,6 +212,37 @@ def test_install_unit_invokes_daemon_reload_and_enable_user(tmp_path: Path) -> N
 
 
 @pytest.mark.unit
+def test_install_unit_tolerates_missing_systemctl_binary(tmp_path: Path) -> None:
+    """A host with no systemctl binary takes the same best-effort path as a nonzero exit.
+
+    Fresh Docker installs crash-looped on first boot (#469): inside a
+    container ``subprocess.run(["systemctl", ...])`` raises
+    ``FileNotFoundError`` (the binary does not exist), the best-effort
+    block caught only ``CalledProcessError``, so the exception escaped,
+    ``kairix init`` exited 1 and s6 restarted the container forever.
+    The durable artefact — the unit file — must still be written and
+    the report must record ``systemctl_enabled="false"``.
+
+    Sabotage-proof (executed): narrow the production except tuple back
+    to ``subprocess.CalledProcessError`` only and this test errors with
+    the escaped ``FileNotFoundError``. Restored.
+    """
+
+    def missing_binary_runner(argv: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        raise FileNotFoundError(2, "No such file or directory", argv[0])
+
+    deps = SystemdDeps(subprocess_runner=missing_binary_runner, target_dir=tmp_path)
+    content = "[Unit]\nDescription=container-first-boot\n"
+
+    result = install_unit(Mode.system, content=content, deps=deps)
+
+    target = tmp_path / "kairix.service"
+    assert target.exists(), "unit file must still be written when systemctl is absent"
+    assert target.read_text() == content
+    assert result == {"path": str(target), "mode": "system", "systemctl_enabled": "false"}
+
+
+@pytest.mark.unit
 def test_install_unit_creates_parent_dirs(tmp_path: Path) -> None:
     """Target dir is created if it doesn't exist (user install on a fresh host).
 

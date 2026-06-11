@@ -40,7 +40,7 @@ from kairix.paths import Mode
 # ---------------------------------------------------------------------------
 
 _UserCreatorCall = namedtuple("_UserCreatorCall", [])
-_DirCreatorCall = namedtuple("_DirCreatorCall", ["specs"])
+_DirCreatorCall = namedtuple("_DirCreatorCall", ["specs", "strict"])
 _UnitRendererCall = namedtuple("_UnitRendererCall", ["mode", "kairix_bin", "config_path"])
 _UnitInstallerCall = namedtuple("_UnitInstallerCall", ["mode", "content", "deps"])
 
@@ -60,8 +60,8 @@ class _RecordingFakes:
         self.user_calls.append(_UserCreatorCall())
         return SystemUserResult(action="existing", uid=self._user_uid, gid=self._user_gid)
 
-    def dir_creator(self, specs: list[DirSpec]) -> list[DirActionReport]:
-        self.dir_calls.append(_DirCreatorCall(specs=list(specs)))
+    def dir_creator(self, specs: list[DirSpec], *, strict: bool = True) -> list[DirActionReport]:
+        self.dir_calls.append(_DirCreatorCall(specs=list(specs), strict=strict))
         return [DirActionReport(path=str(s.path), action="created") for s in specs]
 
     def unit_renderer(self, mode: Mode, *, kairix_bin: str, config_path: Path) -> str:
@@ -161,6 +161,103 @@ def test_install_user_mode_skips_system_user(tmp_path: Path) -> None:
     # And the report's ``user`` field is None in user mode (no SystemUserResult
     # to flatten into the dict shape).
     assert report.user is None
+
+
+@pytest.mark.unit
+def test_install_container_mode_skips_systemd_unit_install(tmp_path: Path) -> None:
+    """Container mode never renders or installs the systemd unit (#469).
+
+    Containers have no systemd — s6 supervises the kairix process and
+    the Dockerfile already laid the FHS tree down. Before this fix,
+    ``install(mode=Mode.container)`` unconditionally called
+    ``_install_systemd``, whose ``systemctl`` invocation raised
+    ``FileNotFoundError`` inside the image, killed ``kairix init`` and
+    crash-looped the container on first boot. The report's ``systemd``
+    element must record the deliberate skip so ``kairix init --json``
+    shows the decision.
+
+    Sabotage-proof (executed): remove the ``mode == Mode.container``
+    branch from production ``install()`` (always call
+    ``_install_systemd``) and this test flips red on
+    ``len(fakes.install_calls) == 0`` and on the skip-shaped
+    ``report.systemd``. Restored.
+    """
+    fakes = _RecordingFakes()
+    deps = _deps_with(
+        fakes,
+        config_target_dir=tmp_path / "config",
+        systemd_target_dir=tmp_path / "systemd",
+    )
+
+    report = install(mode=Mode.container, deps=deps)
+
+    assert len(fakes.install_calls) == 0, f"unit_installer must NOT fire in container mode, got {fakes.install_calls!r}"
+    assert len(fakes.render_calls) == 0, f"unit_renderer must NOT fire in container mode, got {fakes.render_calls!r}"
+    # No system-user creation either — the image build owns the user.
+    assert len(fakes.user_calls) == 0
+    # Dirs + config layers still run (verifier semantics over the image tree).
+    assert len(fakes.dir_calls) == 1
+    assert report.mode == "container"
+    assert report.systemd == {"action": "skipped-container", "mode": "container"}
+
+
+@pytest.mark.unit
+def test_install_dir_strictness_follows_mode(tmp_path: Path) -> None:
+    """Container installs request best-effort dirs; system installs stay strict (#469).
+
+    With the documented ``/run/secrets/kairix.env`` bind-mount the
+    container's ``/run/secrets`` is root-owned, so the uid-995 mkdir
+    of ``/run/secrets/kairix`` raises PermissionError. install() must
+    pass ``strict=False`` to the dir layer in container mode (record +
+    continue) while system mode keeps ``strict=True`` (a root install
+    failing to mkdir /var/lib/kairix is a real error).
+
+    Sabotage-proof (executed): change production install() to pass
+    ``strict=True`` unconditionally and the container assertion flips
+    red; pass ``strict=False`` unconditionally and the system assertion
+    flips red. Restored.
+    """
+    container_fakes = _RecordingFakes()
+    install(
+        mode=Mode.container,
+        deps=_deps_with(
+            container_fakes,
+            config_target_dir=tmp_path / "c-config",
+            systemd_target_dir=tmp_path / "c-systemd",
+        ),
+    )
+    assert container_fakes.dir_calls[0].strict is False, "container mode must request best-effort dir creation"
+
+    system_fakes = _RecordingFakes()
+    install(
+        mode=Mode.system,
+        deps=_deps_with(
+            system_fakes,
+            config_target_dir=tmp_path / "s-config",
+            systemd_target_dir=tmp_path / "s-systemd",
+        ),
+    )
+    assert system_fakes.dir_calls[0].strict is True, "system mode must keep strict dir creation"
+
+
+@pytest.mark.unit
+def test_verify_container_mode_treats_absent_unit_as_ok(tmp_path: Path) -> None:
+    """Container verify reports systemd_ok=True even with no unit file (#469 symmetry).
+
+    install() skips the unit in container mode, so verify() must not
+    count the absent unit against health — otherwise the s6 first-boot
+    check would flag every healthy container as broken.
+
+    Sabotage-proof (executed): revert production verify() to
+    ``systemd_ok = unit_path.exists()`` with no container branch and
+    this test flips red on ``report.systemd_ok is True``. Restored.
+    """
+    # Point the unit dir at a path that definitely has no kairix.service.
+    deps = InstallerDeps(systemd_target_dir=tmp_path / "empty-systemd")
+
+    report = verify(mode=Mode.container, deps=deps)
+
+    assert report.systemd_ok is True, "container mode must treat the absent systemd unit as healthy"
 
 
 @pytest.mark.unit

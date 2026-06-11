@@ -34,7 +34,13 @@ Return JSON only:
 """
 
 
-def classify_with_llm(content: str, agent: str = "shared", llm_backend=None) -> ClassificationResult:  # noqa: F821
+def classify_with_llm(
+    content: str,
+    agent: str = "shared",
+    llm_backend=None,
+    *,
+    config: dict[str, object] | None = None,
+) -> ClassificationResult:  # noqa: F821
     """
     Use GPT-4o-mini to classify ambiguous content.
 
@@ -43,15 +49,19 @@ def classify_with_llm(content: str, agent: str = "shared", llm_backend=None) -> 
         agent:       Agent name (used for routing after classification).
         llm_backend: Optional LLM backend instance for dependency injection.
                      Defaults to get_default_backend().
+        config:      Optional parsed ``kairix.config.yaml`` dict — injection
+                     seam for the config-driven agent allowlist (#472).
 
     Returns:
         ClassificationResult. On failure, returns confidence=0.0 and needs_confirmation=True.
     """
-    from kairix.core.classify.rules import VALID_AGENTS, ClassificationResult
+    from kairix.core.classify.router import invalid_agent_message, valid_agents
+    from kairix.core.classify.rules import ClassificationResult
 
-    # Validate agent
-    if agent not in VALID_AGENTS:
-        raise ValueError(f"Invalid agent {agent!r}. Must be one of: {sorted(VALID_AGENTS)}")
+    # Validate agent against configured union legacy names BEFORE any LLM call.
+    allowed = valid_agents(config)
+    if agent not in allowed:
+        raise ValueError(invalid_agent_message(agent, allowed))
 
     if not content or not content.strip():
         return ClassificationResult(
@@ -68,7 +78,7 @@ def classify_with_llm(content: str, agent: str = "shared", llm_backend=None) -> 
     ]
 
     try:
-        return _call_and_parse_llm(messages, agent, llm_backend)
+        return _call_and_parse_llm(messages, agent, llm_backend, config=config)
     except Exception as e:
         logger.warning("judge: LLM classification failed — %s", e)
         return ClassificationResult(
@@ -84,6 +94,8 @@ def _call_and_parse_llm(
     messages: list[dict[str, str]],
     agent: str,
     llm_backend: object,
+    *,
+    config: dict[str, object] | None = None,
 ) -> ClassificationResult:  # noqa: F821 — forward reference, imported in classify_with_llm body
     """Run the LLM call, parse the JSON response, resolve a target path.
 
@@ -119,7 +131,7 @@ def _call_and_parse_llm(
 
     # Resolve target path
     try:
-        target_path = resolve_target_path(agent, classification_type)
+        target_path = resolve_target_path(agent, classification_type, config=config)
     except (ValueError, KeyError):
         target_path = ""
 

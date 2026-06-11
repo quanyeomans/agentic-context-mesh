@@ -16,6 +16,10 @@ Public surface for callers:
   :func:`parse_canonical_name` — pure functions for inspecting / round-
   tripping canonical names. See :mod:`kairix.secrets.naming` for the
   ambiguity-resolution rule.
+* :func:`set_secret` / :func:`resolve_bundle_path` — write-side
+  persistence: upsert one canonical secret into the operator bundle
+  file the read side hydrates at boot. Backs ``kairix secrets set``
+  and the setup wizard.
 
 The legacy env-var alias chain (``LEGACY_ALIASES`` + the loader's
 ``_try_legacy_aliases`` / ``_default_legacy_chain`` fallback) was
@@ -49,6 +53,10 @@ from kairix.secrets.naming import (
     canonical_secret_name,
     parse_canonical_name,
 )
+from kairix.secrets.store import (
+    resolve_bundle_path,
+    set_secret,
+)
 
 __all__ = [
     "Scope",
@@ -66,6 +74,8 @@ __all__ = [
     "neo4j_user",
     "parse_canonical_name",
     "refresh_secrets",
+    "resolve_bundle_path",
     "set_llm_api_key",
     "set_llm_endpoint",
+    "set_secret",
 ]

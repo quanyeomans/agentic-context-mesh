@@ -40,19 +40,19 @@ HEALTH_PROBE_BUDGET_S: float = 2.0
 
 
 def _default_secrets_loaded() -> bool:
-    """Lightweight probe: is ``KAIRIX_LLM_API_KEY`` resolvable?
+    """Lightweight probe: is the LLM API key resolvable?
 
-    Goes through ``kairix.secrets.get_secret`` with ``required=False`` so
-    a missing secret returns ``None`` instead of raising. The result is
-    a boolean — callers want "is the LLM credential available" not the
-    secret value.
+    Canonical ``KAIRIX_PROVIDER_LLM_API_KEY`` first (SecretsLoader chain),
+    then the legacy ``kairix-llm-api-key`` chain — deployed bundles still
+    emit the retired names (GH #479); retirement tracked in GH #369. The
+    result is a boolean — callers want "is the LLM credential available"
+    not the secret value.
     """
-    from kairix.secrets import get_secret
+    from kairix.secrets.probe import llm_credentials_available
 
     try:
-        value = get_secret("kairix-llm-api-key", required=False)
-        return bool(value)
-    except Exception as exc:  # pragma: no cover  # defensive lazy-import guard for get_secret
+        return llm_credentials_available()
+    except Exception as exc:  # pragma: no cover  # defensive lazy-import guard for the probe
         logger.warning("_default_secrets_loaded probe failed: %s", exc, exc_info=True)
         return False
 

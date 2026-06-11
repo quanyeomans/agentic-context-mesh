@@ -155,6 +155,8 @@ def test_build_server_constructs_fastmcp_with_all_tools_registered_under_unit() 
         # Plan B-parity Week 5 Stream A — agent-driven ingest + recall
         "ingest_chat",
         "facts_about",
+        # #472 — agent-facing memory write (pairs with `kairix remember`)
+        "memory_write",
     } == names
 
 
@@ -283,6 +285,9 @@ def test_warm_marked_drives_wrapper_bodies_under_unit(warm_marked: None) -> None
         ("entity_validate", {"name": "x"}),
         ("ingest_chat", {"jsonl_content": "", "conversation_id": "c", "namespace": "ns"}),
         ("facts_about", {"entity": ""}),
+        # #472 — memory_write's EmptyContent guard fires before any config /
+        # filesystem resolution, so the wrapper body runs hermetically here.
+        ("memory_write", {"agent": "agent-alpha", "content": ""}),
     ]
 
     payloads: dict[str, dict[str, Any]] = {}
@@ -299,6 +304,9 @@ def test_warm_marked_drives_wrapper_bodies_under_unit(warm_marked: None) -> None
     )
     assert payloads["facts_about"].get("error") == "InvalidInput", (
         f"facts_about wrapper body did not dispatch under warm-mode; got {payloads['facts_about']!r}"
+    )
+    assert payloads["memory_write"].get("error", "").startswith("EmptyContent"), (
+        f"memory_write wrapper body did not dispatch under warm-mode; got {payloads['memory_write']!r}"
     )
 
 

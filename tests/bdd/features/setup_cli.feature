@@ -21,3 +21,4 @@ Feature: kairix setup CLI
     And the setup CLI stdout is parseable JSON
     And the JSON config "paths.document_root" matches the supplied path
     And the JSON config "retrieval" section is a non-empty object
+    And the JSON config names the chosen provider plugin

@@ -1,5 +1,11 @@
 # Docker Sidecar Secrets Pattern
 
+> **Looking for the laptop / single-VM quick start?** Use the
+> `docker-compose.yml` at the repo root — it reads a plain `.env`
+> (`cp .env.example .env`) and bundles neo4j. The stack in THIS directory
+> is the production VM pattern with a Key Vault sidecar; the
+> `/run/secrets/kairix.env` wiring lives here, not in the base file.
+
 The `docker-compose.yml` in this directory implements a vault-agent sidecar that
 fetches secrets from Azure Key Vault and makes them available to the kairix service
 and neo4j database via a shared in-memory volume.
@@ -47,13 +53,14 @@ and neo4j database via a shared in-memory volume.
 # Set your Key Vault name
 export KAIRIX_KV_NAME=kv-my-vault
 
-# Build and start all services
+# Build and start all services (sidecar stack — this directory's compose file)
 docker compose -f docker/docker-compose.yml up --build
 ```
 
 ## Local development (without Docker)
 
-For local dev, set env vars directly or use a `.env` file — `kairix.secrets.load_secrets()`
+For local dev, set env vars directly or use a `.env` file
+(`cp .env.example .env` at the repo root) — `kairix.secrets.load_secrets()`
 is a no-op when `/run/secrets/kairix.env` does not exist.
 
 ## Secret resolution in Python

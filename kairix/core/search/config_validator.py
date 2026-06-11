@@ -42,6 +42,14 @@ _VALID_OVERRIDE_KEYS = frozenset(
 # validator. Hoisted so a future rename has a single edit site.
 _COLLECTIONS_KEY = "collections"
 
+# reference_library.index modes valid in kairix.config.yaml (#475). Kept as a
+# literal tuple (mirrors _VALID_OVERRIDE_KEYS) so validation doesn't drag the
+# config_loader dataclasses in as a runtime dependency.
+_VALID_REFLIB_INDEX_MODES = ("eager", "lazy", "skip")
+
+# F17 — the top-level YAML key appears in every reference_library error string.
+_REFLIB_KEY = "reference_library"
+
 
 def validate_config(
     data: dict[str, Any],
@@ -73,6 +81,7 @@ def validate_config(
     errors: list[str] = []
     errors.extend(_validate_collections(data.get(_COLLECTIONS_KEY)))
     errors.extend(_validate_agents(data.get("agents"), data.get(_COLLECTIONS_KEY)))
+    errors.extend(_validate_reference_library(data.get(_REFLIB_KEY)))
     errors.extend(_validate_topology_v2(data))
     errors.extend(
         _validate_collection_paths_resolve(
@@ -182,6 +191,45 @@ def _check_one_collection_path(
         f"next: kairix config validate. "
         f"run: ls {candidate.parent} to see what's actually mounted there."
     )
+
+
+def _validate_reference_library(block: Any) -> list[str]:
+    """Validate the optional ``reference_library:`` block (#475).
+
+    Absence is valid (eager default — today's behaviour). Unknown keys
+    and invalid ``index`` values render as F21-shaped errors naming the
+    three valid modes so a typo never silently re-embeds the bundled
+    library on a fresh install.
+    """
+    if block is None:
+        return []
+    if not isinstance(block, dict):
+        return [
+            f"{_REFLIB_KEY}: must be a mapping with an 'index' key. "
+            f"fix: declare `{_REFLIB_KEY}:` as a block, e.g. `{_REFLIB_KEY}:` then `  index: eager`. "
+            "next: kairix config validate. "
+            "run: kairix config validate"
+        ]
+    errors: list[str] = []
+    unknown = set(block.keys()) - {"index"}
+    if unknown:
+        errors.append(
+            f"{_REFLIB_KEY}: unknown key(s) {sorted(unknown)} — valid: ['index']. "
+            f"fix: keep only `index:` under `{_REFLIB_KEY}:`. "
+            "next: kairix config validate. "
+            "run: kairix config validate"
+        )
+    mode = block.get("index", "eager")
+    if mode not in _VALID_REFLIB_INDEX_MODES:
+        errors.append(
+            f"{_REFLIB_KEY}.index: {mode!r} is not a valid mode — valid options: eager | lazy | skip. "
+            "fix: set index to eager (bundled library embeds with your documents — default), "
+            "lazy (your documents embed first; the library follows on later runs), or "
+            "skip (the library is never embedded). "
+            "next: kairix config validate. "
+            "run: docker compose restart kairix kairix-worker"
+        )
+    return errors
 
 
 def _validate_topology_v2(data: dict[str, Any]) -> list[str]:

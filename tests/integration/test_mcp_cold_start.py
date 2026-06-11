@@ -62,6 +62,8 @@ GATED_TOOLS: list[tuple[str, dict[str, Any]]] = [
         {"jsonl_content": "{}\n", "conversation_id": "anything", "namespace": "anything"},
     ),
     ("facts_about", {"entity": "anything"}),
+    # #472 — memory_write shares ingest_chat's out-of-band-write hygiene.
+    ("memory_write", {"agent": "anyone", "content": "anything"}),
 ]
 
 # Tools that must STILL serve real responses while cold — they exist to

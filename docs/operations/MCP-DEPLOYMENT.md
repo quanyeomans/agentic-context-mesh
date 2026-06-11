@@ -41,7 +41,7 @@ Flags:
 
 ## Secrets injection for the MCP server
 
-The MCP server needs the same credentials any other kairix command does — `KAIRIX_LLM_API_KEY`, `KAIRIX_LLM_ENDPOINT`, optionally connector and Neo4j secrets. How they reach the process depends on which transport you run:
+The MCP server needs the same credentials any other kairix command does — `KAIRIX_PROVIDER_LLM_API_KEY`, `KAIRIX_PROVIDER_LLM_ENDPOINT`, optionally connector and Neo4j secrets. How they reach the process depends on which transport you run:
 
 - **stdio (Claude Desktop / Cursor / Aider):** kairix is launched as a subprocess by the MCP client and inherits its environment. On macOS GUI launchers (Claude Desktop) that don't pick up your shell rc, wrap kairix in a small script that sources the secrets file before exec'ing it:
 

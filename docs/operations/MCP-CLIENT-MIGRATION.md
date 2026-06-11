@@ -13,7 +13,7 @@ Change `/sse` to `/mcp` in your MCP client configuration. Nothing else.
 
 That's the entire client-side migration. Same host, same port, same tools, same parameters.
 
-> **You do NOT need to set up Cloudflare tunnels, Cloudflare Access, OAuth, JWT, or any other auth.** If your kairix is at `http://localhost:8090` (the standard TC deployment), it stays at `http://localhost:8090`. If your kairix sits behind a gateway someone else operates, that gateway's auth keeps working unchanged for `/mcp` exactly as it did for `/sse` — that's an *operator* concern, not yours. Anything in this doc about Cloudflare or Caddy is reference material for whoever runs the kairix server, not steps you need to take.
+> **You do NOT need to set up Cloudflare tunnels, Cloudflare Access, OAuth, JWT, or any other auth.** If your kairix is at `http://localhost:8080` (the Docker Compose default), it stays at `http://localhost:8080`. If your kairix sits behind a gateway someone else operates, that gateway's auth keeps working unchanged for `/mcp` exactly as it did for `/sse` — that's an *operator* concern, not yours. Anything in this doc about Cloudflare or Caddy is reference material for whoever runs the kairix server, not steps you need to take.
 
 If you can't migrate yet, **the old `/sse` endpoint still works** — kairix mounts both. You can move at your own pace. New clients should target `/mcp`; old clients can stay on `/sse` until you have time.
 
@@ -25,7 +25,7 @@ Streamable HTTP makes each tool call a normal HTTP request/response. The gateway
 
 ## What does NOT change
 
-- The host and port — still whatever your kairix is listening on (e.g. `127.0.0.1:8090` or `your-mcp-host.example.com`).
+- The host and port — still whatever your kairix is listening on (e.g. `127.0.0.1:8080`, a `KAIRIX_HOST_PORT` override like `127.0.0.1:8090`, or `your-mcp-host.example.com`).
 - Tool names — `search`, `entity`, `prep`, `timeline`, `research`, `contradict`, `usage_guide`. All seven still there.
 - Tool parameters — same JSON schema, same defaults.
 - Authentication — if your gateway uses Cloudflare Access, OAuth, or anything else, that all carries over to `/mcp` unchanged.
@@ -46,7 +46,7 @@ Streamable HTTP makes each tool call a normal HTTP request/response. The gateway
    {
      "mcpServers": {
        "kairix": {
-         "url": "http://localhost:8090/sse"
+         "url": "http://localhost:8080/sse"
        }
      }
    }
@@ -56,7 +56,7 @@ Streamable HTTP makes each tool call a normal HTTP request/response. The gateway
    {
      "mcpServers": {
        "kairix": {
-         "url": "http://localhost:8090/mcp"
+         "url": "http://localhost:8080/mcp"
        }
      }
    }
@@ -76,14 +76,14 @@ Streamable HTTP makes each tool call a normal HTTP request/response. The gateway
    ```json
    "kairix": {
      "transport": "sse",
-     "url": "http://localhost:8090/sse"
+     "url": "http://localhost:8080/sse"
    }
    ```
    and change to:
    ```json
    "kairix": {
      "transport": "streamable-http",
-     "url": "http://localhost:8090/mcp"
+     "url": "http://localhost:8080/mcp"
    }
    ```
 3. Reapply the config: `sudo /opt/openclaw/scripts/apply-openclaw-config.sh`.
@@ -96,7 +96,7 @@ If you used `mcp.client.sse.sse_client(...)`:
 ```python
 # Before
 from mcp.client.sse import sse_client
-async with sse_client("http://localhost:8090/sse") as (read, write):
+async with sse_client("http://localhost:8080/sse") as (read, write):
     ...
 ```
 
@@ -105,7 +105,7 @@ Change to `streamablehttp_client`:
 ```python
 # After
 from mcp.client.streamable_http import streamablehttp_client
-async with streamablehttp_client("http://localhost:8090/mcp") as (read, write, _):
+async with streamablehttp_client("http://localhost:8080/mcp") as (read, write, _):
     ...
 ```
 
@@ -118,7 +118,7 @@ If you used `SSEClientTransport`:
 ```ts
 // Before
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-const transport = new SSEClientTransport(new URL("http://localhost:8090/sse"));
+const transport = new SSEClientTransport(new URL("http://localhost:8080/sse"));
 ```
 
 Change to `StreamableHTTPClientTransport`:
@@ -126,7 +126,7 @@ Change to `StreamableHTTPClientTransport`:
 ```ts
 // After
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-const transport = new StreamableHTTPClientTransport(new URL("http://localhost:8090/mcp"));
+const transport = new StreamableHTTPClientTransport(new URL("http://localhost:8080/mcp"));
 ```
 
 Bump `@modelcontextprotocol/sdk` to a version that includes `streamableHttp.js` (1.5+).
@@ -139,11 +139,11 @@ If you want a deliberate end-to-end check before trusting it:
 
 ```bash
 # Check kairix is healthy
-curl http://localhost:8090/healthz
+curl http://localhost:8080/healthz
 # Expect: {"ready":true,"uptime_s":N}
 
 # Check tools/list works on /mcp
-curl -X POST http://localhost:8090/mcp \
+curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'

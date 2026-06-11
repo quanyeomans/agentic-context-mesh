@@ -96,6 +96,8 @@ class UseCaseDeps:
     )
     document_root_fn: Callable[[], Path] = field(default_factory=lambda: _real_document_root)
     reference_library_root_fn: Callable[[], Path] = field(default_factory=lambda: _real_reference_library_root)
+    # reference_library.index mode (#475) — "eager" | "lazy" | "skip".
+    reflib_index_mode_fn: Callable[[], str] = field(default_factory=lambda: _real_reflib_index_mode)
     rebuild_fts_fn: Callable[[Any], int] = field(default_factory=lambda: _real_rebuild_fts)
     yaml_safe_load_fn: Callable[[Any], Any] = field(default_factory=lambda: _real_yaml_safe_load)
 
@@ -200,6 +202,12 @@ def _real_reference_library_root() -> Path:  # pragma: no cover  # lazy-import D
     from kairix.paths import reference_library_root
 
     return reference_library_root()
+
+
+def _real_reflib_index_mode() -> str:  # pragma: no cover  # lazy-import DI-default delegation
+    from kairix.core.search.config_loader import load_reference_library
+
+    return load_reference_library().index
 
 
 def _real_rebuild_fts(db: Any) -> int:  # pragma: no cover  # lazy-import DI-default delegation
@@ -348,6 +356,25 @@ def default_reflib_collection(reflib_root: Path) -> Any:  # pragma: no cover  # 
     return CollectionConfig(name=REFERENCE_LIBRARY_NAME, path=str(reflib_root), glob="**/*.md")
 
 
+def _resolve_reflib_collections(
+    scan_collections: list[Any],
+    d: UseCaseDeps,
+    droot: Path,
+) -> list[Any]:
+    """Apply the ``reference_library.index`` mode to the scan walk (#475).
+
+    ``skip`` excludes the bundled reference library from the walk
+    entirely (and drops an operator-declared entry of the same name).
+    ``eager`` / ``lazy`` keep today's harmonise behaviour — the embed
+    gather applies the lazy deferral downstream.
+    """
+    if d.reflib_index_mode_fn() != "skip":
+        return harmonise_reference_library(scan_collections, d.reference_library_root_fn(), droot)
+    kept = [c for c in scan_collections if getattr(c, "name", None) != REFERENCE_LIBRARY_NAME]
+    logger.info("reference-library: index mode 'skip' — bundled library excluded from the scan walk")
+    return kept
+
+
 def default_scan_documents(  # pragma: no cover  # lazy-import DI-default delegation
     db: Any,
     diagnostics: list[str],
@@ -392,8 +419,7 @@ def default_scan_documents(  # pragma: no cover  # lazy-import DI-default delega
     else:
         scan_collections = [CollectionConfig(name="default", path=".")]
 
-    reflib_root = d.reference_library_root_fn()
-    scan_collections = harmonise_reference_library(scan_collections, reflib_root, droot)
+    scan_collections = _resolve_reflib_collections(scan_collections, d, droot)
 
     scan_report = scanner.scan(scan_collections)
     if scan_report.new > 0 or scan_report.updated > 0:

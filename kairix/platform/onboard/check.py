@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kairix.paths import Mode
 from kairix.paths import mcp_port as _mcp_port
 
 logger = logging.getLogger(__name__)
@@ -126,6 +127,32 @@ class OnboardResult:
 # detailed multi-line guidance for human readers; CheckFailure.remediation
 # is the one-line "run this now" command an agent or healthcheck can act on.
 
+# F17 — shared remediation building blocks. `kairix init verify` is the
+# canonical "diagnose my install" entry point (the old strings named
+# scripts/deploy-vm.sh, which no longer exists — GH #473). The Neo4j
+# strings are deployment-aware (GH #476 — the old remediation curl'd a
+# stale fork URL) and keep the production-required framing that landed
+# in v2026.5.24a3.
+_INSTALL_VERIFY_FIX = (
+    "fix: run `kairix init verify` — it reports any missing install element "
+    "with a remediation. next: re-run `kairix onboard check`."
+)
+_NEO4J_REQUIRED_FRAMING = (
+    "Neo4j is required for production — entity boost, multi-hop, alias "
+    "resolution, and briefing all rely on it. The system loads without it "
+    "but entity-heavy queries degrade significantly."
+)
+_NEO4J_FIX_CONTAINER = (
+    "fix: the bundled compose ships Neo4j — set "
+    "`KAIRIX_NEO4J_URI=bolt://neo4j:7687` in your .env. "
+    "next: `docker compose up -d && kairix onboard check`. " + _NEO4J_REQUIRED_FRAMING
+)
+_NEO4J_FIX_DEFAULT = (
+    "fix: run the bundled docker-compose.yml (Neo4j is included) OR install "
+    "Neo4j and set `KAIRIX_NEO4J_URI=bolt://localhost:7687`. "
+    "next: `kairix onboard check`. " + _NEO4J_REQUIRED_FRAMING
+)
+
 CANONICAL_REMEDIATIONS: dict[str, str] = {
     _CHECK_QUERY_CACHE_STATS: (
         "Diagnostic check — no remediation required. Cache hit-rate is informational; "
@@ -135,14 +162,8 @@ CANONICAL_REMEDIATIONS: dict[str, str] = {
         "Diagnostic check — no remediation required. Cache hit-rate is informational; "
         "tune `KAIRIX_EMBED_CACHE_MAX_ENTRIES` / `KAIRIX_EMBED_CACHE_MAX_AGE_S` if needed."
     ),
-    _CHECK_KAIRIX_ON_PATH: (
-        "Run `bash scripts/deploy-vm.sh` on the host to install the wrapper + symlink; "
-        "or manually export `PATH=/opt/openclaw/bin:$PATH`."
-    ),
-    _CHECK_WRAPPER_INSTALLED: (
-        "Run `bash scripts/deploy-vm.sh` to install /opt/kairix/bin/kairix-wrapper.sh "
-        "and repoint /usr/local/bin/kairix at it."
-    ),
+    _CHECK_KAIRIX_ON_PATH: _INSTALL_VERIFY_FIX,
+    _CHECK_WRAPPER_INSTALLED: _INSTALL_VERIFY_FIX,
     _CHECK_SECRETS_LOADED: (
         "Run `sudo systemctl enable --now kairix-fetch-secrets.service` on the host; "
         "if that fails, confirm `/run/secrets/kairix.env` exists and contains "
@@ -156,13 +177,7 @@ CANONICAL_REMEDIATIONS: dict[str, str] = {
         "`kairix onboard check secrets_loaded` passes; then run `kairix embed --limit 20` "
         "to test the embed pipeline."
     ),
-    _CHECK_NEO4J_REACHABLE: (
-        "Run `bash scripts/install-neo4j.sh` to install Neo4j, then set "
-        "`KAIRIX_NEO4J_URI=bolt://localhost:7687` in /opt/kairix/service.env. "
-        "Neo4j is required for production — entity boost, multi-hop, alias resolution, "
-        "and briefing all rely on it. The system loads without it but entity-heavy "
-        "queries degrade significantly."
-    ),
+    _CHECK_NEO4J_REACHABLE: _NEO4J_FIX_DEFAULT,
     _CHECK_AGENT_KNOWLEDGE_POPULATED: (
         "Run `kairix embed` to populate the agent knowledge store from the document root, "
         "or create at least one memory file at "
@@ -297,9 +312,8 @@ def check_kairix_on_path(deps: OnboardChecksDeps | None = None) -> CheckResult:
             ok=False,
             detail="kairix not found on PATH",
             fix=(
-                "Add the kairix symlink directory to PATH.\n"
-                "Run: bash scripts/deploy-vm.sh  (sets up /etc/profile.d/kairix.sh)\n"
-                "Or manually: export PATH=/opt/openclaw/bin:$PATH"
+                "Add the directory holding the kairix entry point to PATH "
+                "(pipx: ~/.local/bin; venv: <venv>/bin).\n" + _INSTALL_VERIFY_FIX
             ),
         )
     return CheckResult(name=_CHECK_KAIRIX_ON_PATH, ok=True, detail=f"kairix found at {path}")
@@ -327,7 +341,7 @@ def check_wrapper_installed(deps: OnboardChecksDeps | None = None) -> CheckResul
             name=_CHECK_WRAPPER_INSTALLED,
             ok=False,
             detail="kairix not on PATH — cannot check wrapper",
-            fix="Run scripts/deploy-vm.sh to install the wrapper and symlink.",
+            fix=_INSTALL_VERIFY_FIX,
         )
 
     resolved = Path(path).resolve()
@@ -344,11 +358,8 @@ def check_wrapper_installed(deps: OnboardChecksDeps | None = None) -> CheckResul
                 ok=False,
                 detail=f"kairix symlink points to raw Python binary: {resolved}",
                 fix=(
-                    "The symlink should point to kairix-wrapper.sh, not the Python binary.\n"
-                    "Run the deploy script to fix:\n"
-                    "  bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/kairix/main/scripts/deploy-vm.sh)\n"
-                    "This installs the wrapper at /opt/kairix/bin/kairix-wrapper.sh\n"
-                    "and updates /usr/local/bin/kairix to point to it."
+                    "The kairix command should resolve to a shell wrapper that loads "
+                    "secrets before exec'ing Python, not the raw Python binary.\n" + _INSTALL_VERIFY_FIX
                 ),
             )
         if first_line.startswith("#!") and ("bash" in first_line or "sh" in first_line):
@@ -362,7 +373,7 @@ def check_wrapper_installed(deps: OnboardChecksDeps | None = None) -> CheckResul
             name=_CHECK_WRAPPER_INSTALLED,
             ok=False,
             detail=f"kairix binary has unexpected format (header: {first_line[:60]})",
-            fix="Run scripts/deploy-vm.sh to reinstall the wrapper.",
+            fix=_INSTALL_VERIFY_FIX,
         )
     except Exception as exc:
         return CheckResult(
@@ -373,7 +384,16 @@ def check_wrapper_installed(deps: OnboardChecksDeps | None = None) -> CheckResul
         )
 
 
-_REQUIRED_SECRETS = ("KAIRIX_LLM_API_KEY", "KAIRIX_LLM_ENDPOINT")
+# Canonical names drive every user-facing message; the legacy pair is
+# still accepted because deployed secrets bundles (vault-agent sidecar,
+# GH #479) emit it. Retirement of the legacy pair is tracked in GH #369.
+_CANONICAL_SECRETS = ("KAIRIX_PROVIDER_LLM_API_KEY", "KAIRIX_PROVIDER_LLM_ENDPOINT")
+_LEGACY_SECRETS = ("KAIRIX_LLM_API_KEY", "KAIRIX_LLM_ENDPOINT")
+_REQUIRED_SECRETS = _CANONICAL_SECRETS
+_ROTATION_NOTE = (
+    "legacy KAIRIX_LLM_* names resolved — rotate to KAIRIX_PROVIDER_LLM_API_KEY / "
+    "KAIRIX_PROVIDER_LLM_ENDPOINT (run `kairix secrets verify` for the canonical table)"
+)
 _SECRETS_FILE_PROBE_PATHS = (
     "/run/secrets/kairix.env",
     "/opt/kairix/secrets.env",
@@ -396,6 +416,57 @@ def _secrets_file_keys_present(path: Path, keys: tuple[str, ...]) -> set[str]:
     return found
 
 
+def _secrets_from_env(env: Mapping[str, str]) -> CheckResult | None:
+    """Tier 1: return ok when a full credential pair sits in the env.
+
+    Canonical pair first; the legacy pair still passes (deployed bundles
+    emit it, GH #479) but the detail carries a rotation note. ``None``
+    means neither generation is complete — caller falls through to the
+    file probe.
+    """
+    for pair, note in ((_CANONICAL_SECRETS, ""), (_LEGACY_SECRETS, f" — {_ROTATION_NOTE}")):
+        api_key = env.get(pair[0], "")
+        endpoint = env.get(pair[1], "")
+        if api_key and endpoint:
+            masked_key = api_key[:8] + "..." if len(api_key) > 8 else "***"
+            return CheckResult(
+                name=_CHECK_SECRETS_LOADED,
+                ok=True,
+                detail=f"LLM credentials present (key: {masked_key}, endpoint: {endpoint[:40]}...){note}",
+            )
+    return None
+
+
+def _secrets_from_file(probe: str) -> CheckResult:
+    """Tier 2: judge an existing secrets file — either generation passes whole."""
+    found = _secrets_file_keys_present(Path(probe), _CANONICAL_SECRETS + _LEGACY_SECRETS)
+    canonical_complete = all(k in found for k in _CANONICAL_SECRETS)
+    legacy_complete = all(k in found for k in _LEGACY_SECRETS)
+    if canonical_complete or legacy_complete:
+        note = "" if canonical_complete else f" ({_ROTATION_NOTE})"
+        return CheckResult(
+            name=_CHECK_SECRETS_LOADED,
+            ok=True,
+            detail=(
+                f"Secrets file found at {probe} — credentials will be active on first search call. "
+                f"Run `kairix search` to confirm.{note}"
+            ),
+        )
+    # File exists but neither generation is complete — give specific guidance
+    missing_in_file = [k for k in _CANONICAL_SECRETS if k not in found]
+    return CheckResult(
+        name=_CHECK_SECRETS_LOADED,
+        ok=False,
+        detail=f"Secrets file at {probe} is missing required keys: {', '.join(missing_in_file)}",
+        fix=(
+            f"Add the missing keys to {probe}:\n"
+            + "".join(f"  {k}=<value>\n" for k in missing_in_file)
+            + "Set KAIRIX_PROVIDER_LLM_API_KEY and KAIRIX_PROVIDER_LLM_ENDPOINT "
+            "in your env or secrets file."
+        ),
+    )
+
+
 def check_secrets_loaded(env: Mapping[str, str] | None = None) -> CheckResult:
     """LLM credentials are available in the environment or a secrets file.
 
@@ -404,17 +475,13 @@ def check_secrets_loaded(env: Mapping[str, str] | None = None) -> CheckResult:
     """
     if env is None:
         env = os.environ
-    api_key = env.get("KAIRIX_LLM_API_KEY", "")
-    endpoint = env.get("KAIRIX_LLM_ENDPOINT", "")
 
-    # Tier 1 — credentials in process environment (wrapper loaded them)
-    if api_key and endpoint:
-        masked_key = api_key[:8] + "..." if len(api_key) > 8 else "***"
-        return CheckResult(
-            name=_CHECK_SECRETS_LOADED,
-            ok=True,
-            detail=f"LLM credentials present (key: {masked_key}, endpoint: {endpoint[:40]}...)",
-        )
+    # Tier 1 — credentials in process environment (wrapper loaded them).
+    # Canonical KAIRIX_PROVIDER_LLM_* first; the legacy pair still passes
+    # (deployed bundles emit it, GH #479) but carries a rotation note.
+    env_result = _secrets_from_env(env)
+    if env_result is not None:
+        return env_result
 
     # Tier 2 — probe secrets file directly (credentials present but not yet in env;
     # load_secrets() is called lazily on first provider plugin construction)
@@ -423,45 +490,21 @@ def check_secrets_loaded(env: Mapping[str, str] | None = None) -> CheckResult:
         (secrets_file_env, *_SECRETS_FILE_PROBE_PATHS) if secrets_file_env else _SECRETS_FILE_PROBE_PATHS
     )
     for probe in probe_paths:
-        p = Path(probe)
-        if not p.exists():
-            continue
-        found = _secrets_file_keys_present(p, _REQUIRED_SECRETS)
-        missing_in_file = [k for k in _REQUIRED_SECRETS if k not in found]
-        if not missing_in_file:
-            return CheckResult(
-                name=_CHECK_SECRETS_LOADED,
-                ok=True,
-                detail=(
-                    f"Secrets file found at {probe} — credentials will be active on first search call. "
-                    f"Run `kairix search` to confirm."
-                ),
-            )
-        # File exists but is missing keys — give specific guidance
-        return CheckResult(
-            name=_CHECK_SECRETS_LOADED,
-            ok=False,
-            detail=f"Secrets file at {probe} is missing required keys: {', '.join(missing_in_file)}",
-            fix=(
-                f"Add the missing keys to {probe}:\n"
-                + "".join(f"  {k}=<value>\n" for k in missing_in_file)
-                + "Set KAIRIX_LLM_API_KEY and KAIRIX_LLM_ENDPOINT in your env or secrets file."
-            ),
-        )
+        if Path(probe).exists():
+            return _secrets_from_file(probe)
 
-    # Tier 3 — nothing found
-    missing_env = [k for k in _REQUIRED_SECRETS if not os.environ.get(k)]
-    default_path = _SECRETS_FILE_PROBE_PATHS[-1]
+    # Tier 3 — nothing found (read through the env seam, not os.environ,
+    # so callers passing an explicit mapping get a truthful missing list)
+    missing_env = [k for k in _REQUIRED_SECRETS if not env.get(k)]
     return CheckResult(
         name=_CHECK_SECRETS_LOADED,
         ok=False,
         detail=f"LLM credentials not found in environment or secrets file: {', '.join(missing_env)}",
         fix=(
-            f"Create {default_path} with:\n"
-            "  KAIRIX_LLM_API_KEY=<value>\n"
-            "  KAIRIX_LLM_ENDPOINT=<value>\n"
-            "Or ensure the kairix wrapper (not the raw Python binary) is on PATH.\n"
-            "Verify: head -1 $(which kairix)  — should show #!/usr/bin/env bash"
+            "fix: set the missing keys named above in your environment, or write "
+            "them as KEY=VALUE lines in a secrets file and point KAIRIX_SECRETS_FILE "
+            "at it. next: run `kairix secrets verify` to confirm every credential "
+            "resolves, then re-run `kairix onboard check`."
         ),
     )
 
@@ -576,12 +619,24 @@ def check_vector_search_working(pipeline: Any | None = None) -> CheckResult:
         )
 
 
-def check_neo4j_reachable(neo4j_client: Any | None = None) -> CheckResult:
+def check_neo4j_reachable(
+    neo4j_client: Any | None = None,
+    env: Mapping[str, str] | None = None,
+) -> CheckResult:
     """Neo4j is reachable and contains entities.
+
+    The "client unavailable" remediation is deployment-aware (GH #476):
+    inside the kairix container (``KAIRIX_CONTAINER=1``) it names the
+    bundled compose sidecar URI (``bolt://neo4j:7687``); everywhere else
+    it points at the bundled docker-compose.yml or a local install.
 
     Args:
         neo4j_client: Injectable Neo4j client for testing.
                       Defaults to the production client.
+        env: DI seam forwarded to :meth:`kairix.paths.Mode.detect` so tests
+             drive the container / non-container remediation branches with
+             an explicit mapping. Production callers leave it ``None`` and
+             the live environment is read at the F4 boundary in paths.py.
     """
     try:
         if neo4j_client is not None:
@@ -591,19 +646,12 @@ def check_neo4j_reachable(neo4j_client: Any | None = None) -> CheckResult:
 
             client = get_client()
         if not getattr(client, "available", False):
+            in_container = Mode.detect(env) is Mode.container
             return CheckResult(
                 name=_CHECK_NEO4J_REACHABLE,
                 ok=False,
                 detail="Neo4j client unavailable (KAIRIX_NEO4J_URI not set or connection refused)",
-                fix=(
-                    "Install Neo4j:\n"
-                    "  bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/kairix/main/scripts/install-neo4j.sh)\n"
-                    "Or run with Docker:\n"
-                    "  docker run -d --name neo4j -p 7687:7687 -e NEO4J_AUTH=neo4j/YOUR_PASSWORD neo4j:5-community\n"
-                    "Then set KAIRIX_NEO4J_URI in /opt/kairix/service.env:\n"
-                    "  KAIRIX_NEO4J_URI=bolt://localhost:7687\n"
-                    "Neo4j is required for production — entity boost and multi-hop queries are degraded without it."
-                ),
+                fix=_NEO4J_FIX_CONTAINER if in_container else _NEO4J_FIX_DEFAULT,
             )
 
         rows = client.cypher("MATCH (n) RETURN count(n) AS total LIMIT 1")
@@ -633,9 +681,10 @@ def check_neo4j_reachable(neo4j_client: Any | None = None) -> CheckResult:
             ok=False,
             detail=f"Neo4j check failed: {exc}",
             fix=(
-                "Verify Neo4j connection details in /opt/kairix/service.env.\n"
-                "kairix degrades gracefully when Neo4j is unavailable — "
-                "entity boost and multi-hop are disabled but search still works."
+                "fix: verify KAIRIX_NEO4J_URI and the Neo4j credentials resolve "
+                "(run `kairix secrets verify`). kairix degrades gracefully when "
+                "Neo4j is unavailable — entity boost and multi-hop are disabled "
+                "but search still works. next: re-run `kairix onboard check`."
             ),
         )
 

@@ -35,7 +35,7 @@ Not all environment variables are secrets. Configuration values belong in `servi
 | `KAIRIX_AZURE_API_VERSION` | Azure API version override | `2024-12-01-preview` |
 | `KAIRIX_NEO4J_URI` | Neo4j connection URI | `bolt://localhost:7687` |
 | `KAIRIX_NEO4J_USER` | Neo4j username | `neo4j` |
-| `KAIRIX_DOCUMENT_ROOT` | Path to document store | `~/kairix-vault` |
+| `KAIRIX_DOCUMENT_ROOT` | Path to document store | `/data/documents` (Docker), `/var/lib/kairix/documents` (system install), `~/Documents` (user install) |
 | `KAIRIX_DB_PATH` | SQLite database path | `~/.cache/kairix/index.sqlite` |
 | `KAIRIX_KV_NAME` | Azure Key Vault name (for secret resolution) | — |
 | `KAIRIX_MAINTENANCE_SKIP_NOOP_THRESHOLD` | Consecutive worker embed no-ops before maintenance (entity_seed/health_check/wikilinks) is skipped | `10` |
@@ -44,16 +44,18 @@ Not all environment variables are secrets. Configuration values belong in `servi
 
 | KV name | Env var | Purpose |
 |---------|---------|---------|
-| `kairix-llm-api-key` | `KAIRIX_LLM_API_KEY` | LLM API key |
-| `kairix-llm-endpoint` | `KAIRIX_LLM_ENDPOINT` | LLM API endpoint |
-| `kairix-llm-model` | `KAIRIX_LLM_MODEL` | Chat model name |
-| `kairix-embed-api-key` | `KAIRIX_EMBED_API_KEY` | Embed API key (falls back to LLM) |
-| `kairix-embed-endpoint` | `KAIRIX_EMBED_ENDPOINT` | Embed API endpoint (falls back to LLM) |
-| `kairix-embed-model` | `KAIRIX_EMBED_MODEL` | Embed model name |
+| `kairix-provider-llm-api-key` | `KAIRIX_PROVIDER_LLM_API_KEY` | LLM API key |
+| `kairix-provider-llm-endpoint` | `KAIRIX_PROVIDER_LLM_ENDPOINT` | LLM API endpoint |
+| `kairix-provider-llm-model` | `KAIRIX_PROVIDER_LLM_MODEL` | Chat model name |
+| `kairix-provider-embed-api-key` | `KAIRIX_PROVIDER_EMBED_API_KEY` | Embed API key (falls back to LLM) |
+| `kairix-provider-embed-endpoint` | `KAIRIX_PROVIDER_EMBED_ENDPOINT` | Embed API endpoint (falls back to LLM) |
+| `kairix-provider-embed-model` | `KAIRIX_PROVIDER_EMBED_MODEL` | Embed model name |
 | `kairix-embed-pool-size` | `KAIRIX_EMBED_POOL_SIZE` | int, default 20 — max concurrent HTTP connections to the embed provider |
 | `kairix-embed-pool-keepalive` | `KAIRIX_EMBED_POOL_KEEPALIVE` | int, default 10 — max idle connections kept warm |
 | `kairix-embed-pool-expiry-s` | `KAIRIX_EMBED_POOL_EXPIRY_S` | float, default 30.0 — idle-connection expiry (seconds) |
-| `kairix-neo4j-password` | `KAIRIX_NEO4J_PASSWORD` | Neo4j password |
+| `kairix-infra-neo4j-password` | `KAIRIX_NEO4J_PASSWORD` | Neo4j password |
+
+The full canonical-name schema (`kairix-<scope>-<area>[-<instance>]-<leaf>`) plus per-connector names live in [`secrets-configuration.md`](secrets-configuration.md). Run `kairix secrets verify` to see every registered credential and whether it resolves.
 
 Resolution order: env var > per-file secret (`/run/secrets/<name>`) > bundle file (`/run/secrets/kairix.env`) > Azure Key Vault CLI (`KAIRIX_KV_NAME`).
 
@@ -61,15 +63,15 @@ Resolution order: env var > per-file secret (`/run/secrets/<name>`) > bundle fil
 
 ## Environment Configuration
 
-All infrastructure-specific values (vault name, paths, credentials) are passed via environment variables — nothing is hardcoded in the source. The repo ships [`env.example`](../env.example) with every variable documented.
+All infrastructure-specific values (Key Vault name, paths, credentials) are passed via environment variables — nothing is hardcoded in the source. The repo ships [`.env.example`](../../.env.example) with every variable documented.
 
 **Setting up your environment file:**
 
 ```bash
 # On your deployment VM
-cp env.example /opt/kairix/service.env
+cp .env.example /opt/kairix/service.env
 chmod 600 /opt/kairix/service.env
-# Edit with your values (Key Vault name, vault path, data dir, etc.)
+# Edit with your values (Key Vault name, document root, data dir, etc.)
 nano /opt/kairix/service.env
 
 # Source it in each cron job (see Cron Scheduling below)
@@ -79,24 +81,24 @@ source /opt/kairix/service.env
 **For local dev/testing:**
 
 ```bash
-cp env.example .env    # .env is gitignored
+cp .env.example .env    # .env is gitignored
 # Edit with your values, then:
 source .env && kairix search "test query" --agent builder
 ```
 
-**For GitHub Actions:** add each variable as a repository secret (Settings → Secrets and variables → Actions). The CI workflows that need Azure credentials read them as `${{ secrets.KAIRIX_LLM_API_KEY }}` etc.
+**For GitHub Actions:** add each variable as a repository secret (Settings → Secrets and variables → Actions). CI workflows that need provider credentials read them as `${{ secrets.KAIRIX_PROVIDER_LLM_API_KEY }}` etc.
 
 **Key variables to set first:**
 
 | Variable | What it is |
 |---|---|
 | `KAIRIX_KV_NAME` | Your Azure Key Vault name |
-| `KAIRIX_VAULT_ROOT` | Path to your Obsidian vault |
+| `KAIRIX_DOCUMENT_ROOT` | Path to your document store (the knowledge store kairix indexes) |
 | `KAIRIX_DATA_DIR` | Where logs and data files go |
 | `KAIRIX_WORKSPACE_ROOT` | Agent memory log root (e.g. `/data/workspaces`) |
 | `LOG_DIR` | Where deploy.sh and cron wrappers write logs |
 
-See `env.example` for the complete variable reference.
+See `.env.example` for the complete variable reference.
 
 ---
 
@@ -117,21 +119,21 @@ Create the following secrets in Key Vault:
 
 | Secret name | Value |
 |---|---|
-| `kairix-llm-endpoint` | `https://<your-resource>.cognitiveservices.azure.com/` |
-| `kairix-llm-api-key` | Your Azure OpenAI API key |
-| `kairix-embed-model` | `text-embedding-3-large` (or your deployment name) |
-| `kairix-llm-model` | `gpt-4o-mini` (or your deployment name) |
-| `kairix-neo4j-password` | Your Neo4j password |
+| `kairix-provider-llm-endpoint` | `https://<your-resource>.cognitiveservices.azure.com/` |
+| `kairix-provider-llm-api-key` | Your Azure OpenAI API key |
+| `kairix-provider-embed-model` | `text-embedding-3-large` (or your deployment name) |
+| `kairix-provider-llm-model` | `gpt-4o-mini` (or your deployment name) |
+| `kairix-infra-neo4j-password` | Your Neo4j password |
 
 ```bash
 # Create secrets (run once, from a machine with Key Vault access)
-az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name kairix-llm-endpoint \
+az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name kairix-provider-llm-endpoint \
   --value "https://your-resource.cognitiveservices.azure.com/"
-az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name kairix-llm-api-key \
+az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name kairix-provider-llm-api-key \
   --value "your-api-key"
-az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name kairix-embed-model \
+az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name kairix-provider-embed-model \
   --value "text-embedding-3-large"
-az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name kairix-llm-model \
+az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name kairix-provider-llm-model \
   --value "gpt-4o-mini"
 ```
 
@@ -146,7 +148,7 @@ The VM running Kairix must be able to authenticate to Azure Key Vault. Two optio
 
 ```bash
 # Verify managed identity auth is working
-az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name kairix-llm-endpoint --query value -o tsv
+az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name kairix-provider-llm-endpoint --query value -o tsv
 ```
 
 **Option B: Service Principal**
@@ -196,7 +198,7 @@ KAIRIX_NEO4J_USER=neo4j
 KAIRIX_NEO4J_PASSWORD=<your-password>
 ```
 
-For managed deployments where the password is stored in Azure Key Vault as `kairix-neo4j-password`, `kairix-fetch-secrets.service` populates `KAIRIX_NEO4J_PASSWORD` in `/run/secrets/kairix.env` automatically.
+For managed deployments where the password is stored in Azure Key Vault as `kairix-infra-neo4j-password`, `kairix-fetch-secrets.service` populates `KAIRIX_NEO4J_PASSWORD` in `/run/secrets/kairix.env` automatically.
 
 Verify Neo4j is reachable:
 ```bash
@@ -219,7 +221,7 @@ sudo chown -R <service-user>:<service-user> \
 ```
 
 Kairix expects:
-- `$KAIRIX_VAULT_ROOT` — vault root (kairix indexes this)
+- `$KAIRIX_DOCUMENT_ROOT` — document root (kairix indexes this)
 - `$KAIRIX_DATA_DIR/briefing/` — session briefings output directory
 - `$KAIRIX_DATA_DIR/logs/` — optional query logs (`KAIRIX_LOG_QUERIES=1`)
 - `$KAIRIX_WORKSPACE_ROOT/<agent>/memory/` — agent memory logs (required for briefing pipeline)
@@ -286,18 +288,20 @@ Extractor scratch (the per-call tmpfile that markitdown/pdfplumber etc. use) lan
 
 ### Docker Compose (recommended)
 
-Docker Compose is the primary deployment method. It bundles kairix, Neo4j, and the secrets sidecar in a single stack.
+Docker Compose is the primary deployment method. The base stack (repo root `docker-compose.yml`) bundles kairix and Neo4j and reads a plain `.env`.
 
 ```bash
 # Clone and start
 git clone https://github.com/three-cubes/kairix.git
-cd kairix/docker
+cd kairix
 cp .env.example .env
-# Edit .env with your values (Key Vault name, vault path, etc.)
+# Edit .env — set KAIRIX_PROVIDER_LLM_ENDPOINT + KAIRIX_PROVIDER_LLM_API_KEY
+cp kairix.config.example.yaml kairix.config.yaml
+ln -s /path/to/your/documents ./documents
 docker compose up -d
 ```
 
-See `docker/docker-compose.yml` for the full service definition. `kairix onboard check` runs inside the container on startup.
+See the repo-root [`docker-compose.yml`](../../docker-compose.yml) for the full service definition; `kairix onboard check` runs inside the container on startup. VM deployments that feed secrets through a `/run/secrets/kairix.env` sidecar use the stack in [`docker/`](../../docker/README.md) instead.
 
 #### Deploying behind a reverse proxy (caddy / nginx / Cloudflared)
 
@@ -391,7 +395,7 @@ The expected layout on the VM:
   .venv/              ← kairix package installed here (legacy pip path)
   bin/
     kairix-wrapper.sh ← env loader; /usr/local/bin/kairix symlinks here
-  service.env         ← operator config (KAIRIX_KV_NAME, KAIRIX_VAULT_ROOT, etc.)
+  service.env         ← operator config (KAIRIX_KV_NAME, KAIRIX_DOCUMENT_ROOT, etc.)
   secrets/            ← optional: pre-fetched secrets for non-Docker deployments
 ```
 
@@ -467,9 +471,9 @@ Or follow the manual steps in [Wrapper Script and PATH Setup](#wrapper-script-an
 
 ```bash
 # If service.env doesn't exist yet
-cp env.example /opt/kairix/service.env
+cp .env.example /opt/kairix/service.env
 nano /opt/kairix/service.env
-# Set: KAIRIX_KV_NAME, KAIRIX_VAULT_ROOT, KAIRIX_DATA_DIR, KAIRIX_WORKSPACE_ROOT
+# Set: KAIRIX_KV_NAME, KAIRIX_DOCUMENT_ROOT, KAIRIX_DATA_DIR, KAIRIX_WORKSPACE_ROOT
 ```
 
 ### Step 3: Verify Azure credentials
@@ -478,9 +482,9 @@ nano /opt/kairix/service.env
 source /opt/kairix/service.env
 
 ENDPOINT=$(az keyvault secret show --vault-name ${KAIRIX_KV_NAME} \
-  --name kairix-llm-endpoint --query value -o tsv)
+  --name kairix-provider-llm-endpoint --query value -o tsv)
 APIKEY=$(az keyvault secret show --vault-name ${KAIRIX_KV_NAME} \
-  --name kairix-llm-api-key --query value -o tsv)
+  --name kairix-provider-llm-api-key --query value -o tsv)
 
 echo "Endpoint: ${ENDPOINT:0:40}..."
 echo "Key: ${APIKEY:0:8}..."
@@ -491,8 +495,8 @@ Both must return values. If either is empty, check Azure CLI auth and Key Vault 
 ### Step 4: Run a test embed (first 20 chunks)
 
 ```bash
-KAIRIX_LLM_ENDPOINT="$ENDPOINT" \
-KAIRIX_LLM_API_KEY="$APIKEY" \
+KAIRIX_PROVIDER_LLM_ENDPOINT="$ENDPOINT" \
+KAIRIX_PROVIDER_LLM_API_KEY="$APIKEY" \
 kairix embed --limit 20
 ```
 
@@ -510,8 +514,8 @@ If you see `SchemaVersionError` or `usearch index load failed`, see [Troubleshoo
 ### Step 5: Full vault embed
 
 ```bash
-KAIRIX_LLM_ENDPOINT="$ENDPOINT" \
-KAIRIX_LLM_API_KEY="$APIKEY" \
+KAIRIX_PROVIDER_LLM_ENDPOINT="$ENDPOINT" \
+KAIRIX_PROVIDER_LLM_API_KEY="$APIKEY" \
 nohup kairix embed >> ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/embed.log 2>&1 &
 echo "PID: $!"
 ```
@@ -534,11 +538,11 @@ Expected: `vec_count > 0` and 3–5 results with file paths. If `vec_failed: tru
 ### Step 7: Populate the entity graph
 
 ```bash
-kairix vault crawl --vault-root /path/to/vault
+kairix store crawl --document-root /path/to/documents
 kairix curator health   # should report entity counts
 ```
 
-Expected: entity count ≥ 50 for a typical vault.
+Expected: entity count ≥ 50 for a typical knowledge store.
 
 **Entity-graph management (#262, #263).** Routine maintenance commands:
 
@@ -548,8 +552,8 @@ Expected: entity count ≥ 50 for a typical vault.
 ### Step 8: Test briefing
 
 ```bash
-KAIRIX_LLM_ENDPOINT="$ENDPOINT" \
-KAIRIX_LLM_API_KEY="$APIKEY" \
+KAIRIX_PROVIDER_LLM_ENDPOINT="$ENDPOINT" \
+KAIRIX_PROVIDER_LLM_API_KEY="$APIKEY" \
 kairix brief builder
 ```
 
@@ -616,7 +620,7 @@ source "${KAIRIX_SECRETS_FILE:-/run/secrets/kairix.env}"
 kairix embed
 
 # Wrong — fetches secrets inline, requires az CLI auth per-run, leaks into cron logs
-export KAIRIX_LLM_API_KEY=$(az keyvault secret show ...)
+export KAIRIX_PROVIDER_LLM_API_KEY=$(az keyvault secret show ...)
 ```
 
 For production VM deployments, `kairix-fetch-secrets.service` writes Azure credentials to `/run/secrets/kairix.env` (tmpfs) at boot using the VM's managed identity. See [SECURITY.md](../SECURITY.md) for setup detail.
@@ -640,7 +644,7 @@ Runs vault crawler and relationship seeding. Uses GPT-4o-mini for relationship c
 
 ```bash
 # The two commands to run, in order:
-kairix vault crawl --vault-root $KAIRIX_VAULT_ROOT
+kairix store crawl --document-root $KAIRIX_DOCUMENT_ROOT
 python scripts/seed-entity-relations.py
 ```
 
@@ -670,10 +674,10 @@ All credentials are fetched from Azure Key Vault at runtime. You can override an
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `KAIRIX_LLM_API_KEY` | Azure OpenAI API key | From Key Vault `kairix-llm-api-key` |
-| `KAIRIX_LLM_ENDPOINT` | Azure OpenAI endpoint URL | From Key Vault `kairix-llm-endpoint` |
-| `KAIRIX_EMBED_MODEL` | Embedding deployment name | From Key Vault `kairix-embed-model` |
-| `KAIRIX_VAULT_ROOT` | Path to Obsidian vault | `/path/to/vault` |
+| `KAIRIX_PROVIDER_LLM_API_KEY` | Azure OpenAI API key | From Key Vault `kairix-provider-llm-api-key` |
+| `KAIRIX_PROVIDER_LLM_ENDPOINT` | Azure OpenAI endpoint URL | From Key Vault `kairix-provider-llm-endpoint` |
+| `KAIRIX_PROVIDER_EMBED_MODEL` | Embedding deployment name | From Key Vault `kairix-provider-embed-model` |
+| `KAIRIX_DOCUMENT_ROOT` | Path to your document store | `/data/documents` (Docker), `~/Documents` (user install) |
 | `KAIRIX_DATA_DIR` | Data directory for logs | `/var/lib/kairix` |
 | `KAIRIX_WORKSPACE_ROOT` | Agent memory log root | `/data/workspaces` |
 | `KAIRIX_NEO4J_URI` | Neo4j Bolt URI | `bolt://localhost:7687` |
@@ -833,14 +837,14 @@ head -1 $(which kairix)
 # Should show: #!/usr/bin/env bash  (not #!/path/to/python)
 ```
 
-### `KAIRIX_LLM_API_KEY not set`
+### `Required secret not available: kairix-provider-llm-api-key`
 
-The embed or briefing command can't find Azure credentials.
+The embed or briefing command can't find provider credentials. The error message names the canonical secret and the env var to set (`KAIRIX_PROVIDER_LLM_API_KEY`).
 
 ```bash
 # Check Key Vault auth
 az account show
-az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name kairix-llm-api-key --query value -o tsv
+az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name kairix-provider-llm-api-key --query value -o tsv
 ```
 
 If `az account show` fails, run `az login` or check the VM's managed identity assignment.
@@ -889,7 +893,7 @@ cat ~/.cache/kairix/vectors.meta.json
 # Look for "ndim": 1536
 
 # If index is missing: run full re-embed
-KAIRIX_LLM_ENDPOINT="$ENDPOINT" KAIRIX_LLM_API_KEY="$APIKEY" \
+KAIRIX_PROVIDER_LLM_ENDPOINT="$ENDPOINT" KAIRIX_PROVIDER_LLM_API_KEY="$APIKEY" \
 kairix embed --force
 ```
 
@@ -926,7 +930,7 @@ systemctl status neo4j
 echo $KAIRIX_NEO4J_URI   # should be bolt://localhost:7687
 
 # Populate entity graph after fixing
-kairix vault crawl --vault-root $KAIRIX_VAULT_ROOT
+kairix store crawl --document-root $KAIRIX_DOCUMENT_ROOT
 ```
 
 ### Nightly entity extraction not running
@@ -939,7 +943,7 @@ crontab -l
 tail -20 ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/entity-relation-seed.log
 
 # Run manually to debug
-kairix vault crawl --vault-root $KAIRIX_VAULT_ROOT
+kairix store crawl --document-root $KAIRIX_DOCUMENT_ROOT
 python scripts/seed-entity-relations.py
 ```
 
@@ -999,12 +1003,12 @@ kairix onboard check
 
 ## Data Residency
 
-Vault content is sent to Azure OpenAI (Australia East) for:
-- **Embedding:** All vault documents sent to `text-embedding-3-large` for indexing
+Knowledge-store content is sent to Azure OpenAI (Australia East) for:
+- **Embedding:** All indexed documents sent to `text-embedding-3-large` for indexing
 - **Briefing synthesis:** Memory logs + retrieved chunks sent to `gpt-4o-mini`
 - **Entity extraction:** Entity stub content sent to `gpt-4o-mini` for NER
 - **Relationship classification:** Relationship text sent to `gpt-4o-mini`
 
-No vault content is stored externally beyond the duration of the API request. All vectors, entity data, and briefings live in SQLite and Neo4j on your own infrastructure.
+No document content is stored externally beyond the duration of the API request. All vectors, entity data, and briefings live in SQLite and Neo4j on your own infrastructure.
 
 See [SECURITY.md](../SECURITY.md) for the full data handling and secret management policy.

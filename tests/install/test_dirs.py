@@ -139,6 +139,86 @@ def test_ensure_dirs_idempotent(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_ensure_dirs_best_effort_records_perms_unmanaged_and_continues(tmp_path: Path) -> None:
+    """``strict=False`` turns a denied mkdir into action='perms-unmanaged' (#469).
+
+    Container first boot: with the documented ``/run/secrets/kairix.env``
+    bind-mount, ``/run/secrets`` is root-owned, so the uid-995 mkdir of
+    ``/run/secrets/kairix`` raises PermissionError and killed
+    ``kairix init`` → s6 crash-loop. In best-effort mode the failure is
+    recorded in the report (the operator still sees the path) and the
+    walk continues to the remaining specs.
+
+    Simulated with a 0o555 parent dir under tmp_path — same EACCES
+    shape as the root-owned ``/run/secrets`` mount.
+
+    Sabotage-proof (executed): revert production ``ensure_dirs`` to the
+    pre-#469 body (no strict seam, bare mkdir/chmod) and this test
+    errors with the escaped PermissionError (or TypeError on the
+    missing ``strict`` kwarg). Restored.
+    """
+    if os.geteuid() == 0:
+        pytest.skip(
+            "permission denial cannot be simulated as root (mkdir succeeds despite 0o555); "
+            "fix: run the suite as an unprivileged user to exercise the best-effort branch."
+        )
+
+    locked_parent = tmp_path / "locked"
+    locked_parent.mkdir()
+    locked_parent.chmod(0o555)
+    denied = locked_parent / "kairix"
+    later_target = tmp_path / "writable" / "kairix"
+
+    specs = [
+        DirSpec(denied, 0o750, os.getuid(), os.getgid()),
+        DirSpec(later_target, 0o700, os.getuid(), os.getgid()),
+    ]
+    try:
+        results = ensure_dirs(specs, strict=False)
+    finally:
+        # Restore write perms so pytest's tmp_path cleanup never trips.
+        locked_parent.chmod(0o755)
+
+    actions = {r["path"]: r["action"] for r in results}
+    # The denied path is surfaced in the report — operators can see it.
+    assert actions[str(denied)] == "perms-unmanaged"
+    assert not denied.exists()
+    # The walk continued past the denied entry: later specs still land.
+    assert actions[str(later_target)] == "created"
+    assert later_target.is_dir()
+
+
+@pytest.mark.unit
+def test_ensure_dirs_strict_default_raises_on_permission_error(tmp_path: Path) -> None:
+    """Default (strict) behaviour still raises — system/user installs must fail loudly.
+
+    The #469 best-effort tolerance is container-only; a system-mode
+    install that cannot mkdir /var/lib/kairix is a real error the
+    operator must see as a nonzero exit, not a soft report entry.
+
+    Sabotage-proof (executed): change production ``_ensure_one_dir`` to
+    swallow PermissionError regardless of ``strict`` and this test
+    flips red on the missing raise. Restored.
+    """
+    if os.geteuid() == 0:
+        pytest.skip(
+            "permission denial cannot be simulated as root (mkdir succeeds despite 0o555); "
+            "fix: run the suite as an unprivileged user to exercise the strict branch."
+        )
+
+    locked_parent = tmp_path / "locked-strict"
+    locked_parent.mkdir()
+    locked_parent.chmod(0o555)
+    denied = locked_parent / "kairix"
+
+    try:
+        with pytest.raises(PermissionError):
+            ensure_dirs([DirSpec(denied, 0o750, os.getuid(), os.getgid())])
+    finally:
+        locked_parent.chmod(0o755)
+
+
+@pytest.mark.unit
 def test_ensure_dirs_adjusts_wrong_mode(tmp_path: Path) -> None:
     """A pre-existing dir whose mode drifted gets chmod'd; action='mode-adjusted'.
 

@@ -56,39 +56,48 @@ def test_wrapper_check_skipped_in_docker() -> None:
 
 
 # ---------------------------------------------------------------------------
-# check_neo4j_reachable — fix hint content
+# check_neo4j_reachable — fix hint content (deployment-aware, GH #476)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-def test_neo4j_fix_hint_contains_install_script() -> None:
-    """fix hint must reference install-neo4j.sh + docker fallback + the
-    production-required framing when Neo4j is unavailable."""
+def test_neo4j_fix_hint_default_points_at_bundled_compose() -> None:
+    """Outside a container the fix points at the bundled docker-compose.yml
+    (Neo4j is included) OR a local Neo4j install with the localhost bolt URI,
+    and keeps the production-required framing. Earlier versions curl'd a
+    stale fork URL (quanyeomans) — the fix must carry no remote URL at all."""
     fake_client = _FakeNeo4jClient(available=False)
 
-    result = check_neo4j_reachable(neo4j_client=fake_client)
+    result = check_neo4j_reachable(neo4j_client=fake_client, env={})
 
     assert not result.ok
     assert result.fix is not None
-    assert "install-neo4j.sh" in result.fix
-    assert "docker" in result.fix.lower()
+    assert "docker-compose.yml" in result.fix
+    assert "KAIRIX_NEO4J_URI=bolt://localhost:7687" in result.fix
     # The fix hint frames Neo4j as required for production — the system
     # loads without it but entity-heavy queries degrade. Earlier versions
     # called it "optional"; the framing landed in v2026.5.24a3 because
     # operators were skipping Neo4j based on the "optional" wording and
     # then hitting recall regressions on entity-named queries.
     assert "required for production" in result.fix.lower()
+    # GH #476 — the old remediation curl'd a stale fork; no URLs allowed.
+    assert "quanyeomans" not in result.fix
+    assert "https://" not in result.fix
 
 
 @pytest.mark.unit
-def test_neo4j_fix_hint_contains_docker_run() -> None:
-    """fix hint must include a docker run command as a quick-start option."""
+def test_neo4j_fix_hint_container_points_at_compose_sidecar() -> None:
+    """Inside the container (KAIRIX_CONTAINER=1) the fix names the compose
+    sidecar service URI (bolt://neo4j:7687) and the compose restart verb."""
     fake_client = _FakeNeo4jClient(available=False)
 
-    result = check_neo4j_reachable(neo4j_client=fake_client)
+    result = check_neo4j_reachable(neo4j_client=fake_client, env={"KAIRIX_CONTAINER": "1"})
 
+    assert not result.ok
     assert result.fix is not None
-    assert "neo4j:5-community" in result.fix
+    assert "KAIRIX_NEO4J_URI=bolt://neo4j:7687" in result.fix
+    assert "docker compose up -d" in result.fix
+    assert "quanyeomans" not in result.fix
 
 
 @pytest.mark.unit
@@ -163,6 +172,49 @@ def test_secrets_loaded_ok_from_file(tmp_path: Path) -> None:
     assert "Secrets file" in result.detail
 
 
+@pytest.mark.unit
+def test_secrets_loaded_ok_from_env_canonical_names() -> None:
+    """Canonical KAIRIX_PROVIDER_LLM_* names satisfy the check (GH #473)."""
+    env = {
+        "KAIRIX_PROVIDER_LLM_API_KEY": "key-can12345",  # pragma: allowlist secret
+        "KAIRIX_PROVIDER_LLM_ENDPOINT": "https://example.openai.azure.com/",
+    }
+    result = check_secrets_loaded(env=env)
+    assert result.ok
+    assert "key-can1" in result.detail
+
+
+@pytest.mark.unit
+def test_secrets_loaded_legacy_env_carries_rotation_note() -> None:
+    """Legacy KAIRIX_LLM_* names still pass but name the canonical rotation target."""
+    env = {
+        "KAIRIX_LLM_API_KEY": "key-leg12345",  # pragma: allowlist secret
+        "KAIRIX_LLM_ENDPOINT": "https://example.openai.azure.com/",
+    }
+    result = check_secrets_loaded(env=env)
+    assert result.ok
+    assert "KAIRIX_PROVIDER_LLM_API_KEY" in result.detail
+
+
+@pytest.mark.unit
+def test_secrets_loaded_ok_from_file_canonical_names(tmp_path: Path) -> None:
+    """Tier 2: a secrets file carrying only the canonical pair passes (GH #473)."""
+    secrets_file = tmp_path / "kairix.env"
+    secrets_file.write_text(
+        "KAIRIX_PROVIDER_LLM_API_KEY=test-key\nKAIRIX_PROVIDER_LLM_ENDPOINT=https://example.openai.azure.com/\n"
+    )
+    result = check_secrets_loaded(env={"KAIRIX_SECRETS_FILE": str(secrets_file)})
+    assert result.ok
+
+
+@pytest.mark.unit
+def test_secrets_loaded_failure_names_canonical_keys() -> None:
+    """Tier 3 failure teaches the canonical names, not the retired ones."""
+    result = check_secrets_loaded(env={})
+    assert not result.ok
+    assert "KAIRIX_PROVIDER_LLM_API_KEY" in result.detail
+
+
 # ---------------------------------------------------------------------------
 # check_document_root_configured (document root configuration check)
 # ---------------------------------------------------------------------------
@@ -210,6 +262,39 @@ def test_run_all_checks_returns_list_of_check_results() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Remediation hygiene — no phantom scripts / stale forks / install-specific
+# paths in any operator-facing fix string (GH #473 / #476 / #477)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_no_canonical_remediation_references_phantom_artifacts() -> None:
+    """Every canonical remediation must name only things that exist.
+
+    scripts/deploy-vm.sh was deleted, the quanyeomans GitHub org is a stale
+    fork, and /opt/openclaw/bin + /opt/kairix/secrets.env are paths from a
+    single historical VM layout — none of them may appear in a remediation.
+    """
+    from kairix.platform.onboard.check import CANONICAL_REMEDIATIONS
+
+    for name, remediation in CANONICAL_REMEDIATIONS.items():
+        for banned in ("deploy-vm.sh", "quanyeomans", "/opt/openclaw", "/opt/kairix/secrets.env"):
+            assert banned not in remediation, f"{name} remediation references {banned!r}"
+
+
+@pytest.mark.unit
+def test_secrets_missing_fix_is_deployment_neutral() -> None:
+    """Tier-3 (nothing found) fix points at KAIRIX_SECRETS_FILE + `kairix
+    secrets verify` rather than the historical /opt/kairix/secrets.env path."""
+    result = check_secrets_loaded(env={})
+    assert not result.ok
+    assert result.fix is not None
+    assert "KAIRIX_SECRETS_FILE" in result.fix
+    assert "kairix secrets verify" in result.fix
+    assert "/opt/kairix/secrets.env" not in result.fix
+
+
+# ---------------------------------------------------------------------------
 # check_kairix_on_path — DI via which
 # ---------------------------------------------------------------------------
 
@@ -226,13 +311,15 @@ def test_kairix_on_path_ok() -> None:
 
 @pytest.mark.unit
 def test_kairix_on_path_missing() -> None:
-    """which returns None → ok=False with deploy-vm.sh hint."""
+    """which returns None → ok=False pointing at `kairix init verify` (GH #473 —
+    the old hint named scripts/deploy-vm.sh, which does not exist)."""
     from kairix.platform.onboard.check import check_kairix_on_path
 
     result = check_kairix_on_path(deps=OnboardChecksDeps(which=lambda _name: None))
     assert result.ok is False
     assert result.fix is not None
-    assert "deploy-vm.sh" in result.fix
+    assert "kairix init verify" in result.fix
+    assert "deploy-vm.sh" not in result.fix
 
 
 # ---------------------------------------------------------------------------
@@ -242,13 +329,16 @@ def test_kairix_on_path_missing() -> None:
 
 @pytest.mark.unit
 def test_wrapper_check_missing_kairix_returns_failed(tmp_path: Path) -> None:
-    """When which returns None, wrapper check fails with a helpful hint."""
+    """When which returns None, wrapper check fails pointing at `kairix init
+    verify` (GH #473 — the old hint named scripts/deploy-vm.sh, which does
+    not exist)."""
     result = check_wrapper_installed(
         deps=OnboardChecksDeps(is_docker=lambda: False, which=lambda _name: None),
     )
     assert result.ok is False
     assert result.fix is not None
-    assert "deploy-vm.sh" in result.fix
+    assert "kairix init verify" in result.fix
+    assert "deploy-vm.sh" not in result.fix
 
 
 @pytest.mark.unit

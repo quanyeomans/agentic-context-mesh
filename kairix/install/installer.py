@@ -36,7 +36,6 @@ from pathlib import Path
 
 from kairix.install.dirs import (
     DirActionReport,
-    DirSpec,
     ensure_dirs,
     specs_for,
 )
@@ -70,9 +69,10 @@ _DEFAULT_KAIRIX_BIN = "/usr/local/bin/kairix"
 
 # Callable aliases for the InstallerDeps fields. Match the public shape
 # of each underlying entry point so the production defaults plug in
-# without any wrapper.
+# without any wrapper. _DirCreator takes (specs, *, strict=...) — the
+# strict keyword is the container-mode best-effort seam (#469).
 _UserCreator = Callable[..., SystemUserResult]
-_DirCreator = Callable[[list[DirSpec]], list[DirActionReport]]
+_DirCreator = Callable[..., list[DirActionReport]]
 _UnitRenderer = Callable[..., str]
 _UnitInstaller = Callable[..., dict[str, str]]
 
@@ -137,6 +137,9 @@ class InstallReport:
         config file) + ``action`` (``"created"`` / ``"existing"``).
       * ``systemd`` — dict with ``path`` (absolute path of the unit
         file) + ``mode`` (the mode value the unit was installed for).
+        In container mode no unit is installed (s6 supervises the
+        service, #469) and the dict reads
+        ``{"action": "skipped-container", "mode": "container"}``.
     """
 
     mode: str
@@ -171,7 +174,9 @@ class VerifyReport:
         order :func:`specs_for` returns.
       * ``config_ok`` — ``True`` when the default config file exists.
       * ``systemd_ok`` — ``True`` when the unit file exists at the
-        expected location for the mode.
+        expected location for the mode. Always ``True`` in container
+        mode — no unit is installed there (s6 supervises the service,
+        #469), so its absence is healthy.
       * ``ok`` — AND of every per-layer flag above. The single boolean
         the CLI surface reads.
     """
@@ -197,7 +202,11 @@ def install(*, mode: Mode, deps: InstallerDeps | None = None) -> InstallReport:
        :attr:`InstallerDeps.config_target_dir` override). Idempotent:
        a pre-existing file is left untouched and reported as
        ``"existing"``.
-    4. systemd unit — render + write + reload + enable.
+    4. systemd unit — render + write + reload + enable. Skipped in
+       container mode (#469): the image has no systemd (s6 supervises
+       the service) and the Dockerfile already laid the tree down, so
+       ``kairix init`` acts as a verifier there; the report records
+       the deliberate skip.
 
     Returns an :class:`InstallReport` capturing the per-layer outcome.
     """
@@ -205,10 +214,20 @@ def install(*, mode: Mode, deps: InstallerDeps | None = None) -> InstallReport:
     user_result, uid, gid = _resolve_user_and_uid_gid(mode, deps)
 
     specs = specs_for(mode, uid=uid, gid=gid)
-    dirs_result = deps.dir_creator(specs)
+    # Container mode runs dir creation best-effort: bind-mounted paths
+    # (e.g. /run/secrets with the documented kairix.env mount) are owned
+    # by the container runtime, so a denied mkdir/chmod is recorded in
+    # the report instead of killing first boot (#469).
+    dirs_result = deps.dir_creator(specs, strict=mode != Mode.container)
 
     config_result = _ensure_default_config(mode, deps=deps)
-    systemd_result = _install_systemd(mode, deps=deps)
+    if mode == Mode.container:
+        # No systemd inside the container — s6 supervises the kairix
+        # process. Record the skip so `kairix init --json` shows the
+        # decision (#469).
+        systemd_result = {"action": "skipped-container", "mode": mode.value}
+    else:
+        systemd_result = _install_systemd(mode, deps=deps)
 
     return InstallReport(
         mode=mode.value,
@@ -248,8 +267,10 @@ def verify(*, mode: Mode, deps: InstallerDeps | None = None) -> VerifyReport:
     config_path = _config_target_dir(mode, deps) / _CONFIG_FILENAME
     config_ok = config_path.exists()
 
+    # Container mode installs no systemd unit (install() skips it — s6
+    # supervises the service, #469), so the absent unit is healthy.
     unit_path = _systemd_target_dir(mode, deps) / _UNIT_FILENAME
-    systemd_ok = unit_path.exists()
+    systemd_ok = mode == Mode.container or unit_path.exists()
 
     overall_ok = user_ok and all(d.present and d.mode_correct for d in dirs_ok) and config_ok and systemd_ok
 

@@ -37,6 +37,94 @@ def _default_set_llm_api_key(api_key: str) -> None:
     set_llm_api_key(api_key)
 
 
+def _default_get_provider(name: str) -> Any:
+    """Production seam — resolve the chosen provider plugin by name."""
+    from kairix.providers import get_provider
+
+    return get_provider(name)
+
+
+def _default_hydrate(path: Path) -> int:
+    """Production seam — hydrate the just-written bundle into the process env.
+
+    Routes through :func:`kairix.secrets.refresh_secrets` so the
+    in-process connection test resolves the persisted canonical values
+    through the standard loader chain.
+    """
+    from kairix.secrets import refresh_secrets
+
+    return refresh_secrets(path)
+
+
+# Legacy (pre-Foundry) Azure endpoint host fragments — mirrors the
+# detection the credentials layer uses for SDK-shape routing.
+_LEGACY_AZURE_ENDPOINT_FRAGMENTS = ("openai.azure.com", "cognitiveservices.azure.com")
+_FOUNDRY_ENDPOINT_FRAGMENT = "services.ai.azure.com"
+_OPENAI_DEFAULT_ENDPOINT = "https://api.openai.com/v1"
+
+
+def provider_plugin_name(provider_key: str, endpoint: str) -> str:
+    """Map the wizard's provider survey answer to a provider plugin name.
+
+    The returned name is what lands in the generated config's
+    ``provider:`` field and what the connection test resolves through
+    the plugin registry. Azure answers are split by endpoint shape:
+    ``<r>.openai.azure.com`` / ``<r>.cognitiveservices.azure.com`` ride
+    the ``azure_legacy`` plugin; everything else (including the
+    recommended ``<r>.services.ai.azure.com``) rides ``azure_foundry``.
+    "Other OpenAI-compatible endpoint" rides the ``openai`` plugin,
+    which takes the stored endpoint verbatim as its base URL.
+    """
+    if provider_key == "azure":
+        ep = endpoint.lower()
+        is_legacy = any(fragment in ep for fragment in _LEGACY_AZURE_ENDPOINT_FRAGMENTS)
+        if is_legacy and _FOUNDRY_ENDPOINT_FRAGMENT not in ep:
+            return "azure_legacy"
+        return "azure_foundry"
+    return "openai"
+
+
+_LLM_API_KEY_SECRET = "kairix-provider-llm-api-key"  # noqa: S105 — secret SLOT name, not a value  # pragma: allowlist secret
+_LLM_ENDPOINT_SECRET = "kairix-provider-llm-endpoint"  # noqa: S105 — secret SLOT name, not a value  # pragma: allowlist secret
+_EMBED_MODEL_SECRET = "kairix-provider-embed-model"  # noqa: S105 — secret SLOT name, not a value  # pragma: allowlist secret
+
+
+def persist_llm_credentials(
+    api_key: str,
+    endpoint: str,
+    embed_model: str,
+    *,
+    bundle_path: Path | None = None,
+    hydrate_fn: Callable[[Path], int] = _default_hydrate,
+) -> Path | None:
+    """Persist the wizard's collected credentials under canonical names.
+
+    Routes every value through :func:`kairix.secrets.set_secret` — the
+    same use-case function behind ``kairix secrets set`` — so the wizard
+    and the CLI share one persistence path (#473/#474). Empty values are
+    skipped. After the last write the bundle is hydrated into the
+    process env (``hydrate_fn`` seam; production = ``refresh_secrets``)
+    so the connection test resolves the stored values.
+
+    Returns the bundle path written to, or ``None`` when every value
+    was empty (nothing persisted, nothing hydrated).
+    """
+    from kairix.secrets import set_secret
+
+    pairs = (
+        (_LLM_API_KEY_SECRET, api_key),
+        (_LLM_ENDPOINT_SECRET, endpoint),
+        (_EMBED_MODEL_SECRET, embed_model),
+    )
+    path: Path | None = None
+    for name, value in pairs:
+        if value:
+            path = set_secret(name, value, bundle_path=bundle_path)
+    if path is not None:
+        hydrate_fn(path)
+    return path
+
+
 def probe_llm_connection(
     provider: str,
     endpoint: str,
@@ -45,41 +133,50 @@ def probe_llm_connection(
     *,
     set_llm_endpoint_fn: Callable[[str], None] = _default_set_llm_endpoint,
     set_llm_api_key_fn: Callable[[str], None] = _default_set_llm_api_key,
+    get_provider_fn: Callable[[str], Any] = _default_get_provider,
 ) -> bool:
     """Test LLM connectivity with a single embed + chat call.
+
+    ``provider`` is the chosen provider plugin name (the value the
+    wizard writes to the config's ``provider:`` field); the probe
+    resolves it through the plugin registry directly so a fresh machine
+    doesn't depend on any pre-existing config discovery. Credentials
+    resolve through the canonical loader chain — ``run_setup`` persists
+    and hydrates them before this probe fires.
 
     Public surface for the wizard's connectivity probe — wired through
     :class:`WizardDeps` ``connection_test`` so production callers leave
     the defaults and ``run_setup`` invokes it transparently. Exposed
-    directly so tests can exercise the exception-handling branch
-    without reaching past a ``_``-prefix (F5).
+    directly so tests can exercise the failure branches without
+    reaching past a ``_``-prefix (F5).
 
-    ``set_llm_endpoint_fn`` / ``set_llm_api_key_fn`` are public DI seams
-    — production callers leave the defaults and the function uses the
-    ``kairix.secrets`` versions; tests pass raising fakes to drive the
-    exception branch without monkey-patching ``kairix.secrets``.
+    ``set_llm_endpoint_fn`` / ``set_llm_api_key_fn`` / ``get_provider_fn``
+    are public DI seams — production callers leave the defaults; tests
+    pass fakes (raising or canned) to drive each branch without
+    monkey-patching ``kairix.secrets`` or the plugin registry.
+
+    On failure the underlying provider error is printed VERBATIM with an
+    F21 affordance — a DNS failure, a wrong deployment name, or a
+    missing config must never be reported as "bad credentials".
 
     ``embed_model`` is accepted for signature symmetry with the wizard's
     other provider-probe helpers (which DO use it); F19 ack.
     """
     _ = embed_model
     try:
-        if provider == "azure":
+        if endpoint:
             set_llm_endpoint_fn(endpoint)
-            set_llm_api_key_fn(api_key)
-        elif provider == "openai":
+        if api_key:
             set_llm_api_key_fn(api_key)
 
-        from kairix.platform.llm import get_default_backend
-
-        backend = get_default_backend()
+        plugin = get_provider_fn(provider)
         # Test embed
-        vec = backend.embed("test connection")
-        if not vec or len(vec) < 100:
+        vectors = plugin.embed_batch(["test connection"])
+        if not vectors or not vectors[0] or len(vectors[0]) < 100:
             print("  Warning: embedding returned fewer dimensions than expected")
             return False
         # Test chat
-        response = backend.chat(
+        response = plugin.chat(
             [{"role": "user", "content": "Say 'ok' and nothing else."}],
             max_tokens=5,
         )
@@ -89,7 +186,12 @@ def probe_llm_connection(
         return True
     except Exception as exc:
         logger.warning("wizard: connection check failed — %s", exc)
-        print("  Connection failed — check your Azure endpoint and API key.")
+        print(f"  Connection test failed: {exc}")
+        print("  The error above is the root cause — it can be the endpoint, the model")
+        print("  deployment name, or the network; your API key may be fine.")
+        print("  fix: correct the failing value, then store it with: kairix secrets set <name>")
+        print("  next: kairix secrets verify")
+        print("  run: kairix setup")
         return False
 
 
@@ -134,6 +236,13 @@ class WizardDeps:
     # without monkey-patching ``kairix.core.embed.cli.main``. The default
     # factory lazy-imports the production ``embed_main`` at call time.
     embed_main: Callable[[], Any] = field(default_factory=lambda: _default_embed_main)
+    # Public DI seam for credential persistence (#474). The production
+    # default writes the collected (api_key, endpoint, embed_model)
+    # through kairix.secrets.set_secret and hydrates the bundle; tests
+    # inject a recorder so no real bundle file or process env is touched.
+    persist_credentials: Callable[[str, str, str], Path | None] = field(
+        default_factory=lambda: persist_llm_credentials,
+    )
 
 
 _USE_CASE_OPTIONS = [
@@ -208,22 +317,52 @@ def _prompt_llm_credentials(ctx: SetupContext) -> tuple[str, str, str, str]:
 def _confirm_llm_connection(
     ctx: SetupContext,
     deps: WizardDeps,
-    provider_key: str,
+    provider_plugin: str,
     endpoint: str,
     api_key: str,
     embed_model: str,
 ) -> bool:
-    """Step 1b: test the LLM connection and ask whether to continue on failure."""
-    print("\n  Testing connection...")
-    if deps.connection_test(provider_key, endpoint, api_key, embed_model):
+    """Test the connection against the just-written config + secrets.
+
+    Runs AFTER the config write + credential persistence so the probe
+    exercises what the operator will actually run with. On failure the
+    probe has already printed the underlying provider error verbatim —
+    this wrapper must not re-blame the operator's credentials.
+    """
+    print("\n  Testing connection to your provider...")
+    if deps.connection_test(provider_plugin, endpoint, api_key, embed_model):
         print("  ✓ Connected successfully\n")
         return True
-    print("  ✗ Connection failed — check your credentials and try again\n")
+    print("  ✗ Connection test failed — the provider error above shows the cause.")
+    print("  Your config and stored credentials are saved; nothing you entered is lost.\n")
     # Non-interactive mode is for CI/Docker/scripted bootstrap where the
     # operator can't answer a prompt; default to continuing so a config
     # is still emitted. Interactive operators retain the safer default.
     continue_default = not ctx.interactive
     return prompt_yn(ctx, "Continue anyway?", default=continue_default)
+
+
+def _read_back_credentials(
+    secrets_path: Path | None,
+    endpoint: str,
+    api_key: str,
+) -> tuple[str, str]:
+    """Read the persisted credentials back from the bundle file.
+
+    The connection test must validate what was STORED (what every later
+    command resolves), not the in-memory copies — a persistence bug
+    would otherwise pass the probe and fail on first real use. Falls
+    back to the collected values when nothing was persisted.
+    """
+    if secrets_path is None or not secrets_path.exists():
+        return endpoint, api_key
+    from kairix.secrets import load_secrets_file
+
+    stored = load_secrets_file(secrets_path)
+    return (
+        stored.get("KAIRIX_PROVIDER_LLM_ENDPOINT") or endpoint,
+        stored.get("KAIRIX_PROVIDER_LLM_API_KEY") or api_key,
+    )
 
 
 def _resolve_document_root(ctx: SetupContext, document_path: str | None) -> str | None:
@@ -367,6 +506,7 @@ def _print_agent_instructions(ctx: SetupContext) -> None:
 
 def _build_full_config(
     template: dict[str, Any],
+    provider: str,
     doc_root: str,
     db_path: str,
     log_dir: str,
@@ -374,9 +514,15 @@ def _build_full_config(
     use_neo4j: bool,
     neo4j_uri: str,
 ) -> dict[str, Any]:
-    """Assemble the final ``full_config`` dict from the wizard's collected fields."""
+    """Assemble the final ``full_config`` dict from the wizard's collected fields.
+
+    ``provider`` is mandatory in the emitted config — factory
+    construction fails without it, which was #474's headline defect
+    (the wizard asked for the provider and then didn't write it).
+    """
     retrieval = template.get("retrieval") or {"fusion_strategy": "bm25_primary"}
     full_config: dict[str, Any] = {
+        "provider": provider,
         "paths": {"document_root": doc_root, "db_path": db_path, "log_dir": log_dir},
     }
     if collections_config:
@@ -456,14 +602,24 @@ def _run_health_check_summary() -> None:
         print("  Health check skipped (run 'kairix onboard check' manually)\n")
 
 
-def _print_setup_summary(output: Path) -> None:
-    """Print the closing 'setup complete' summary block."""
+def _print_setup_summary(output: Path, secrets_path: Path | None) -> None:
+    """Print the closing 'setup complete' summary block.
+
+    Names exactly where the config + secrets were written and the three
+    commands the operator runs next, in order (#474 defect 4 — the
+    epilogue is the onboarding hand-off, not a feature tour).
+    """
     print("Setup complete. Your knowledge base is ready.\n")
-    print('  Search:     kairix search "your question here"')
-    print("  MCP server: kairix mcp serve")
-    print("  Research:   kairix mcp serve  (then call tool_research via MCP)")
-    print("  Benchmark:  kairix eval build-gold --suite queries.yaml")
-    print(f"\n  Config: {output}\n")
+    print(f"  Config written to:  {output}")
+    if secrets_path is not None:
+        print(f"  Secrets written to: {secrets_path}")
+    else:
+        print("  Secrets: none stored (no API key was entered)")
+    print("\nNext steps:")
+    print("  1. kairix embed          — build the search index from your documents")
+    print("  2. kairix onboard check  — verify the deployment end to end")
+    print("  3. kairix mcp serve      — connect your agents over MCP")
+    print()
 
 
 def _redirect_for_json_mode(json_mode: bool) -> Any:
@@ -519,11 +675,20 @@ def run_setup(
     # Step 0: use-case -> preset
     preset_key = _resolve_preset(ctx, preset)
 
-    # Step 1: LLM backend
+    # Step 1: LLM backend — collect, then PERSIST. The connection test
+    # runs later, against the just-written config + secrets (#474).
     print("Step 1 of 7: LLM Backend\n")
     provider_key, endpoint, api_key, embed_model = _prompt_llm_credentials(ctx)
-    if not _confirm_llm_connection(ctx, deps, provider_key, endpoint, api_key, embed_model):
-        return False
+    if provider_key == "openai" and not endpoint:
+        # OpenAI-direct: the plugin takes the endpoint verbatim, so the
+        # persisted value must be the real base URL, not "".
+        endpoint = _OPENAI_DEFAULT_ENDPOINT
+    provider_plugin = provider_plugin_name(provider_key, endpoint)
+    secrets_path: Path | None = None
+    if api_key:
+        secrets_path = deps.persist_credentials(api_key, endpoint, embed_model)
+        if secrets_path is not None:
+            print(f"  ✓ Credentials stored in {secrets_path} (0600)\n")
 
     # Step 2: document root
     print("Step 2 of 7: Document Source\n")
@@ -567,7 +732,9 @@ def run_setup(
     _print_agent_instructions(ctx)
 
     # Build config
-    full_config = _build_full_config(template, doc_root, db_path, log_dir, collections_config, use_neo4j, neo4j_uri)
+    full_config = _build_full_config(
+        template, provider_plugin, doc_root, db_path, log_dir, collections_config, use_neo4j, neo4j_uri
+    )
 
     if ctx.json_mode:
         # JSON mode emits the config to stdout and skips file write +
@@ -576,7 +743,16 @@ def run_setup(
         return True
 
     output = _write_config_yaml(output_path, template_name, full_config)
+
+    # Connection test — against the just-written config + the secrets
+    # read back from the bundle (#474: the probe validates what later
+    # commands will actually resolve, and it can pass on a fresh
+    # machine because everything it needs is now on disk).
+    endpoint_rb, api_key_rb = _read_back_credentials(secrets_path, endpoint, api_key)
+    if not _confirm_llm_connection(ctx, deps, provider_plugin, endpoint_rb, api_key_rb, embed_model):
+        return False
+
     _maybe_run_initial_index(ctx, file_count, embed_main_fn=deps.embed_main)
     _run_health_check_summary()
-    _print_setup_summary(output)
+    _print_setup_summary(output, secrets_path)
     return True

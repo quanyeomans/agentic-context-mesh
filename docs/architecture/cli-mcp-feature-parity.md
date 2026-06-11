@@ -46,6 +46,7 @@ For every feature operation:
 | **research** | research | — → `kairix research` | `mcp__research` | CLI missing | ✅ Phase 3d (#186) |
 | **entity** | get (lookup by name) | — → `kairix entity get` | `mcp__entity` | CLI missing | ✅ Phase 3e (#187) |
 | **usage_guide** | get | — → `kairix usage-guide` | `mcp__usage_guide` | CLI missing (also dogfood CONN-2) | ✅ Phase 3f (#188) |
+| **remember** | write a memory (agent allowlist → classify → dated markdown file → immediate BM25 index) | `kairix remember` | `mcp__memory_write` | — (shipped together; use case `kairix/use_cases/remember.py`) | ✅ #472 |
 | **entity** | seed (discover from index) | `kairix entity seed` | — | Operator-only — no agent-facing surface | Out of scope |
 
 **Status:** Phases 1–4 complete. MCP exposes 11 tools (was 7). Every

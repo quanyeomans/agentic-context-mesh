@@ -1,15 +1,20 @@
 """``kairix secrets`` — operator surface for the canonical credential map.
 
-One subcommand:
+Two subcommands:
 
 * ``kairix secrets verify`` — for every registered credential identity,
   try to resolve the secret via :class:`SecretsLoader`. Prints a per-row
   status table (``present`` / ``MISSING``). Exits non-zero if any
   required secret is missing — suitable for a pre-deploy gate.
+* ``kairix secrets set <name>`` — persist one canonical secret into the
+  resolved operator bundle file (#473). The value arrives via stdin by
+  default so it never lands in shell history; ``--value`` exists for
+  non-sensitive values. Delegates to
+  :func:`kairix.secrets.store.set_secret` — the same use-case function
+  the setup wizard calls.
 
-The ``verify`` subcommand accepts ``--json`` for envelope-shape output
-so agent-facing tooling can consume the same data the human surface
-shows.
+Both subcommands accept ``--json`` for envelope-shape output so
+agent-facing tooling can consume the same data the human surface shows.
 
 The legacy alias chain (``LEGACY_ALIASES`` + ``migrate-list``) was
 retired in #369; operators with pre-canonical env-var names must
@@ -32,6 +37,11 @@ from kairix.secrets.naming import (
 )
 
 _VERIFY = "verify"
+_SET = "set"
+
+# Hoisted next-step affordance — quoted by the set success line and the
+# JSON envelope (F17).
+_NEXT_VERIFY = "kairix secrets verify"
 
 # Hoisted leaf constant — F17 (no string literal ≥10 chars duplicated
 # ≥3 times). Shared across M365, Slack, Gmail rows that all carry an
@@ -190,11 +200,48 @@ def _run_verify(
     return rendered, exit_code
 
 
+def _default_value_reader() -> str:
+    """Read the secret value from stdin — the leak-safe default for ``set``."""
+    return sys.stdin.read()
+
+
+def _run_set(
+    *,
+    name: str,
+    inline_value: str | None,
+    emit_json: bool,
+    bundle_path: Path | None,
+    value_reader: Callable[[], str],
+) -> tuple[str, int]:
+    """Persist one canonical secret; return (rendered_output, exit_code).
+
+    Exit code 0 on success, 2 on a rejected name/value. The rendered
+    output never contains the secret value (F15) — success names the
+    secret SLOT and the destination path only.
+    """
+    from kairix.secrets.store import set_secret
+
+    raw = inline_value if inline_value is not None else value_reader()
+    # Strip the trailing newline that `echo` / heredocs append; values
+    # with interior newlines are rejected by set_secret itself.
+    value = raw.rstrip("\r\n") if raw else ""
+    try:
+        path = set_secret(name, value, bundle_path=bundle_path)
+    except ValueError as exc:
+        if emit_json:
+            return json.dumps({"error": str(exc), "name": name}, indent=2, sort_keys=True), 2
+        return str(exc), 2
+    if emit_json:
+        envelope = {"stored": name, "path": str(path), "mode": "0600", "next": _NEXT_VERIFY}
+        return json.dumps(envelope, indent=2, sort_keys=True), 0
+    return f"Stored {name} in {path} (0600). next: {_NEXT_VERIFY}", 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Construct the argparse parser for ``kairix secrets``."""
     parser = argparse.ArgumentParser(
         prog="kairix secrets",
-        description="Inspect the canonical credential naming surface.",
+        description="Inspect and persist the canonical credential surface.",
     )
     sub = parser.add_subparsers(dest="action", required=True, metavar="ACTION")
 
@@ -209,6 +256,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit a JSON envelope instead of the human-readable table.",
     )
 
+    set_parser = sub.add_parser(
+        _SET,
+        help="Persist one canonical secret into the operator bundle file (value from stdin by default).",
+        description=(
+            "Write or update one canonical secret in the resolved bundle file "
+            "($KAIRIX_SECRETS_FILE, else /run/secrets/kairix.env in containers, "
+            "else ~/.config/kairix/secrets/kairix.env for pip installs). "
+            "The value is read from stdin by default — "
+            "printf '%s' '<the-value>' | kairix secrets set <name> — "
+            "so it never lands in your shell history. The file is created "
+            "with mode 0600; existing entries are replaced in place and "
+            "unrelated lines are preserved."
+        ),
+    )
+    set_parser.add_argument(
+        "name",
+        help="Canonical secret name: kairix-<scope>-<area>[-<instance>]-<leaf>, e.g. kairix-provider-llm-api-key",
+    )
+    set_parser.add_argument(
+        "--value",
+        default=None,
+        help=(
+            "Inline value for NON-sensitive entries only (endpoints, model names). "
+            "For API keys and tokens, pipe via stdin instead — --value leaks into shell history."
+        ),
+    )
+    set_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="emit_json",
+        help="Emit a JSON envelope instead of the human-readable confirmation.",
+    )
+
     return parser
 
 
@@ -221,15 +301,29 @@ def main(
         tuple[tuple[Scope, str, str | None, str], ...],
     ] = _default_identities_provider,
     bundle_path: Path | None = None,
+    value_reader: Callable[[], str] = _default_value_reader,
 ) -> int:
     """Entry point for ``kairix secrets``.
 
-    Thin adapter — parse argv, route to the verify branch. The
+    Thin adapter — parse argv, route to the verify or set branch. The
     keyword-only seams (``loader_factory``, ``identities_provider``,
-    ``bundle_path``) are the DI surface for tests; production callers
-    leave them at their defaults.
+    ``bundle_path``, ``value_reader``) are the DI surface for tests;
+    production callers leave them at their defaults. ``bundle_path``
+    names the operator bundle file for both branches: the hydration
+    source for ``verify``, the write target for ``set``.
     """
     args = build_parser().parse_args(argv if argv is not None else sys.argv[2:])
+
+    if args.action == _SET:
+        rendered, exit_code = _run_set(
+            name=args.name,
+            inline_value=args.value,
+            emit_json=args.emit_json,
+            bundle_path=bundle_path,
+            value_reader=value_reader,
+        )
+        print(rendered, file=sys.stdout if exit_code == 0 else sys.stderr)
+        return exit_code
 
     rendered, exit_code = _run_verify(
         emit_json=args.emit_json,

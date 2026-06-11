@@ -115,3 +115,56 @@ def test_config_validate_subprocess_reports_errors_on_typo_overrides(tmp_path: P
     assert "validation error" in proc.stdout, f"expected validation-error header in stdout: {proc.stdout!r}"
     assert "unknown retrieval override key" in proc.stdout, f"expected per-error bullet in stdout: {proc.stdout!r}"
     assert "rrfk" in proc.stdout, f"expected typo'd key in stdout: {proc.stdout!r}"
+
+
+def test_config_validate_subprocess_accepts_reference_library_block(tmp_path: Path) -> None:
+    """#475 — a well-formed ``reference_library.index`` block validates OK."""
+    config_path = _write_config(
+        tmp_path,
+        """
+        reference_library:
+          index: lazy
+        """,
+    )
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "kairix.cli", "config", "validate", str(config_path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, (
+        f"config validate exited {proc.returncode}\n--- stderr ---\n{proc.stderr}\n--- stdout ---\n{proc.stdout}"
+    )
+    assert "OK" in proc.stdout, f"expected OK marker in stdout: {proc.stdout!r}"
+
+
+def test_config_validate_subprocess_rejects_invalid_reference_library_mode(tmp_path: Path) -> None:
+    """#475 — a typo'd index mode → exit 1 + an error naming the three options.
+
+    This is the operator-visible guard that keeps a misconfigured first
+    boot from silently re-embedding the bundled library.
+    """
+    config_path = _write_config(
+        tmp_path,
+        """
+        reference_library:
+          index: skpi
+        """,
+    )
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "kairix.cli", "config", "validate", str(config_path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 1, (
+        f"expected exit 1 on invalid config; got {proc.returncode}\n--- stdout ---\n{proc.stdout}"
+    )
+    assert "reference_library.index" in proc.stdout, f"expected the offending key in stdout: {proc.stdout!r}"
+    for mode in ("eager", "lazy", "skip"):
+        assert mode in proc.stdout, f"expected valid mode {mode!r} named in stdout: {proc.stdout!r}"
+    assert "fix:" in proc.stdout, f"expected F21 remediation marker in stdout: {proc.stdout!r}"

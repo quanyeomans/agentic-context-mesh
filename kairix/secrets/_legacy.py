@@ -40,7 +40,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_SECRETS_FILE = "/run/secrets/kairix.env"
 _DEFAULT_SECRETS_DIR = "/run/secrets"
 
 # Map of logical secret name → env var name (provider-agnostic)
@@ -87,15 +86,23 @@ def load_secrets(path: str | Path | None = None) -> int:
     Load KEY=VALUE pairs from the secrets file into os.environ.
 
     Args:
-        path: Path to the secrets file. Defaults to KAIRIX_SECRETS_FILE env
-              var, or /run/secrets/kairix.env if not set.
+        path: Path to the secrets file. Defaults to the shared bundle
+              resolution in :func:`kairix.secrets.store.resolve_bundle_path`:
+              KAIRIX_SECRETS_FILE env var, else /run/secrets/kairix.env
+              (container), else ~/.config/kairix/secrets/kairix.env
+              (pip install) — the same location ``kairix secrets set``
+              writes to, so persisted secrets hydrate at the next boot.
 
     Returns:
         Number of environment variables loaded (0 if file absent or empty).
         Never raises.
     """
     if path is None:
-        path = os.environ.get("KAIRIX_SECRETS_FILE", _DEFAULT_SECRETS_FILE)
+        # Shared with the write side (kairix secrets set) — single
+        # resolution rule, lazy import to avoid a module cycle.
+        from kairix.secrets.store import resolve_bundle_path
+
+        path = resolve_bundle_path()
     secrets_path = Path(path)
 
     if not secrets_path.exists():

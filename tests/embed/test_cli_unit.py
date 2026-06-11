@@ -385,12 +385,17 @@ def test_acquire_and_release_lock_roundtrip(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_acquire_lock_exits_3_when_holder_never_releases(monkeypatch, tmp_path: Path) -> None:
-    """If LOCK_EX blocks for the entire wait window, acquire_lock exits 3.
+def test_acquire_lock_exits_3_when_holder_never_releases(monkeypatch, tmp_path: Path, caplog) -> None:
+    """If LOCK_EX blocks for the entire wait window, acquire_lock exits 3
+    and the error carries the F21 affordance (#475) — fix:/next:/run:
+    telling the operator the worker holds the lock and how to pause it.
 
     ``fcntl`` is stdlib — F1 exempts it — so we keep the flock monkeypatch
     to force the BlockingIOError path. Time + lockfile flow through the
     new public seams (no module-attribute reassignment).
+
+    Sabotage proof: reverting the lock-timeout message to the bare
+    "another embed is still running" line fails the fix:/run: assertions.
     """
     lock_path = tmp_path / "embed.lock"
 
@@ -407,9 +412,15 @@ def test_acquire_lock_exits_3_when_holder_never_releases(monkeypatch, tmp_path: 
 
     monkeypatch.setattr(_time, "sleep", lambda _s: None)
 
-    with pytest.raises(SystemExit) as info:
-        acquire_lock(lockfile=lock_path, wait_secs=0.01)
+    import logging as _logging
+
+    with caplog.at_level(_logging.ERROR):
+        with pytest.raises(SystemExit) as info:
+            acquire_lock(lockfile=lock_path, wait_secs=0.01)
     assert info.value.code == 3
+    assert "fix: another embed (usually the background worker) holds the lock" in caplog.text
+    assert "next: kairix worker status" in caplog.text
+    assert "run: kairix worker pause && kairix embed && kairix worker resume" in caplog.text
 
 
 @pytest.mark.unit

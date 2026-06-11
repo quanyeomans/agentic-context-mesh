@@ -101,7 +101,7 @@ It works with any agent platform that supports [MCP](https://modelcontextprotoco
 - **[Claude Code](https://claude.ai/claude-code)** / **Claude Desktop** — add kairix to your MCP config. Claude searches your knowledge store during conversations and coding sessions.
 - **[OpenClaw](https://openclaw.ai)** — register kairix as an MCP server and every agent gets search tools automatically. Runs on the same VM — adds ~200MB RAM.
 - **[LangGraph](https://github.com/langchain-ai/langgraph)** / **[CrewAI](https://github.com/crewAIInc/crewAI)** — the `research` tool does iterative multi-turn search, refining its own queries until it finds a good answer.
-- **Any MCP-compatible agent** — stdio or SSE transport, no custom integration code.
+- **Any MCP-compatible agent** — stdio or streamable HTTP transport, no custom integration code.
 
 ---
 
@@ -127,11 +127,14 @@ Kairix is the memory + context layer your agent uses to stay oriented across ses
 ### 1. Install
 
 ```bash
-# pip — user-mode install (no root)
-pip install --user kairix-agentic-knowledge-mgt && kairix init --user
+# pipx — user-mode install (no root; works on PEP 668 distros like Ubuntu 24.04 / Homebrew,
+# where a bare `pip install` fails with externally-managed-environment)
+pipx install kairix-agentic-knowledge-mgt && kairix init --user
 
-# pip — system-mode install (production servers)
-sudo pip install kairix-agentic-knowledge-mgt && sudo kairix init --system
+# venv — system-mode install (production servers); pip works inside a venv
+sudo python3 -m venv /opt/kairix/.venv \
+  && sudo /opt/kairix/.venv/bin/pip install kairix-agentic-knowledge-mgt \
+  && sudo /opt/kairix/.venv/bin/kairix init --system
 
 # Docker
 curl -O https://raw.githubusercontent.com/three-cubes/kairix/main/docker-compose.yml \
@@ -147,7 +150,7 @@ Pick the recipe that matches where you're running:
 
 | Where you run kairix | What to do |
 |---|---|
-| Laptop / local dev | Edit `.env` (Docker) or `~/.config/kairix/secrets/kairix.env` (pip) — set `KAIRIX_LLM_ENDPOINT` + `KAIRIX_LLM_API_KEY` |
+| Laptop / local dev | Edit `.env` (Docker) or `~/.config/kairix/secrets/kairix.env` (pip) — set `KAIRIX_PROVIDER_LLM_ENDPOINT` + `KAIRIX_PROVIDER_LLM_API_KEY` |
 | Single-machine prod (any cloud) | Same as local dev with `chmod 600` on the file; store a backup out-of-band |
 | VM with cloud secrets manager (Azure KV / AWS / GCP / 1Password) | Run a small sidecar that materialises every `kairix-*` secret to `/run/secrets/kairix.env` at boot — no per-secret list to maintain |
 | Managed container platform (ECS / Cloud Run / AKS) | Reference the secrets directly in your task definition / service spec — the platform injects them as env vars |
@@ -182,20 +185,20 @@ See [`kairix.example.config.yaml`](kairix.example.config.yaml) for the full sche
 ### 4. Verify
 
 ```bash
-kairix onboard check          # human-readable: runs 9 checks (PATH → wrapper → secrets → docs → vector → Neo4j → agent memory → chunk dates → MCP)
-kairix onboard check --json   # structured: same checks, machine-readable, exits 0 only on 9/9 — wire into your docker-compose healthcheck or external monitor
+kairix onboard check          # human-readable: runs 18 checks (PATH → wrapper → secrets → docs → vector → Neo4j → agent memory → chunk dates → MCP → caches → topology → extractors)
+kairix onboard check --json   # structured: same checks, machine-readable, exits 0 only when every check passes — wire into your docker-compose healthcheck or external monitor
 ```
 
-Green output looks like `9/9 passed`. The `--json` shape is `{passed, total, fully_passed, failures: [{check, detail, remediation}]}` — each failure carries an operator-actionable `remediation` string verbatim. Common failures and the canonical fix for each:
+Green output looks like `All 18 checks passed`. The `--json` shape is `{passed, total, fully_passed, failures: [{check, detail, remediation}]}` — each failure carries an operator-actionable `remediation` string verbatim. Common failures and the canonical fix for each:
 
 | Check | Means | Canonical fix |
 |-------|-------|---------------|
-| `kairix_on_path` | `kairix` binary not on `$PATH` | `bash scripts/deploy-vm.sh` (installs the wrapper + symlink) |
-| `wrapper_installed` | Symlink points at raw Python binary, not the shell wrapper | Run the deploy script to reinstall the wrapper |
-| `secrets_loaded` | `KAIRIX_LLM_API_KEY` / `KAIRIX_LLM_ENDPOINT` not in env or in `/run/secrets/kairix.env` | Add them to `/opt/kairix/secrets.env` or enable `kairix-fetch-secrets.service` |
+| `kairix_on_path` | `kairix` binary not on `$PATH` | `kairix init verify` reports the missing install element; add the pipx/venv bin dir to `PATH` |
+| `wrapper_installed` | Symlink points at raw Python binary, not the shell wrapper | `kairix init verify` reports the missing install element with a remediation |
+| `secrets_loaded` | The LLM key + endpoint are not in env or the secrets file | Set them in your env or a secrets file pointed at by `KAIRIX_SECRETS_FILE`; confirm with `kairix secrets verify` |
 | `document_root_configured` | `KAIRIX_DOCUMENT_ROOT` unset or directory missing | `export KAIRIX_DOCUMENT_ROOT=/data/documents` (or your path) |
 | `vector_search_working` | Vector search returned 0 results or failed | Run `kairix embed`; if credentials are missing fix `secrets_loaded` first |
-| `neo4j_reachable` | Neo4j unreachable or empty | `bash scripts/install-neo4j.sh`; then `kairix store crawl --document-root $KAIRIX_DOCUMENT_ROOT` |
+| `neo4j_reachable` | Neo4j unreachable or empty | Run the bundled `docker-compose.yml` (Neo4j is included) or `bash scripts/install-neo4j.sh`; then `kairix store crawl --document-root $KAIRIX_DOCUMENT_ROOT` |
 | `agent_knowledge_populated` | No agent memory logs found | Create `<doc-root>/04-Agent-Knowledge/<agent>/memory/`; agents write daily logs there |
 | `chunk_date_populated` | `chunk_date` column unpopulated (temporal boost inert) | Run `kairix embed` (migration is automatic) |
 | `mcp_service` | No MCP consumer registered | See step 5 below |
@@ -317,6 +320,23 @@ ruff check kairix/ tests/          # lint only
 ```
 
 `scripts/safe-commit.sh` is the single entry point — it runs every gate the CI runs in the same order before letting the commit through; failing gates print the exact fix command. See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture and PR process, and [docs/architecture/fitness-functions.md](docs/architecture/fitness-functions.md) for the F1–F24 architecture fitness functions that enforce structural invariants.
+
+---
+
+## Support
+
+Stuck, or found a bug?
+
+- **[GitHub Issues](https://github.com/three-cubes/kairix/issues)** — report a bug or request a feature.
+- **[GitHub Discussions](https://github.com/three-cubes/kairix/discussions)** — ask questions, share how your team uses kairix, follow the roadmap.
+
+When you report a problem, attach the output of:
+
+```bash
+kairix onboard check --json
+```
+
+It captures the state of your deployment (install, secrets, document store, search, knowledge graph) in one machine-readable block — most problems can be diagnosed from it without back-and-forth.
 
 ---
 
