@@ -69,7 +69,7 @@ def search_wikidata(
             WIKIDATA_SEARCH_URL,
             params=params,
             timeout=_DEFAULT_TIMEOUT,
-            headers={"User-Agent": "kairix-entity-validator/0.9 (https://github.com/quanyeomans/kairix)"},
+            headers={"User-Agent": "kairix-entity-validator/0.9 (https://github.com/three-cubes/kairix)"},
         )
         resp.raise_for_status()
         data = resp.json()

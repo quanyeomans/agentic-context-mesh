@@ -384,7 +384,16 @@ def check_wrapper_installed(deps: OnboardChecksDeps | None = None) -> CheckResul
         )
 
 
-_REQUIRED_SECRETS = ("KAIRIX_LLM_API_KEY", "KAIRIX_LLM_ENDPOINT")
+# Canonical names drive every user-facing message; the legacy pair is
+# still accepted because deployed secrets bundles (vault-agent sidecar,
+# GH #479) emit it. Retirement of the legacy pair is tracked in GH #369.
+_CANONICAL_SECRETS = ("KAIRIX_PROVIDER_LLM_API_KEY", "KAIRIX_PROVIDER_LLM_ENDPOINT")
+_LEGACY_SECRETS = ("KAIRIX_LLM_API_KEY", "KAIRIX_LLM_ENDPOINT")
+_REQUIRED_SECRETS = _CANONICAL_SECRETS
+_ROTATION_NOTE = (
+    "legacy KAIRIX_LLM_* names resolved — rotate to KAIRIX_PROVIDER_LLM_API_KEY / "
+    "KAIRIX_PROVIDER_LLM_ENDPOINT (run `kairix secrets verify` for the canonical table)"
+)
 _SECRETS_FILE_PROBE_PATHS = (
     "/run/secrets/kairix.env",
     "/opt/kairix/secrets.env",
@@ -407,6 +416,57 @@ def _secrets_file_keys_present(path: Path, keys: tuple[str, ...]) -> set[str]:
     return found
 
 
+def _secrets_from_env(env: Mapping[str, str]) -> CheckResult | None:
+    """Tier 1: return ok when a full credential pair sits in the env.
+
+    Canonical pair first; the legacy pair still passes (deployed bundles
+    emit it, GH #479) but the detail carries a rotation note. ``None``
+    means neither generation is complete — caller falls through to the
+    file probe.
+    """
+    for pair, note in ((_CANONICAL_SECRETS, ""), (_LEGACY_SECRETS, f" — {_ROTATION_NOTE}")):
+        api_key = env.get(pair[0], "")
+        endpoint = env.get(pair[1], "")
+        if api_key and endpoint:
+            masked_key = api_key[:8] + "..." if len(api_key) > 8 else "***"
+            return CheckResult(
+                name=_CHECK_SECRETS_LOADED,
+                ok=True,
+                detail=f"LLM credentials present (key: {masked_key}, endpoint: {endpoint[:40]}...){note}",
+            )
+    return None
+
+
+def _secrets_from_file(probe: str) -> CheckResult:
+    """Tier 2: judge an existing secrets file — either generation passes whole."""
+    found = _secrets_file_keys_present(Path(probe), _CANONICAL_SECRETS + _LEGACY_SECRETS)
+    canonical_complete = all(k in found for k in _CANONICAL_SECRETS)
+    legacy_complete = all(k in found for k in _LEGACY_SECRETS)
+    if canonical_complete or legacy_complete:
+        note = "" if canonical_complete else f" ({_ROTATION_NOTE})"
+        return CheckResult(
+            name=_CHECK_SECRETS_LOADED,
+            ok=True,
+            detail=(
+                f"Secrets file found at {probe} — credentials will be active on first search call. "
+                f"Run `kairix search` to confirm.{note}"
+            ),
+        )
+    # File exists but neither generation is complete — give specific guidance
+    missing_in_file = [k for k in _CANONICAL_SECRETS if k not in found]
+    return CheckResult(
+        name=_CHECK_SECRETS_LOADED,
+        ok=False,
+        detail=f"Secrets file at {probe} is missing required keys: {', '.join(missing_in_file)}",
+        fix=(
+            f"Add the missing keys to {probe}:\n"
+            + "".join(f"  {k}=<value>\n" for k in missing_in_file)
+            + "Set KAIRIX_PROVIDER_LLM_API_KEY and KAIRIX_PROVIDER_LLM_ENDPOINT "
+            "in your env or secrets file."
+        ),
+    )
+
+
 def check_secrets_loaded(env: Mapping[str, str] | None = None) -> CheckResult:
     """LLM credentials are available in the environment or a secrets file.
 
@@ -415,17 +475,13 @@ def check_secrets_loaded(env: Mapping[str, str] | None = None) -> CheckResult:
     """
     if env is None:
         env = os.environ
-    api_key = env.get("KAIRIX_LLM_API_KEY", "")
-    endpoint = env.get("KAIRIX_LLM_ENDPOINT", "")
 
-    # Tier 1 — credentials in process environment (wrapper loaded them)
-    if api_key and endpoint:
-        masked_key = api_key[:8] + "..." if len(api_key) > 8 else "***"
-        return CheckResult(
-            name=_CHECK_SECRETS_LOADED,
-            ok=True,
-            detail=f"LLM credentials present (key: {masked_key}, endpoint: {endpoint[:40]}...)",
-        )
+    # Tier 1 — credentials in process environment (wrapper loaded them).
+    # Canonical KAIRIX_PROVIDER_LLM_* first; the legacy pair still passes
+    # (deployed bundles emit it, GH #479) but carries a rotation note.
+    env_result = _secrets_from_env(env)
+    if env_result is not None:
+        return env_result
 
     # Tier 2 — probe secrets file directly (credentials present but not yet in env;
     # load_secrets() is called lazily on first provider plugin construction)
@@ -434,34 +490,12 @@ def check_secrets_loaded(env: Mapping[str, str] | None = None) -> CheckResult:
         (secrets_file_env, *_SECRETS_FILE_PROBE_PATHS) if secrets_file_env else _SECRETS_FILE_PROBE_PATHS
     )
     for probe in probe_paths:
-        p = Path(probe)
-        if not p.exists():
-            continue
-        found = _secrets_file_keys_present(p, _REQUIRED_SECRETS)
-        missing_in_file = [k for k in _REQUIRED_SECRETS if k not in found]
-        if not missing_in_file:
-            return CheckResult(
-                name=_CHECK_SECRETS_LOADED,
-                ok=True,
-                detail=(
-                    f"Secrets file found at {probe} — credentials will be active on first search call. "
-                    f"Run `kairix search` to confirm."
-                ),
-            )
-        # File exists but is missing keys — give specific guidance
-        return CheckResult(
-            name=_CHECK_SECRETS_LOADED,
-            ok=False,
-            detail=f"Secrets file at {probe} is missing required keys: {', '.join(missing_in_file)}",
-            fix=(
-                f"Add the missing keys to {probe}:\n"
-                + "".join(f"  {k}=<value>\n" for k in missing_in_file)
-                + "Set KAIRIX_LLM_API_KEY and KAIRIX_LLM_ENDPOINT in your env or secrets file."
-            ),
-        )
+        if Path(probe).exists():
+            return _secrets_from_file(probe)
 
-    # Tier 3 — nothing found
-    missing_env = [k for k in _REQUIRED_SECRETS if not os.environ.get(k)]
+    # Tier 3 — nothing found (read through the env seam, not os.environ,
+    # so callers passing an explicit mapping get a truthful missing list)
+    missing_env = [k for k in _REQUIRED_SECRETS if not env.get(k)]
     return CheckResult(
         name=_CHECK_SECRETS_LOADED,
         ok=False,

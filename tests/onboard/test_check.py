@@ -172,6 +172,49 @@ def test_secrets_loaded_ok_from_file(tmp_path: Path) -> None:
     assert "Secrets file" in result.detail
 
 
+@pytest.mark.unit
+def test_secrets_loaded_ok_from_env_canonical_names() -> None:
+    """Canonical KAIRIX_PROVIDER_LLM_* names satisfy the check (GH #473)."""
+    env = {
+        "KAIRIX_PROVIDER_LLM_API_KEY": "key-can12345",  # pragma: allowlist secret
+        "KAIRIX_PROVIDER_LLM_ENDPOINT": "https://example.openai.azure.com/",
+    }
+    result = check_secrets_loaded(env=env)
+    assert result.ok
+    assert "key-can1" in result.detail
+
+
+@pytest.mark.unit
+def test_secrets_loaded_legacy_env_carries_rotation_note() -> None:
+    """Legacy KAIRIX_LLM_* names still pass but name the canonical rotation target."""
+    env = {
+        "KAIRIX_LLM_API_KEY": "key-leg12345",  # pragma: allowlist secret
+        "KAIRIX_LLM_ENDPOINT": "https://example.openai.azure.com/",
+    }
+    result = check_secrets_loaded(env=env)
+    assert result.ok
+    assert "KAIRIX_PROVIDER_LLM_API_KEY" in result.detail
+
+
+@pytest.mark.unit
+def test_secrets_loaded_ok_from_file_canonical_names(tmp_path: Path) -> None:
+    """Tier 2: a secrets file carrying only the canonical pair passes (GH #473)."""
+    secrets_file = tmp_path / "kairix.env"
+    secrets_file.write_text(
+        "KAIRIX_PROVIDER_LLM_API_KEY=test-key\nKAIRIX_PROVIDER_LLM_ENDPOINT=https://example.openai.azure.com/\n"
+    )
+    result = check_secrets_loaded(env={"KAIRIX_SECRETS_FILE": str(secrets_file)})
+    assert result.ok
+
+
+@pytest.mark.unit
+def test_secrets_loaded_failure_names_canonical_keys() -> None:
+    """Tier 3 failure teaches the canonical names, not the retired ones."""
+    result = check_secrets_loaded(env={})
+    assert not result.ok
+    assert "KAIRIX_PROVIDER_LLM_API_KEY" in result.detail
+
+
 # ---------------------------------------------------------------------------
 # check_document_root_configured (document root configuration check)
 # ---------------------------------------------------------------------------
