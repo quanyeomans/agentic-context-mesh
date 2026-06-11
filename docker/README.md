@@ -39,13 +39,21 @@ and neo4j database via a shared in-memory volume.
 
 ### Secrets fetched
 
-| KV Secret Name                        | Env Var Written                    |
-|---------------------------------------|------------------------------------|
-| `kairix-llm-api-key`                | `KAIRIX_LLM_API_KEY`             |
-| `kairix-llm-endpoint`               | `KAIRIX_LLM_ENDPOINT`            |
-| `kairix-embed-model`   | `KAIRIX_EMBED_MODEL`    |
-| `kairix-llm-model`  | `KAIRIX_LLM_MODEL` |
-| `kairix-neo4j-password`               | `KAIRIX_NEO4J_PASSWORD`            |
+Canonical names follow [`docs/operations/secrets-configuration.md`](../docs/operations/secrets-configuration.md)
+(`kairix-<scope>-<area>-<leaf>`). The sidecar fetches the canonical KV name
+first and falls back to the pre-canonical short name (e.g. `kairix-llm-api-key`)
+so existing vaults keep working. Each value is written under its canonical
+env var plus the legacy alias (removed with #369).
+
+| Canonical KV Secret Name          | Env Vars Written                                        |
+|-----------------------------------|---------------------------------------------------------|
+| `kairix-provider-llm-api-key`     | `KAIRIX_PROVIDER_LLM_API_KEY` + `KAIRIX_LLM_API_KEY`    |
+| `kairix-provider-llm-endpoint`    | `KAIRIX_PROVIDER_LLM_ENDPOINT` + `KAIRIX_LLM_ENDPOINT`  |
+| `kairix-provider-llm-model`       | `KAIRIX_PROVIDER_LLM_MODEL` + `KAIRIX_LLM_MODEL`        |
+| `kairix-provider-embed-api-key`   | `KAIRIX_PROVIDER_EMBED_API_KEY` + `KAIRIX_EMBED_API_KEY` |
+| `kairix-provider-embed-endpoint`  | `KAIRIX_PROVIDER_EMBED_ENDPOINT` + `KAIRIX_EMBED_ENDPOINT` |
+| `kairix-provider-embed-model`     | `KAIRIX_PROVIDER_EMBED_MODEL` + `KAIRIX_EMBED_MODEL`    |
+| `kairix-infra-neo4j-password`     | `KAIRIX_INFRA_NEO4J_PASSWORD` + `KAIRIX_NEO4J_PASSWORD` |
 
 ## Usage
 

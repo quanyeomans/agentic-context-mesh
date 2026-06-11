@@ -18,20 +18,29 @@ Optional:
   SECRETS_DIR              Where to write the secrets file (default: /run/secrets)
   REFRESH_INTERVAL_SECONDS How often to re-fetch from KV (default: 3600)
 
-Secrets fetched (KV secret name → env var written to file):
-  kairix-llm-api-key      → KAIRIX_LLM_API_KEY
-  kairix-llm-endpoint     → KAIRIX_LLM_ENDPOINT
-  kairix-llm-model        → KAIRIX_LLM_MODEL
-  kairix-embed-api-key    → KAIRIX_EMBED_API_KEY
-  kairix-embed-endpoint   → KAIRIX_EMBED_ENDPOINT
-  kairix-embed-model      → KAIRIX_EMBED_MODEL
-  kairix-neo4j-password   → KAIRIX_NEO4J_PASSWORD
+Secrets fetched (canonical KV secret name → env vars written to file):
+  kairix-provider-llm-api-key     → KAIRIX_PROVIDER_LLM_API_KEY     (+ KAIRIX_LLM_API_KEY)
+  kairix-provider-llm-endpoint    → KAIRIX_PROVIDER_LLM_ENDPOINT    (+ KAIRIX_LLM_ENDPOINT)
+  kairix-provider-llm-model       → KAIRIX_PROVIDER_LLM_MODEL       (+ KAIRIX_LLM_MODEL)
+  kairix-provider-embed-api-key   → KAIRIX_PROVIDER_EMBED_API_KEY   (+ KAIRIX_EMBED_API_KEY)
+  kairix-provider-embed-endpoint  → KAIRIX_PROVIDER_EMBED_ENDPOINT  (+ KAIRIX_EMBED_ENDPOINT)
+  kairix-provider-embed-model     → KAIRIX_PROVIDER_EMBED_MODEL     (+ KAIRIX_EMBED_MODEL)
+  kairix-infra-neo4j-password     → KAIRIX_INFRA_NEO4J_PASSWORD     (+ KAIRIX_NEO4J_PASSWORD)
+
+Canonical names follow docs/operations/secrets-configuration.md
+(kairix-<scope>-<area>[-<instance>]-<leaf>). Vaults created before the
+canonical schema may still hold the pre-canonical short names
+(kairix-llm-api-key etc.); each spec lists those as ``kv_fallbacks`` so
+existing vaults keep working during the transition window (#479). The
+parenthesised env vars are legacy aliases — remove with #369.
 """
 
 import logging
 import os
 import sys
 import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 
 logging.basicConfig(
@@ -47,16 +56,87 @@ READY_FILE = SECRETS_DIR / ".ready"
 KV_NAME = os.environ.get("KAIRIX_KV_NAME", "")
 REFRESH_INTERVAL = int(os.environ.get("REFRESH_INTERVAL_SECONDS", "3600"))
 
-# Azure Key Vault secret name → env var name
-SECRET_MAP: dict[str, str] = {
-    "kairix-llm-api-key": "KAIRIX_LLM_API_KEY",
-    "kairix-llm-endpoint": "KAIRIX_LLM_ENDPOINT",
-    "kairix-llm-model": "KAIRIX_LLM_MODEL",
-    "kairix-embed-api-key": "KAIRIX_EMBED_API_KEY",
-    "kairix-embed-endpoint": "KAIRIX_EMBED_ENDPOINT",
-    "kairix-embed-model": "KAIRIX_EMBED_MODEL",
-    "kairix-neo4j-password": "KAIRIX_NEO4J_PASSWORD",  # pragma: allowlist secret
-}
+
+@dataclass(frozen=True)
+class SecretSpec:
+    """One secret to fetch: canonical KV name, env vars to emit, KV fallbacks.
+
+    ``kv_name`` is the canonical Key Vault secret name (fetched first).
+    ``env_vars`` lists every env var the resolved value is written under —
+    canonical name first, then the legacy aliases kept for the transition
+    window (remove with #369). ``kv_fallbacks`` lists pre-canonical KV
+    names tried in order when the canonical name is absent, so existing
+    vaults keep working (#479).
+    """
+
+    kv_name: str
+    env_vars: tuple[str, ...]
+    kv_fallbacks: tuple[str, ...] = field(default=())
+
+
+SECRET_SPECS: tuple[SecretSpec, ...] = (
+    SecretSpec(
+        "kairix-provider-llm-api-key",
+        ("KAIRIX_PROVIDER_LLM_API_KEY", "KAIRIX_LLM_API_KEY"),
+        ("kairix-llm-api-key",),
+    ),
+    SecretSpec(
+        "kairix-provider-llm-endpoint",
+        ("KAIRIX_PROVIDER_LLM_ENDPOINT", "KAIRIX_LLM_ENDPOINT"),
+        ("kairix-llm-endpoint",),
+    ),
+    SecretSpec(
+        "kairix-provider-llm-model",
+        ("KAIRIX_PROVIDER_LLM_MODEL", "KAIRIX_LLM_MODEL"),
+        ("kairix-llm-model",),
+    ),
+    SecretSpec(
+        "kairix-provider-embed-api-key",
+        ("KAIRIX_PROVIDER_EMBED_API_KEY", "KAIRIX_EMBED_API_KEY"),
+        ("kairix-embed-api-key",),
+    ),
+    SecretSpec(
+        "kairix-provider-embed-endpoint",
+        ("KAIRIX_PROVIDER_EMBED_ENDPOINT", "KAIRIX_EMBED_ENDPOINT"),
+        ("kairix-embed-endpoint",),
+    ),
+    SecretSpec(
+        "kairix-provider-embed-model",
+        ("KAIRIX_PROVIDER_EMBED_MODEL", "KAIRIX_EMBED_MODEL"),
+        ("kairix-embed-model",),
+    ),
+    SecretSpec(
+        # KAIRIX_NEO4J_PASSWORD is NOT only an alias yet: the graph layer
+        # (kairix.secrets.neo4j_password) and docker-compose interpolation
+        # still read it today. Keep emitting it until #369 retires it.
+        "kairix-infra-neo4j-password",  # pragma: allowlist secret — secret NAME, not a value
+        ("KAIRIX_INFRA_NEO4J_PASSWORD", "KAIRIX_NEO4J_PASSWORD"),  # pragma: allowlist secret
+        ("kairix-neo4j-password",),  # pragma: allowlist secret — secret NAME, not a value
+    ),
+)
+
+
+def resolve_secret_env(fetch: Callable[[str], str | None]) -> dict[str, str]:
+    """Resolve every spec through ``fetch`` and fan values out to env vars.
+
+    For each :class:`SecretSpec`, the canonical KV name is tried first,
+    then each legacy fallback in order. A resolved value is emitted under
+    every env var the spec declares (canonical + legacy aliases). Specs
+    that resolve nowhere are skipped — same missing-secret semantics as
+    before.
+    """
+    fetched: dict[str, str] = {}
+    for spec in SECRET_SPECS:
+        value = fetch(spec.kv_name)
+        if value is None:
+            for legacy_name in spec.kv_fallbacks:
+                value = fetch(legacy_name)
+                if value is not None:
+                    break
+        if value is not None:
+            for env_var in spec.env_vars:
+                fetched[env_var] = value
+    return fetched
 
 
 def fetch_from_keyvault() -> dict[str, str]:
@@ -75,13 +155,13 @@ def fetch_from_keyvault() -> dict[str, str]:
     credential = DefaultAzureCredential()
     client = SecretClient(vault_url=kv_uri, credential=credential)
 
-    fetched: dict[str, str] = {}
-    for secret_name, env_var in SECRET_MAP.items():
-        resolved = _fetch_single_secret(client, secret_name)
-        if resolved is not None:
-            fetched[env_var] = resolved
+    fetched = resolve_secret_env(lambda name: _fetch_single_secret(client, name))
 
-    logger.info("Resolved %d of %d secrets from Key Vault", len(fetched), len(SECRET_MAP))
+    logger.info(
+        "Resolved %d env var(s) across %d secret spec(s) from Key Vault",
+        len(fetched),
+        len(SECRET_SPECS),
+    )
     return fetched
 
 

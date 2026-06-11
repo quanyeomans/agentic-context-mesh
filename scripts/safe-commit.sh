@@ -8,7 +8,8 @@
 #   1. ruff lint (includes isort import ordering via I rules)
 #   2. ruff format (black-compatible formatting)
 #   3. mypy --strict type checking
-#   4. pytest (unit + bdd + contract) with coverage.xml generation
+#   4. pytest (unit + bdd + contract) with per-invocation coverage XML
+#      generation (coverage.safe-commit.<pid>.xml, removed on exit)
 #   5. architecture fitness functions (F1-F30, including F7 per-file coverage
 #      floor — mirrors CI's Stage 2 invocation exactly so the historical
 #      safe-commit ↔ CI parity gap on F7 is closed)
@@ -48,6 +49,45 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 NC='\033[0m'
 
+# ── #483 guard: command substitution under `set -e` ──────────────────────────
+# `VAR=$(cmd)` kills the whole script AT THE ASSIGNMENT when cmd exits
+# non-zero — no FAIL line, no captured output; the log just ends at the
+# stage's "..." prefix. Every gate that captures output into a variable
+# MUST run through run_gate so the exit code lands in GATE_RC for
+# explicit handling instead of tripping `set -e`.
+GATE_OUT=""
+GATE_RC=0
+run_gate() {
+    GATE_RC=0
+    GATE_OUT=$("$@" 2>&1) || GATE_RC=$?
+}
+
+# Named-stage death report. Prints the tail of the captured output, a
+# FAIL line carrying the stage name + exit code, and fix:/next: action
+# markers, then exits non-zero. Used when a gate exits non-zero WITHOUT
+# producing the failure shape its stage handler knows how to summarise
+# (crash, collection error, coverage floor, concurrent-run collision).
+gate_died() {
+    local stage="$1" rc="$2" rerun="$3"
+    echo -e "${RED}FAIL${NC} (${stage} stage died, rc=${rc})"
+    echo "----- last 50 lines of ${stage} output -----"
+    echo "$GATE_OUT" | tail -50
+    echo "----- end ${stage} output -----"
+    echo "fix: read the ${stage} tail above — the stage exited before producing a verdict (crash, collection error, coverage floor, or a concurrent safe-commit run colliding on shared artifacts)."
+    echo "next: re-run the stage standalone: ${rerun}"
+    exit "$rc"
+}
+
+# ── #483 concurrency hardening: per-invocation coverage artifacts ────────────
+# Two concurrent safe-commit runs used to collide on coverage.xml and the
+# .coverage data file, killing pytest mid-write with no visible error.
+# Each invocation now writes its own pair and removes them on exit;
+# run-all.sh receives the per-invocation XML path via KAIRIX_COVERAGE_XML.
+COVERAGE_XML="coverage.safe-commit.$$.xml"
+COVERAGE_DATA=".coverage.safe-commit.$$"
+cleanup_coverage_artifacts() { rm -f "$COVERAGE_XML" "$COVERAGE_DATA"; }
+trap cleanup_coverage_artifacts EXIT
+
 # 0. Empty-stage guard. safe-commit.sh does not auto-stage; running it
 # without `git add` produced silent no-op "commits" that masked real
 # failures (#208 side-finding). Fail loud here instead.
@@ -84,10 +124,11 @@ if command -v gofmt >/dev/null 2>&1; then
     while IFS= read -r gomod; do
         svc_dir="$(dirname "$gomod")"
         echo -n "  gofmt -s ($svc_dir)... "
-        unformatted=$(gofmt -s -l "$svc_dir" 2>&1)
-        if [[ -n "$unformatted" ]]; then
+        run_gate gofmt -s -l "$svc_dir"
+        unformatted="$GATE_OUT"
+        if [[ -n "$unformatted" || "$GATE_RC" -ne 0 ]]; then
             echo -e "${RED}FAIL${NC}"
-            echo "$unformatted" | sed 's/^/  /'
+            echo "  ${unformatted//$'\n'/$'\n'  }"
             echo "Run: gofmt -s -w $svc_dir"
             exit 1
         fi
@@ -102,12 +143,18 @@ echo -n "  mypy strict... "
 # Without `uv run`, system mypy can't see types for kairix.connectors.obsidian
 # (FileSystemEventHandler) or kairix.extractors.markitdown (MarkItDown) and
 # fires false-positive `[misc]` / `[no-any-return]` errors. CI uses uv run mypy.
-MYPY_OUT=$(uv run mypy kairix/ --strict 2>&1)
+run_gate uv run mypy kairix/ --strict
+MYPY_OUT="$GATE_OUT"
 if echo "$MYPY_OUT" | grep -q "error"; then
     echo -e "${RED}FAIL${NC}"
     echo "$MYPY_OUT" | grep "error" | head -10
     echo "Run: uv run mypy kairix/ --strict"
     exit 1
+fi
+if [[ "$GATE_RC" -ne 0 ]]; then
+    # Non-zero without an "error" line: mypy itself crashed (bad config,
+    # missing venv, usage error) — previously a silent set -e death.
+    gate_died "mypy" "$GATE_RC" "uv run mypy kairix/ --strict"
 fi
 echo -e "${GREEN}OK${NC}"
 
@@ -116,8 +163,9 @@ echo -e "${GREEN}OK${NC}"
 # Invocation mirrors CI's Stage 2 exactly (.github/workflows/ci.yml: "Unit +
 # BDD + Contract tests with coverage") so the safe-commit ↔ CI parity gap
 # that historically hid F7 failures from agents (KAIRIX_TRACE memory:
-# feedback_ci_parity_checklist) is closed. The coverage.xml emitted here
-# is consumed by run-all.sh's F7 check below.
+# feedback_ci_parity_checklist) is closed. The per-invocation coverage XML
+# emitted here is consumed by run-all.sh's F7 check below (#483: a shared
+# coverage.xml made concurrent safe-commit runs corrupt each other).
 #
 # To temporarily skip the per-file coverage floor during a focused refactor
 # (e.g. between commits in a coverage-lift series), set KAIRIX_SKIP_COVERAGE=1.
@@ -132,6 +180,7 @@ if [[ "$FAST_MODE" == "1" ]]; then
     if [[ -z "$STAGED_KAIRIX" ]]; then
         echo -e "${GREEN}OK${NC} (no staged kairix/*.py — skipping product tests)"
         TEST_OUT="--fast: no kairix source touched, no tests to run"
+        TEST_RC=0
         COVERAGE_SKIPPED=1
     else
         # Map kairix/foo/bar.py → kairix.foo.bar for import-grep
@@ -147,29 +196,47 @@ if [[ "$FAST_MODE" == "1" ]]; then
         if [[ -z "$UNIQ_TESTS" ]]; then
             echo -e "${GREEN}OK${NC} (no tests import the staged modules)"
             TEST_OUT="--fast: no tests import the staged modules"
+            TEST_RC=0
             COVERAGE_SKIPPED=1
         else
-            COUNT=$(echo "$UNIQ_TESTS" | wc -l | tr -d ' ')
-            # shellcheck disable=SC2086 # word-split intentional for pytest argv
-            TEST_OUT=$(uv run python -m pytest $UNIQ_TESTS -x --timeout=30 \
-                -m "unit or bdd or contract" --no-cov 2>&1)
+            mapfile -t TEST_FILE_ARGS <<< "$UNIQ_TESTS"
+            run_gate uv run python -m pytest "${TEST_FILE_ARGS[@]}" -x --timeout=30 \
+                -m "unit or bdd or contract" --no-cov
+            TEST_OUT="$GATE_OUT"
+            TEST_RC="$GATE_RC"
             COVERAGE_SKIPPED=1
         fi
     fi
 elif [[ "${KAIRIX_SKIP_COVERAGE:-0}" == "1" ]]; then
-    TEST_OUT=$(uv run python -m pytest tests/ -x --timeout=30 -m "unit or bdd or contract" 2>&1)
+    run_gate uv run python -m pytest tests/ -x --timeout=30 -m "unit or bdd or contract"
+    TEST_OUT="$GATE_OUT"
+    TEST_RC="$GATE_RC"
     COVERAGE_SKIPPED=1
 else
-    TEST_OUT=$(uv run python -m pytest tests/ -x --timeout=30 \
+    # COVERAGE_FILE points the .coverage data file at the per-invocation
+    # path so concurrent safe-commit runs never collide (#483).
+    run_gate env COVERAGE_FILE="$COVERAGE_DATA" \
+        uv run python -m pytest tests/ -x --timeout=30 \
         -m "unit or bdd or contract" \
-        --cov=kairix --cov-report=xml:coverage.xml \
-        --cov-fail-under=80 2>&1)
+        --cov=kairix "--cov-report=xml:${COVERAGE_XML}" \
+        --cov-fail-under=80
+    TEST_OUT="$GATE_OUT"
+    TEST_RC="$GATE_RC"
     COVERAGE_SKIPPED=0
 fi
 if echo "$TEST_OUT" | grep -qE "[0-9]+ failed"; then
     echo -e "${RED}FAIL${NC}"
     echo "$TEST_OUT" | grep -E "FAILED|passed|failed" | tail -10
+    echo "fix: the failing tests are listed above."
+    echo "next: re-run standalone: uv run python -m pytest tests/ -m 'unit or bdd or contract'"
     exit 1
+fi
+if [[ "${TEST_RC:-0}" -ne 0 ]]; then
+    # Non-zero without a "N failed" summary: pytest died before producing
+    # a verdict (collection error, INTERNALERROR, coverage floor breach,
+    # concurrent-run artifact collision) — previously a silent set -e
+    # death with the log ending at "tests + coverage...".
+    gate_died "tests + coverage" "$TEST_RC" "uv run python -m pytest tests/ -m 'unit or bdd or contract'"
 fi
 # --fast may legitimately collect 0 tests (no kairix/*.py touched, or no
 # tests import the staged modules); skip the no-tests-collected check then.
@@ -199,9 +266,11 @@ if [[ "$FAST_MODE" == "1" ]]; then
 fi
 
 # 5. Architecture fitness functions (F1-F30)
-# F7 (per-file coverage floor) runs against the coverage.xml produced in step 4,
-# closing the historical safe-commit ↔ CI parity gap. Falls back to skip-mode
-# when KAIRIX_SKIP_COVERAGE=1 was set in step 4.
+# F7 (per-file coverage floor) runs against the per-invocation coverage XML
+# produced in step 4 (passed via KAIRIX_COVERAGE_XML so concurrent
+# safe-commit runs never collide on a shared coverage.xml — #483), closing
+# the historical safe-commit ↔ CI parity gap. Falls back to skip-mode when
+# KAIRIX_SKIP_COVERAGE=1 was set in step 4.
 echo -n "  arch fitness... "
 if [[ "${COVERAGE_SKIPPED:-0}" == "1" ]]; then
     ARCH_OUT=$(bash scripts/checks/run-all.sh --skip-coverage 2>&1) || {
@@ -211,7 +280,7 @@ if [[ "${COVERAGE_SKIPPED:-0}" == "1" ]]; then
         exit 1
     }
 else
-    ARCH_OUT=$(bash scripts/checks/run-all.sh 2>&1) || {
+    ARCH_OUT=$(KAIRIX_COVERAGE_XML="$COVERAGE_XML" bash scripts/checks/run-all.sh 2>&1) || {
         echo -e "${RED}FAIL${NC}"
         echo "$ARCH_OUT" | tail -30
         echo "See docs/architecture/fitness-functions.md for remediation."

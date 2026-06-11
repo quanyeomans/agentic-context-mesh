@@ -13,7 +13,7 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-cd "$REPO_ROOT"
+cd "$REPO_ROOT" || exit 1
 
 skip_coverage=0
 for arg in "$@"; do
@@ -264,12 +264,16 @@ python3 "${SCRIPT_DIR}/check_go_no_panic_outside_main.py" || overall=1
 # G8 — logging via log/slog only (no fmt.Print* / log.Print* in prod)
 python3 "${SCRIPT_DIR}/check_go_logging_discipline.py" || overall=1
 
-# F7 — needs coverage.xml. Skip if not present or skip flag set.
+# F7 — needs a coverage XML report. Callers running per-invocation
+# coverage artifacts (safe-commit.sh, #483) pass the path via
+# KAIRIX_COVERAGE_XML; standalone runs default to coverage.xml in the
+# repo root. Skip if not present or skip flag set.
 if [[ "$skip_coverage" -eq 0 ]]; then
-    if [[ -f "${REPO_ROOT}/coverage.xml" ]]; then
-        python3 "${SCRIPT_DIR}/check_per_file_coverage.py" "${REPO_ROOT}/coverage.xml" || overall=1
+    coverage_xml="${KAIRIX_COVERAGE_XML:-${REPO_ROOT}/coverage.xml}"
+    if [[ -f "$coverage_xml" ]]; then
+        python3 "${SCRIPT_DIR}/check_per_file_coverage.py" "$coverage_xml" || overall=1
     else
-        printf '\033[0;33mskip [arch:per-file-coverage-floor]\033[0m — coverage.xml not found.\n'
+        printf '\033[0;33mskip [arch:per-file-coverage-floor]\033[0m — coverage report not found at %s.\n' "$coverage_xml"
         printf '   Run: pytest --cov=kairix --cov-report=xml first, then re-run this check.\n'
     fi
 fi

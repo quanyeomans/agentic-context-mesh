@@ -1,0 +1,64 @@
+name: "Fresh-install smoke (F81)"
+
+# F81 first cut — proves a stranger's fresh install boots: clean dir →
+# the README's literal docker-compose quick-start path → assertions
+# (healthz/ready, MCP handshake, setup wizard behind its flag, BM25
+# search). CI has no provider secrets, so the embedding/vector legs are
+# excluded in this cut; see the scope note in
+# scripts/checks/check-fresh-install-smoke.sh.
+#
+# NON-required workflow: not a branch-protection check, does not block
+# PR merge. Runs nightly on main, on demand, and on PRs touching the
+# fresh-install surface.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Nightly on main, offset from soak-suite / other nightlies.
+    - cron: "23 16 * * *"
+  pull_request:
+    paths:
+      - 'docker-compose.yml'
+      - 'Dockerfile'
+      - 'docker/**'
+      - 'kairix/platform/setup/**'
+      - 'kairix/install/**'
+      - 'scripts/install/**'
+      - 'scripts/checks/check-fresh-install-smoke.sh'
+      - '.github/workflows/fresh-install-smoke.yml'
+      - '.env.example'
+      - 'kairix.config.example.yaml'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  fresh-install-smoke:
+    name: "Fresh install smoke"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      # Same build + gha-cache pattern as ci.yml's "Docker build" job, so
+      # both workflows share layer cache. Tagged under the production
+      # image name because docker-compose.yml interpolates
+      # ghcr.io/three-cubes/kairix:${KAIRIX_IMAGE_TAG}; the tag is local
+      # only (load, never push).
+      - name: Build candidate image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          load: true
+          tags: ghcr.io/three-cubes/kairix:fresh-smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run fresh-install smoke
+        env:
+          KAIRIX_IMAGE_TAG: fresh-smoke
+        run: bash scripts/checks/check-fresh-install-smoke.sh
