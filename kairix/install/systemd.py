@@ -115,25 +115,25 @@ def install_unit(
     # systemctl daemon-reload + enable are best-effort: the durable
     # artefact is the unit file at `target`. When the systemd user
     # manager can't reach the unit (no logind session, XDG override
-    # mismatch, container runtime, etc.) we log + continue rather than
-    # raise — operators can run `systemctl --user enable kairix.service`
-    # manually once the bus is reachable.
+    # mismatch) — or the systemctl binary doesn't exist at all (container
+    # runtime, #469) — we log + continue rather than raise; operators can
+    # run `systemctl --user enable kairix.service` manually once the bus
+    # is reachable.
     systemctl_ok = True
     try:
         _run(deps.subprocess_runner, [*systemctl_argv, "daemon-reload"])
         _run(deps.subprocess_runner, [*systemctl_argv, "enable", _UNIT_FILENAME])
-    except subprocess.CalledProcessError as exc:
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         systemctl_ok = False
         _logger.warning(
-            "systemctl enable kairix.service failed (rc=%d). Unit file is written "
-            "at %s — run `%s enable %s` manually once the systemd %s manager "
-            "is reachable. stderr: %s",
-            exc.returncode,
+            "systemctl enable kairix.service failed (%s). Unit file is written "
+            "at %s — fix: run `%s enable %s` manually once the systemd %s manager "
+            "is reachable.",
+            _systemctl_failure_detail(exc),
             target,
             " ".join(systemctl_argv),
             _UNIT_FILENAME,
             "system" if mode == Mode.system else "--user",
-            (exc.stderr or b"").decode("utf-8", errors="replace")[:200],
         )
 
     return {
@@ -141,6 +141,21 @@ def install_unit(
         "mode": mode.value,
         "systemctl_enabled": "true" if systemctl_ok else "false",
     }
+
+
+def _systemctl_failure_detail(exc: subprocess.CalledProcessError | FileNotFoundError) -> str:
+    """One-line cause string for the best-effort systemctl warning.
+
+    ``subprocess.run`` raises ``FileNotFoundError`` when the systemctl
+    binary itself is absent (container runtime — the #469 crash-loop)
+    and ``CalledProcessError`` when the binary runs but exits nonzero
+    (no logind session, unreachable user bus). The warning carries
+    whichever detail applies so the operator sees the real cause.
+    """
+    if isinstance(exc, FileNotFoundError):
+        return "systemctl binary not found; this host has no systemd (e.g. container runtime)"
+    stderr = (exc.stderr or b"").decode("utf-8", errors="replace")[:200]
+    return f"rc={exc.returncode}, stderr: {stderr}"
 
 
 def _default_target_dir(mode: Mode) -> Path:

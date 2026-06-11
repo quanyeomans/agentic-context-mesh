@@ -136,7 +136,12 @@ def _print_install_human(report: Any) -> None:
     for d in report.dirs:
         print(f"  dir: {d.get('path')} action={d.get('action')}")
     print(f"  config: {report.config.get('path')} action={report.config.get('action')}")
-    print(f"  systemd: {report.systemd.get('path')} mode={report.systemd.get('mode')}")
+    if report.systemd.get("action") == "skipped-container":
+        # Container installs write no unit (#469) — s6 / the container
+        # supervisor owns the service, so there is no path to print.
+        print("  systemd: action=skipped-container (no unit installed; the container supervisor runs the service)")
+    else:
+        print(f"  systemd: {report.systemd.get('path')} mode={report.systemd.get('mode')}")
 
 
 def _print_verify_human(report: Any) -> None:

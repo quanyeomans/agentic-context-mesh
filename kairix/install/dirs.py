@@ -18,7 +18,11 @@ Two layers:
   layout under their HOME does not crash on the rare path that lies
   outside their owned tree (e.g. ``$XDG_RUNTIME_DIR`` on a shared
   host) — the operator is told via the install report and resolves
-  out-of-band.
+  out-of-band. With ``strict=False`` (container installs, #469) the
+  mkdir/chmod pair gets the same best-effort treatment: bind-mounted
+  paths like ``/run/secrets`` are owned by the container runtime, so
+  a denied mkdir is recorded as ``"perms-unmanaged"`` instead of
+  killing first boot.
 
 The system-mode spec mirrors the FHS / Debian convention used by
 ``apt install`` for daemon packages:
@@ -34,12 +38,15 @@ owned by the invoking user, mode 0700 (private by default).
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
 from kairix.paths import Mode, cache_dir, config_dir, data_dir, runtime_secrets_dir
+
+_logger = logging.getLogger("kairix.install.dirs")
 
 # Mode-octal constants used by both system + user spec branches. Centralised
 # so any future hardening (e.g. tighter 0750 on /var/lib/kairix) flips one
@@ -72,7 +79,7 @@ class DirActionReport(TypedDict):
     """One entry in the :func:`ensure_dirs` return list."""
 
     path: str
-    action: str  # "created" | "existing" | "mode-adjusted"
+    action: str  # "created" | "existing" | "mode-adjusted" | "perms-unmanaged"
 
 
 def specs_for(mode: Mode, *, uid: int, gid: int) -> list[DirSpec]:
@@ -123,7 +130,7 @@ def specs_for(mode: Mode, *, uid: int, gid: int) -> list[DirSpec]:
     ]
 
 
-def ensure_dirs(specs: list[DirSpec]) -> list[DirActionReport]:
+def ensure_dirs(specs: list[DirSpec], *, strict: bool = True) -> list[DirActionReport]:
     """Create the directories in ``specs`` idempotently.
 
     For each :class:`DirSpec` (in order):
@@ -144,27 +151,58 @@ def ensure_dirs(specs: list[DirSpec]) -> list[DirActionReport]:
        cannot chown; the operator resolves these out-of-band by
        reading the install report.
 
+    Args:
+        specs: ordered directory specs to lay down.
+        strict: when ``True`` (default — system / user installs), a
+            :class:`PermissionError` from the mkdir/chmod pair
+            propagates so the install fails loudly. When ``False``
+            (container installs, #469), the failure is recorded as
+            ``"perms-unmanaged"`` — bind-mounted paths such as
+            ``/run/secrets`` are owned by the container runtime, the
+            report still surfaces the path, and the walk continues.
+
     Returns:
         One :class:`DirActionReport` per input spec, same order. The
         ``action`` field is one of ``"created"`` / ``"existing"`` /
-        ``"mode-adjusted"``.
+        ``"mode-adjusted"`` / ``"perms-unmanaged"`` (the last only
+        with ``strict=False``).
     """
-    results: list[DirActionReport] = []
-    for spec in specs:
-        action = "existing"
-        if not spec.path.exists():
-            spec.path.mkdir(parents=True, exist_ok=False)
-            action = "created"
-        if spec.path.stat().st_mode & 0o7777 != spec.mode_octal:
-            spec.path.chmod(spec.mode_octal)
-            if action == "existing":
-                action = "mode-adjusted"
-        try:
-            os.chown(spec.path, spec.owner_uid, spec.owner_gid)
-        except PermissionError:
-            # User-mode + path not under the invoking user's owned tree
-            # (rare XDG_RUNTIME_DIR on shared hosts). The install report
-            # surfaces the path; operator fixes out-of-band.
-            pass
-        results.append({"path": str(spec.path), "action": action})
-    return results
+    return [_ensure_one_dir(spec, strict=strict) for spec in specs]
+
+
+def _ensure_one_dir(spec: DirSpec, *, strict: bool) -> DirActionReport:
+    """Lay down a single :class:`DirSpec`; see :func:`ensure_dirs` for the contract."""
+    try:
+        action = _create_and_align_mode(spec)
+    except PermissionError:
+        if strict:
+            raise
+        _logger.warning(
+            "kairix install: mkdir/chmod denied for %s (runtime-owned mount?) — "
+            "recorded action=perms-unmanaged and continuing. fix: lay the "
+            "directory down in the image build or mount it writable, then "
+            "re-run `kairix init`.",
+            spec.path,
+        )
+        return {"path": str(spec.path), "action": "perms-unmanaged"}
+    try:
+        os.chown(spec.path, spec.owner_uid, spec.owner_gid)
+    except PermissionError:
+        # User-mode + path not under the invoking user's owned tree
+        # (rare XDG_RUNTIME_DIR on shared hosts). The install report
+        # surfaces the path; operator fixes out-of-band.
+        pass
+    return {"path": str(spec.path), "action": action}
+
+
+def _create_and_align_mode(spec: DirSpec) -> str:
+    """mkdir-if-missing + chmod-if-drifted for one spec; returns the action label."""
+    action = "existing"
+    if not spec.path.exists():
+        spec.path.mkdir(parents=True, exist_ok=False)
+        action = "created"
+    if spec.path.stat().st_mode & 0o7777 != spec.mode_octal:
+        spec.path.chmod(spec.mode_octal)
+        if action == "existing":
+            action = "mode-adjusted"
+    return action
