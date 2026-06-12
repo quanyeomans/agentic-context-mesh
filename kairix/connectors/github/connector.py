@@ -77,6 +77,22 @@ logger = logging.getLogger(__name__)
 
 CONNECTOR_NAME = "github"
 
+# Canonical credential leaf names this connector's resolver reads
+# (``scope="connector", area="github"``). The App-mode triple is the
+# write set both ``kairix connect github-app`` and the setup wizard
+# must produce — name parity is pinned by
+# ``tests/contracts/test_connect_secret_name_parity.py``.
+GITHUB_LEAF_APP_ID = "app-id"
+GITHUB_LEAF_APP_PRIVATE_KEY = "app-private-key"  # pragma: allowlist secret — leaf slot name, not a value
+GITHUB_LEAF_INSTALLATION_ID = "installation-id"
+GITHUB_LEAF_PAT = "pat"
+GITHUB_LEAF_WEBHOOK_SECRET = "webhook-secret"  # noqa: S105 — leaf SLOT name, not a credential value  # pragma: allowlist secret
+GITHUB_APP_LEAVES: tuple[str, ...] = (
+    GITHUB_LEAF_APP_ID,
+    GITHUB_LEAF_APP_PRIVATE_KEY,
+    GITHUB_LEAF_INSTALLATION_ID,
+)
+
 # F17 — Wave E topology flag name; module-level so the F52 call-site
 # scan picks up exactly one verbatim reference per call site.
 TOPOLOGY_V2_GITHUB_FLAG = "topology_v2_github"
@@ -992,11 +1008,13 @@ def _resolve_credentials_from_secrets(secrets: SecretsResolver) -> GitHubCredent
     :class:`GitHubCredentials` dataclass and passed to the api_client;
     they are NEVER logged.
     """
-    app_id_str = secrets.get(scope="connector", area="github", instance=None, leaf="app-id") or ""
-    installation_id_str = secrets.get(scope="connector", area="github", instance=None, leaf="installation-id") or ""
-    private_key = secrets.get(scope="connector", area="github", instance=None, leaf="app-private-key") or ""
-    pat = secrets.get(scope="connector", area="github", instance=None, leaf="pat") or ""
-    webhook_secret = secrets.get(scope="connector", area="github", instance=None, leaf="webhook-secret") or ""
+    app_id_str = secrets.get(scope="connector", area="github", instance=None, leaf=GITHUB_LEAF_APP_ID) or ""
+    installation_id_str = (
+        secrets.get(scope="connector", area="github", instance=None, leaf=GITHUB_LEAF_INSTALLATION_ID) or ""
+    )
+    private_key = secrets.get(scope="connector", area="github", instance=None, leaf=GITHUB_LEAF_APP_PRIVATE_KEY) or ""
+    pat = secrets.get(scope="connector", area="github", instance=None, leaf=GITHUB_LEAF_PAT) or ""
+    webhook_secret = secrets.get(scope="connector", area="github", instance=None, leaf=GITHUB_LEAF_WEBHOOK_SECRET) or ""
     app_id = int(app_id_str) if app_id_str else None
     installation_id = int(installation_id_str) if installation_id_str else None
     return GitHubCredentials(

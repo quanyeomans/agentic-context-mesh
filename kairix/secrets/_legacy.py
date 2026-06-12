@@ -16,7 +16,10 @@ Semantics for load_secrets():
   - Environment variables that are already set are never overwritten. This
     preserves the existing priority: direct env overrides > sidecar secrets.
   - Comments (#) and blank lines in the file are ignored.
-  - Multiline values are not supported — each secret must fit on one line.
+  - Each entry occupies exactly one line. Multi-line VALUES (a PEM
+    private key) are stored in the quoted-escaped form
+    ``kairix.secrets.encoding`` defines; both parse sites here decode
+    them back to the original bytes, so consumers see the true value.
   - Never raises.
 
 The secrets file path can be overridden via KAIRIX_SECRETS_FILE for testing.
@@ -37,6 +40,8 @@ import subprocess
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
+
+from kairix.secrets.encoding import decode_bundle_value
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +149,7 @@ def _apply_secret_line(line: str, lineno: int) -> bool:
     if not key or key in os.environ:
         # Existing env var takes priority — sidecar secrets are fallback
         return False
-    os.environ[key] = value
+    os.environ[key] = decode_bundle_value(value)
     return True
 
 
@@ -162,7 +167,7 @@ def load_secrets_file(path: Path) -> dict[str, str]:
             key, _, value = stripped.partition("=")
             key = key.strip()
             if key:
-                result[key] = value
+                result[key] = decode_bundle_value(value)
     except (OSError, UnicodeDecodeError) as exc:
         logger.warning("secrets: failed to parse secrets file — %s", exc)
     return result

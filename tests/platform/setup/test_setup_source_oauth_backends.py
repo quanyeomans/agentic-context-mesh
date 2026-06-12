@@ -187,9 +187,13 @@ def test_github_flow_accepts_stateless_callback() -> None:
     outcome = harness.service.complete_source_callback(None, {"installation_id": "777", "setup_action": "install"})
     assert outcome.ok, outcome.error
     assert harness.wait_for_phase(PHASE_DONE, PHASE_FAILED).phase == PHASE_DONE
+    # Same derivation as `kairix connect github-app` (leaf_pairs +
+    # SERVICE_LEAF_OVERRIDES): the App triple the connector resolver
+    # reads, plus the ephemeral installation access token.
     assert harness.persisted_names == [
         "kairix-connector-github-app-id",
         "kairix-connector-github-app-private-key",
+        "kairix-connector-github-access-token",
         "kairix-connector-github-installation-id",
     ]
 

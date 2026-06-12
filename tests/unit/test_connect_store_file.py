@@ -1,16 +1,21 @@
 """Unit-level coverage for kairix.connect.store.file_store.
 
 Covers:
-  * Path resolution (explicit > env > default home)
-  * Fresh write (canonical env vars appear)
+  * Path resolution (explicit > env > container > default home), all
+    delegated to ``kairix.secrets.store.set_secret`` — the single
+    bundle upsert site (review finding M7)
+  * Fresh write (canonical env vars appear) + 0600 perms
   * Idempotent update (existing canonical names replaced; new ones appended;
     unrelated lines preserved)
-  * Write-permission failure surfaces typed error
-  * Unknown-attribute internal-only path
+  * GitHub App leaf remap (app-id / app-private-key) + newline-safe PEM
+    encoding (review finding H2)
+  * Write-permission / confinement failures surface the typed store error
 """
 
 from __future__ import annotations
 
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -21,6 +26,7 @@ from kairix.connect.protocols import (
     TokenStoreUnauthorizedError,
 )
 from kairix.connect.store.file_store import FileTokenStore
+from kairix.secrets.store import resolve_bundle_path
 
 pytestmark = pytest.mark.unit
 
@@ -72,8 +78,13 @@ def test_env_overrides_home_default(tmp_path: Path) -> None:
 
 
 def test_home_default_used_when_no_overrides(tmp_path: Path) -> None:
-    """No explicit path and no env → ``<home>/.config/kairix/secrets/kairix.env``."""
-    store = FileTokenStore(env={}, home=tmp_path)
+    """No explicit path, no env, no container dir → the XDG home default.
+
+    ``container_dir`` is pinned to a non-existent directory so the test
+    behaves identically on Linux CI (where the real ``/run/secrets``
+    exists) and macOS (where it doesn't).
+    """
+    store = FileTokenStore(env={}, home=tmp_path, container_dir=tmp_path / "no-run-secrets")
     store.store(
         scope="connector",
         area="gmail",
@@ -83,6 +94,49 @@ def test_home_default_used_when_no_overrides(tmp_path: Path) -> None:
     )
     target = tmp_path / ".config" / "kairix" / "secrets" / "kairix.env"
     assert target.exists()
+    assert stat.S_IMODE(os.stat(target).st_mode) == 0o600
+
+
+def test_container_layout_writes_where_runtime_read_side_resolves(tmp_path: Path) -> None:
+    """Container layout (``/run/secrets`` exists): the store writes the SAME
+    file ``resolve_bundle_path`` — the runtime read side — resolves.
+
+    Review finding M7: the old ``FileTokenStore`` had its own path rule
+    that never probed the container dir, so connect-CLI tokens were
+    invisible to the worker in container deployments.
+    """
+    container = tmp_path / "run-secrets"
+    container.mkdir()
+    store = FileTokenStore(env={}, home=tmp_path / "fake-home", container_dir=container)
+    report = store.store(
+        scope="connector",
+        area="gmail",
+        instance=None,
+        tokens=_tokens(),
+        client=_client(),
+    )
+    read_side = resolve_bundle_path(env={}, home=tmp_path / "fake-home", container_dir=container)
+    assert Path(report.target) == read_side == container / "kairix.env"
+    assert read_side.exists()
+    assert stat.S_IMODE(os.stat(read_side).st_mode) == 0o600
+
+
+def test_xdg_layout_writes_where_runtime_read_side_resolves(tmp_path: Path) -> None:
+    """XDG layout (``$XDG_CONFIG_HOME`` set, no container dir): same parity."""
+    xdg = tmp_path / "xdg-config"
+    env = {"XDG_CONFIG_HOME": str(xdg)}
+    store = FileTokenStore(env=env, home=tmp_path / "fake-home", container_dir=tmp_path / "no-run-secrets")
+    report = store.store(
+        scope="connector",
+        area="gmail",
+        instance=None,
+        tokens=_tokens(),
+        client=_client(),
+    )
+    read_side = resolve_bundle_path(env=env, home=tmp_path / "fake-home", container_dir=tmp_path / "no-run-secrets")
+    assert Path(report.target) == read_side == xdg / "kairix" / "secrets" / "kairix.env"
+    assert read_side.exists()
+    assert stat.S_IMODE(os.stat(read_side).st_mode) == 0o600
 
 
 def test_idempotent_update_replaces_existing(tmp_path: Path) -> None:
@@ -193,12 +247,54 @@ def test_file_store_emits_metadata_leaves_and_skips_empties(tmp_path: Path) -> N
         client=client,
     )
     content = target.read_text()
-    # Strengthened: must include both the metadata leaf AND the access-token
-    # base leaf, AND must exclude the empty refresh-token leaf.
+    # Review finding H2: the GitHub area remaps the repurposed
+    # client_id/client_secret slots to the leaf names the connector's
+    # credential resolver reads — app-id + app-private-key — alongside
+    # the metadata leaf and the access-token base leaf. The empty
+    # refresh-token leaf stays excluded.
+    assert "KAIRIX_CONNECTOR_GITHUB_APP_ID=42" in content
+    assert "KAIRIX_CONNECTOR_GITHUB_APP_PRIVATE_KEY=" in content
+    assert "KAIRIX_CONNECTOR_GITHUB_CLIENT_ID=" not in content
+    assert "KAIRIX_CONNECTOR_GITHUB_CLIENT_SECRET=" not in content
     assert "KAIRIX_CONNECTOR_GITHUB_INSTALLATION_ID=12345" in content
     assert "KAIRIX_CONNECTOR_GITHUB_ACCESS_TOKEN=installation-token-xyz" in content  # pragma: allowlist secret
     assert "KAIRIX_CONNECTOR_GITHUB_REFRESH_TOKEN=" not in content
     assert "KAIRIX_CONNECTOR_GITHUB_INSTALLATION_ID" in report.canonical_names
+    assert "KAIRIX_CONNECTOR_GITHUB_APP_PRIVATE_KEY" in report.canonical_names
+
+
+def test_github_pem_write_keeps_every_line_key_value_parseable(tmp_path: Path) -> None:
+    """Corruption regression (H2): a multi-line PEM through the CLI store
+    leaves every bundle line ``KEY=VALUE`` parseable and round-trips
+    byte-identically through the bundle parse layer.
+    """
+    target = tmp_path / "kairix.env"
+    target.write_text("UNRELATED=value\n")
+    fake_pem = (  # pragma: allowlist secret
+        "-----BEGIN RSA PRIVATE KEY-----\nFAKE-A\nFAKE-B\n-----END RSA PRIVATE KEY-----\n"
+    )
+    store = FileTokenStore(path=target)
+    store.store(
+        scope="connector",
+        area="github",
+        instance=None,
+        tokens=CapturedTokens(
+            refresh_token="",
+            access_token="installation-token-xyz",
+            token_uri="https://api.github.com/app/installations/access_tokens",
+            metadata={"installation-id": "12345"},
+        ),
+        client=ClientCredentials(client_id="42", client_secret=fake_pem),
+    )
+    lines = target.read_text(encoding="utf-8").splitlines()
+    for line in lines:
+        assert "=" in line, f"unparseable bundle line: {line!r}"
+    assert "UNRELATED=value" in lines
+
+    from kairix.secrets import load_secrets_file
+
+    load_secrets_file.cache_clear()
+    assert load_secrets_file(target)["KAIRIX_CONNECTOR_GITHUB_APP_PRIVATE_KEY"] == fake_pem
 
 
 def test_file_store_skips_empty_metadata_values(tmp_path: Path) -> None:
@@ -223,17 +319,19 @@ def test_file_store_skips_empty_metadata_values(tmp_path: Path) -> None:
 
 
 def test_env_path_escape_outside_allowed_roots_raises(tmp_path: Path) -> None:
-    """``$KAIRIX_SECRETS_FILE`` resolving outside the allow-list raises ValueError.
+    """``$KAIRIX_SECRETS_FILE`` resolving outside the allow-list fails closed.
 
-    Sabotage-proof (executed): mutated ``_confine_to_allowed_root`` to
-    ``return Path(candidate).expanduser().resolve()`` (skip the allow-list
-    loop); test then fails with no exception raised. Restored.
+    Sabotage-proof (executed): mutated
+    ``kairix.secrets.store._confine_to_allowed_root`` to ``return
+    resolved`` before the allow-list loop; test then fails with no
+    exception raised. Restored.
 
     Pins pythonsecurity:S2083 — operator-controlled ``$KAIRIX_SECRETS_FILE``
     must not write outside an allow-listed root (operator home, system
-    temp, /etc/kairix). The check fires before the FS write so a
-    misconfigured deploy never silently lands tokens in ``/`` or
-    ``/usr/local/share``.
+    temp, /etc/kairix, /run/secrets, /run/kairix). The check fires inside
+    the delegated ``set_secret`` before the FS write, and the store
+    surfaces it as the typed ``TokenStoreUnauthorizedError`` the CLI's
+    ``except ConnectError`` path prints.
     """
     # Use a fake home pointing inside tmp_path so the allow-list does NOT
     # include the real ``/`` (or the operator's actual ``$HOME``). The
@@ -245,7 +343,7 @@ def test_env_path_escape_outside_allowed_roots_raises(tmp_path: Path) -> None:
     # ``/var/log/kairix-escape.env`` resolves outside every allowed root.
     escape_path = "/var/log/kairix-escape.env"
     store = FileTokenStore(env={"KAIRIX_SECRETS_FILE": escape_path}, home=fake_home)
-    with pytest.raises(ValueError, match="escapes the allowed roots"):
+    with pytest.raises(TokenStoreUnauthorizedError, match="outside the allowed roots"):
         store.store(
             scope="connector",
             area="gmail",
@@ -256,7 +354,7 @@ def test_env_path_escape_outside_allowed_roots_raises(tmp_path: Path) -> None:
 
 
 def test_explicit_path_escape_outside_allowed_roots_raises(tmp_path: Path) -> None:
-    """``path=`` constructor arg that escapes the allow-list raises ValueError.
+    """``path=`` constructor arg that escapes the allow-list fails closed.
 
     Pins the same defense for the explicit-path branch. Without the
     confinement an operator wrapper script that constructs
@@ -267,7 +365,7 @@ def test_explicit_path_escape_outside_allowed_roots_raises(tmp_path: Path) -> No
     fake_home.mkdir()
     escape_target = Path("/var/log/kairix-escape-explicit.env")
     store = FileTokenStore(path=escape_target, home=fake_home)
-    with pytest.raises(ValueError, match="escapes the allowed roots"):
+    with pytest.raises(TokenStoreUnauthorizedError, match="outside the allowed roots"):
         store.store(
             scope="connector",
             area="gmail",
@@ -281,10 +379,10 @@ def test_dotdot_traversal_resolves_and_blocks(tmp_path: Path) -> None:
     """``..`` segments in the env path are collapsed before the allow-list check.
 
     A path like ``<home>/../../etc/passwd`` resolves to ``/etc/passwd``,
-    which sits outside every allowed root, so the helper raises.
-    Sabotage-proof: remove the ``.resolve()`` call in
-    ``_confine_to_allowed_root`` — the ``relative_to(home)`` check then
-    spuriously passes (because the unresolved string starts with the
+    which sits outside every allowed root, so the delegated confinement
+    raises. Sabotage-proof: remove the ``.resolve()`` call in
+    ``kairix.secrets.store._confine_to_allowed_root`` — the prefix check
+    then spuriously passes (because the unresolved string starts with the
     home prefix), the write proceeds, and this test fails.
     """
     fake_home = tmp_path / "fake-home"
@@ -293,7 +391,7 @@ def test_dotdot_traversal_resolves_and_blocks(tmp_path: Path) -> None:
     # well outside it.
     escape = str(fake_home) + "/../../../../../etc/passwd-kairix"
     store = FileTokenStore(env={"KAIRIX_SECRETS_FILE": escape}, home=fake_home)
-    with pytest.raises(ValueError, match="escapes the allowed roots"):
+    with pytest.raises(TokenStoreUnauthorizedError, match="outside the allowed roots"):
         store.store(
             scope="connector",
             area="gmail",

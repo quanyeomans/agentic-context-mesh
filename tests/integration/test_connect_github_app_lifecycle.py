@@ -120,9 +120,23 @@ def test_github_app_subprocess_writes_canonical_secrets(tmp_path: Path) -> None:
     expected_install_id = "KAIRIX_CONNECTOR_GITHUB_INSTALLATION_ID=70000"
     assert expected_access in content, f"expected access token line, got:\n{content}"
     assert expected_install_id in content, f"expected installation-id line, got:\n{content}"
+    # Review finding H2: the CLI must write the FULL App-mode set the
+    # connector's credential resolver reads — app-id + the PEM private
+    # key (newline-safe encoded onto one line, still greppable) — not
+    # the repurposed client-id/client-secret slot names.
+    assert "KAIRIX_CONNECTOR_GITHUB_APP_ID=42" in content, f"expected app-id line, got:\n{content}"
+    pem_lines = [line for line in content.splitlines() if line.startswith("KAIRIX_CONNECTOR_GITHUB_APP_PRIVATE_KEY=")]
+    assert len(pem_lines) == 1, f"expected one app-private-key line, got:\n{content}"
+    assert "BEGIN RSA PRIVATE KEY" in pem_lines[0]
+    assert "KAIRIX_CONNECTOR_GITHUB_CLIENT_ID=" not in content
+    # Every line stays KEY=VALUE parseable — the raw multi-line PEM
+    # corrupted the bundle before the encoding landed.
+    for line in content.splitlines():
+        assert "=" in line, f"unparseable bundle line: {line!r}"
     # The success summary on stdout lists the canonical names.
     assert "KAIRIX_CONNECTOR_GITHUB" in result.stdout
     assert "INSTALLATION_ID" in result.stdout
+    assert "KAIRIX_CONNECTOR_GITHUB_APP_ID" in result.stdout
 
 
 def test_github_app_subprocess_emits_summary_to_stdout(tmp_path: Path) -> None:

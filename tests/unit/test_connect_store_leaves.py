@@ -4,9 +4,10 @@ Per ADR-032 Phase 2 §"TokenStore widening": the three stores share
 :func:`kairix.connect.store.leaves.leaf_pairs` so they all derive the
 canonical-leaf list dynamically from the dataclass fields.
 
-Tests pin the Google + Slack shapes and the empty-field skipping
-behaviour so a refactor that breaks per-service canonical-name
-emission surfaces here.
+Tests pin the Google + Slack + GitHub App shapes (the latter through
+``SERVICE_LEAF_OVERRIDES`` — review finding H2) and the empty-field
+skipping behaviour so a refactor that breaks per-service
+canonical-name emission surfaces here.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from __future__ import annotations
 import pytest
 
 from kairix.connect.protocols import CapturedTokens, ClientCredentials
-from kairix.connect.store.leaves import leaf_pairs, unknown_attribute_error
+from kairix.connect.store.leaves import SERVICE_LEAF_OVERRIDES, leaf_pairs, unknown_attribute_error
 
 pytestmark = pytest.mark.unit
 
@@ -130,6 +131,47 @@ def test_emission_order_is_stable_across_shapes() -> None:
     # Both shapes start with client identity in the same order.
     assert google_leaves[:2] == ["client-id", "client-secret"]
     assert slack_leaves[:2] == ["client-id", "client-secret"]
+
+
+def test_github_service_area_remaps_repurposed_client_slots() -> None:
+    """``service_area="github"`` writes the App-mode leaf names the
+    connector's credential resolver reads (review finding H2).
+
+    The GitHub App flow repurposes ``client_id`` → App id and
+    ``client_secret`` → PEM private key; without the remap the
+    connector resolves ``app_id=None`` and cannot mint installation
+    tokens.
+    """
+    fake_pem = (  # pragma: allowlist secret
+        "-----BEGIN RSA PRIVATE KEY-----\nFAKE\n-----END RSA PRIVATE KEY-----\n"  # pragma: allowlist secret — fake
+    )
+    client = ClientCredentials(client_id="42", client_secret=fake_pem)
+    tokens = CapturedTokens(
+        refresh_token="",
+        access_token="ghs_fake",
+        token_uri="https://api.github.com/app/installations/access_tokens",
+        metadata={"installation-id": "70000"},
+    )
+    pairs = leaf_pairs(client, tokens, service_area="github")
+    assert pairs == (
+        ("app-id", "42"),
+        ("app-private-key", fake_pem),
+        ("access-token", "ghs_fake"),
+        ("installation-id", "70000"),
+    )
+
+
+def test_service_area_without_override_keeps_base_mapping() -> None:
+    """Areas absent from ``SERVICE_LEAF_OVERRIDES`` emit the base leaf names."""
+    assert "slack" not in SERVICE_LEAF_OVERRIDES
+    client = ClientCredentials(client_id="cid", client_secret="csec")  # pragma: allowlist secret
+    tokens = CapturedTokens(
+        refresh_token="",
+        access_token="",
+        token_uri="https://slack.com/api/oauth.v2.access",
+        bot_token="xoxb-z",
+    )
+    assert leaf_pairs(client, tokens, service_area="slack") == leaf_pairs(client, tokens)
 
 
 def test_unknown_attribute_error_carries_f21_markers() -> None:

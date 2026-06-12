@@ -1,9 +1,17 @@
 """Write-side persistence for canonical kairix secrets.
 
 :class:`kairix.secrets.SecretsLoader` is the read side; this module is
-the matching write side. ``kairix secrets set`` (CLI) and the setup
-wizard both route through :func:`set_secret`, so there is exactly one
-upsert site for the operator bundle file.
+the matching write side. ``kairix secrets set`` (CLI), the setup
+wizard, and ``kairix connect``'s :class:`FileTokenStore` all route
+through :func:`set_secret`, so there is exactly one upsert site for the
+operator bundle file.
+
+Multi-line values (the GitHub App PEM private key is the canonical
+case) are stored newline-safe: :func:`set_secret` encodes them to one
+quoted, escaped line via
+:func:`kairix.secrets.encoding.encode_bundle_value`; the bundle parse
+sites in :mod:`kairix.secrets._legacy` decode symmetrically, so every
+resolver downstream sees the original value byte-for-byte.
 
 Path resolution is shared with the read side: :func:`resolve_bundle_path`
 implements the single resolution rule (``$KAIRIX_SECRETS_FILE`` →
@@ -31,6 +39,7 @@ import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 
+from kairix.secrets.encoding import encode_bundle_value
 from kairix.secrets.naming import canonical_env_var, parse_canonical_name
 
 # Container layout: the Docker-secrets tmpfs dir. When this directory
@@ -100,7 +109,11 @@ def set_secret(
     Upserts the ``ENV_VAR=value`` line: an existing line for the same
     canonical name is replaced in place; comments and unrelated lines
     are preserved verbatim. The file is created with its parent dirs if
-    absent and locked to mode 0600 either way.
+    absent and locked to mode 0600 either way. Multi-line values are
+    encoded to one quoted, escaped line via
+    :func:`kairix.secrets.encoding.encode_bundle_value`; the bundle
+    parse sites decode symmetrically, so callers read back the exact
+    bytes they stored.
 
     Args:
         name: Canonical secret name
@@ -115,12 +128,13 @@ def set_secret(
         The path the value was written to.
 
     Raises:
-        ValueError: non-canonical ``name``, empty ``value``, or a value
-            containing a newline. Messages carry F21 ``fix:``/``next:``/
-            ``run:`` affordances and never include the value.
+        ValueError: non-canonical ``name`` or empty ``value``. Messages
+            carry F21 ``fix:``/``next:``/``run:`` affordances and never
+            include the value.
     """
     env_var = _validated_env_var(name)
     _validate_value(name, value)
+    stored_value = encode_bundle_value(value)
     if bundle_path is not None:
         path = bundle_path
     else:
@@ -128,7 +142,7 @@ def set_secret(
     path = _confine_to_allowed_root(path, home=home)
     path.parent.mkdir(parents=True, exist_ok=True)
     existing = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-    merged = _upsert_line(existing, env_var, value)
+    merged = _upsert_line(existing, env_var, stored_value)
     if not path.exists():
         path.touch(mode=0o600)
     path.write_text("\n".join(merged) + "\n", encoding="utf-8")
@@ -189,20 +203,17 @@ def _validated_env_var(name: str) -> str:
 
 
 def _validate_value(name: str, value: str) -> None:
-    """Reject empty / multiline values with F21 affordances (value never echoed)."""
+    """Reject empty values with F21 affordances (value never echoed).
+
+    Multi-line values are accepted — :func:`set_secret` encodes them to
+    one bundle line via ``encode_bundle_value`` before writing.
+    """
     if not value:
         raise ValueError(
             f"No value provided for {name}. "
             f"fix: pipe the value via stdin — printf '%s' '<the-value>' | kairix secrets set {name} — "
             f"or pass --value for non-sensitive values. "
             f"next: stdin keeps the value out of your shell history. "
-            f"{_RUN_VERIFY}",
-        )
-    if "\n" in value or "\r" in value:
-        raise ValueError(
-            f"The value for {name} contains a newline; the bundle file is line-based. "
-            f"fix: strip the trailing newline before piping — printf '%s' (not echo) avoids adding one. "
-            f"next: re-run kairix secrets set {name} with the single-line value. "
             f"{_RUN_VERIFY}",
         )
 

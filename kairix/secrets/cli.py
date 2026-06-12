@@ -223,7 +223,8 @@ def _run_set(
 
     raw = inline_value if inline_value is not None else value_reader()
     # Strip the trailing newline that `echo` / heredocs append; values
-    # with interior newlines are rejected by set_secret itself.
+    # with interior newlines (a pasted PEM key) are accepted —
+    # set_secret encodes them to one newline-safe bundle line.
     value = raw.rstrip("\r\n") if raw else ""
     try:
         path = set_secret(name, value, bundle_path=bundle_path)

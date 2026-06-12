@@ -187,10 +187,22 @@ def test_set_secret_rejects_empty_value(tmp_path: Path) -> None:
     assert not (tmp_path / "kairix.env").exists()
 
 
-def test_set_secret_rejects_multiline_value(tmp_path: Path) -> None:
-    """The bundle is line-based; embedded newlines are rejected — and the
-    value itself never appears in the error message (F15)."""
-    with pytest.raises(ValueError) as excinfo:
-        set_secret(_NAME, "line-one\nline-two", bundle_path=tmp_path / "kairix.env")
-    assert "line-one" not in str(excinfo.value)
-    assert "newline" in str(excinfo.value)
+def test_set_secret_encodes_multiline_value_onto_one_line(tmp_path: Path) -> None:
+    """A multi-line value (a PEM key) lands on ONE quoted bundle line.
+
+    Pre-#review-H2 behaviour was a hard rejection, which made the wizard's
+    GitHub leg fail after successful consent. Now the bundle layer encodes;
+    the parse layer decodes it back byte-for-byte.
+    """
+    bundle = tmp_path / "kairix.env"
+    value = "line-one\nline-two\n"
+    set_secret(_NAME, value, bundle_path=bundle)
+    lines = bundle.read_text(encoding="utf-8").splitlines()
+    entry_lines = [line for line in lines if "=" in line]
+    assert lines == entry_lines, f"non KEY=VALUE lines written: {lines!r}"
+    assert len(entry_lines) == 1
+
+    from kairix.secrets import load_secrets_file
+
+    load_secrets_file.cache_clear()
+    assert load_secrets_file(bundle)[_ENV_VAR] == value

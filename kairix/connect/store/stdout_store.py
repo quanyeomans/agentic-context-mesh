@@ -50,7 +50,7 @@ class StdoutTokenStore:
         client: ClientCredentials,
     ) -> WriteReport:
         canonical: list[str] = []
-        for leaf, value in leaf_pairs(client, tokens):
+        for leaf, value in leaf_pairs(client, tokens, service_area=area):
             env_name = canonical_env_var(scope, area, instance, leaf)
             self._stream.write(f"{env_name}\t{value}\n")
             canonical.append(env_name)

@@ -4,8 +4,12 @@ Per ADR-032 §"Phase 2 — TokenStore widening": the four hardcoded leaves
 (``client-id``, ``client-secret``, ``refresh-token``, ``access-token``)
 were Google-specific. Slack writes a different set
 (``client-id``, ``client-secret``, ``bot-token``, optional
-``app-token``); GitHub App will write another set
-(``app-id``, ``app-private-key``, ``installation-id``).
+``app-token``); GitHub App writes another set (``app-id``,
+``app-private-key``, ``access-token``, ``installation-id``) — the App
+flow repurposes the ``client_id`` / ``client_secret`` dataclass slots
+for the App id + PEM key, and :data:`SERVICE_LEAF_OVERRIDES` remaps
+those two fields to the leaf names the GitHub connector's credential
+resolver actually reads.
 
 This helper derives the leaf list from the :class:`CapturedTokens`
 dataclass + :class:`ClientCredentials` dataclass at write time so the
@@ -57,8 +61,27 @@ _FIELD_TO_LEAF: dict[str, str] = {
     "app_token": "app-token",
 }
 
+# Per-service-area leaf-name remaps layered over :data:`_FIELD_TO_LEAF`.
+# GitHub App repurposes the ``client_id`` / ``client_secret`` slots for
+# the App id + PEM private key (see
+# ``kairix/connect/oauth2/github_app.py``); the connector's credential
+# resolver reads ``app-id`` / ``app-private-key``, so the stores must
+# write those names — writing ``client-id`` / ``client-secret`` leaves
+# the connector resolving ``app_id=None`` and falling into the legacy
+# path that cannot mint installation tokens.
+SERVICE_LEAF_OVERRIDES: dict[str, dict[str, str]] = {
+    "github": {
+        "client_id": "app-id",
+        "client_secret": "app-private-key",  # pragma: allowlist secret — leaf slot name, not a value
+    },
+}
 
-def _leaf_pair_for_field(source: object, field_name: str) -> tuple[str, str] | None:
+
+def _leaf_pair_for_field(
+    source: object,
+    field_name: str,
+    overrides: dict[str, str],
+) -> tuple[str, str] | None:
     """Return the ``(canonical-leaf, value)`` pair for one dataclass field, or None.
 
     Hoisted from :func:`leaf_pairs` so the inner per-field decision
@@ -72,10 +95,13 @@ def _leaf_pair_for_field(source: object, field_name: str) -> tuple[str, str] | N
       * The field's value is not a non-empty string (Slack's empty
         ``refresh_token`` and Google's empty ``bot_token`` flow through
         this path).
+
+    ``overrides`` is the service-area remap from
+    :data:`SERVICE_LEAF_OVERRIDES` (empty for services without one).
     """
     if field_name in _NON_LEAF_FIELDS:
         return None
-    leaf = _FIELD_TO_LEAF.get(field_name)
+    leaf = overrides.get(field_name) or _FIELD_TO_LEAF.get(field_name)
     if leaf is None:
         return None
     value = getattr(source, field_name)
@@ -87,11 +113,12 @@ def _leaf_pair_for_field(source: object, field_name: str) -> tuple[str, str] | N
 def _meta_pair(meta_key: str, meta_value: object) -> tuple[str, str] | None:
     """Return the ``(canonical-leaf, value)`` pair for one metadata entry, or None.
 
-    Keys are dataclass-style ``snake_case`` so per-service code can read
-    them via ``tokens.metadata["installation_id"]``; the leaf written to
-    KV is the canonical ``kebab-case`` form. Empty / non-string values
-    are skipped (matches the base-leaf behaviour for Slack's empty
-    ``refresh_token``).
+    The leaf written to KV is the canonical ``kebab-case`` form;
+    ``snake_case`` keys are normalised (``installation_id`` →
+    ``installation-id``) and already-kebab keys (the GitHub App flow's
+    ``GITHUB_INSTALLATION_ID_METADATA_KEY``) pass through unchanged.
+    Empty / non-string values are skipped (matches the base-leaf
+    behaviour for Slack's empty ``refresh_token``).
     """
     if not isinstance(meta_value, str) or meta_value == "":
         return None
@@ -101,6 +128,8 @@ def _meta_pair(meta_key: str, meta_value: object) -> tuple[str, str] | None:
 def leaf_pairs(
     client: ClientCredentials,
     tokens: CapturedTokens,
+    *,
+    service_area: str | None = None,
 ) -> tuple[tuple[str, str], ...]:
     """Return the ``(canonical-leaf, value)`` pairs to write to KV.
 
@@ -108,7 +137,9 @@ def leaf_pairs(
     declaration order. For each field that:
 
       1. Has a non-empty string value, AND
-      2. Maps to a known canonical leaf in :data:`_FIELD_TO_LEAF`,
+      2. Maps to a known canonical leaf in :data:`_FIELD_TO_LEAF`
+         (after the ``service_area`` remap in
+         :data:`SERVICE_LEAF_OVERRIDES`, when one exists),
 
     emits one tuple ``(canonical-leaf-name, value)``. Empty strings,
     ``None``, non-string values, and metadata fields
@@ -116,21 +147,29 @@ def leaf_pairs(
     ``refresh_token`` and Google's empty ``bot_token`` never appear in
     the output.
 
+    ``service_area`` is the canonical-naming "area" slot the calling
+    store received (``"github"``, ``"slack"``, ``"gmail"``, …). Areas
+    with an entry in :data:`SERVICE_LEAF_OVERRIDES` get their repurposed
+    dataclass slots written under the leaf names the matching
+    connector's credential resolver reads (GitHub App: ``client_id`` →
+    ``app-id``, ``client_secret`` → ``app-private-key``).
+
     The emission order is: client_id, client_secret first (operator
     identity material before token material), then tokens in field
     declaration order. This pins the operator-facing
     ``WriteReport.canonical_names`` tuple stably across runs.
 
     Per-service metadata leaves on top of the base set. The GitHub App
-    flow uses this to carry ``installation_id`` (the App-install
+    flow uses this to carry ``installation-id`` (the App-install
     callback returns no refresh_token; the installation id IS the
     per-tenant identifier the connector pairs with the JWT signing key
     to mint installation access tokens on demand).
     """
+    overrides = SERVICE_LEAF_OVERRIDES.get(service_area or "", {})
     pairs: list[tuple[str, str]] = []
     for source in (client, tokens):
         for field in fields(source):
-            pair = _leaf_pair_for_field(source, field.name)
+            pair = _leaf_pair_for_field(source, field.name, overrides)
             if pair is not None:
                 pairs.append(pair)
     for meta_key, meta_value in tokens.metadata.items():
@@ -155,4 +194,4 @@ def unknown_attribute_error(attr: str) -> KeyError:
     )
 
 
-__all__ = ["leaf_pairs", "unknown_attribute_error"]
+__all__ = ["SERVICE_LEAF_OVERRIDES", "leaf_pairs", "unknown_attribute_error"]

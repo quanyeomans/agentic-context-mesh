@@ -64,6 +64,15 @@ GITHUB_JWT_AUDIENCE_TOKEN_URI = "https://api.github.com/app/installations/access
 # ``_resolve_credentials_from_secrets`` call site (uses ``area="github"``).
 GITHUB_APP_SERVICE_AREA = "github"
 
+# Metadata key :meth:`GitHubAppFlow.authorize` stores the captured
+# installation id under in ``CapturedTokens.metadata``. Already the
+# canonical kebab-case leaf name, so the stores' metadata walk
+# (``kairix.connect.store.leaves._meta_pair``) writes it verbatim and
+# the GitHub connector's credential resolver reads the same name.
+# The wizard's source-OAuth layer imports this constant rather than
+# re-declaring the string.
+GITHUB_INSTALLATION_ID_METADATA_KEY = "installation-id"
+
 # Default scopes tuple for the GitHub App flow. GitHub Apps don't use
 # OAuth scope strings — permissions are configured on the App itself,
 # not granted at install time. The tuple is empty by design; the
@@ -234,7 +243,7 @@ class GitHubAppFlow:
             refresh_token="",  # GitHub App has no refresh token — JWT key is the long-lived credential
             access_token=access_token,
             token_uri=GITHUB_JWT_AUDIENCE_TOKEN_URI,
-            metadata={"installation-id": installation_id},
+            metadata={GITHUB_INSTALLATION_ID_METADATA_KEY: installation_id},
         )
 
     def _build_install_url(self) -> str:
@@ -380,6 +389,7 @@ __all__ = [
     "GITHUB_APP_DEFAULT_SCOPES",
     "GITHUB_APP_INSTALL_URL_TEMPLATE",
     "GITHUB_APP_SERVICE_AREA",
+    "GITHUB_INSTALLATION_ID_METADATA_KEY",
     "GITHUB_JWT_AUDIENCE_TOKEN_URI",
     "JWT_ALGORITHM",
     "JWT_LIFETIME_S",

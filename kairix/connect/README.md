@@ -127,16 +127,15 @@ The captured tokens land under these canonical names:
 
 | Subcommand | Canonical secret names written |
 |---|---|
-| `github-app` | `KAIRIX_CONNECTOR_GITHUB_{ACCESS_TOKEN,INSTALLATION_ID}` |
+| `github-app` | `KAIRIX_CONNECTOR_GITHUB_{APP_ID,APP_PRIVATE_KEY,ACCESS_TOKEN,INSTALLATION_ID}` |
 
-Note the GitHub App flow does NOT write a `REFRESH_TOKEN` line — there is no refresh token in the App model. The PEM private key (which you keep on disk and reference via `--private-key-path`) is the long-lived credential; the installation access token is ephemeral (1h TTL) and the GitHub connector mints a fresh one transparently per tick via the shared `GitHubAppRefreshableToken`.
+That is the complete set the GitHub connector needs for App mode — `kairix connect github-app` writes all of it in one run, including the App id and the PEM private key contents, so no extra hand-provisioning step is required:
+- `KAIRIX_CONNECTOR_GITHUB_APP_ID` — the `--app-id` value
+- `KAIRIX_CONNECTOR_GITHUB_APP_PRIVATE_KEY` — the PEM contents (stored newline-safe on one quoted line; kairix decodes it back to the original multi-line key when reading)
+- `KAIRIX_CONNECTOR_GITHUB_INSTALLATION_ID` — captured from the install redirect automatically
+- `KAIRIX_CONNECTOR_GITHUB_ACCESS_TOKEN` — the first installation access token (ephemeral, 1h TTL)
 
-For the GitHub connector to use App mode at runtime, three secrets must also be provisioned in your KV / secrets file:
-- `KAIRIX_CONNECTOR_GITHUB_APP_ID` — the same `--app-id` value
-- `KAIRIX_CONNECTOR_GITHUB_APP_PRIVATE_KEY` — the PEM contents (the entire file body, multi-line)
-- `KAIRIX_CONNECTOR_GITHUB_INSTALLATION_ID` — captured by `kairix connect github-app` automatically
-
-Without all three, the connector falls back to the legacy single-`installation_id` JWT path or to PAT mode.
+Note the GitHub App flow does NOT write a `REFRESH_TOKEN` line — there is no refresh token in the App model. The PEM private key is the long-lived credential; the installation access token is ephemeral and the GitHub connector mints a fresh one transparently per tick via the shared `GitHubAppRefreshableToken`. Without the App id / private key / installation id triple, the connector falls back to PAT mode (`kairix-connector-github-pat`). Run `kairix secrets verify` to confirm every GitHub credential resolves.
 
 ## Store backends
 

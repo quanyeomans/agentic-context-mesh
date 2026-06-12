@@ -44,6 +44,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+from kairix.connect.oauth2.github_app import (
+    GITHUB_INSTALLATION_ID_METADATA_KEY as GITHUB_INSTALLATION_ID_KEY,
+)
 from kairix.connect.protocols import (
     CallbackDeniedError,
     CallbackResult,
@@ -140,11 +143,6 @@ _RETRY_HINT = "next: go back to the source step and start the connection again."
 #: client_secret.json files are ~1 KB and PEM keys a few KB — anything
 #: past this is a paste mistake, never a credential.
 SECRET_MATERIAL_MAX_BYTES = 64 * 1024
-
-# Metadata key the GitHub App flow stores the installation id under
-# (see kairix/connect/oauth2/github_app.py CapturedTokens.metadata) and
-# the canonical leaf name the GitHub connector's resolver reads.
-GITHUB_INSTALLATION_ID_KEY = "installation-id"
 
 # Default F39 tier for OAuth-connected sources whose content is private
 # by default (GitHub repos, Google mail/files/events). Slack overrides
@@ -467,27 +465,19 @@ def source_secret_leaves(
     """Canonical ``(secret-name, value)`` pairs for one captured credential set.
 
     Names follow ADR-031 (``kairix-connector-<area>[-<instance>]-<leaf>``).
-    Slack + Google derive leaves through the shared
-    :func:`kairix.connect.store.leaves.leaf_pairs` walk. GitHub is the
-    exception: the connector's credential resolver
-    (``kairix/connectors/github/connector.py::_resolve_credentials_from_secrets``)
-    reads ``app-id`` / ``app-private-key`` / ``installation-id`` — the
-    GitHub App flow repurposes the ``client_id`` / ``client_secret``
-    slots for the App id + PEM, so ``leaf_pairs`` would emit the wrong
-    leaf names for that connector.
+    Every provider derives leaves through the shared
+    :func:`kairix.connect.store.leaves.leaf_pairs` walk — the same
+    derivation the ``kairix connect`` CLI stores use, so the wizard and
+    the CLI write identical name sets by construction. GitHub's
+    repurposed ``client_id`` / ``client_secret`` slots are remapped to
+    ``app-id`` / ``app-private-key`` by ``SERVICE_LEAF_OVERRIDES``
+    inside ``leaf_pairs`` (the names the connector's credential
+    resolver reads).
 
     F15: callers persist these values through the secrets store; this
     function (and its tests) only ever assert the NAMES.
     """
-    if provider == PROVIDER_GITHUB:
-        github_pairs = (
-            ("app-id", client.client_id),
-            ("app-private-key", client.client_secret),
-            (GITHUB_INSTALLATION_ID_KEY, tokens.metadata.get(GITHUB_INSTALLATION_ID_KEY, "")),
-        )
-        pairs: tuple[tuple[str, str], ...] = tuple((leaf, value) for leaf, value in github_pairs if value)
-    else:
-        pairs = leaf_pairs(client, tokens)
+    pairs = leaf_pairs(client, tokens, service_area=provider)
     return tuple((canonical_secret_name("connector", provider, instance or None, leaf), value) for leaf, value in pairs)
 
 

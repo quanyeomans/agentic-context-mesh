@@ -89,7 +89,7 @@ class AzureKeyVaultTokenStore:
         url = self._resolve_vault_url()
         secret_client = self._build_secret_client(url)
         canonical: list[str] = []
-        for leaf, value in leaf_pairs(client, tokens):
+        for leaf, value in leaf_pairs(client, tokens, service_area=area):
             name = canonical_secret_name(scope, area, instance, leaf)
             try:
                 secret_client.set_secret(name, value)  # type: ignore[attr-defined]  # F3 rationale: secret_client is typed object because the live SecretClient + the test FakeSecretClient share the .set_secret(name, value) shape but no common base.

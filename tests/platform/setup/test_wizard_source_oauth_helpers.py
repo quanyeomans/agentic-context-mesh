@@ -281,11 +281,15 @@ def test_google_leaves_match_the_connector_resolver_names() -> None:
 def test_github_leaves_use_the_app_triple_not_client_pairs() -> None:
     """The GitHub connector resolver reads app-id / app-private-key /
     installation-id — NOT client-id/client-secret (the App flow
-    repurposes those slots)."""
+    repurposes those slots). The remap now rides the shared
+    ``leaf_pairs`` walk (``SERVICE_LEAF_OVERRIDES``), so the wizard
+    emits exactly what ``kairix connect github-app`` emits: the App
+    triple plus the ephemeral installation access token."""
     names = [name for name, _ in source_secret_leaves("github", None, _CLIENT, _GITHUB_TOKENS)]
     assert names == [
         "kairix-connector-github-app-id",
         "kairix-connector-github-app-private-key",
+        "kairix-connector-github-access-token",
         "kairix-connector-github-installation-id",
     ]
 

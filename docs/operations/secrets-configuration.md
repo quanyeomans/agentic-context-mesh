@@ -46,10 +46,16 @@ Examples:
 | `kairix-infra-neo4j-password` | Neo4j password |
 | `kairix-connector-m365-tenant-id` | M365 / SharePoint tenant id |
 | `kairix-connector-m365-client-secret` | M365 client secret |
+| `kairix-connector-github-app-id` | GitHub App id (App mode) |
+| `kairix-connector-github-app-private-key` | GitHub App PEM private key (multi-line — see note below) |
+| `kairix-connector-github-installation-id` | GitHub App installation id |
+| `kairix-connector-github-pat` | GitHub personal access token (PAT-mode alternative) |
 | `kairix-connector-apple-caldav-app-password` | Apple CalDAV app password |
 | `kairix-connector-obsidian-tcv-encryption-password` | Per-vault Obsidian encryption password (`tcv` is an example instance id) |
 
 The env var form is the canonical name uppercased with `-` → `_`: `kairix-provider-llm-api-key` → `KAIRIX_PROVIDER_LLM_API_KEY`. One rule, one function — see `kairix.secrets.naming.canonical_env_var()`.
+
+> **Multi-line values (PEM keys):** the bundle file is one `KEY=VALUE` pair per line. When you store a multi-line value through `kairix secrets set`, `kairix connect`, or the setup wizard, kairix encodes it onto one quoted line (`KEY="-----BEGIN ...\n..."`) and decodes it back to the original bytes when reading. The line stays greppable and every other tool that parses the file keeps working. KV-backed sources (Azure KV, per-file secret mounts) hold the real multi-line value directly — no encoding needed there.
 
 > **Legacy aliases retired:** older env var names (`KAIRIX_LLM_API_KEY`, `CONNECTOR_M365_TENANT_ID`, `APPLE_CALDAV_USERNAME`, etc.) are no longer recognised. Rotate to the canonical `KAIRIX_<SCOPE>_<AREA>[_<INSTANCE>]_<LEAF>` form (see the canonical-name table above). Run `kairix secrets verify` after rotating to confirm every credential resolves.
 
