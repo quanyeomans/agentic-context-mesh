@@ -44,7 +44,7 @@ fix: either retire the flag (delete the REGISTRY entry + remove the legacy
      comment adjacent to the entry in kairix/core/features/registry.py.
 next: see docs/architecture/feature-flag-architecture.md §4.1 (lifecycle
       stages) + §6 (F51 mechanics).
-run: bash scripts/checks/check-f51-flag-retirement.sh
+run: python3 scripts/checks/check_f51_flag_retirement.py
 
 Pass example:
   # kairix/core/features/registry.py

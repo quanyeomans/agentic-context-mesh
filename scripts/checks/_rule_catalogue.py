@@ -241,7 +241,6 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="layering",
         scope="per-file",
         summary="engagement-scope code may not import firm-scope storage clients (psycopg etc.)",
-        script="check-f44-engagement-firm-boundary.sh",
     ),
     RuleEntry(
         id="F61",
@@ -353,7 +352,6 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-commit",
         summary="every new CLI/MCP/provider/connector/extractor adds a BDD feature in the same commit",
         adr_origin="docs/architecture/test-discipline-hardening.md",
-        script="check-f45-new-capability-bdd.sh",
         exemplar="tests/bdd/features/bootstrap.feature",
         task_type=(
             "adding-a-cli-subcommand",
@@ -371,7 +369,6 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="test-discipline",
         scope="per-file",
         summary="BDD step impls compose via CLI/MCP/factory — no direct *Pipeline(...) construction",
-        script="check-f46-bdd-step-composition.sh",
         exemplar="tests/integration/test_vec_index_lifecycle.py",
         task_type=("writing-a-bdd-feature", "writing-a-test"),
     ),
@@ -392,7 +389,6 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="test-discipline",
         scope="cross-cutting",
         summary="tests/e2e/test_composed_production_path.py exists, runs in CI Stage 4.5",
-        script="check-f48-e2e-present.sh",
         exemplar="tests/e2e/test_composed_production_path.py",
         task_type=("writing-a-test",),
     ),
@@ -406,7 +402,6 @@ _ENTRIES: tuple[RuleEntry, ...] = (
             "every flag has OFF + ON BDD scenarios, integration tests, and (for top-level) an E2E composed-path test"
         ),
         tags=("test-discipline",),
-        script="check-f54-flag-both-branch-tested.sh",
         exemplar="tests/bdd/features/feature_flag_connector_github.feature",
         task_type=("adding-a-feature-flag",),
     ),
@@ -560,7 +555,6 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="plugin-contract",
         scope="per-plugin",
         summary="every connector + extractor plugin has matching BDD feature + Examples-table row",
-        script="check-f36-connector-bdd-parity.sh",
         exemplar="tests/bdd/features/e2e_connector_sync.feature",
         task_type=("adding-a-connector", "adding-an-extractor", "writing-a-bdd-feature"),
     ),
@@ -621,7 +615,6 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="plugin-contract",
         scope="per-plugin",
         summary="every connector declares SourceConnector + at least one of {Poll, Checkpointed, Event}Connector",
-        script="check-f56-connector-capability-declaration.sh",
     ),
     RuleEntry(
         id="F64",
@@ -667,7 +660,6 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="production-safety",
         scope="per-commit",
         summary="net-new files may not appear in any per-file F-rule baseline",
-        script="check-f50-net-new-file-violations.sh",
     ),
     RuleEntry(
         id="F63",
@@ -780,7 +772,6 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-flag",
         summary="every FeatureFlag has target_retire_in ≤ current scm version + 6 months",
         adr_origin="docs/architecture/feature-flag-architecture.md §6",
-        script="check-f51-flag-retirement.sh",
     ),
     RuleEntry(
         id="F52",
@@ -789,7 +780,6 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="feature-flag",
         scope="per-flag",
         summary='every flag("<name>") call site references a name that exists in REGISTRY',
-        script="check-f52-flag-call-sites.sh",
     ),
     RuleEntry(
         id="F53",
@@ -798,7 +788,6 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="feature-flag",
         scope="cross-cutting",
         summary="kairix features status CLI subcommand + features_status MCP tool both exist",
-        script="check-f53-features-status-surface.sh",
     ),
     # ----- agent-affordance -----------------------------------------------
     RuleEntry(

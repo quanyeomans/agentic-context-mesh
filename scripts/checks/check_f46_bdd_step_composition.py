@@ -26,9 +26,10 @@ Pre-existing violations are grandfathered in
 ``.architecture/baseline/f46-files.txt``. F49 forces this baseline to
 shrink each release; new files cannot be added to the list.
 
-Output: one violation file path per line on stdout, sorted,
-deduplicated. The shell wrapper ``check-f46-bdd-step-composition.sh``
-pipes this into ``arch_gate`` from ``_lib.sh`` for baseline diff.
+``main()`` gates the violation set against the baseline via
+:func:`tc_fitness.gate` and returns the exit code. The catalogue-driven
+runner dispatches it in-process (#499 Phase 2 stage 4a); the former
+``check-f46-bdd-step-composition.sh`` delegator wrapper was retired then.
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ and docs/architecture/test-discipline-hardening.md §4.1.
 next: replace direct *Pipeline(...) construction with
 factory.build_<pipeline>(paths=FakePaths(...)) and a
 registry=FakeProviderRegistry(...) where embed is in scope.
-run: bash scripts/checks/check-f46-bdd-step-composition.sh
+run: python3 scripts/checks/check_f46_bdd_step_composition.py
 
 Pass example:
   from kairix.core import factory

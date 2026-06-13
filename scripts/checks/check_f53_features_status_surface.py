@@ -42,7 +42,7 @@ fix: ensure kairix/cli.py:COMMANDS includes a 'features' entry (CLI
      missing an outcome test).
 next: see docs/architecture/feature-flag-architecture.md §3.5 (operator
       surface) + §6 (F53 mechanics).
-run: bash scripts/checks/check-f53-features-status-surface.sh
+run: python3 scripts/checks/check_f53_features_status_surface.py
 
 Pass example:
   # kairix/cli.py

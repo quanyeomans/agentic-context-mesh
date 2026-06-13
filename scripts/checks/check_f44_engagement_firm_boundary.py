@@ -10,8 +10,9 @@ denylisted Postgres-client prefix (``psycopg`` / ``psycopg2`` / ``asyncpg`` /
 Thin shim over :mod:`_import_boundary_engine` (#499 Phase 2). The rule is one
 ``ImportBoundaryRule`` row in ``prefix`` mode; this module re-exports the
 back-compat surface (``collect_violations`` / ``main`` / ``REMEDIATION``) the
-F44 unit test loads by file path. The ``check-f44-engagement-firm-boundary.sh``
-wrapper invokes this module unchanged.
+F44 unit test loads by file path. The catalogue-driven runner dispatches
+``main()`` in-process (#499 Phase 2 stage 4a); the former
+``check-f44-engagement-firm-boundary.sh`` delegator wrapper was retired then.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ fix: engagement code talks to SQLite + Neo4j + filesystem only. Firm-scope queri
      (engagement = SQLite + Neo4j + filesystem; firm = Postgres-only).
 next: if you need cross-engagement data, the reflection-extractor is the only sanctioned
       flow. Route through there, not via direct PG access.
-run: bash scripts/checks/check-f44-engagement-firm-boundary.sh
+run: python3 scripts/checks/check_f44_engagement_firm_boundary.py
 
 Pass example:
   # kairix/core/storage/sqlite_repo.py

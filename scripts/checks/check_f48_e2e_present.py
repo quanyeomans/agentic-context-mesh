@@ -50,7 +50,7 @@ REMEDIATION = """F48: tests/e2e/test_composed_production_path.py is missing or h
 next: write the test per docs/architecture/test-discipline-hardening.md §4.3 (canonical E2E shape).
 fix: restore tests/e2e/test_composed_production_path.py with at least one @pytest.mark.e2e
      test that exercises config -> factory.build_search_pipeline -> ingest -> query -> assertion.
-run: bash scripts/checks/check-f48-e2e-present.sh
+run: python3 scripts/checks/check_f48_e2e_present.py
 
 Pass example:
   # tests/e2e/test_composed_production_path.py

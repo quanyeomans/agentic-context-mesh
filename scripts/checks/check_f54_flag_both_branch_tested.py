@@ -60,7 +60,7 @@ fix: add tests/bdd/features/feature_flag_<name>.feature with OFF + ON
      tests/e2e/test_composed_<name>_path.py per F48.
 next: see docs/architecture/feature-flag-architecture.md §5
       (both-branch test coverage).
-run: bash scripts/checks/check-f54-flag-both-branch-tested.sh
+run: python3 scripts/checks/check_f54_flag_both_branch_tested.py
 
 Pass example:
   # tests/integration/test_feature_flag_hybrid_ranker_v2.py
