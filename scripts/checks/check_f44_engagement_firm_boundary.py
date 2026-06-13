@@ -1,75 +1,27 @@
 """F44: engagement-scope code may not import firm-scope storage clients.
 
-The two-scope architecture splits the world in two:
+Engagement scope is SQLite + Neo4j + filesystem (this repo, under ``kairix/``).
+Firm scope is Postgres-only (a separate codebase). F44 locks the boundary:
+engagement code that imports a Postgres client has reached across it. The
+detector flags any import whose module name equals or is dotted-under a
+denylisted Postgres-client prefix (``psycopg`` / ``psycopg2`` / ``asyncpg`` /
+``pg8000`` / ``aiopg``).
 
-  * **Engagement scope** — single-engagement state. SQLite + Neo4j +
-    filesystem. Lives in this repo, under ``kairix/``.
-  * **Firm scope** — cross-engagement state (reflections, registry,
-    audit envelope). Postgres-only. Lives in the separate
-    ``kairix-firm/`` codebase.
-
-F44 locks the boundary mechanically. Engagement-scope code MUST NOT
-import a Postgres client; doing so means engagement code has reached
-across the scope boundary and is talking directly to firm-scope
-storage. The only sanctioned cross-scope flow is the
-reflection-extractor (one-way, append-only, audited).
-
-Denylist (the standard Python Postgres clients):
-  - ``psycopg``
-  - ``psycopg2``
-  - ``asyncpg``
-  - ``pg8000``
-  - ``psycopg-binary``
-  - ``psycopg2-binary``
-  - ``aiopg``
-
-(Distribution names like ``psycopg-binary`` are listed for
-completeness, even though Python ``import`` statements name the
-underlying module — the AST scanner only sees the importable form,
-e.g. ``import psycopg`` or ``from psycopg2 import connect``. We match
-on import-name prefixes so submodule imports such as
-``psycopg2.extras`` also fire.)
-
-In-scope tree: every ``.py`` file under ``kairix/`` (the production
-package). Test files under ``tests/`` are out of scope — fakes and
-fixtures don't ship in the wheel. ``kairix-firm/`` would also be out
-of scope (different codebase), but it does not exist in this repo
-today.
-
-Today: zero firm-scope code exists in ``kairix/``; the denylist
-matches nothing. F44 is preventive — it locks the boundary so the
-first attempt to ``import psycopg`` from engagement code is blocked
-at pre-commit. Closes the boundary the two-scope architecture names.
+Thin shim over :mod:`_import_boundary_engine` (#499 Phase 2). The rule is one
+``ImportBoundaryRule`` row in ``prefix`` mode; this module re-exports the
+back-compat surface (``collect_violations`` / ``main`` / ``REMEDIATION``) the
+F44 unit test loads by file path. The ``check-f44-engagement-firm-boundary.sh``
+wrapper invokes this module unchanged.
 """
 
 from __future__ import annotations
 
-import ast
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _fitness_rule import FitnessRule
-from tc_fitness import REPO_ROOT, repo_relative  # noqa: F401 — kept for back-compat with importing tests
-
-# Forbidden Postgres-client import-name prefixes. An import is flagged
-# if the imported module name equals one of these OR starts with one
-# followed by ``.`` (so ``psycopg2.extras`` fires the same way
-# ``psycopg2`` does).
-_FIRM_SCOPE_CLIENT_PREFIXES: frozenset[str] = frozenset(
-    {
-        "psycopg",
-        "psycopg2",
-        "asyncpg",
-        "pg8000",
-        # psycopg-binary / psycopg2-binary are wheel distributions that
-        # install the psycopg / psycopg2 module respectively — covered
-        # by the entries above. Listed in the module docstring for the
-        # reader; not duplicated here because they're not importable
-        # names.
-        "aiopg",
-    }
-)
+from _import_boundary_engine import ImportBoundaryRule, collect_violations_for, register
+from tc_fitness import REPO_ROOT, gate
 
 REMEDIATION = """F44: engagement-scope code imports a firm-scope storage client (Postgres).
 fix: engagement code talks to SQLite + Neo4j + filesystem only. Firm-scope queries
@@ -95,73 +47,24 @@ reflections, registry, audit envelope — Postgres-only) into a separate
 codebase. Letting engagement code reach into firm storage collapses the
 scope boundary."""
 
-
-def _imported_names(tree: ast.AST) -> list[str]:
-    """Yield every module name referenced by an ``Import`` or
-    ``ImportFrom`` node in ``tree``.
-
-    For ``import foo.bar`` we return ``foo.bar`` (the full dotted
-    name). For ``from foo.bar import baz`` we return ``foo.bar``.
-    ``from . import x`` (relative imports, ``module is None``) is
-    skipped — relative imports cannot reach an external package.
-    """
-    names: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name:
-                    names.append(alias.name)
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                names.append(node.module)
-    return names
+RULE = register(
+    ImportBoundaryRule(
+        name="f44",
+        roots=("kairix",),
+        mode="prefix",
+        forbidden_prefixes=("psycopg", "psycopg2", "asyncpg", "pg8000", "aiopg"),
+        remediation=REMEDIATION,
+    )
+)
 
 
-def _is_firm_scope_client(module: str) -> bool:
-    """True if ``module`` names (or has as a prefix) a denylisted
-    Postgres client.
-
-    Matches on exact name (``import psycopg``) or dotted prefix
-    (``from psycopg2.extras import ...`` → ``psycopg2.extras`` has
-    prefix ``psycopg2``).
-    """
-    for prefix in _FIRM_SCOPE_CLIENT_PREFIXES:
-        if module == prefix or module.startswith(prefix + "."):
-            return True
-    return False
-
-
-def file_has_violation(path: Path) -> bool:
-    """True if ``path`` imports any denylisted Postgres client."""
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    except (SyntaxError, UnicodeDecodeError, OSError):
-        return False
-    for module in _imported_names(tree):
-        if _is_firm_scope_client(module):
-            return True
-    return False
-
-
-class F44(FitnessRule):
-    """F44 as a FitnessRule subclass — see module docstring for rule semantics."""
-
-    name = "f44"
-    remediation = REMEDIATION
-    roots = ("kairix",)
-
-    def file_has_violation(self, path: Path) -> bool:
-        return file_has_violation(path)
-
-
-# Public ``collect_violations`` kept for back-compat with any code that
-# imports it directly (tests, scripts). The class is the canonical entry.
 def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
-    return F44(repo_root=repo_root).collect_violations()
+    """Back-compat surface for the F44 unit test."""
+    return collect_violations_for(RULE, repo_root)
 
 
 def main() -> int:
-    return F44().run()
+    return gate(RULE.name, collect_violations(), REMEDIATION)
 
 
 if __name__ == "__main__":
