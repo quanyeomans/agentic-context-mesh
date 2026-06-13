@@ -13,6 +13,12 @@
 #                                GET /setup/ returns 200 (in-container
 #                                loopback curl — the wizard's operator-token
 #                                guard intentionally skips loopback peers)
+#   stage 3b wizard-choreography POST /setup/folder/scan returns the HTMX
+#                                scan partial (200, kx- wrapper markup), and
+#                                POST /setup/key drives the form→redirect
+#                                choreography (303 Location: /setup/folder).
+#                                Proves the wizard's POST/partial/redirect
+#                                interaction works, not just the GET screen.
 #   stage 4  bm25-search         `kairix embed` ingests the sample doc into
 #                                the BM25 index, `kairix search` finds it
 #
@@ -222,6 +228,62 @@ if [[ "$WIZARD_CODE" != "200" ]]; then
         "reproduce: docker compose exec kairix curl -v http://127.0.0.1:8080/setup/"
 fi
 echo "stage 3 setup-wizard: OK (200)"
+
+# ── stage 3b: wizard choreography (POST → HTMX partial → redirect) ────────────
+# The GET-200 leg above proves the wizard SERVES; this leg proves it
+# INTERACTS. All curls are in-container loopback (the operator-token
+# guard skips loopback by design, as in stage 3).
+#
+# Leg 1 — POST /setup/folder/scan returns the HTMX scan partial. The
+# sample doc lives at /data/documents (KAIRIX_DOCUMENT_ROOT), so the
+# scan succeeds and the partial carries the `kx-scan-result` wrapper;
+# either way a real scan partial is `kx-`-prefixed markup, never a 404
+# or a raw 500.
+SCAN_BODY=$(compose exec -T kairix curl -s \
+    -X POST "http://127.0.0.1:8080/setup/folder/scan" \
+    --data-urlencode "folder_path=/data/documents" || true)
+if ! echo "$SCAN_BODY" | grep -q 'kx-scan-result\|kx-validation-error'; then
+    echo "scan partial body (head):"
+    echo "$SCAN_BODY" | head -20
+    fail_stage "wizard-choreography" \
+        "POST /setup/folder/scan did not return the HTMX scan partial (expected kx-scan-result / kx-validation-error markup) — the wizard's POST/partial interaction is broken on a fresh install." \
+        "reproduce: docker compose exec kairix curl -X POST http://127.0.0.1:8080/setup/folder/scan --data-urlencode folder_path=/data/documents"
+fi
+echo "stage 3b wizard-choreography: scan partial OK"
+
+# Leg 2 — POST /setup/key drives the form→redirect choreography: the
+# key-save handler persists the provider pick and answers 303 to
+# /setup/folder. `-w` prints the status + redirect Location so we assert
+# the choreography, not just a 2xx. (A read-only config overlay would
+# re-render 200 with a rescue banner instead of 303 — also a valid,
+# non-5xx outcome — so the assertion accepts a 303 redirect to
+# /setup/folder OR a 200 re-render, and fails only on 404/5xx.)
+KEY_POST=$(compose exec -T kairix curl -s -o /dev/null \
+    -w '%{http_code} %{redirect_url}' \
+    -X POST "http://127.0.0.1:8080/setup/key" \
+    --data-urlencode "provider=anthropic" \
+    --data-urlencode "api_key=fresh-install-smoke-placeholder-key" || true)
+KEY_CODE="${KEY_POST%% *}"
+KEY_REDIRECT="${KEY_POST#* }"
+case "$KEY_CODE" in
+    303)
+        case "$KEY_REDIRECT" in
+            */setup/folder) echo "stage 3b wizard-choreography: key POST OK (303 → ${KEY_REDIRECT})" ;;
+            *) fail_stage "wizard-choreography" \
+                "POST /setup/key returned 303 but redirected to '${KEY_REDIRECT}' (expected .../setup/folder) — the form→redirect choreography points at the wrong screen." \
+                "reproduce: docker compose exec kairix curl -i -X POST http://127.0.0.1:8080/setup/key --data-urlencode provider=anthropic --data-urlencode api_key=x" ;;
+        esac
+        ;;
+    200)
+        echo "stage 3b wizard-choreography: key POST OK (200 re-render — config likely read-only, rescue banner served, not a 500)"
+        ;;
+    *)
+        fail_stage "wizard-choreography" \
+            "POST /setup/key returned ${KEY_CODE} (expected 303 redirect to /setup/folder, or a 200 re-render on a read-only config) — the key-save choreography failed on a fresh install." \
+            "reproduce: docker compose exec kairix curl -i -X POST http://127.0.0.1:8080/setup/key --data-urlencode provider=anthropic --data-urlencode api_key=x"
+        ;;
+esac
+echo "stage 3b wizard-choreography: OK"
 
 # ── stage 4: BM25 search path ────────────────────────────────────────────────
 # `kairix embed` scans the document root and (re)builds the FTS index

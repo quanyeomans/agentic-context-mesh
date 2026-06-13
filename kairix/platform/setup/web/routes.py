@@ -83,6 +83,35 @@ _OAUTH_CALLBACK_MOUNT_PATH = "/oauth/callback"
 # Header HTMX reads to navigate the whole page from a partial response.
 _HX_REDIRECT = "HX-Redirect"
 
+# Security headers on every HTML the wizard serves (F91 Limb A). The
+# wizard renders operator-controlled config paths and provider labels
+# into HTML; these headers are the browser-side baseline that keeps a
+# reflected value from being sniffed into a script, framed by a
+# clickjacking page, or used to pull in off-origin code.
+#
+# The CSP permits ``'unsafe-inline'`` for scripts and styles because the
+# wizard ships a small amount of inline HTMX glue (the afterSwap
+# reveal listeners in key.html / folder.html) and inline-styled Pico
+# classless CSS. That inline surface is deliberately small and is itself
+# governed by F91 Limb B (rationale-tagged, size-capped, de-duplicated)
+# — so the ``'unsafe-inline'`` allowance stays a reviewed, bounded
+# surface rather than an open door. ``default-src 'self'`` plus
+# ``object-src 'none'`` and ``frame-ancestors 'none'`` close the
+# off-origin-fetch, plugin, and clickjacking vectors regardless.
+_SECURITY_HEADERS: Mapping[str, str] = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'"
+    ),
+}
+
 # Template-context key for the inline rescue banner on a failed save.
 _CTX_SAVE_ERROR = "save_error"
 
@@ -529,6 +558,18 @@ class OperatorTokenGuard:
         await response(scope, receive, send)
 
 
+def _apply_security_headers(response: Response) -> None:
+    """Set the F91 Limb A security-header baseline on an HTML response.
+
+    Mutates ``response.headers`` in place — used by the wizard's render
+    chokepoint so every screen and HTMX partial leaves with the same
+    nosniff / frame-denial / CSP triple. Idempotent: re-applying the
+    same names is a no-op.
+    """
+    for name, value in _SECURITY_HEADERS.items():
+        response.headers[name] = value
+
+
 def _header_value(scope: Scope, name: str) -> str | None:
     """Case-insensitive single-header lookup from the raw ASGI scope."""
     wanted = name.lower().encode("latin-1")
@@ -713,7 +754,13 @@ def build_setup_wizard_mount(
         return holder[0]
 
     def _render(template_name: str, context: dict[str, Any], **kwargs: Any) -> HTMLResponse:
-        return HTMLResponse(env.get_template(template_name).render(**context), **kwargs)
+        response = HTMLResponse(env.get_template(template_name).render(**context), **kwargs)
+        # F91 Limb A: every HTML the wizard serves — full screens AND the
+        # HTMX partials swapped into them — carries the security-header
+        # baseline. _render is the single chokepoint, so a new screen
+        # cannot ship an un-headed response by construction.
+        _apply_security_headers(response)
+        return response
 
     def _endpoint(handler: Callable[[Request, SetupService], Response]) -> Callable[[Request], Response]:
         return _make_screen_endpoint(_service, handler)

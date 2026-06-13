@@ -1079,3 +1079,59 @@ def test_wizard_bypasses_the_cold_start_gate() -> None:
     assert "Welcome to kairix" in welcome.text
     # Everything else still gets the structured cold-start 503.
     assert client.get("/mcp").status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# F91 Limb A — security headers on the wizard's HTML responses
+# ---------------------------------------------------------------------------
+#
+# Contract: every HTML the wizard serves carries the nosniff /
+# frame-denial / Content-Security-Policy triple. The static check
+# (scripts/checks/check_f91_browser_surface.py) proves the render path
+# SETS them; these tests prove they actually arrive on a live response,
+# on both a full-screen render and an HTMX partial (both flow through
+# the _render chokepoint). Sabotage proof: delete any of the three
+# names from _SECURITY_HEADERS in routes.py and the matching assertion
+# below fails.
+
+
+def test_full_page_response_carries_security_headers() -> None:
+    client = _build_client()
+    response = client.get("/setup/provider")
+    assert response.status_code == 200
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    # Frame-denial via either header is acceptable; the wizard ships
+    # X-Frame-Options: DENY plus frame-ancestors 'none' in the CSP.
+    assert response.headers["X-Frame-Options"] == "DENY"
+    csp = response.headers["Content-Security-Policy"]
+    assert "default-src 'self'" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert "object-src 'none'" in csp
+
+
+def test_htmx_partial_response_carries_security_headers() -> None:
+    """The async partials (validation / scan / progress / search) are HTML
+    the browser swaps into the live DOM — they must carry the same
+    headers as the full screens, not just the initial page load."""
+    service = FakeSetupService()
+    client = _build_client(service=service)
+    response = client.post(
+        "/setup/key/validate",
+        data={"provider": "anthropic", "api_key": "fake-key-for-tests"},  # pragma: allowlist secret
+    )
+    assert response.status_code == 200
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["X-Frame-Options"] == "DENY"
+    assert "default-src 'self'" in response.headers["Content-Security-Policy"]
+
+
+def test_security_csp_restricts_default_and_object_and_frame_sources() -> None:
+    """The CSP closes the three highest-value browser vectors for a
+    config-rendering surface: off-origin fetch (default-src), plugin
+    execution (object-src), and clickjacking (frame-ancestors)."""
+    client = _build_client()
+    csp = client.get("/setup", follow_redirects=True).headers["Content-Security-Policy"]
+    assert "default-src 'self'" in csp
+    assert "object-src 'none'" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert "base-uri 'self'" in csp
