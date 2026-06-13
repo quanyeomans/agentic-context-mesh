@@ -10,6 +10,14 @@ passwords, Windows-path-style backslashes — passes through untouched.
 Sabotage-proof (executed): swapped decode's escape walk to sequential
 ``str.replace`` calls — ``test_escaped_backslash_before_n_round_trips``
 failed (``\\\\n`` collapsed into a newline). Restored.
+
+# F87-corpus: secrets_set_load
+This module is part of the secrets persist/load pair's adversarial
+round-trip corpus (F87). ``test_adversarial_material_round_trips``
+sweeps the four material classes the GitHub-PEM happy path skipped —
+multi-line, unicode (emoji + CJK), large (>= 64 KiB), and
+backslash-escape-lookalike — across encode/decode, the codec underneath
+``set_secret`` / ``load_secrets_file``.
 """
 
 from __future__ import annotations
@@ -91,3 +99,31 @@ def test_decode_leaves_unquoted_value_with_escape_lookalike_alone() -> None:
 def test_decode_preserves_unknown_escape_sequences() -> None:
     """Inside a decoded value, escapes the encoder never emits pass through."""
     assert decode_bundle_value('"keep\\q-and\\nnewline"') == "keep\\q-and\nnewline"
+
+
+# --- F87 adversarial round-trip corpus -------------------------------------
+# Four material classes the single-line happy path never exercises — the
+# GitHub-PEM consent failure shipped because only single-line tokens were
+# ever round-tripped. Each value carries an embedded newline so the codec
+# actually engages (encode is identity for single-line input).
+_MULTI_LINE = "line-one\nline-two\nline-three"  # multi-line
+_UNICODE = "secret-🔑-世界-値-한글\nwith-newline"  # unicode: emoji + CJK + Hangul
+_LARGE = ("X" * (64 * 1024)) + "\nlarge-tail"  # large: >= 64 KiB
+_ESCAPE_LOOKALIKE = "C:\\new\\path\\to\\key\nand-a\\n-literal"  # escape-lookalike
+
+
+@pytest.mark.parametrize(
+    ("label", "value"),
+    [
+        ("multi-line", _MULTI_LINE),
+        ("unicode", _UNICODE),
+        ("large", _LARGE),
+        ("escape-lookalike", _ESCAPE_LOOKALIKE),
+    ],
+    ids=["multi-line", "unicode", "large", "escape-lookalike"],
+)
+def test_adversarial_material_round_trips(label: str, value: str) -> None:
+    """Every adversarial class survives encode → decode byte-identical."""
+    encoded = encode_bundle_value(value)
+    assert "\n" not in encoded and "\r" not in encoded, f"{label}: encoded form must stay single-line"
+    assert decode_bundle_value(encoded) == value, f"{label}: round-trip lost bytes"

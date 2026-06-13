@@ -421,6 +421,20 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         ),
         adr_origin="EPIC #499 Phase 1 — session-escape-5 (save_source ValueError surfaced as 500)",
     ),
+    RuleEntry(
+        id="F87",
+        gate="f87",
+        check="f87_persist_load_corpus",
+        category="test-discipline",
+        scope="cross-cutting",
+        summary=(
+            "every registered persist/load pair (set_secret/load_secrets_file, FileTokenStore/secrets "
+            "read, write_config_updates/load_merged_mapping, EmbeddingCache put_many/get_many) ships an "
+            "adversarial round-trip corpus — multi-line + unicode + large (>=64KiB) + escape-lookalike "
+            "(the GitHub-PEM consent-failure class)"
+        ),
+        adr_origin="EPIC #499 Phase 1 — GitHub-PEM multi-line secret round-trip (session escape 2)",
+    ),
     # ----- plugin-contract -------------------------------------------------
     RuleEntry(
         id="F28",
