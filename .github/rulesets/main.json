@@ -1,0 +1,58 @@
+{
+  "_comment": "Importable ruleset for the default branch (main). Apply with: gh api repos/three-cubes/kairix/rulesets --method POST --input .github/rulesets/main.json (requires Administration:Write). NOTE: the merge_queue rule is NOT included \u2014 GitHub's REST rulesets API rejects it (422) in both active and disabled mode; enable the merge queue via the web UI: Settings -> Rules -> Rulesets -> 'main' -> Add rule -> Require merge queue (grouping: ALLGREEN). Only the human admin role may bypass; agent Apps are not admins.",
+  "name": "main",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "~DEFAULT_BRANCH"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 1,
+        "require_code_owner_review": true,
+        "dismiss_stale_reviews_on_push": true,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true,
+        "allowed_merge_methods": [
+          "squash",
+          "merge"
+        ]
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "CI gate"
+          },
+          {
+            "context": "2 \u00b7 Pre-merge PR gates (PR \u2192 main)"
+          }
+        ]
+      }
+    }
+  ],
+  "bypass_actors": [
+    {
+      "actor_id": 5,
+      "actor_type": "RepositoryRole",
+      "bypass_mode": "pull_request"
+    }
+  ]
+}
