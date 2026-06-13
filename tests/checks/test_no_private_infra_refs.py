@@ -1,7 +1,9 @@
 """Tests for the F73 pattern loader, scope filter, and exempt logic.
 
 Patterns are loaded at runtime from the ``PRIVATE_INFRA_PATTERNS`` env
-var (CI) or a gitignored ``.private-infra-patterns`` file (local).
+var — populated in CI from the org secret, and locally from the org
+variable via ``scripts/fetch-fitness-config.sh`` — with a
+gitignored ``.private-infra-patterns`` file as the last-resort fallback.
 These tests use synthetic patterns so the test file carries no
 operator-specific literals.
 """

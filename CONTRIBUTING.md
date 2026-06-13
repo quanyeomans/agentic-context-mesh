@@ -21,6 +21,26 @@ pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
 make setup           # pre-commit hooks only
 ```
 
+### Fitness-check config (F73 private-infra patterns)
+
+The F73 token-pattern scanner loads its pattern set from org config in the
+`three-cubes` org — single-sourced for CI and local dev. CI reads the org
+secret; locally you fetch the org variable (org-member-readable) with the
+`gh` CLI:
+
+```bash
+# Export into your current shell (preferred):
+eval "$(bash scripts/fetch-fitness-config.sh)"
+
+# Or cache it to the gitignored .private-infra-patterns fallback file:
+make fitness-config
+```
+
+Without the patterns the scanner is a no-op locally, so the commit gate
+passes — CI is still the backstop. The hand-maintained
+`.private-infra-patterns` file is a last-resort fallback/cache only; the
+org variable is the canonical local source.
+
 ## Making changes
 
 Kairix is trunk-based on `main`. Routine work commits direct to `main` when `safe-commit.sh` is green.

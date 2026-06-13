@@ -1,4 +1,4 @@
-.PHONY: setup setup-dev setup-check lint format check test test-unit test-bdd test-contract test-integration type-check security commit clean \
+.PHONY: setup setup-dev setup-check fitness-config lint format check test test-unit test-bdd test-contract test-integration type-check security commit clean \
         go-modules go-fmt go-vet go-lint go-test go-build go-check
 
 # Developer-environment setup — wires the pre-commit hooks so first-commit
@@ -32,6 +32,16 @@ setup-dev:
 # Useful for "did I miss a prereq" troubleshooting.
 setup-check:
 	bash scripts/dev/setup.sh --check
+
+# Fetch the F73 private-infra pattern set from org config (the org VARIABLE
+# PRIVATE_INFRA_PATTERNS in the three-cubes org) and cache it to the
+# gitignored .private-infra-patterns file the check falls back to. Requires
+# the `gh` CLI authenticated as an org member. CI uses the matching org
+# SECRET; this is the org-member-readable equivalent for local dev. To
+# export into your shell instead of caching to a file:
+#   eval "$(bash scripts/fetch-fitness-config.sh)"
+fitness-config:
+	bash scripts/fetch-fitness-config.sh --write
 
 # Combined quality check — run all linting, formatting, and type checks
 lint: lint-check format-check type-check

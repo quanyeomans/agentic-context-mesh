@@ -322,6 +322,29 @@ _Generated from `scripts/checks/_rule_catalogue.py` — do not edit by hand._
 
 <!-- END F-CATALOGUE -->
 
+### F73 pattern source — org config, not a local file
+
+F73's token-pattern set is **externalised to org config** in the
+`three-cubes` org, single-sourced for CI and local dev:
+
+- **CI** reads the org **secret** `PRIVATE_INFRA_PATTERNS` into the
+  `PRIVATE_INFRA_PATTERNS` env var (wired in `.github/workflows/ci.yml`).
+- **Local dev** reads the org **variable** `PRIVATE_INFRA_PATTERNS`
+  (org-member-readable) with the `gh` CLI:
+
+  ```bash
+  # Export into the current shell (preferred):
+  eval "$(bash scripts/fetch-fitness-config.sh)"
+
+  # Or cache it to the gitignored .private-infra-patterns fallback:
+  make fitness-config
+  ```
+
+The hand-maintained `.private-infra-patterns` file is a **last-resort
+fallback/cache only** — the org variable is the canonical local source.
+With no patterns loaded the scanner is a no-op locally (CI remains the
+backstop), so a fresh clone never hard-fails on a missing file.
+
 ---
 
 ## The rules in detail
