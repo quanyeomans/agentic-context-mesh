@@ -273,6 +273,7 @@ _Generated from `scripts/checks/_rule_catalogue.py` — do not edit by hand._
 | F63 | production-safety | per-file | shipped | every .fetchall() includes LIMIT in the query or carries a # F63-bounded: rationale |
 | F66 | production-safety | per-class | shipped | every connector + tick-driven component declares per_tick_max_items + disk_watermark_min_free_bytes |
 | F73 | production-safety | per-file | shipped | token-pattern scanner for private infra identifiers (externalised pattern source) |
+| F89 | production-safety | per-file | shipped | every served file under a kairix/**/web/static/ tree has a sha256-pinned ASSETS.lock manifest row (upstream version + sha256 + url + rationale); the on-disk sha256 must match the row, so a swapped/outdated htmx.min.js or pico.css fails instead of shipping untraced |
 | F57 | schema-integrity | per-file | shipped | every UPDATE topology_cc_pairs SET status=? lives next to a _ALLOWED_TRANSITIONS dispatch dict |
 | F58 | schema-integrity | cross-cutting | vacuous | HierarchyConnector impls have a parent-before-child contract test |
 | F67 | schema-integrity | per-table | shipped | every pushed_to_<sink> column has a matching UPDATE site flipping 0 → 1 |
@@ -293,6 +294,7 @@ _Generated from `scripts/checks/_rule_catalogue.py` — do not edit by hand._
 | F23 | agent-affordance | cross-cutting | shipped | every top-level directory has a README.md resolver |
 | F83 | agent-affordance | per-file | shipped | gate-runner contract for shell gate scripts — no unguarded VAR=$(...) under set -e (#483 silent-death class), \|\| true requires trailing rationale, shellcheck-clean at error severity, safe-commit.sh/run-all.sh stages emit named OK/FAIL verdicts |
 | F85 | agent-affordance | per-file | shipped | registered cross-tier contract vocabularies single-sourced — a member of a DECLARED vocabulary (source-auth PHASE_* strings, the azure provider-name set; owned by kairix/platform/setup/service.py) re-declared as a constant/collection in another setup-tier module, or used as a raw string in a template instead of the env.globals symbol, fails (session-escape-8 phase-string class) |
+| F90 | agent-affordance | per-file | shipped | setup-wizard template ↔ route referential integrity (F52 applied to the browser tier) — every hx-get/hx-post/href/action /setup URL resolves to a Route/Mount in routes.py, every hx-target/hx-include #id is defined in some template, every template is rendered or extended (dangling-button class: the tour replacing first-search left no dead control) |
 | F4 | repo-hygiene | per-file | shipped | no os.environ.get("KAIRIX_*") outside paths.py / secrets.py |
 | F22 | repo-hygiene | per-file | shipped | repo paths follow per-tree naming conventions |
 | F24 | repo-hygiene | per-file | shipped | no `from tests.*` / `import tests` inside kairix/**/*.py — tests not shipped in wheel |

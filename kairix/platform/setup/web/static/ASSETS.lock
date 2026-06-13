@@ -1,0 +1,33 @@
+{
+  "_comment": [
+    "F89 vendored browser-asset manifest. Every file the wizard serves out of",
+    "this static/ directory is pinned here by sha256 so a silent swap (a fresh",
+    "htmx.min.js dropped in, an outdated pico that drifts from upstream) fails",
+    "the build with a sha mismatch instead of shipping untraced. Regenerate the",
+    "shas after a deliberate upgrade and record WHY in the rationale field.",
+    "Owned by scripts/checks/check_f89_vendored_asset_manifest.py."
+  ],
+  "assets": {
+    "htmx.min.js": {
+      "vendored": true,
+      "version": "1.9.12",
+      "sha256": "73eabc44d978b226a667c62ca3c40e99236d11aa6f8fc8a27be6f0b36a73b42d",
+      "url": "https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js",
+      "rationale": "HTMX powers every async wizard interaction (hx-get/hx-post into the banner slot). Pinned to the 1.9.x line the templates were authored and tested against; bumping is a deliberate review-and-retest action, not a silent drop-in."
+    },
+    "pico.classless.min.css": {
+      "vendored": true,
+      "version": "2.1.1",
+      "sha256": "bc60164f2e3625d95857172413bf03791e7fb25b5af462d837b8a9363baa848f",
+      "url": "https://unpkg.com/@picocss/pico@2.1.1/css/pico.classless.min.css",
+      "rationale": "Pico classless gives the wizard its base typography and form styling with zero markup classes. Pinned to v2.1.1; an upgrade can reflow every screen, so it is a reviewed change with a screenshot pass."
+    },
+    "kairix.css": {
+      "vendored": false,
+      "version": "first-party",
+      "sha256": "04805061789283558f38efd7059c7aab42c83cfe912a51b78cb6b6bab05a738f",
+      "url": "(first-party) kairix/platform/setup/web/static/kairix.css",
+      "rationale": "First-party wizard stylesheet (the kx-* layout primitives, #488). Not third-party, but pinned here too so the manifest covers EVERY served static file — a tampered kairix.css fails the sha check the same way a swapped vendor file does."
+    }
+  }
+}

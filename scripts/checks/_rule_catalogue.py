@@ -604,6 +604,20 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         summary="token-pattern scanner for private infra identifiers (externalised pattern source)",
         tags=("security",),
     ),
+    RuleEntry(
+        id="F89",
+        gate="f89",
+        check="f89_vendored_asset_manifest",
+        category="production-safety",
+        scope="per-file",
+        summary=(
+            "every served file under a kairix/**/web/static/ tree has a sha256-pinned ASSETS.lock "
+            "manifest row (upstream version + sha256 + url + rationale); the on-disk sha256 must match "
+            "the row, so a swapped/outdated htmx.min.js or pico.css fails instead of shipping untraced"
+        ),
+        adr_origin="EPIC #499 Phase 3 — un-pinned vendored browser-asset class",
+        tags=("security",),
+    ),
     # ----- schema-integrity -----------------------------------------------
     RuleEntry(
         id="F57",
@@ -789,6 +803,20 @@ _ENTRIES: tuple[RuleEntry, ...] = (
             "(session-escape-8 phase-string class)"
         ),
         adr_origin="EPIC #499 Phase 1 — session-escape-8 cross-tier vocabulary drift",
+    ),
+    RuleEntry(
+        id="F90",
+        gate="f90",
+        check="f90_template_route_choreography",
+        category="agent-affordance",
+        scope="per-file",
+        summary=(
+            "setup-wizard template ↔ route referential integrity (F52 applied to the browser tier) — "
+            "every hx-get/hx-post/href/action /setup URL resolves to a Route/Mount in routes.py, every "
+            "hx-target/hx-include #id is defined in some template, every template is rendered or extended "
+            "(dangling-button class: the tour replacing first-search left no dead control)"
+        ),
+        adr_origin="EPIC #499 Phase 3 — dangling-button choreography class",
     ),
     # ----- repo-hygiene ---------------------------------------------------
     RuleEntry(
