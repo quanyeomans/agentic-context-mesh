@@ -1,17 +1,23 @@
 {
-  "_comment": "Importable ruleset for the default branch (main). Apply with: gh api repos/three-cubes/kairix/rulesets --method POST --input .github/rulesets/main.json  (requires Administration:Write — a human/admin action). kairix currently has legacy branch protection with enforce_admins=true but NO required reviews or required status checks; this ruleset adds the human-in-the-loop gate + a merge queue. CONFIRM the required_status_checks contexts below against this repo's actual gating checks before applying — add 'Go quality', 'SonarCloud analysis', '1a · Benchmark gate (retrieval loop)', or 'Fresh-install smoke (F81)' if they should gate merges. Mirrors three-cubes/tc-agent-zone; rationale: that repo's docs/standards/agent-sdlc-access-and-hitl.md.",
+  "_comment": "Importable ruleset for the default branch (main). Apply with: gh api repos/three-cubes/kairix/rulesets --method POST --input .github/rulesets/main.json (requires Administration:Write). NOTE: the merge_queue rule is NOT included \u2014 GitHub's REST rulesets API rejects it (422) in both active and disabled mode; enable the merge queue via the web UI: Settings -> Rules -> Rulesets -> 'main' -> Add rule -> Require merge queue (grouping: ALLGREEN). Only the human admin role may bypass; agent Apps are not admins.",
   "name": "main",
   "target": "branch",
   "enforcement": "active",
   "conditions": {
     "ref_name": {
-      "include": ["~DEFAULT_BRANCH"],
+      "include": [
+        "~DEFAULT_BRANCH"
+      ],
       "exclude": []
     }
   },
   "rules": [
-    { "type": "deletion" },
-    { "type": "non_fast_forward" },
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
     {
       "type": "pull_request",
       "parameters": {
@@ -20,7 +26,10 @@
         "dismiss_stale_reviews_on_push": true,
         "require_last_push_approval": false,
         "required_review_thread_resolution": true,
-        "allowed_merge_methods": ["squash", "merge"]
+        "allowed_merge_methods": [
+          "squash",
+          "merge"
+        ]
       }
     },
     {
@@ -29,21 +38,13 @@
         "strict_required_status_checks_policy": true,
         "do_not_enforce_on_create": false,
         "required_status_checks": [
-          { "context": "CI gate" },
-          { "context": "2 · Pre-merge PR gates (PR → main)" }
+          {
+            "context": "CI gate"
+          },
+          {
+            "context": "2 \u00b7 Pre-merge PR gates (PR \u2192 main)"
+          }
         ]
-      }
-    },
-    {
-      "type": "merge_queue",
-      "parameters": {
-        "merge_method": "SQUASH",
-        "grouping_strategy": "ALLGREEN",
-        "max_entries_to_build": 5,
-        "max_entries_to_merge": 5,
-        "min_entries_to_merge": 1,
-        "min_entries_to_merge_wait_minutes": 5,
-        "check_response_timeout_minutes": 60
       }
     }
   ],
