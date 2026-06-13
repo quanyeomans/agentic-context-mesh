@@ -651,9 +651,13 @@ jobs:
   security:
     name: "Stage 4 -- Security"
     runs-on: ubuntu-latest
-    needs: [changes, unit-and-type]
+    # bandit / pip-audit / detect-secrets are import-graph-independent — they
+    # scan source + dependency manifests, not the unit test surface, so they
+    # don't need the unit matrix to pass first. Parented on `changes` alone,
+    # security now overlaps Stage 2 (#499 Phase 2) instead of waiting for it.
+    needs: [changes]
     if: needs.changes.outputs.python == 'true'
-    # Run in parallel with integration -- both depend on unit passing
+    # Run in parallel with integration + the unit matrix -- no test dependency
     permissions:
       contents: read
       security-events: write   # required to upload SARIF / security findings
@@ -733,6 +737,16 @@ jobs:
   # "SonarCloud Code Analysis" check posted by the SonarCloud GitHub App over
   # webhook can race / temporarily disagree (#269); branch protection should
   # gate on this `SonarCloud analysis` job, not the webhook-posted check.
+  # fan-in: informational — SonarCloud is advisory and intentionally NOT in
+  # the `check` (CI gate) fan-in. Branch protection requires exactly "CI gate"
+  # + "2 · Pre-merge PR gates (PR → main)"; SonarCloud is not a separately
+  # required status context (the webhook-posted "SonarCloud Code Analysis"
+  # check can race / temporarily disagree with this job — #269). The Sonar
+  # new-code parity gate is enforced locally + in the security stage via
+  # check_sonar_new_code.py, not through this job's pass/fail.
+  # TODO(#499): confirm gating intent — the job header comment below still
+  # reads "branch protection should gate on this job"; reconcile that with the
+  # current branch-protection contexts before promoting Sonar to a hard gate.
   sonarcloud:
     name: "SonarCloud analysis"
     runs-on: ubuntu-latest

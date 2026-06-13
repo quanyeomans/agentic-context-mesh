@@ -304,6 +304,7 @@ _Generated from `scripts/checks/_rule_catalogue.py` — do not edit by hand._
 | F32 | repo-hygiene | per-file | shipped | no real names in test fixtures (use agent-alpha etc. + reference library) |
 | F33 | repo-hygiene | per-file | shipped | shellcheck disable directives require rationale |
 | F74 | observability | per-class | vacuous | every Stage subclass is only invoked via a StageRunner — never direct .process() call |
+| F93 | observability | cross-cutting | shipped | every ci.yml job is in the 'CI gate' aggregator's needs: closure (so its failure blocks the merge) or carries a # fan-in: informational marker — a green merge can't ship with an un-gated job failing |
 | F75 | test-discipline | cross-cutting | proposed | every CLI subcommand + MCP tool + connector appears in at least one eval-suite question |
 | F76 | production-safety | per-file | shipped | no f-string interpolation of content-like vars (raw/body/payload/markdown/...) in log/exception/dead-letter strings |
 | F77 | schema-integrity | per-file | proxy | sqlite3.connect call sites outside the allow-list (worker/factory/scripts/tests) are flagged |
