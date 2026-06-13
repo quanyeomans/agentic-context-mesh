@@ -46,10 +46,16 @@ Modes
 -----
 * ``--all`` — every in-scope rule (the full tree). The entrypoint
   ``run-all.sh`` calls; safe-commit / CI Stage 0 consume it.
-* ``--staged`` — only rules whose ``scope`` plausibly intersects the
-  staged paths (``git diff --cached --name-only``). When scope can't be
-  resolved to a path predicate, the rule runs (fail-safe: never silently
-  drop a rule). pre-commit calls this.
+* ``--staged`` — precise per-rule selection against the staged paths
+  (``git diff --cached --name-only``), single-sourced on each
+  :class:`~_rule_catalogue.RuleEntry` (``staged_class`` / ``staged_scope``)
+  and resolved by :mod:`_staged_selection` (stage 4b). File-local rules run
+  over ``staged ∩ scope`` (with the file index narrowed to the staged files);
+  relational rules run their FULL scope when any staged path is in scope;
+  always-run rules run unconditionally. The hard invariant is no false
+  negative on staged changes — when scope can't be resolved, the rule runs
+  (fail-safe). The transparent ledger prints which rules ran vs were skipped
+  as not-in-scope. pre-commit calls this; the ``--all`` gate is the backstop.
 * ``--gate <id>`` — one rule by catalogue id (e.g. ``F26``).
 
 Output contract (F83 gate-runner discipline)
@@ -78,6 +84,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _check_context import CheckContext
 from _rule_catalogue import ALL_ENTRIES, RuleEntry
+from _staged_selection import StagedDecision, decide, restrict_enumeration
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CHECKS_DIR = REPO_ROOT / "scripts" / "checks"
@@ -114,41 +121,26 @@ def is_dispatchable(entry: RuleEntry) -> bool:
 
 # ── scope → staged-path predicate (the --staged narrowing) ──────────────
 #
-# A rule's ``scope`` is a coarse shape, not a path glob, so the staged
-# narrowing is deliberately permissive: it maps a scope to the path
-# prefixes the rule could plausibly fire on. Anything not confidently
-# narrowable falls through to "run it" — the whole point is to never
-# silently skip a rule that a staged file might violate.
-_CROSS_CUTTING_SCOPES = frozenset({"cross-cutting", "per-commit", "per-flag", "per-table", "per-protocol-method"})
+# Stage 4b (#499 Phase 2) makes the narrowing PRECISE and SOUND. The per-rule
+# selection class + path-scope are single-sourced on each
+# :class:`~_rule_catalogue.RuleEntry` (``staged_class`` / ``staged_scope``)
+# and resolved by :mod:`_staged_selection`. The runner asks that module for a
+# :class:`~_staged_selection.StagedDecision` per rule and dispatches
+# accordingly. The hard invariant — never silently drop a rule a staged file
+# could violate — is enforced there: file-local rules run over ``staged ∩
+# scope``, relational rules run their FULL scope when any staged path is in
+# scope, and always-run rules run unconditionally.
 
 
 def _rule_touches_staged(entry: RuleEntry, staged: list[str]) -> bool:
-    """Decide whether ``entry`` should run given the ``staged`` paths.
+    """Back-compat shim: True iff ``entry`` would be DISPATCHED for ``staged``.
 
-    Conservative: returns ``True`` (run the rule) whenever the staged
-    set could plausibly contain a file the rule governs. Only returns
-    ``False`` when the rule is confidently a no-op for the staged set.
+    Delegates to the stage-4b :func:`_staged_selection.decide`. Kept so the
+    existing ``test_staged_narrowing_*`` cases keep asserting the run/skip
+    boundary; new code consumes :func:`_staged_selection.decide` directly for
+    the full decision (scope + file narrowing).
     """
-    if not staged:
-        # pre-commit with no staged files (e.g. --all-files dispatch
-        # quirk) — run everything rather than silently pass.
-        return True
-    # Cross-cutting / whole-tree rules always run: their detectors walk
-    # the repo, not a per-file delta, so a staged change anywhere can
-    # flip them.
-    if entry.scope in _CROSS_CUTTING_SCOPES:
-        return True
-    # Shell-script rules (F83 etc.) fire on staged .sh changes; the
-    # F3 suppression-rationale rule fires on any .py. Resolve by the
-    # script's own breadth — cheapest correct answer is "run it".
-    script = resolve_script(entry)
-    if script.endswith(".sh"):
-        # gate-runner / shell-scoped rules: run if any shell or python
-        # source is staged (their detectors walk fixed trees).
-        return any(p.endswith((".sh", ".py", ".feature", ".yml", ".yaml")) for p in staged)
-    # Default python checks walk kairix/ and/or tests/ — run when any
-    # python, feature, or config source is staged.
-    return any(p.endswith((".py", ".feature", ".yml", ".yaml", ".properties", ".toml")) for p in staged)
+    return decide(entry, resolve_script(entry), staged).run
 
 
 def _staged_paths() -> list[str]:
@@ -348,10 +340,35 @@ def _select_all() -> list[RuleEntry]:
     return [e for e in ALL_ENTRIES if is_dispatchable(e) and e.run_all]
 
 
+def _staged_decisions(staged: list[str]) -> list[tuple[RuleEntry, StagedDecision]]:
+    """Per-rule staged decision for every ``--all`` entry, in catalogue order.
+
+    Deduped by resolved script (the same script runs once), mirroring the
+    ``--all`` dispatch. Each pair carries the rule's
+    :class:`~_staged_selection.StagedDecision` — run/skip, the reason (for the
+    transparent ledger), and the staged file subset to narrow a file-local
+    rule's file index to.
+    """
+    out: list[tuple[RuleEntry, StagedDecision]] = []
+    seen_scripts: set[str] = set()
+    for entry in _select_all():
+        script = resolve_script(entry)
+        if script in seen_scripts:
+            continue
+        seen_scripts.add(script)
+        out.append((entry, decide(entry, script, staged)))
+    return out
+
+
 def _select_staged() -> list[RuleEntry]:
-    """``--all`` set, narrowed to rules a staged change could trip."""
+    """``--all`` set, narrowed to the rules a staged change could trip.
+
+    Back-compat surface (the dispatch now consumes :func:`_staged_decisions`
+    so it can also narrow file-local rules' file index). Returns only the
+    rules that WILL run.
+    """
     staged = _staged_paths()
-    return [e for e in _select_all() if _rule_touches_staged(e, staged)]
+    return [e for e, decision in _staged_decisions(staged) if decision.run]
 
 
 def _select_gate(gate_id: str) -> list[RuleEntry]:
@@ -402,6 +419,77 @@ def _dispatch(entries: list[RuleEntry], *, skip_coverage: bool) -> int:
     return 0
 
 
+def _dispatch_staged(staged: list[str], *, skip_coverage: bool) -> int:
+    """Precise staged dispatch (#499 Phase 2 stage 4b).
+
+    For every ``--all`` rule, ask :func:`_staged_selection.decide` whether — and
+    over what — to run it against ``staged``:
+
+    * SKIPPED rules print a transparent ``skip [id] — <reason>`` line, so the
+      narrowing is auditable, never silent.
+    * RUN rules dispatch exactly as ``--all`` does (in-process for pure-python,
+      guarded subprocess for shell / coverage). A FILE-LOCAL rule with a staged
+      file subset runs inside :func:`restrict_enumeration`, so its file
+      enumeration is narrowed to the staged files (the big inner-loop win)
+      while its per-file verdict stays byte-identical to a full run.
+
+    Aggregate ledger + exit code match the ``--all`` contract; only the
+    SELECTION (which rules, over which files) differs.
+    """
+    decisions = _staged_decisions(staged)
+    failures: list[str] = []
+    ran = 0
+    skipped = 0
+    ctx = CheckContext(repo_root=REPO_ROOT)
+    with ctx.install():
+        for entry, decision in decisions:
+            if not decision.run:
+                print(f"{_YELLOW}skip [{entry.id}]{_RESET} {resolve_script(entry)} — {decision.reason}")
+                skipped += 1
+                continue
+            result = _run_staged_one(entry, ctx, decision, staged=staged, skip_coverage=skip_coverage)
+            if result is None:
+                skipped += 1
+                continue
+            ran += 1
+            if result != 0:
+                failures.append(entry.id)
+
+    print()
+    print(f"{_YELLOW}staged selection:{_RESET} {ran} ran, {skipped} skipped (not in staged scope or report absent)")
+    if failures:
+        print(
+            f"{_RED}=== Architecture fitness functions FAILED ==={_RESET} "
+            f"({len(failures)}/{ran} rule(s) failed: {', '.join(failures)})"
+        )
+        return 1
+    print(f"{_GREEN}=== All {ran} staged architecture fitness functions passed ==={_RESET}")
+    return 0
+
+
+def _run_staged_one(
+    entry: RuleEntry,
+    ctx: CheckContext,
+    decision: StagedDecision,
+    *,
+    staged: list[str],
+    skip_coverage: bool,
+) -> int | None:
+    """Dispatch one RUN-decided rule in staged mode.
+
+    File-local rules carrying a staged file subset run inside
+    :func:`restrict_enumeration` so the in-process check walks ONLY those
+    files. Everything else (relational / always-run / shell / coverage) runs
+    over its full natural scope, exactly as ``--all`` would.
+    """
+    if not _dispatches_in_process(entry):
+        return _run_one(entry, skip_coverage=skip_coverage)
+    if decision.scope_files:
+        with restrict_enumeration(REPO_ROOT, list(decision.scope_files)):
+            return _run_one_inprocess(entry, ctx)
+    return _run_one_inprocess(entry, ctx)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse mode flags and dispatch. ``--all`` is the default."""
     parser = argparse.ArgumentParser(
@@ -426,14 +514,19 @@ def main(argv: list[str] | None = None) -> int:
             print("   fix: pass a real id (see scripts/checks/_rule_catalogue.py) or run --all.")
             return 2
         print(f"=== Architecture fitness function: {args.gate} ===")
-    elif args.staged:
-        entries = _select_staged()
-        print("=== Architecture fitness functions (staged) ===")
-    else:
-        entries = _select_all()
-        print("=== Architecture fitness functions ===")
+        return _dispatch(entries, skip_coverage=args.skip_coverage)
 
-    return _dispatch(entries, skip_coverage=args.skip_coverage)
+    if args.staged:
+        # Precise per-rule staged selection (#499 Phase 2 stage 4b): the
+        # dispatcher computes each rule's decision, prints the transparent
+        # run/skip ledger, and narrows file-local rules' file index to the
+        # staged files. Selection is sound — no false negative on staged
+        # changes; the full --all gate remains the merge backstop.
+        print("=== Architecture fitness functions (staged) ===")
+        return _dispatch_staged(_staged_paths(), skip_coverage=args.skip_coverage)
+
+    print("=== Architecture fitness functions ===")
+    return _dispatch(_select_all(), skip_coverage=args.skip_coverage)
 
 
 if __name__ == "__main__":
