@@ -80,6 +80,7 @@ def test_plugin_with_conforming_contract_test_is_not_flagged(tmp_path: Path) -> 
         body=(
             "from tests.fakes import FakeOpenAIProvider\n"
             "from kairix.providers.openai import OpenAIProvider\n"
+            "# F43-single-impl: limb-1 fixture\n"
             "def test_shape():\n    assert FakeOpenAIProvider and OpenAIProvider\n"
         ),
     )
@@ -115,6 +116,7 @@ def test_missing_contract_test_is_flagged(tmp_path: Path) -> None:
         body=(
             "from tests.fakes import FakeBedrockProvider\n"
             "from kairix.providers.bedrock import BedrockProvider\n"
+            "# F43-single-impl: limb-1 fixture\n"
             "def test_shape():\n    assert FakeBedrockProvider and BedrockProvider\n"
         ),
     )
@@ -162,6 +164,7 @@ def test_import_from_nested_module_path_is_accepted(tmp_path: Path) -> None:
         body=(
             "from tests.fakes import FakeOpenAIProvider\n"
             "from kairix.providers.openai.provider import OpenAIProvider\n"
+            "# F43-single-impl: limb-1 fixture\n"
             "def test_shape():\n    assert FakeOpenAIProvider and OpenAIProvider\n"
         ),
     )
@@ -181,6 +184,7 @@ def test_import_module_form_is_accepted(tmp_path: Path) -> None:
         body=(
             "import tests.fakes\n"
             "import kairix.providers.openai\n"
+            "# F43-single-impl: limb-1 fixture\n"
             "def test_shape():\n"
             "    assert tests.fakes is not None\n"
             "    assert kairix.providers.openai is not None\n"

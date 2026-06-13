@@ -106,9 +106,9 @@ reported an empty corpus as instantly-done while the real backend spins
 forever) and every suite still passes, because no single body ever ran
 the same assertion over both.
 
-fix (Limb 1): create ``tests/contracts/test_<name>_protocol.py`` that
+fix: (Limb 1) create ``tests/contracts/test_<name>_protocol.py`` that
 imports the canonical fake AND the real implementation.
-fix (Limb 2): collapse the real-only + fake-only tests into ONE body
+fix: (Limb 2) collapse the real-only + fake-only tests into ONE body
 parametrized over both impls — ``@pytest.mark.parametrize`` over an
 implementation param (``factory`` / ``service`` / ``backend`` / …) with
 ≥2 values, OR a ``@pytest.fixture(params=[real, fake])``. Genuinely
