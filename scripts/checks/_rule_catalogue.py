@@ -378,10 +378,12 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="cross-cutting",
         summary=(
             "CI fresh-install smoke — clean dir → compose boot → healthz → MCP handshake → "
-            "wizard 200 → BM25 search hit (scripts/checks/check-fresh-install-smoke.sh via "
+            "wizard 200 → wizard choreography (POST scan partial + key form→redirect) → BM25 search "
+            "hit (scripts/checks/check-fresh-install-smoke.sh via "
             ".github/workflows/fresh-install-smoke.yml; per-commit leg checks the wiring)"
         ),
-        adr_origin="onboarding tranche 3, 2026-06-11 — registered via EPIC #499 Phase 0",
+        adr_origin="onboarding tranche 3, 2026-06-11 — registered via EPIC #499 Phase 0; "
+        "choreography stage added EPIC #499 Phase 3",
     ),
     RuleEntry(
         id="F82",
@@ -616,6 +618,21 @@ _ENTRIES: tuple[RuleEntry, ...] = (
             "the row, so a swapped/outdated htmx.min.js or pico.css fails instead of shipping untraced"
         ),
         adr_origin="EPIC #499 Phase 3 — un-pinned vendored browser-asset class",
+        tags=("security",),
+    ),
+    RuleEntry(
+        id="F91",
+        gate="f91",
+        check="f91_browser_surface",
+        category="production-safety",
+        scope="per-file",
+        summary=(
+            "wizard browser surface — HTML responses carry nosniff + frame-denial + a "
+            "Content-Security-Policy (Limb A: contract test + render-path static check), and every "
+            "inline <script> in the setup templates is F91-inline rationale-tagged, ≤20 lines, and "
+            "not cross-template-duplicated (Limb B)"
+        ),
+        adr_origin="EPIC #499 Phase 3 — browser-surface CSP/XSS/inline-JS governance",
         tags=("security",),
     ),
     # ----- schema-integrity -----------------------------------------------

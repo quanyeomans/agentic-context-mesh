@@ -1,11 +1,14 @@
 """F81: the CI fresh-install smoke exists and stays wired.
 
 The smoke itself (onboarding tranche 3, 2026-06-11; EPIC #499 Phase 0
-registration) is ``scripts/checks/check-fresh-install-smoke.sh``: from a
-clean temp directory it replays the README quick start — compose boot →
+registration; choreography stage added EPIC #499 Phase 3) is
+``scripts/checks/check-fresh-install-smoke.sh``: from a clean temp
+directory it replays the README quick start — compose boot →
 ``/healthz/ready`` 200 → MCP initialize + tools/list handshake →
-``GET /setup/`` 200 with the wizard flag ON → BM25 search hit on a
-seeded sample document. It runs in CI via
+``GET /setup/`` 200 with the wizard flag ON → wizard choreography
+(``POST /setup/folder/scan`` returns the HTMX scan partial; ``POST
+/setup/key`` drives the form→redirect choreography) → BM25 search hit on
+a seeded sample document. It runs in CI via
 ``.github/workflows/fresh-install-smoke.yml`` (it needs Docker and
 minutes of wall-clock, so it is NOT a per-commit local gate).
 

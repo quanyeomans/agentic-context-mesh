@@ -250,7 +250,7 @@ _Generated from `scripts/checks/_rule_catalogue.py` — do not edit by hand._
 | F68 | test-discipline | per-protocol-method | shipped | every Protocol method has a failure-injection contract test |
 | F69 | test-discipline | per-test | shipped | every integration test with .fetchall()/list_changes has a ≥10K-row variant |
 | F72 | test-discipline | cross-cutting | shipped | every cross-layer integrity invariant has a fixture-scale AND soak-scale test |
-| F81 | test-discipline | cross-cutting | shipped | CI fresh-install smoke — clean dir → compose boot → healthz → MCP handshake → wizard 200 → BM25 search hit (scripts/checks/check-fresh-install-smoke.sh via .github/workflows/fresh-install-smoke.yml; per-commit leg checks the wiring) |
+| F81 | test-discipline | cross-cutting | shipped | CI fresh-install smoke — clean dir → compose boot → healthz → MCP handshake → wizard 200 → wizard choreography (POST scan partial + key form→redirect) → BM25 search hit (scripts/checks/check-fresh-install-smoke.sh via .github/workflows/fresh-install-smoke.yml; per-commit leg checks the wiring) |
 | F82 | test-discipline | per-test | shipped | wall-clock ceiling assertions banned outside soak/probe tiers — elapsed-time vs numeric ceiling requires a slow/soak/load/pvt marker or # F82-allowed: rationale (#493 flake family) |
 | F84 | test-discipline | per-method | shipped | every production config-write site (write_config_updates / update_config_file / write_config_yaml / config-writer-named yaml.dump) has a composed write→read round-trip test through the canonical layered reader (#492 overlay split-brain class) |
 | F88 | test-discipline | per-method | shipped | every SetupService / KairixSetupService method documenting a concrete Raises: type is either handled (except, incl. superclass) in the wizard route that calls it or render-tested under tests/platform/setup (session-escape-5 raw-500 class) |
@@ -274,6 +274,7 @@ _Generated from `scripts/checks/_rule_catalogue.py` — do not edit by hand._
 | F66 | production-safety | per-class | shipped | every connector + tick-driven component declares per_tick_max_items + disk_watermark_min_free_bytes |
 | F73 | production-safety | per-file | shipped | token-pattern scanner for private infra identifiers (externalised pattern source) |
 | F89 | production-safety | per-file | shipped | every served file under a kairix/**/web/static/ tree has a sha256-pinned ASSETS.lock manifest row (upstream version + sha256 + url + rationale); the on-disk sha256 must match the row, so a swapped/outdated htmx.min.js or pico.css fails instead of shipping untraced |
+| F91 | production-safety | per-file | shipped | wizard browser surface — HTML responses carry nosniff + frame-denial + a Content-Security-Policy (Limb A: contract test + render-path static check), and every inline <script> in the setup templates is F91-inline rationale-tagged, ≤20 lines, and not cross-template-duplicated (Limb B) |
 | F57 | schema-integrity | per-file | shipped | every UPDATE topology_cc_pairs SET status=? lives next to a _ALLOWED_TRANSITIONS dispatch dict |
 | F58 | schema-integrity | cross-cutting | vacuous | HierarchyConnector impls have a parent-before-child contract test |
 | F67 | schema-integrity | per-table | shipped | every pushed_to_<sink> column has a matching UPDATE site flipping 0 → 1 |
