@@ -408,6 +408,19 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         ),
         adr_origin="EPIC #499 Phase 1 — #492 overlay split-brain (H1)",
     ),
+    RuleEntry(
+        id="F88",
+        gate="f88",
+        check="f88_docstring_raises_parity",
+        category="test-discipline",
+        scope="per-method",
+        summary=(
+            "every SetupService / KairixSetupService method documenting a concrete Raises: type "
+            "is either handled (except, incl. superclass) in the wizard route that calls it or "
+            "render-tested under tests/platform/setup (session-escape-5 raw-500 class)"
+        ),
+        adr_origin="EPIC #499 Phase 1 — session-escape-5 (save_source ValueError surfaced as 500)",
+    ),
     # ----- plugin-contract -------------------------------------------------
     RuleEntry(
         id="F28",
