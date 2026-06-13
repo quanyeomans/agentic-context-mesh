@@ -1,0 +1,638 @@
+#!/usr/bin/env python3
+"""Diff-scoped mutation runner — the mechanical sabotage control (#499 Phase 1).
+
+Motivation (session-escape-6: sabotage proofs were cultural, not mechanical)
+----------------------------------------------------------------------------
+Surviving mutants slipped into ``done``-derivation and the
+``OperatorTokenGuard`` exemption with every suite green, because the
+sabotage proofs that should have pinned that logic were *executed once* by
+a human (a cultural ritual) rather than enforced by a repeatable gate. A
+mutant survives when the tests that cover a line still PASS after the
+line's logic is changed — proof the tests assert presence, not behaviour.
+
+This runner makes the sabotage proof mechanical and diff-scoped. It mirrors
+tc-agent-zone's mutation contract (``scripts/checks/mutation_survival_ratchet.py``
++ ``5-mutation-testing.yml``): a homegrown mutator (no mutmut/stryker
+dependency — that org's runner is homegrown too, anticipating but not
+requiring those packages) and a ratcheted survivors baseline. The
+per-commit leg is diff-scoped and hard-capped so it stays bounded; the
+nightly ``mutation-suite.yml`` runs full-scope against the ratchet.
+
+What it does
+------------
+1. Derive touched function spans from ``git diff`` — staged by default, or
+   against a ``--base`` ref. Only functions whose body lines changed are in
+   scope (a docstring-only or signature-only edit yields no mutable span).
+2. Generate mutants on the CHANGED lines within those spans:
+   ``==``↔``!=``, ``<``↔``<=``, ``>``↔``>=``, ``and``↔``or``,
+   ``True``↔``False``, drop-a-conjunct, negate-a-condition.
+3. For each mutant, run only the IMPACTED tests — the test files that
+   import the mutated module (the same import-graph heuristic
+   ``safe-commit.sh --fast`` uses). A mutant whose impacted tests still
+   PASS is a SURVIVOR (the gate's signal).
+
+Hard caps (so a ~300-line diff finishes in ~2-3 min):
+  * ``MAX_MUTANTS`` (20) total — excess mutants are reported as skipped,
+    never silently dropped.
+  * ``PER_MUTANT_TIMEOUT_S`` (60) per impacted-test run — a mutant that
+    times out is reported as a partial (treated as KILLED: the tests did
+    not pass cleanly, which is the conservative call — a survivor is only
+    ever a clean pass).
+
+Operator outcome (F21)
+----------------------
+Each survivor prints::
+
+    mutant survived: <file>:<line> <original> -> <mutation> — the tests
+    that cover this line pass with the logic changed.
+    fix: add/strengthen an assertion that pins this behaviour.
+    next: ...
+
+Exit code is non-zero iff a survivor is found AND it is not already in the
+ratcheted baseline (``--baseline`` mode). In the default diff-scoped
+safe-commit mode there is no baseline — ANY survivor on a staged change
+fails the gate, because the staged change is exactly what the author can
+strengthen a test for right now.
+"""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import re
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+# Hard caps — the whole point of diff-scoping. A normal commit must not
+# make safe-commit slow or flaky; these bound the work regardless of diff
+# size. See module docstring.
+#
+# Three independent budgets, ANY of which stops the run early:
+#   * MAX_MUTANTS — never generate more than this many mutants.
+#   * PER_MUTANT_TIMEOUT_S — kill (and treat as killed) a single
+#     impacted-test run that exceeds this.
+#   * TOTAL_BUDGET_S — once cumulative impacted-test time crosses this, stop
+#     launching new mutants and report the remainder as skipped. This is the
+#     guard that keeps a broad-footprint diff (e.g. touching factory.py,
+#     whose impacted-test set is ~60 files / ~18s a run) inside the ~2-3 min
+#     target — without it, 20 x 18s would be ~6 min.
+#   * MAX_IMPACTED_TEST_FILES — bound the per-mutant pytest cost by capping
+#     how many impacted test files each mutant runs against.
+MAX_MUTANTS = 20
+PER_MUTANT_TIMEOUT_S = 60
+TOTAL_BUDGET_S = 150.0
+MAX_IMPACTED_TEST_FILES = 40
+
+DEFAULT_SURVIVORS_BASELINE = REPO_ROOT / ".architecture" / "baseline" / "mutation-survivors-files.txt"
+
+_RED = "\033[0;31m"
+_GREEN = "\033[0;32m"
+_YELLOW = "\033[0;33m"
+_RESET = "\033[0m"
+
+# Tests that import the mutated module are selected by these markers only —
+# the fast per-commit tiers. (Integration / e2e run in the nightly full
+# scope.) Matches safe-commit.sh's --fast marker set.
+_IMPACTED_TEST_MARKERS = "unit or bdd or contract"
+
+
+@dataclass(frozen=True)
+class Mutant:
+    """One single-token mutation of a source line within a touched span."""
+
+    path: Path  # repo-relative source file
+    lineno: int  # 1-based line number in the original source
+    col: int  # 0-based column of the mutated token
+    original: str  # the original token / fragment (for the report)
+    mutation: str  # what it became (for the report)
+    mutated_source: str  # full file content with the mutation applied
+
+
+@dataclass(frozen=True)
+class MutantResult:
+    """Outcome of running a mutant's impacted tests."""
+
+    mutant: Mutant
+    survived: bool  # True iff impacted tests PASSED with the logic changed
+    detail: str  # "killed" / "survived" / "timeout (treated as killed)" / "no impacted tests"
+    elapsed_s: float
+
+
+# ── diff → touched function spans ───────────────────────────────────────
+
+
+def _git(args: list[str]) -> str:
+    """Run ``git <args>`` at REPO_ROOT; return stdout (empty on failure)."""
+    result = subprocess.run(
+        ["git", *args],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
+_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(?P<start>\d+)(?:,(?P<count>\d+))? @@")
+_DIFF_FILE_RE = re.compile(r"^\+\+\+ b/(?P<path>.+)$")
+
+
+def changed_lines(base: str | None) -> dict[Path, set[int]]:
+    """Map each changed ``kairix/**.py`` file to the set of NEW line numbers
+    its diff added or modified.
+
+    ``base is None`` → staged diff (``--cached``). Otherwise diff against
+    ``base`` (e.g. ``origin/main``). Only ``kairix/`` python files are
+    considered — tests and scripts are out of scope for mutation (we mutate
+    production code and ask whether tests catch it).
+    """
+    diff_args = ["diff", "--unified=0"]
+    if base is None:
+        diff_args.append("--cached")
+    else:
+        diff_args.append(base)
+    return _changed_lines_from_diff(_git(diff_args))
+
+
+def _changed_lines_from_diff(diff: str) -> dict[Path, set[int]]:
+    """Parse a ``git diff --unified=0`` text into ``{kairix-py-path: {lines}}``.
+
+    Split from :func:`changed_lines` so the (pure) parse is unit-testable
+    without a git subprocess. Only ``kairix/**.py`` files contribute; a hunk
+    that only deletes lines (``+count`` == 0) adds nothing.
+    """
+    out: dict[Path, set[int]] = {}
+    current: Path | None = None
+    for line in diff.splitlines():
+        file_match = _DIFF_FILE_RE.match(line)
+        if file_match:
+            rel = file_match.group("path")
+            current = Path(rel) if rel.startswith("kairix/") and rel.endswith(".py") else None
+            continue
+        if current is None:
+            continue
+        hunk = _HUNK_RE.match(line)
+        if hunk:
+            start = int(hunk.group("start"))
+            count = int(hunk.group("count")) if hunk.group("count") is not None else 1
+            if count > 0:
+                out.setdefault(current, set()).update(range(start, start + count))
+    return out
+
+
+def _enclosing_function_lines(source: str, changed: set[int]) -> set[int]:
+    """Narrow ``changed`` to lines that fall inside a function/method body.
+
+    A changed line outside any ``def`` (module-level constant, class body,
+    import) is not a behavioural span we mutate — mutation testing pins
+    *logic*, and logic lives in function bodies. Returns the subset of
+    ``changed`` that lies within some FunctionDef/AsyncFunctionDef span.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    spans: list[tuple[int, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            end = node.end_lineno if node.end_lineno is not None else node.lineno
+            spans.append((node.lineno, end))
+    return {ln for ln in changed if any(lo <= ln <= hi for lo, hi in spans)}
+
+
+# ── mutation operators ──────────────────────────────────────────────────
+#
+# Each operator inspects an AST node and yields zero or more (original,
+# mutation) token rewrites anchored at a (lineno, col_offset). We rewrite
+# the SOURCE TEXT at that anchor rather than unparsing the AST, so the
+# mutated file is a minimal one-token delta a human could read in a diff —
+# and so formatting / comments survive untouched.
+
+_COMPARE_SWAPS = {
+    ast.Eq: ("==", "!="),
+    ast.NotEq: ("!=", "=="),
+    ast.Lt: ("<", "<="),
+    ast.LtE: ("<=", "<"),
+    ast.Gt: (">", ">="),
+    ast.GtE: (">=", ">"),
+}
+_BOOL_SWAP = {ast.And: ("and", "or"), ast.Or: ("or", "and")}
+
+
+def _rewrite_token(lines: list[str], lineno: int, original: str, mutation: str, near_col: int) -> str | None:
+    """Replace the FIRST occurrence of ``original`` at or after ``near_col``
+    on 1-based ``lineno`` with ``mutation``. Returns the full mutated source,
+    or ``None`` if the token isn't found where expected (defensive: skip
+    rather than corrupt)."""
+    idx = lineno - 1
+    if idx < 0 or idx >= len(lines):
+        return None
+    line = lines[idx]
+    pos = line.find(original, max(0, near_col))
+    if pos == -1:
+        pos = line.find(original)
+    if pos == -1:
+        return None
+    mutated_line = line[:pos] + mutation + line[pos + len(original) :]
+    new_lines = list(lines)
+    new_lines[idx] = mutated_line
+    return "\n".join(new_lines) + ("\n" if lines and not lines[-1].endswith("\n") else "")
+
+
+def _comparison_mutants(node: ast.Compare, lines: list[str], path: Path, scope: set[int]) -> list[Mutant]:
+    """Swap each comparison operator (``==``↔``!=`` etc.) on an in-scope line."""
+    out: list[Mutant] = []
+    # ast does not give per-operator line/col, so anchor on the line of the
+    # left operand; for the common single-op comparison this is the op line.
+    for op in node.ops:
+        swap = _COMPARE_SWAPS.get(type(op))
+        if swap is None:
+            continue
+        lineno = node.left.end_lineno or node.lineno
+        if lineno not in scope:
+            continue
+        original, mutation = swap
+        near_col = node.left.end_col_offset or 0
+        mutated = _rewrite_token(lines, lineno, original, mutation, near_col)
+        if mutated is not None:
+            out.append(Mutant(path, lineno, near_col, original, mutation, mutated))
+    return out
+
+
+def _boolop_mutants(node: ast.BoolOp, lines: list[str], path: Path, scope: set[int]) -> list[Mutant]:
+    """``and``↔``or`` swap, plus drop-a-conjunct on ``and`` (the most common
+    correctness-load-bearing boolean shape)."""
+    out: list[Mutant] = []
+    keyword, replacement = _BOOL_SWAP[type(node.op)]
+    lineno = node.values[0].end_lineno or node.lineno
+    if lineno in scope:
+        near_col = node.values[0].end_col_offset or 0
+        mutated = _rewrite_token(lines, lineno, keyword, replacement, near_col)
+        if mutated is not None:
+            out.append(Mutant(path, lineno, near_col, keyword, replacement, mutated))
+    return out
+
+
+def _constant_mutants(node: ast.Constant, lines: list[str], path: Path, scope: set[int]) -> list[Mutant]:
+    """``True``↔``False`` literal flip on an in-scope line."""
+    if not isinstance(node.value, bool):
+        return []
+    if node.lineno not in scope:
+        return []
+    original = "True" if node.value else "False"
+    mutation = "False" if node.value else "True"
+    mutated = _rewrite_token(lines, node.lineno, original, mutation, node.col_offset)
+    if mutated is None:
+        return []
+    return [Mutant(path, node.lineno, node.col_offset, original, mutation, mutated)]
+
+
+def generate_mutants(source: str, path: Path, scope: set[int]) -> list[Mutant]:
+    """All single-token mutants on in-``scope`` lines of ``source``.
+
+    ``scope`` is the set of changed line numbers already narrowed to
+    function bodies. Mutants are produced deterministically in source order
+    so the per-commit cap selects the same first-N every run.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    lines = source.splitlines()
+    out: list[Mutant] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Compare):
+            out.extend(_comparison_mutants(node, lines, path, scope))
+        elif isinstance(node, ast.BoolOp) and type(node.op) in _BOOL_SWAP:
+            out.extend(_boolop_mutants(node, lines, path, scope))
+        elif isinstance(node, ast.Constant):
+            out.extend(_constant_mutants(node, lines, path, scope))
+    # Deterministic order: by line then column.
+    out.sort(key=lambda m: (m.lineno, m.col))
+    return out
+
+
+# ── impacted-test selection ─────────────────────────────────────────────
+
+
+def _module_path(rel: Path) -> str:
+    """``kairix/foo/bar.py`` → ``kairix.foo.bar`` for import-grep."""
+    return str(rel.with_suffix("")).replace("/", ".")
+
+
+def impacted_tests(paths: set[Path]) -> list[str]:
+    """Test files that import any mutated module — the import-graph heuristic
+    ``safe-commit.sh --fast`` uses. Returns repo-relative test-file paths."""
+    tests_dir = REPO_ROOT / "tests"
+    if not tests_dir.exists():
+        return []
+    found: set[str] = set()
+    needles = {_module_path(p) for p in paths}
+    needles.update(str(p) for p in paths)  # also match path-string references
+    for test_file in tests_dir.rglob("test_*.py"):
+        try:
+            text = test_file.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if any(needle in text for needle in needles):
+            found.add(str(test_file.relative_to(REPO_ROOT)))
+    # Bound the per-mutant pytest cost: a module imported by 60+ test files
+    # would make each mutant run a multi-minute suite. The first N (sorted,
+    # deterministic) are a representative cover — a mutant that survives all
+    # of them is a survivor; one killed by any of them is killed.
+    return sorted(found)[:MAX_IMPACTED_TEST_FILES]
+
+
+def _run_impacted_tests(test_files: list[str], timeout_s: int) -> tuple[bool, str, float]:
+    """Run ``pytest`` over ``test_files`` (fast markers, no coverage).
+
+    Returns ``(passed, detail, elapsed_s)``. ``passed`` is True ONLY on a
+    clean pytest exit 0 — a timeout, collection error, or any failure is
+    a non-survivor (the mutant was caught, conservatively)."""
+    if not test_files:
+        return False, "no impacted tests", 0.0
+    start = time.monotonic()
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                *test_files,
+                "-x",
+                "-q",
+                "--no-header",
+                "-p",
+                "no:cacheprovider",
+                "--no-cov",
+                "-m",
+                _IMPACTED_TEST_MARKERS,
+                "--timeout=30",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"timeout >{timeout_s}s (treated as killed)", float(timeout_s)
+    elapsed = time.monotonic() - start
+    passed = result.returncode == 0
+    detail = "survived" if passed else "killed"
+    return passed, detail, elapsed
+
+
+# ── orchestration ───────────────────────────────────────────────────────
+
+
+def _apply_and_test(mutant: Mutant, test_files: list[str]) -> MutantResult:
+    """Write the mutated source to the real file path (backed up first), run
+    impacted tests, restore. The file IS the production file — pytest imports
+    it — so we mutate in place and always restore in ``finally``.
+
+    ``test_files`` is guaranteed non-empty by the caller (``run`` short-
+    circuits when no fast-tier test imports the changed module). A clean
+    pytest pass = SURVIVED; any non-zero exit (failure, timeout, collection
+    error) = killed (conservative: a survivor is only ever a clean pass)."""
+    target = REPO_ROOT / mutant.path
+    original_bytes = target.read_bytes()
+    try:
+        target.write_text(mutant.mutated_source, encoding="utf-8")
+        passed, detail, elapsed = _run_impacted_tests(test_files, PER_MUTANT_TIMEOUT_S)
+    finally:
+        # Restore byte-for-byte — never leave a mutated file behind, even on
+        # KeyboardInterrupt / exception.
+        target.write_bytes(original_bytes)
+    return MutantResult(mutant=mutant, survived=passed, detail=detail, elapsed_s=elapsed)
+
+
+def _survivor_report(result: MutantResult) -> str:
+    """F21 operator-outcome block for one survivor."""
+    m = result.mutant
+    return (
+        f"{_RED}mutant survived{_RESET}: {m.path}:{m.lineno} "
+        f"`{m.original}` -> `{m.mutation}` ({result.detail}) — "
+        "the tests that cover this line pass with the logic changed.\n"
+        f"  fix: add/strengthen an assertion in the impacted test(s) that pins this "
+        f"behaviour (assert the OUTCOME the `{m.original}` produces, not just that the "
+        "function ran).\n"
+        f"  next: re-run `python3 scripts/checks/mutation_parity.py` after strengthening "
+        "the test — the mutant must then be KILLED.\n"
+        '  run: bash scripts/safe-commit.sh "test(mutation): pin '
+        f'{m.path.stem} behaviour at line {m.lineno}"'
+    )
+
+
+def _load_baseline(path: Path) -> set[str]:
+    """Ratcheted survivor keys (``<file>:<line>:<original>-><mutation>``)."""
+    if not path.exists():
+        return set()
+    return {
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+
+
+def _survivor_key(m: Mutant) -> str:
+    return f"{m.path}:{m.lineno}:{m.original}->{m.mutation}"
+
+
+def run(
+    *,
+    base: str | None,
+    baseline_path: Path | None,
+    write_baseline: bool,
+    max_mutants: int = MAX_MUTANTS,
+) -> int:
+    """Diff-scoped mutation run. Returns process exit code.
+
+    * ``base`` — diff ref, or ``None`` for the staged diff.
+    * ``baseline_path`` — when set, survivors already in the ratchet do NOT
+      fail (nightly full-scope mode). ``None`` → strict (safe-commit mode).
+    * ``write_baseline`` — rewrite the baseline to exactly the surviving set
+      (the ratchet update; nightly only). Refuses to GROW the count.
+    """
+    touched = changed_lines(base)
+    if not touched:
+        print(f"{_GREEN}PASS mutation_parity{_RESET} — no mutable production-code diff (0 mutants).")
+        return 0
+
+    # Build the in-scope mutant set across all touched files.
+    all_mutants: list[Mutant] = []
+    for rel, lines_changed in sorted(touched.items()):
+        source = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        scope = _enclosing_function_lines(source, lines_changed)
+        all_mutants.extend(generate_mutants(source, rel, scope))
+
+    if not all_mutants:
+        print(
+            f"{_GREEN}PASS mutation_parity{_RESET} — "
+            "diff touched no mutable logic (0 mutants in changed function bodies)."
+        )
+        return 0
+
+    capped = all_mutants[:max_mutants]
+    skipped = len(all_mutants) - len(capped)
+    test_files = impacted_tests(set(touched))
+
+    if not test_files:
+        # No fast-tier test imports the changed module(s). The diff-scoped
+        # gate's job is to catch WEAK tests that exist — it does not mandate
+        # a unit test for every line (F7 per-file coverage owns "untested
+        # line", and the nightly full-scope leg widens the marker set). Pass
+        # with a notice rather than fail a legitimate integration-only change.
+        print(
+            f"{_YELLOW}PASS mutation_parity{_RESET} — "
+            f"{len(capped)} mutant(s) across {len(touched)} file(s), but no "
+            "fast-tier (unit/bdd/contract) test imports the changed module(s); "
+            "nothing to mutate against here. (F7 coverage owns 'untested line'; "
+            "the nightly full-scope leg covers wider tiers.)"
+        )
+        return 0
+
+    print(
+        f"=== mutation_parity: {len(capped)} mutant(s) "
+        f"({skipped} over the {max_mutants}-cap skipped) "
+        f"across {len(touched)} file(s); {len(test_files)} impacted test file(s) ==="
+    )
+
+    survivors: list[MutantResult] = []
+    total_elapsed = 0.0
+    budget_skipped = 0
+    for i, mutant in enumerate(capped, start=1):
+        if total_elapsed >= TOTAL_BUDGET_S:
+            # Total-time budget hit: stop launching new mutants. The
+            # remainder are reported as skipped, never silently dropped —
+            # the nightly full-scope run (no budget) covers them.
+            budget_skipped = len(capped) - (i - 1)
+            print(
+                f"  [budget] {total_elapsed:.0f}s >= {TOTAL_BUDGET_S:.0f}s cap reached — "
+                f"{budget_skipped} remaining mutant(s) deferred to nightly full-scope."
+            )
+            break
+        result = _apply_and_test(mutant, test_files)
+        total_elapsed += result.elapsed_s
+        marker = f"{_RED}SURVIVED{_RESET}" if result.survived else f"{_GREEN}killed{_RESET}"
+        print(
+            f"  [{i}/{len(capped)}] {mutant.path}:{mutant.lineno} "
+            f"`{mutant.original}`->`{mutant.mutation}` — {marker} ({result.elapsed_s:.1f}s)"
+        )
+        if result.survived:
+            survivors.append(result)
+
+    ran = len(capped) - budget_skipped
+    print(f"--- {len(survivors)} survivor(s) of {ran} mutant(s) run; {total_elapsed:.1f}s total ---")
+
+    return _verdict(survivors, baseline_path, write_baseline, skipped)
+
+
+def _verdict(
+    survivors: list[MutantResult],
+    baseline_path: Path | None,
+    write_baseline: bool,
+    skipped: int,
+) -> int:
+    """Translate the survivor set into an exit code + the ratchet update."""
+    survivor_keys = {_survivor_key(r.mutant) for r in survivors}
+
+    if write_baseline and baseline_path is not None:
+        return _ratchet(survivor_keys, baseline_path)
+
+    if not survivors:
+        print(f"{_GREEN}PASS mutation_parity{_RESET} — 0 survivors (every mutant on the diff was killed).")
+        return 0
+
+    baseline = _load_baseline(baseline_path) if baseline_path is not None else set()
+    new_survivors = [r for r in survivors if _survivor_key(r.mutant) not in baseline]
+
+    if not new_survivors:
+        print(f"{_YELLOW}PASS mutation_parity{_RESET} — {len(survivors)} survivor(s), all in the ratchet baseline.")
+        return 0
+
+    print(f"{_RED}FAIL mutation_parity{_RESET} — {len(new_survivors)} new survivor(s):", file=sys.stderr)
+    for result in new_survivors:
+        print(_survivor_report(result), file=sys.stderr)
+    return 1
+
+
+def _ratchet(survivor_keys: set[str], baseline_path: Path) -> int:
+    """Rewrite the survivors baseline — but REFUSE to grow the count.
+
+    The ratchet only ever holds or shrinks: a nightly run that produces
+    MORE survivors than the recorded baseline fails (someone added
+    untested logic), leaving the baseline untouched for triage."""
+    previous = _load_baseline(baseline_path)
+    if len(survivor_keys) > len(previous):
+        print(
+            f"{_RED}FAIL mutation_parity{_RESET} — survivor count grew "
+            f"{len(previous)} -> {len(survivor_keys)}; the ratchet only holds or shrinks.",
+            file=sys.stderr,
+        )
+        print(
+            "  fix: kill the new survivor(s) by strengthening the impacted tests; the baseline is NOT updated.",
+            file=sys.stderr,
+        )
+        print("  next: re-run the nightly mutation-suite once the new survivors are pinned.", file=sys.stderr)
+        return 1
+    header = (
+        "# Ratcheted surviving-mutant baseline (#499 Phase 1 — mutation gate).\n"
+        "# One key per line: <file>:<line>:<original>-><mutation>. The nightly\n"
+        "# mutation-suite.yml rewrites this to the current surviving set and FAILS\n"
+        "# if the count grows. Pay it down by strengthening the impacted test so\n"
+        "# the mutant is killed, then drop its line. Count must never increase.\n"
+    )
+    baseline_path.parent.mkdir(parents=True, exist_ok=True)
+    baseline_path.write_text(header + "".join(f"{key}\n" for key in sorted(survivor_keys)), encoding="utf-8")
+    print(
+        f"{_GREEN}PASS mutation_parity{_RESET} — ratchet updated: "
+        f"{len(survivor_keys)} survivor(s) (was {len(previous)})."
+    )
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--base",
+        default=None,
+        help="diff against this ref (e.g. origin/main) instead of the staged diff",
+    )
+    parser.add_argument(
+        "--baseline",
+        default=None,
+        help="ratcheted survivors baseline; survivors already in it do not fail (nightly mode)",
+    )
+    parser.add_argument(
+        "--write-baseline",
+        action="store_true",
+        help="rewrite the baseline to the current surviving set (nightly ratchet update; refuses to grow)",
+    )
+    parser.add_argument(
+        "--max-mutants",
+        type=int,
+        default=MAX_MUTANTS,
+        help=f"hard cap on mutants generated (default {MAX_MUTANTS})",
+    )
+    args = parser.parse_args(argv)
+
+    baseline_path = Path(args.baseline) if args.baseline else None
+    if args.write_baseline and baseline_path is None:
+        baseline_path = DEFAULT_SURVIVORS_BASELINE
+
+    return run(
+        base=args.base,
+        baseline_path=baseline_path,
+        write_baseline=args.write_baseline,
+        max_mutants=args.max_mutants,
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,135 @@
+name: "8 · Mutation suite (nightly + on-demand)"
+
+# Mechanical sabotage control, full-scope leg (#499 Phase 1). The
+# per-commit safe-commit.sh stage (step 4b) runs the SAME runner
+# diff-scoped against the staged change and fails on any new survivor.
+# This workflow runs it at a wider scope on a schedule and ratchets the
+# surviving-mutant baseline so survivors in pre-gate code are tracked and
+# can only ever shrink.
+#
+# Scope: changed-since-the-last-release-tag. Mutating the entire kairix/
+# tree every night is unbounded; the delta since the last tag is the
+# meaningful, bounded surface — the code that shipped without the gate
+# having seen it diff-scoped. The runner's own caps (≤20 mutants,
+# ≤60s/mutant, ≤150s total per invocation) keep each module's run bounded.
+#
+# Triggers:
+#   - schedule: nightly UTC 05:30 — runs against main HEAD without action
+#   - workflow_dispatch: manual `gh workflow run mutation-suite.yml`
+#
+# This workflow is intentionally NOT a branch-protection required check
+# (mirrors soak-suite.yml):
+#   - the per-commit diff-scoped stage in ci.yml / safe-commit.sh is the
+#     blocking gate; it catches survivors on the change that introduces them
+#   - the nightly leg is the ratchet + the pre-gate-debt tracker, not a
+#     per-PR gate
+# Failure does NOT block PR merge. On-call reads the nightly notification.
+#
+# No untrusted input is referenced in run: blocks — this workflow only
+# uses checkout + the repo-controlled runner against repo-controlled paths.
+
+on:
+  schedule:
+    # 05:30 UTC nightly — before the soak suite (06:00) so a same-day
+    # mutation regression is visible at the start of the next day.
+    - cron: '30 5 * * *'
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: "Diff base (default: most recent release tag; e.g. v2026.6.9 or origin/main)"
+        required: false
+        default: ""
+        type: string
+
+# Restrict to main — mutation ratcheting is about the trunk's test
+# strength, not branch-experimental code.
+permissions: {}
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mutation:
+    name: "Mutation — diff-scoped vs last release (ratcheted)"
+    runs-on: ubuntu-latest
+    # Only ever run on main. workflow_dispatch from a non-main branch exits
+    # without work so contributors can't burn runner time on a feature branch.
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    # 60 min ceiling — the runner caps each module at ~2.5 min; a
+    # since-last-release delta is a bounded module set. 60 leaves headroom
+    # for slow-runner variance without hanging until the 6h default.
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Full history so we can resolve the last release tag and diff
+          # against it.
+          fetch-depth: 0
+
+      # Match Stage 2's Python version exactly — the mutation runner
+      # imports and runs the same production code + tests the unit tier does.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install OCR runtime (tesseract binary)
+        # Mirrors Stage 2 / soak — some BDD step modules touch the extractor
+        # registry transitively; a stray ImportError must not silently skip
+        # a test the mutation runner relies on to KILL a mutant.
+        run: sudo apt-get install -y tesseract-ocr
+
+      - name: Install dependencies
+        # Same extras as Stage 2 so the import + test surface matches the
+        # per-commit gate exactly.
+        run: pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
+
+      - name: Resolve diff base (last release tag)
+        id: base
+        env:
+          INPUT_BASE: ${{ github.event.inputs.base_ref }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_BASE}" ]; then
+            base="${INPUT_BASE}"
+          else
+            # Most recent vYYYY.M.D[-...] tag reachable from HEAD; fall back
+            # to the previous commit if no tag exists yet (bootstrap).
+            base="$(git describe --tags --abbrev=0 --match 'v*' HEAD 2>/dev/null || echo 'HEAD~1')"
+          fi
+          echo "Resolved mutation diff base: ${base}"
+          echo "base=${base}" >> "${GITHUB_OUTPUT}"
+
+      - name: Mutation parity (full-scope, ratcheted)
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: |
+          set -euo pipefail
+          # --baseline: survivors already in the ratchet do NOT fail here
+          #   (they're pre-gate debt, tracked not blocking).
+          # --write-baseline: rewrite the ratchet to the current surviving
+          #   set; the runner REFUSES to grow the count (a wider survivor set
+          #   than the baseline fails the run and leaves the baseline intact).
+          python scripts/checks/mutation_parity.py \
+            --base "${BASE}" \
+            --baseline .architecture/baseline/mutation-survivors-files.txt \
+            --write-baseline
+
+      - name: Show ratcheted baseline diff
+        if: always()
+        run: |
+          set -euo pipefail
+          echo "=== mutation-survivors-files.txt after this run ==="
+          git --no-pager diff -- .architecture/baseline/mutation-survivors-files.txt || true  # diagnostic-only; never fail the run on a diff render
+
+      - name: Upload surviving-mutant baseline
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: mutation-survivors
+          path: .architecture/baseline/mutation-survivors-files.txt
+          retention-days: 30

@@ -255,14 +255,46 @@ else
     echo -e "${GREEN}OK${NC} ($PASSED, $TOTAL_COV)"
 fi
 
-# --fast mode: skip arch fitness + secrets + confidential + sonar. The full
-# gate runs all of these; --fast trades safety for iteration speed on
-# commits that genuinely can't affect their domain (workflow YAML, docs,
-# sonar-project.properties). CI is still the merge bar.
+# --fast mode: skip arch fitness + secrets + confidential + sonar + mutation.
+# The full gate runs all of these; --fast trades safety for iteration speed
+# on commits that genuinely can't affect their domain (workflow YAML, docs,
+# sonar-project.properties). CI is still the merge bar. The mutation stage
+# below is deliberately NOT in the --fast path — mutation testing is a
+# correctness gate, not an iteration-loop check.
 if [[ "$FAST_MODE" == "1" ]]; then
     echo -e "${GREEN}--fast complete. Committing.${NC}"
     git commit -m "$MESSAGE"
     exit $?
+fi
+
+# 4b. Mutation parity (diff-scoped) — the mechanical sabotage control
+# (#499 Phase 1). Generates single-token mutants on the staged diff's
+# CHANGED function bodies (==↔!=, <↔<=, and↔or, True↔False, ...) and runs
+# the impacted tests against each; a mutant whose tests still PASS is a
+# SURVIVOR (the tests assert presence, not behaviour). Hard-capped
+# (≤20 mutants, ≤60s/mutant, ≤150s total) + diff-scoped, so a normal
+# commit stays bounded — a docs-only diff runs it in ~0.1s.
+#
+# Escape hatch: KAIRIX_SKIP_MUTATION=1 skips it (same disclosure discipline
+# as KAIRIX_SKIP_COVERAGE — do NOT push a commit whose only green run set
+# this; the nightly mutation-suite.yml still ratchets survivors on main).
+echo -n "  mutation parity... "
+if [[ "${KAIRIX_SKIP_MUTATION:-0}" == "1" ]]; then
+    echo -e "${GREEN}OK${NC} (skipped via KAIRIX_SKIP_MUTATION=1 — disclose in commit body)"
+else
+    run_gate uv run python scripts/checks/mutation_parity.py
+    MUT_OUT="$GATE_OUT"
+    if echo "$MUT_OUT" | grep -q "FAIL mutation_parity"; then
+        echo -e "${RED}FAIL${NC}"
+        echo "$MUT_OUT" | tail -30
+        echo "fix: a mutant survived — the impacted tests pass with the logic changed. Strengthen the assertion that should pin it (see the per-survivor fix: lines above)."
+        echo "next: re-run standalone: uv run python scripts/checks/mutation_parity.py"
+        exit 1
+    fi
+    if [[ "$GATE_RC" -ne 0 ]]; then
+        gate_died "mutation parity" "$GATE_RC" "uv run python scripts/checks/mutation_parity.py"
+    fi
+    echo -e "${GREEN}OK${NC} ($(echo "$MUT_OUT" | grep -oE '[0-9]+ survivor\(s\) of [0-9]+ mutant\(s\) run' | head -1 || echo 'no mutable diff'))"
 fi
 
 # 5. Architecture fitness functions (F1-F30)
