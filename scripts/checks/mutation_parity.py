@@ -10,13 +10,11 @@ a human (a cultural ritual) rather than enforced by a repeatable gate. A
 mutant survives when the tests that cover a line still PASS after the
 line's logic is changed — proof the tests assert presence, not behaviour.
 
-This runner makes the sabotage proof mechanical and diff-scoped. It mirrors
-tc-agent-zone's mutation contract (``scripts/checks/mutation_survival_ratchet.py``
-+ ``5-mutation-testing.yml``): a homegrown mutator (no mutmut/stryker
-dependency — that org's runner is homegrown too, anticipating but not
-requiring those packages) and a ratcheted survivors baseline. The
-per-commit leg is diff-scoped and hard-capped so it stays bounded; the
-nightly ``mutation-suite.yml`` runs full-scope against the ratchet.
+This runner makes the sabotage proof mechanical and diff-scoped. It follows
+the org's shared mutation contract: a homegrown mutator (no mutmut/stryker
+dependency) and a ratcheted survivors baseline. The per-commit leg is
+diff-scoped and hard-capped so it stays bounded; the nightly
+``mutation-suite.yml`` runs full-scope against the ratchet.
 
 What it does
 ------------
