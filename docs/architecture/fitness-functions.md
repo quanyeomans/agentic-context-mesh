@@ -260,7 +260,7 @@ _Generated from `scripts/checks/_rule_catalogue.py` — do not edit by hand._
 | F40 | plugin-contract | per-plugin | shipped | every Extractor plugin declares module-level version: str + make_extractor factory |
 | F41 | plugin-contract | per-plugin | shipped | every plugin tree has py.typed marker + no unjustified # type: ignore |
 | F42 | plugin-contract | per-protocol-method | shipped | Protocol methods return frozen-dc/tuple — never dict[str, Any] or bare Any |
-| F43 | plugin-contract | per-plugin | shipped | every plugin has tests/contracts/test_<name>_protocol.py exercising real + fake impls |
+| F43 | plugin-contract | per-plugin | shipped | behavioural parity — every contract test runs ONE parametrized body over real + fake (≥2 impl fixtures), not separate real-only/fake-only assertions; plus the per-plugin contract-test presence limb |
 | F55 | plugin-contract | per-plugin | vacuous | every Chunker plugin declares version + every Chunk(...) passes chunker_version= |
 | F56 | plugin-contract | per-plugin | shipped | every connector declares SourceConnector + at least one of {Poll, Checkpointed, Event}Connector |
 | F64 | plugin-contract | per-plugin | shipped | every plugin importing an HTTP client ships a rate-limit test (429/Retry-After) |

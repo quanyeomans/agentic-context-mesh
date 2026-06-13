@@ -484,7 +484,11 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         check="f43_plugin_contract_tests",
         category="plugin-contract",
         scope="per-plugin",
-        summary="every plugin has tests/contracts/test_<name>_protocol.py exercising real + fake impls",
+        summary=(
+            "behavioural parity — every contract test runs ONE parametrized body over real + fake "
+            "(≥2 impl fixtures), not separate real-only/fake-only assertions; plus the per-plugin "
+            "contract-test presence limb"
+        ),
     ),
     RuleEntry(
         id="F55",
