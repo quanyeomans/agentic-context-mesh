@@ -101,7 +101,7 @@ If the feature file must live elsewhere, add a
 ``# F45-feature: <path>`` comment to the surface file.
 next: see docs/architecture/test-discipline-hardening.md §2.3
 (new-capability principle) for the canonical shape.
-run: bash scripts/checks/check-f45-new-capability-bdd.sh
+run: python3 scripts/checks/check_f45_new_capability_bdd.py
 
 Pass example: (tests/bdd/features/cli_<name>.feature)
   Feature: <name> subcommand

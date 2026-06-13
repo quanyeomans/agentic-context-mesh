@@ -31,7 +31,7 @@ fix: either correct the typo OR add the missing entry to
      be declared in REGISTRY before it can be referenced.
 next: see docs/architecture/feature-flag-architecture.md §3.2 (FeatureFlag
       value object) + §6 (F52 mechanics).
-run: bash scripts/checks/check-f52-flag-call-sites.sh
+run: python3 scripts/checks/check_f52_flag_call_sites.py
 
 Pass example:
   # kairix/core/search/ranker.py

@@ -18,11 +18,22 @@ Dispatch convention
 Each :class:`~_rule_catalogue.RuleEntry` resolves to exactly one check
 script:
 
-* ``script`` set (e.g. ``"check-f44-engagement-firm-boundary.sh"``) →
-  run that script. ``.sh`` → ``bash scripts/checks/<script>``; ``.py``
-  → ``python3 scripts/checks/<script>``.
 * ``script`` unset → the default python check
-  ``python3 scripts/checks/check_<check>.py``.
+  ``check_<check>.py``. These run IN-PROCESS (#499 Phase 2 stage 4a):
+  the runner imports the module and calls its ``main() -> int`` inside a
+  single process, sharing one :class:`~_check_context.CheckContext` whose
+  AST cache parses every file at most once. The per-rule verdict is the
+  check's own ``main()`` return code; a check that raises is isolated into
+  a FAIL, never aborting the ledger.
+* ``script`` set to a ``check-*.sh`` (e.g.
+  ``"check-no-internal-patches.sh"``) → run that REAL shell detector as a
+  guarded subprocess. Only the handful of rules whose verdict is produced
+  by bash (the ``grep`` + ``arch_gate`` detectors F1/F2/F3/F4/F10) carry a
+  ``script`` override; the gating logic lives in the shell, not in a python
+  ``main()``, so they cannot run in-process.
+* The F7/F9 coverage check (``check_per_file_coverage.py``) runs as a
+  subprocess too — it takes a runtime Cobertura-XML argument and
+  ``sys.exit``s on a malformed report.
 
 Entries with ``status="proposed"`` / ``check="(proposed)"`` have no
 script yet and are skipped. Entries with ``run_all=False`` run elsewhere
@@ -53,12 +64,19 @@ dispatched rule failed.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import importlib
+import inspect
+import io
 import os
 import subprocess
 import sys
+import traceback
+from collections.abc import Callable
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _check_context import CheckContext
 from _rule_catalogue import ALL_ENTRIES, RuleEntry
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -163,6 +181,114 @@ def _coverage_xml_path() -> Path | None:
     return candidate if candidate.exists() else None
 
 
+# ── in-process vs subprocess dispatch policy ────────────────────────────
+#
+# Stage 4a (#499 Phase 2): most rules are pure-python AST/text checks with a
+# zero-arg ``main() -> int`` that prints its own ``ok``/``FAIL`` gate line and
+# returns the exit code. Those run IN-PROCESS, sharing one ``CheckContext`` so
+# the AST cache parses every file at most once. Two classes stay as guarded
+# subprocesses because they are genuinely NOT pure python:
+#
+#   * ``check-*.sh`` real shell detectors — F1/F2 (python emits paths, the
+#     shell ``arch_gate`` does the baseline diff + verdict), F3/F4/F10 (grep
+#     + arch_gate), and any other shell-scoped gate. Their verdict is produced
+#     by bash, not by the python ``main()``.
+#   * the F7/F9 coverage check — it takes a runtime Cobertura-XML argument and
+#     ``sys.exit``s on a malformed report; it is also conditionally skipped.
+#
+# A rule dispatches in-process iff its resolved script is ``check_<x>.py``
+# (not a ``.sh``) AND is not the coverage check.
+_SHELL_SUFFIX = ".sh"
+
+
+def _dispatches_in_process(entry: RuleEntry) -> bool:
+    """True iff ``entry``'s check runs in-process (pure-python, no runtime arg)."""
+    script = resolve_script(entry)
+    if script.endswith(_SHELL_SUFFIX):
+        return False
+    return script != _COVERAGE_CHECK
+
+
+def _load_check_main(script: str) -> Callable[[], int]:
+    """Import the check module for ``script`` (a ``check_<x>.py`` filename) and
+    return a zero-arg callable that invokes its ``main``.
+
+    Some checks declare ``main(argv: list[str] | None = None)`` and default to
+    ``argparse``'s ``parse_args(None)`` — which reads ``sys.argv``. Under the
+    subprocess runner that was the per-check process's empty argv (the static
+    half / no runtime arg); in-process, ``sys.argv`` is the RUNNER's
+    ``--all`` / ``--skip-coverage``, which the check's parser would reject. So
+    when ``main`` accepts an ``argv`` parameter we pass an explicit empty list
+    — reproducing exactly the no-arguments subprocess invocation. Imported once
+    per module; ``importlib`` caches it in ``sys.modules``."""
+    module_name = script[: -len(".py")]
+    module = importlib.import_module(module_name)
+    main_fn = module.main
+    accepts_argv = bool(inspect.signature(main_fn).parameters)
+
+    def _invoke() -> int:
+        result = main_fn([]) if accepts_argv else main_fn()
+        return int(result)
+
+    return _invoke
+
+
+def _run_one_inprocess(entry: RuleEntry, ctx: CheckContext) -> int:
+    """Dispatch ``entry``'s pure-python check IN-PROCESS, sharing ``ctx``.
+
+    Prints the identical ``run`` / ``PASS`` / ``FAIL`` framing the subprocess
+    path prints, with the check's own stdout/stderr replayed inline between
+    them (so the ledger interleaves exactly as the unbuffered subprocess
+    runner did). The check is fully isolated:
+
+      * its ``main()`` is called inside a try/except over ``BaseException``;
+        a raised exception OR a ``SystemExit`` is converted to a FAIL with the
+        traceback, exactly as a non-zero subprocess exit would have been — one
+        crashing check never aborts the ledger;
+      * a non-int / non-zero return is treated as a failure;
+      * stdout/stderr are captured and replayed so a check that forgets to
+        flush, or writes to stderr, lands in the same stream the developer saw.
+    """
+    script = resolve_script(entry)
+    print(f"{_YELLOW}run [{entry.id}]{_RESET} {script}")
+
+    out_buf = io.StringIO()
+    err_buf = io.StringIO()
+    crashed = False
+    rc = 1
+    try:
+        check_main = _load_check_main(script)
+        with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+            result = check_main()
+        rc = result if isinstance(result, int) else 1
+    except BaseException:
+        # Isolation boundary: one check must never abort the ledger. Every
+        # failure mode — a raised exception, a SystemExit, a KeyboardInterrupt
+        # bubbling out of a check's main() — is converted to a FAIL verdict,
+        # exactly as a non-zero subprocess exit would have been.
+        crashed = True
+        traceback.print_exc(file=err_buf)
+        rc = 1
+
+    # Replay the check's captured output inline, preserving stream separation
+    # so the merged ledger is byte-identical to the unbuffered subprocess form.
+    captured_out = out_buf.getvalue()
+    if captured_out:
+        sys.stdout.write(captured_out)
+    captured_err = err_buf.getvalue()
+    if captured_err:
+        sys.stderr.write(captured_err)
+
+    if rc == 0:
+        print(f"{_GREEN}PASS [{entry.id}]{_RESET} {entry.summary[:88]}")
+        return 0
+    suffix = "" if crashed else f" (exit {rc})"
+    print(f"{_RED}FAIL [{entry.id}]{_RESET} {entry.summary[:88]}{suffix}")
+    if entry.exemplar:
+        print(f"  paved-road: python3 scripts/checks/rules.py --rule {entry.id}")
+    return 1
+
+
 def _run_one(entry: RuleEntry, *, skip_coverage: bool) -> int | None:
     """Dispatch ``entry``'s check as a guarded subprocess. Print a named
     ``run`` line and a ``PASS`` / ``FAIL`` verdict. Return 0 on pass,
@@ -235,23 +361,35 @@ def _select_gate(gate_id: str) -> list[RuleEntry]:
 
 def _dispatch(entries: list[RuleEntry], *, skip_coverage: bool) -> int:
     """Run every entry once per distinct resolved script (dedup), in
-    catalogue order. Aggregate ledger; return 0 iff all passed."""
+    catalogue order. Aggregate ledger; return 0 iff all passed.
+
+    Pure-python rules run IN-PROCESS sharing one :class:`CheckContext` (so the
+    AST cache parses every file at most once); shell detectors and the coverage
+    check run as guarded subprocesses. The dispatch ORDER, the per-rule ``run``
+    / ``PASS`` / ``FAIL`` lines, and the aggregate verdict are identical to the
+    subprocess-per-rule runner — only the SOURCE of each verdict changes.
+    """
     seen_scripts: set[str] = set()
     failures: list[str] = []
     ran = 0
     skipped = 0
-    for entry in entries:
-        script = resolve_script(entry)
-        if script in seen_scripts:
-            continue
-        seen_scripts.add(script)
-        result = _run_one(entry, skip_coverage=skip_coverage)
-        if result is None:
-            skipped += 1
-            continue
-        ran += 1
-        if result != 0:
-            failures.append(entry.id)
+    ctx = CheckContext(repo_root=REPO_ROOT)
+    with ctx.install():
+        for entry in entries:
+            script = resolve_script(entry)
+            if script in seen_scripts:
+                continue
+            seen_scripts.add(script)
+            if _dispatches_in_process(entry):
+                result: int | None = _run_one_inprocess(entry, ctx)
+            else:
+                result = _run_one(entry, skip_coverage=skip_coverage)
+            if result is None:
+                skipped += 1
+                continue
+            ran += 1
+            if result != 0:
+                failures.append(entry.id)
 
     print()
     if failures:

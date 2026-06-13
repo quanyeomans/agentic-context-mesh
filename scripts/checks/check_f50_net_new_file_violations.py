@@ -50,7 +50,7 @@ fix: address the underlying F-rule violation(s) in the new file before
 next: see docs/architecture/test-discipline-hardening.md §5 (canonical
       paydown patterns) for the same shape applied to F30. Same approach
       works for any per-file baseline.
-run: bash scripts/checks/check-f50-net-new-file-violations.sh
+run: python3 scripts/checks/check_f50_net_new_file_violations.py
 
 Pass example:
   # New file kairix/connectors/notion/connector.py lands clean — it has

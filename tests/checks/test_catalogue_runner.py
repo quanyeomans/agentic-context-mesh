@@ -153,6 +153,100 @@ def test_every_dispatched_script_exists_on_disk() -> None:
     assert missing == [], f"runner would dispatch non-existent scripts: {missing}"
 
 
+# ── run_checks: in-process dispatch (#499 Phase 2 stage 4a) ──────────────
+
+
+def test_only_shell_detectors_and_coverage_stay_subprocess() -> None:
+    """The ONLY rules that don't dispatch in-process are the real shell
+    detectors (a ``check-*.sh`` ``script`` override) and the coverage check.
+    Every other ``--all`` rule runs in-process — the perf win's surface."""
+    subprocess_rules = {e.id for e in run_checks._select_all() if not run_checks._dispatches_in_process(e)}
+    # F1/F2/F3/F4/F10 carry a check-*.sh override; F7 is the coverage check.
+    assert subprocess_rules == {"F1", "F2", "F3", "F4", "F10", "F7"}
+
+
+def test_retired_delegators_dispatch_in_process() -> None:
+    """The rules whose ``.sh`` delegator was retired (#499 Phase 2 stage 4a)
+    now resolve to a ``check_<x>.py`` and dispatch in-process — proving the
+    retirement actually moved them onto the in-process path, not into a
+    silent skip."""
+    retired = {"F44", "F45", "F46", "F48", "F54", "F36", "F56", "F50", "F51", "F52", "F53"}
+    by_id = {e.id: e for e in run_checks._select_all()}
+    for rid in retired:
+        entry = by_id[rid]
+        assert run_checks.resolve_script(entry).endswith(".py"), f"{rid} still resolves to a .sh"
+        assert run_checks._dispatches_in_process(entry), f"{rid} does not dispatch in-process"
+
+
+def test_in_process_check_isolation_converts_crash_to_fail() -> None:
+    """A check whose ``main()`` raises is isolated into a FAIL verdict (rc 1),
+    never propagating the exception to abort the ledger."""
+    from _check_context import CheckContext
+
+    boom = RuleEntry(id="BOOM", gate="boom", check="zzz_boom_probe", category="layering", scope="per-file", summary="s")
+    # No check_zzz_boom_probe.py exists → import fails → caught → FAIL (rc 1).
+    ctx = CheckContext(repo_root=run_checks.REPO_ROOT)
+    with ctx.install():
+        rc = run_checks._run_one_inprocess(boom, ctx)
+    assert rc == 1
+
+
+def test_full_run_parses_each_file_at_most_once() -> None:
+    """Parse-once invariant at SCALE: across a real in-process ``--all``
+    dispatch, the number of real ``ast.parse`` calls never exceeds the number
+    of distinct ``(filename, source)`` pairs — i.e. no file is parsed twice.
+    The cache hit count is strictly positive (the suite re-inspects files), so
+    this also proves the cache is actually load-bearing, not a no-op."""
+    import contextlib
+    import io
+
+    from _check_context import CheckContext
+
+    ctx = CheckContext(repo_root=run_checks.REPO_ROOT)
+    seen: set[str] = set()
+    with ctx.install():
+        for entry in run_checks._select_all():
+            script = run_checks.resolve_script(entry)
+            if script in seen or not run_checks._dispatches_in_process(entry):
+                continue
+            seen.add(script)
+            try:
+                check_main = run_checks._load_check_main(script)
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    check_main()
+            except BaseException:
+                # Mirror the runner's isolation: a crashing check must not
+                # fail the cache invariant under test.
+                pass
+
+    # Every real parse corresponds to a distinct (filename, source) — the
+    # number of distinct keys in the cache equals the miss count.
+    distinct_keys = sum(len(by_text) for by_text in ctx._tree_cache.values())
+    assert ctx.parse_misses == distinct_keys, "a (filename, source) was parsed more than once"
+    assert ctx.parse_hits > 0, "the parse cache never hit — it is doing nothing"
+    # Walk cache likewise earns its keep.
+    assert ctx.walk_hits > 0, "the walk cache never hit — it is doing nothing"
+
+
+def test_in_process_verdict_matches_for_a_sample() -> None:
+    """A representative sample of in-process rules return the SAME verdict the
+    catalogue's clean tree expects (all green today). Spans an import-boundary
+    rule (F26), a location rule (F61), a regex/text rule (F76), the
+    catalogue-currency rule (F92), and a retired-delegator rule (F50) — the
+    check kinds the equivalence proof covers."""
+    from _check_context import CheckContext
+
+    sample_ids = {"F26", "F61", "F76", "F92", "F50"}
+    by_id = {e.id: e for e in run_checks._select_all()}
+    ctx = CheckContext(repo_root=run_checks.REPO_ROOT)
+    with ctx.install():
+        for rid in sample_ids:
+            entry = by_id[rid]
+            assert run_checks._dispatches_in_process(entry), f"{rid} is not in-process"
+            rc = run_checks._run_one_inprocess(entry, ctx)
+            assert rc == 0, f"{rid} did not pass in-process on the clean tree"
+
+
 # ── generate_catalogue_docs ─────────────────────────────────────────────
 
 
