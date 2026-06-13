@@ -70,7 +70,8 @@ _TEST_PY = re.compile(r"^(__init__|conftest|fakes|test_[a-z0-9_]+|_?[a-z][a-z0-9
 _SNAKE_FEATURE = re.compile(r"^[a-z][a-z0-9_]*\.feature$")
 _CHECK_SCRIPT_PY = re.compile(
     r"^(check_[a-z0-9_]+|_fitness_rule|_rule_catalogue|_integrity_invariants_registry"
-    r"|audit_baselines|merge_coverage_xml|run_checks|generate_catalogue_docs|mutation_parity)\.py$"
+    r"|audit_baselines|merge_coverage_xml|run_checks|generate_catalogue_docs|mutation_parity"
+    r"|rules)\.py$"
 )
 _CHECK_SCRIPT_SH = re.compile(r"^(check[-_][a-z0-9-]+|_lib|run-all)\.sh$")
 _RUNBOOK_MD = re.compile(r"^(INDEX|README|[a-z][a-z0-9-]*)\.md$")

@@ -207,6 +207,12 @@ def _run_one(entry: RuleEntry, *, skip_coverage: bool) -> int | None:
         print(f"{_GREEN}PASS [{entry.id}]{_RESET} {entry.summary[:88]}")
         return 0
     print(f"{_RED}FAIL [{entry.id}]{_RESET} {entry.summary[:88]} (exit {rc})")
+    # Paved-road footer (#499 Phase 2): when a FAILING rule carries a
+    # curated exemplar, point the agent straight at the query surface
+    # that surfaces it. Only the existing FAIL verdict line is the F83
+    # named verdict; this is an ADDED affordance line, not a replacement.
+    if entry.exemplar:
+        print(f"  paved-road: python3 scripts/checks/rules.py --rule {entry.id}")
     return 1
 
 

@@ -77,6 +77,33 @@ Status = Literal[
     "superseded",
 ]
 
+# ── paved-road task-type vocabulary (#499 Phase 2) ──────────────────────
+#
+# A CLOSED set of agent-facing "I'm about to do X" tasks. ``rules.py
+# --task <t>`` answers "what pattern do I follow for X?" by listing every
+# RuleEntry tagged with that task. The set is intentionally small and
+# capability-shaped — the tasks an agent hits when BUILDING something, not
+# every concern a rule protects. A member that isn't in this tuple is a
+# typo; ``tests/architecture/test_rules_query.py`` guards that forever.
+TASK_TYPES: tuple[str, ...] = (
+    "adding-a-cli-subcommand",
+    "adding-an-mcp-tool",
+    "adding-a-connector",
+    "adding-an-extractor",
+    "adding-a-provider",
+    "adding-a-feature-flag",
+    "writing-a-test",
+    "writing-a-bdd-feature",
+    "a-schema-change",
+    "editing-a-gate-script",
+)
+"""The closed task-type vocabulary for ``RuleEntry.task_type``.
+
+Frozen membership: every ``task_type`` tag on every entry MUST be a
+member. New tasks are added here deliberately (and only here)."""
+
+_TASK_TYPES_FROZEN: frozenset[str] = frozenset(TASK_TYPES)
+
 
 @dataclass(frozen=True)
 class RuleEntry:
@@ -112,6 +139,26 @@ class RuleEntry:
       ``sonar-new-code`` in the security stage; ``worktree-isolation``
       and ``paydown-doc-currency`` invoked out-of-band) so the runner
       reproduces exactly the set ``run-all.sh`` ran before this change.
+
+    Paved-road query surface (#499 Phase 2 — ``rules.py``)
+    -----------------------------------------------------
+    Two OPTIONAL agent-affordance fields answer "what pattern do I copy
+    for task X?" BEFORE an agent writes code, and link a failing gate
+    back to the exemplar:
+
+    * ``exemplar`` — a repo-relative path to a canonical PASSING file
+      that demonstrates the pattern an agent should copy to satisfy the
+      rule. ``None`` (the default) means no curated exemplar yet — only
+      the high-traffic capability-building rules carry one. When a rule
+      with an ``exemplar`` FAILS, ``run_checks.py`` prints a
+      ``paved-road:`` footer pointing at ``rules.py --rule <id>``.
+
+    * ``task_type`` — zero-or-more tags from the closed
+      :data:`TASK_TYPES` vocabulary. Tags the agent-facing tasks ("I'm
+      adding a connector") whose pattern this rule governs, so
+      ``rules.py --task <t>`` can list every rule an agent must satisfy
+      for that task. Empty (the default) for rules an agent doesn't hit
+      while building a capability.
     """
 
     id: str
@@ -125,6 +172,8 @@ class RuleEntry:
     tags: tuple[str, ...] = field(default_factory=tuple)
     script: str | None = None
     run_all: bool = True
+    exemplar: str | None = None
+    task_type: tuple[str, ...] = field(default_factory=tuple)
 
 
 _ENTRIES: tuple[RuleEntry, ...] = (
@@ -154,6 +203,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-file",
         summary="kairix/core/connectors/** may not import kairix/connectors/** or kairix/extractors/**",
         adr_origin="docs/architecture/connector-ingestion-architecture.md",
+        exemplar="kairix/connectors/obsidian/connector.py",
+        task_type=("adding-a-connector",),
     ),
     RuleEntry(
         id="F35",
@@ -162,6 +213,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="layering",
         scope="per-file",
         summary="kairix/connectors/<a>/ may not import another connector or any extractor",
+        exemplar="kairix/connectors/obsidian/connector.py",
+        task_type=("adding-a-connector",),
     ),
     RuleEntry(
         id="F37",
@@ -250,6 +303,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="test-discipline",
         scope="per-test",
         summary="every test_* carries a category marker (unit/bdd/contract/integration/e2e/slow/soak/invariant)",
+        exemplar="tests/test_credentials.py",
+        task_type=("writing-a-test",),
     ),
     RuleEntry(
         id="F9",
@@ -276,6 +331,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-file",
         summary="every BDD feature has a happy-path scenario",
         tags=("bdd",),
+        exemplar="tests/bdd/features/bootstrap.feature",
+        task_type=("writing-a-bdd-feature",),
     ),
     RuleEntry(
         id="F13",
@@ -285,6 +342,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-file",
         summary="BDD scenarios reject implementation symbols (Mock, kairix.<pkg>.<symbol>)",
         tags=("bdd",),
+        exemplar="tests/bdd/features/cli_connect_github_app.feature",
+        task_type=("writing-a-bdd-feature",),
     ),
     RuleEntry(
         id="F45",
@@ -295,6 +354,15 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         summary="every new CLI/MCP/provider/connector/extractor adds a BDD feature in the same commit",
         adr_origin="docs/architecture/test-discipline-hardening.md",
         script="check-f45-new-capability-bdd.sh",
+        exemplar="tests/bdd/features/bootstrap.feature",
+        task_type=(
+            "adding-a-cli-subcommand",
+            "adding-an-mcp-tool",
+            "adding-a-connector",
+            "adding-an-extractor",
+            "adding-a-provider",
+            "writing-a-bdd-feature",
+        ),
     ),
     RuleEntry(
         id="F46",
@@ -304,6 +372,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-file",
         summary="BDD step impls compose via CLI/MCP/factory — no direct *Pipeline(...) construction",
         script="check-f46-bdd-step-composition.sh",
+        exemplar="tests/integration/test_vec_index_lifecycle.py",
+        task_type=("writing-a-bdd-feature", "writing-a-test"),
     ),
     RuleEntry(
         id="F47",
@@ -312,6 +382,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="test-discipline",
         scope="per-file",
         summary="integration tests construct multi-component pipelines via kairix.core.factory.build_*",
+        exemplar="tests/integration/test_vec_index_lifecycle.py",
+        task_type=("writing-a-test",),
     ),
     RuleEntry(
         id="F48",
@@ -321,6 +393,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="cross-cutting",
         summary="tests/e2e/test_composed_production_path.py exists, runs in CI Stage 4.5",
         script="check-f48-e2e-present.sh",
+        exemplar="tests/e2e/test_composed_production_path.py",
+        task_type=("writing-a-test",),
     ),
     RuleEntry(
         id="F54",
@@ -333,6 +407,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         ),
         tags=("test-discipline",),
         script="check-f54-flag-both-branch-tested.sh",
+        exemplar="tests/bdd/features/feature_flag_connector_github.feature",
+        task_type=("adding-a-feature-flag",),
     ),
     RuleEntry(
         id="F62",
@@ -409,6 +485,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
             "round-trip test through the canonical layered reader (#492 overlay split-brain class)"
         ),
         adr_origin="EPIC #499 Phase 1 — #492 overlay split-brain (H1)",
+        exemplar="tests/integration/test_wizard_config_overlay_split_brain.py",
+        task_type=("a-schema-change", "writing-a-test"),
     ),
     RuleEntry(
         id="F88",
@@ -422,6 +500,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
             "render-tested under tests/platform/setup (session-escape-5 raw-500 class)"
         ),
         adr_origin="EPIC #499 Phase 1 — session-escape-5 (save_source ValueError surfaced as 500)",
+        exemplar="tests/platform/setup/test_setup_service.py",
+        task_type=("writing-a-test",),
     ),
     RuleEntry(
         id="F87",
@@ -436,6 +516,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
             "(the GitHub-PEM consent-failure class)"
         ),
         adr_origin="EPIC #499 Phase 1 — GitHub-PEM multi-line secret round-trip (session escape 2)",
+        exemplar="tests/integration/test_secrets_pem_round_trip.py",
+        task_type=("writing-a-test",),
     ),
     RuleEntry(
         id="F86",
@@ -479,6 +561,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-plugin",
         summary="every connector + extractor plugin has matching BDD feature + Examples-table row",
         script="check-f36-connector-bdd-parity.sh",
+        exemplar="tests/bdd/features/e2e_connector_sync.feature",
+        task_type=("adding-a-connector", "adding-an-extractor", "writing-a-bdd-feature"),
     ),
     RuleEntry(
         id="F40",
@@ -487,6 +571,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="plugin-contract",
         scope="per-plugin",
         summary="every Extractor plugin declares module-level version: str + make_extractor factory",
+        exemplar="kairix/extractors/docx/__init__.py",
+        task_type=("adding-an-extractor",),
     ),
     RuleEntry(
         id="F41",
@@ -495,6 +581,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="plugin-contract",
         scope="per-plugin",
         summary="every plugin tree has py.typed marker + no unjustified # type: ignore",
+        exemplar="kairix/connectors/obsidian/__init__.py",
+        task_type=("adding-a-connector", "adding-an-extractor", "adding-a-provider"),
     ),
     RuleEntry(
         id="F42",
@@ -569,6 +657,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="production-safety",
         scope="per-method",
         summary="every Chunk(...) constructor call passes source_uri + source_modified_at + sensitivity explicitly",
+        exemplar="kairix/core/connectors/silver.py",
+        task_type=("adding-a-connector",),
     ),
     RuleEntry(
         id="F50",
@@ -878,6 +968,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="test-discipline",
         scope="cross-cutting",
         summary="every CLI subcommand + every MCP tool has an outcome test (subprocess or direct handler)",
+        exemplar="tests/test_worker_cli_maintenance.py",
+        task_type=("adding-a-cli-subcommand", "adding-an-mcp-tool", "writing-a-test"),
     ),
     RuleEntry(
         id="F32",
