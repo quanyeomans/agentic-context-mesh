@@ -306,7 +306,7 @@ _Generated from `scripts/checks/_rule_catalogue.py` — do not edit by hand._
 | paydown-doc-currency | agent-affordance | cross-cutting | shipped | grandfathering paydown doc reflects current baseline state |
 | sonar-new-code | coverage | cross-cutting | shipped | SonarCloud new-code parity gate — issues introduced after baseline date must be zero |
 | worktree-isolation | process | cross-cutting | shipped | subagent worktree isolation — no shadow copies in primary checkout |
-| F85 | process | cross-cutting | shipped | catalogue currency — every check_*.{py,sh} has a RuleEntry, every RuleEntry maps to an existing check, and the generated doc regions match generate_catalogue_docs.py --check (the self-hosting guard for the catalogue-driven runner) |
+| F92 | process | cross-cutting | shipped | catalogue currency — every check_*.{py,sh} has a RuleEntry, every RuleEntry maps to an existing check, and the generated doc regions match generate_catalogue_docs.py --check (the self-hosting guard for the catalogue-driven runner) |
 | capability-affordance | agent-affordance | cross-cutting | shipped | agent-callable capabilities surface their affordances at the call boundary |
 | no-hardcoded-user-paths | repo-hygiene | per-file | shipped | F31: no hardcoded /Users/ or /home/<dev>/ paths |
 | G1 | go-discipline | per-file | shipped | every Go binary exposes --version |

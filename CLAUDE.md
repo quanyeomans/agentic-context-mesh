@@ -140,7 +140,7 @@ Mechanical, blocking checks encode rejected patterns into automation. F-numbers 
 - **F74** every Stage subclass is only invoked via a StageRunner — never direct .process() call _(vacuous)_.
 
 **Process**
-- **worktree-isolation** subagent worktree isolation — no shadow copies in primary checkout. **F85** catalogue currency — every check_*.{py,sh} has a RuleEntry, every RuleEntry maps to an existing check, and the generated doc regions match generate_catalogue_docs.py --check (the self-hosting guard for the catalogue-driven runner).
+- **worktree-isolation** subagent worktree isolation — no shadow copies in primary checkout. **F92** catalogue currency — every check_*.{py,sh} has a RuleEntry, every RuleEntry maps to an existing check, and the generated doc regions match generate_catalogue_docs.py --check (the self-hosting guard for the catalogue-driven runner).
 
 **Go side**
 - **G1** every Go binary exposes --version. **G6** no panic outside main/init. **G8** logging via log/slog (no log.Println or fmt.Println in service code). **G9** every services/<name>/ has a README.md. **G10** dependency-rationale registry per services/<name>/DEPENDENCIES.md.

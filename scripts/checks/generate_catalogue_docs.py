@@ -15,7 +15,7 @@ Run it to regenerate in place (idempotent):
 
     python3 scripts/checks/generate_catalogue_docs.py
 
-Run it in ``--check`` mode (used by the F85 currency gate) to fail when
+Run it in ``--check`` mode (used by the F92 currency gate) to fail when
 the on-disk regions drift from what the catalogue would generate:
 
     python3 scripts/checks/generate_catalogue_docs.py --check

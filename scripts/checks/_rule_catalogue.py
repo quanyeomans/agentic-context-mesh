@@ -893,8 +893,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         run_all=False,
     ),
     RuleEntry(
-        id="F85",
-        gate="f85",
+        id="F92",
+        gate="f92",
         check="catalogue_currency",
         category="process",
         scope="cross-cutting",

@@ -1,11 +1,11 @@
-"""F85: the fitness catalogue is current — checks, entries, and docs agree.
+"""F92: the fitness catalogue is current — checks, entries, and docs agree.
 
 Motivation (EPIC #499 Phase 2 — the catalogue-driven runner)
 ------------------------------------------------------------
 Phase 2 makes ``scripts/checks/_rule_catalogue.py`` the single source of
 truth: ``run-all.sh``, pre-commit, and the docs all DERIVE from it. That
 only holds if the catalogue cannot silently fall out of sync with the
-check scripts on disk or the generated doc regions. F85 is the
+check scripts on disk or the generated doc regions. F92 is the
 self-hosting guard — a rule ABOUT the catalogue, registered IN the
 catalogue — that fails the build when any of three invariants break:
 
@@ -23,7 +23,7 @@ catalogue — that fails the build when any of three invariants break:
       what ``generate_catalogue_docs.py`` would emit from the catalogue.
 
 Invariant (b) overlaps with ``tests/checks/test_rule_catalogue.py`` by
-design — the test is a unit-suite proof, F85 is the pre-commit / Stage 0
+design — the test is a unit-suite proof, F92 is the pre-commit / Stage 0
 gate that fires on every commit, including doc and shell-script edits the
 unit suite might not be re-run for.
 
@@ -52,7 +52,7 @@ _RESET = "\033[0m"
 # transitively; this captures the `check_<x>.py` names they invoke.
 _PY_DELEGATE_RE = re.compile(r"check_[a-z0-9_]+\.py")
 
-REMEDIATION = """F85: the fitness catalogue is out of sync with reality. The catalogue
+REMEDIATION = """F92: the fitness catalogue is out of sync with reality. The catalogue
 (scripts/checks/_rule_catalogue.py) is the single source of truth — when
 a check script, a RuleEntry, or a generated doc region drifts from it,
 the catalogue-driven runner silently mis-dispatches and the docs lie.
@@ -74,7 +74,7 @@ run: bash scripts/safe-commit.sh "chore(fitness): keep the catalogue current (#4
 Pass example: a new rule F86 added as ONE RuleEntry row + its
 check_f86_<name>.py script + its baseline, then
 `generate_catalogue_docs.py` run to refresh the doc regions — every
-invariant holds, F85 stays green.
+invariant holds, F92 stays green.
 
 Forbidden example: dropping scripts/checks/check_f86_<name>.py into the
 tree with no RuleEntry (it runs in pre-commit but nothing says what it
@@ -158,14 +158,14 @@ def main() -> int:
     orphans = _orphan_scripts()
     if orphans:
         failed_invariants.append("orphan check scripts (invariant a)")
-        print(f"{_RED}FAIL [arch:f85]{_RESET} — check scripts with no catalogue entry:")
+        print(f"{_RED}FAIL [arch:f92]{_RESET} — check scripts with no catalogue entry:")
         for name in orphans:
             print(f"  scripts/checks/{name}")
 
     dangling = _dangling_entries()
     if dangling:
         failed_invariants.append("dangling catalogue entries (invariant b)")
-        print(f"{_RED}FAIL [arch:f85]{_RESET} — catalogue entries naming a missing check:")
+        print(f"{_RED}FAIL [arch:f92]{_RESET} — catalogue entries naming a missing check:")
         for entry_id, script in dangling:
             print(f"  {entry_id} -> scripts/checks/{script}")
 
@@ -178,7 +178,7 @@ def main() -> int:
         print(REMEDIATION)
         return 1
 
-    print(f"{_GREEN}ok [arch:f85]{_RESET} — catalogue current: checks, entries, and docs agree.")
+    print(f"{_GREEN}ok [arch:f92]{_RESET} — catalogue current: checks, entries, and docs agree.")
     return 0
 
 

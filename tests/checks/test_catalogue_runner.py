@@ -8,16 +8,16 @@ Covers the three #499 Phase 2 deliverables that are themselves code:
     set ``run-all.sh`` dispatched.
   * ``scripts/checks/generate_catalogue_docs.py`` — the generated doc
     regions are idempotent and ``--check`` agrees with the on-disk docs.
-  * ``scripts/checks/check_catalogue_currency.py`` (F85) — the three
+  * ``scripts/checks/check_catalogue_currency.py`` (F92) — the three
     currency invariants and their failure modes.
 
 Sabotage proofs (executed; see the runner-agent report for the
 mutate→fail→restore runs):
 
-  * F85 invariant (a): drop ``check_zzz_unregistered.py`` into
+  * F92 invariant (a): drop ``check_zzz_unregistered.py`` into
     ``scripts/checks/`` → ``check_catalogue_currency.main()`` returns 1;
     remove → 0.
-  * F85 invariant (c): hand-edit a ``<!-- F-CATALOGUE -->`` region in
+  * F92 invariant (c): hand-edit a ``<!-- F-CATALOGUE -->`` region in
     CLAUDE.md → ``generate_catalogue_docs.check()`` returns 1; regen → 0.
   * Runner equivalence: delete a RuleEntry's ``run_all=False`` so the
     runner would dispatch a release-only script → the equivalence test
@@ -82,8 +82,8 @@ def test_select_all_excludes_proposed_and_non_run_all() -> None:
     that is proposed or flagged out of the run-all set."""
     selected = run_checks._select_all()
     ids = {e.id for e in selected}
-    # F85 is in --all; the release-only / out-of-band rules are not.
-    assert "F85" in ids
+    # F92 is in --all; the release-only / out-of-band rules are not.
+    assert "F92" in ids
     assert "baseline-shrinking" not in ids, "release-time rule must not run in --all"
     assert "sonar-new-code" not in ids, "security-stage rule must not run in --all"
     # No proposed rule leaks in.
@@ -187,14 +187,14 @@ def test_claude_section_groups_by_category() -> None:
     assert "**Layering**" in section
     # Every shipped rule id appears somewhere in the grouped section.
     assert "**F26**" in section
-    assert "**F85**" in section
+    assert "**F92**" in section
 
 
-# ── check_catalogue_currency (F85) ──────────────────────────────────────
+# ── check_catalogue_currency (F92) ──────────────────────────────────────
 
 
 def test_currency_passes_on_clean_tree() -> None:
-    """With the catalogue, checks, and docs in sync, F85 is green."""
+    """With the catalogue, checks, and docs in sync, F92 is green."""
     assert check_catalogue_currency.main() == 0
 
 
