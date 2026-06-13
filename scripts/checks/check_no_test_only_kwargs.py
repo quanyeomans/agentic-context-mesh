@@ -57,7 +57,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate, python_files, repo_relative
+from tc_fitness import REPO_ROOT, gate, python_files, repo_relative
 
 # Suffix set extended beyond ``_fn`` to catch the broader class of
 # test-injection seams: ``_loader`` / ``_factory`` / ``_builder`` /

@@ -34,11 +34,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import (  # noqa: F401 — back-compat for repo_relative usage in _collect_violations
+from _fitness_rule import FitnessRule
+from tc_fitness import (  # noqa: F401 — back-compat for repo_relative usage in _collect_violations
     REPO_ROOT,
     repo_relative,
 )
-from _fitness_rule import FitnessRule
 
 REMEDIATION = """F66: <ClassName> in <file> does not declare per_tick_max_items
 + disk_watermark_min_free_bytes.

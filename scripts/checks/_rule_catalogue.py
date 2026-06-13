@@ -707,7 +707,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         check="f53_features_status_surface",
         category="feature-flag",
         scope="cross-cutting",
-        summary="kairix features status CLI subcommand + tool_features_status MCP tool both exist",
+        summary="kairix features status CLI subcommand + features_status MCP tool both exist",
         script="check-f53-features-status-surface.sh",
     ),
     # ----- agent-affordance -----------------------------------------------

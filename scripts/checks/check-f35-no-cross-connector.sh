@@ -17,7 +17,7 @@ fix: move the shared concern to kairix/core/connectors/ (Bronze write, Silver ch
 next: see docs/architecture/connector-ingestion-architecture.md §2 and §4 for the canonical layer split and Bronze/Silver responsibilities.
 run: bash scripts/checks/check-f35-no-cross-connector.sh"
 
-# The detector embeds its own baseline-diff gate (gate() from _arch_lib.py)
+# The detector embeds its own baseline-diff gate (gate() from the tc_fitness package)
 # — mirrors the F26/F27 pattern. Echo the remediation if the script exits
 # non-zero so operators get the action markers regardless of how the
 # wrapper is invoked.

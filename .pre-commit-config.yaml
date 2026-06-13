@@ -59,7 +59,10 @@ repos:
     hooks:
       - id: arch-fitness-catalogue
         name: "arch: catalogue-driven fitness functions (staged scope)"
-        entry: python3 scripts/checks/run_checks.py --staged --skip-coverage
+        # `uv run` resolves the synced .venv so the catalogue runner imports
+        # kairix + the shared three-cubes-fitness package (tc_fitness). Bare
+        # `python3` would mask every import-dependent rule as a vacuous pass.
+        entry: uv run python3 scripts/checks/run_checks.py --staged --skip-coverage
         language: system
         pass_filenames: false
         always_run: true

@@ -1,6 +1,6 @@
 """FitnessRule ABC (ADR-026 Track B).
 
-A thin convenience layer over :mod:`_arch_lib` that lets a check
+A thin convenience layer over :mod:`tc_fitness` that lets a check
 declare itself as a 3-line subclass:
 
 .. code-block:: python
@@ -20,10 +20,10 @@ The body of every concrete check stays focused on ``file_has_violation``
 — the only thing that genuinely varies per rule. Loading the baseline,
 enumerating files, applying scope predicates, gating on net-new
 violations, and writing the F21 remediation are inherited from the
-base class via :func:`_arch_lib.gate`.
+base class via :func:`tc_fitness.gate`.
 
-Existing functional helpers (:func:`_arch_lib.gate`,
-:func:`_arch_lib.main_entry`, :func:`_arch_lib.python_files`) remain
+Existing functional helpers (:func:`tc_fitness.gate`,
+:func:`tc_fitness.main_entry`, :func:`tc_fitness.python_files`) remain
 the canonical low-level API. The ABC does not replace them — it
 collapses the boilerplate around them. Checks that need custom
 enumeration, two-pass scans, multi-baseline diff, or external input
@@ -32,14 +32,12 @@ sources stay as plain functions calling the helpers directly.
 
 from __future__ import annotations
 
-import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import ClassVar
 
-sys.path.insert(0, str(Path(__file__).parent))
-# Import from the same _arch_lib helpers most existing checks already use.
-from _arch_lib import REPO_ROOT, gate
+# Shared gating helpers, sourced from the installed three-cubes-fitness package.
+from tc_fitness import REPO_ROOT, gate
 
 
 class FitnessRule(ABC):

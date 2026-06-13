@@ -33,12 +33,10 @@ Detection (per scan target):
 A file violates F21 if it has at least one remediation-shaped string
 that lacks all three markers AND the file is not in the allow-list:
 
-  * ``scripts/checks/_arch_lib.py`` — shared helpers; the remediation
-    text it prints is supplied by callers, not owned here.
   * ``scripts/checks/run-all.sh`` — orchestrator/harness; emits
     aggregate pass/fail messages, not per-rule remediation.
-  * ``scripts/checks/_lib.sh`` — shared helpers (same rationale as
-    ``_arch_lib.py``).
+  * ``scripts/checks/_lib.sh`` — shared shell helpers; the remediation
+    text they print is supplied by callers, not owned here.
   * ``scripts/checks/audit_baselines.py`` — auditor over the baselines;
     not a fitness check itself.
   * ``scripts/checks/merge_coverage_xml.py`` — tool, not a check.
@@ -61,7 +59,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import gate, repo_relative
+from tc_fitness import gate, repo_relative
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CHECKS_DIR = REPO_ROOT / "scripts" / "checks"
@@ -82,7 +80,6 @@ EXAMPLE_MARKERS: tuple[str, ...] = ("Pass example:", "Forbidden example:")
 # and so are exempt from F21 — they don't own per-rule remediation.
 _ALLOW_FILES: frozenset[str] = frozenset(
     {
-        "_arch_lib.py",
         "_lib.sh",
         "run-all.sh",
         "audit_baselines.py",

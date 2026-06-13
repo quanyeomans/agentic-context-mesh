@@ -109,7 +109,7 @@ def test_allowlist_via_baseline_is_honoured(tmp_path: Path) -> None:
     """A file appearing in the baseline list is grandfathered — the
     aggregate gate returns 0 even though a violation exists.
 
-    This proves the standard ``_arch_lib.gate`` ratchet works for F24.
+    This proves the standard ``tc_fitness.gate`` ratchet works for F24.
     The detection function itself still returns True; only the
     aggregate ``main()`` honours the baseline.
     """
@@ -119,18 +119,12 @@ def test_allowlist_via_baseline_is_honoured(tmp_path: Path) -> None:
     _write_py(target, "from tests.fakes import LegacyFake\n")
     assert detector.file_has_violation(target) is True
 
-    # The baseline mechanism lives in _arch_lib.gate. Load it the same
-    # way the detector itself loads it (file-path import) so we don't
-    # depend on the repo-root being on sys.path.
-    import importlib.util
+    # The baseline mechanism lives in the shared three-cubes-fitness
+    # package (tc_fitness.gate) — the same helper the detector imports.
+    from tc_fitness import gate
 
-    arch_lib_path = _REPO_ROOT / "scripts" / "checks" / "_arch_lib.py"
-    spec = importlib.util.spec_from_file_location("_f24_arch_lib", arch_lib_path)
-    assert spec is not None and spec.loader is not None
-    arch_lib = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(arch_lib)
-    # Empty current-set against an empty real baseline → green.
-    assert arch_lib.gate("no-test-imports-in-prod", set(), "irrelevant") == 0
+    # Empty current-set against the real baseline → no net-new → green.
+    assert gate("no-test-imports-in-prod", set(), "irrelevant") == 0
 
 
 def test_real_repo_gate_is_green() -> None:

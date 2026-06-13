@@ -47,7 +47,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate, repo_relative
+from tc_fitness import REPO_ROOT, gate, repo_relative
 
 REMEDIATION = """Refactor: every CLI subcommand and MCP tool MUST be
 exercised end-to-end by at least one outcome test.

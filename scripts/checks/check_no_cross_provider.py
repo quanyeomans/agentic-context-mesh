@@ -40,8 +40,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, repo_relative  # noqa: F401 — back-compat for test imports
 from _fitness_rule import FitnessRule
+from tc_fitness import REPO_ROOT, repo_relative  # noqa: F401 — back-compat for test imports
 
 # Files / directories at the top level of kairix/providers/ that are NOT
 # plugins (they're the shared scaffolding the plugin Protocol lives in).

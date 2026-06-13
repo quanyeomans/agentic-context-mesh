@@ -25,7 +25,7 @@ Trees enforced (first match wins; the order matters):
       ``fakes.py``, ``__init__.py``, or snake_case helper modules.
   ``scripts/checks/``
       Fitness-function check scripts. ``check_<rule>.py``,
-      ``check-<rule>.sh``, ``_arch_lib.py``, ``_lib.sh``,
+      ``check-<rule>.sh``, ``_fitness_rule.py``, ``_lib.sh``,
       ``run-all.sh``, ``audit_baselines.py``, ``merge_coverage_xml.py``,
       the catalogue-runner tooling ``run_checks.py`` /
       ``generate_catalogue_docs.py`` (#499 Phase 2), and the diff-scoped
@@ -58,7 +58,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import gate
+from tc_fitness import gate
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -69,7 +69,7 @@ _SNAKE_PY = re.compile(r"^(__init__|conftest|fakes|_?[a-z][a-z0-9_]*)\.py$")
 _TEST_PY = re.compile(r"^(__init__|conftest|fakes|test_[a-z0-9_]+|_?[a-z][a-z0-9_]*)\.py$")
 _SNAKE_FEATURE = re.compile(r"^[a-z][a-z0-9_]*\.feature$")
 _CHECK_SCRIPT_PY = re.compile(
-    r"^(check_[a-z0-9_]+|_arch_lib|_fitness_rule|_rule_catalogue|_integrity_invariants_registry"
+    r"^(check_[a-z0-9_]+|_fitness_rule|_rule_catalogue|_integrity_invariants_registry"
     r"|audit_baselines|merge_coverage_xml|run_checks|generate_catalogue_docs|mutation_parity)\.py$"
 )
 _CHECK_SCRIPT_SH = re.compile(r"^(check[-_][a-z0-9-]+|_lib|run-all)\.sh$")

@@ -282,7 +282,7 @@ _Generated from `scripts/checks/_rule_catalogue.py` — do not edit by hand._
 | F71 | schema-integrity | per-method | shipped | every preflight _check_* counting external state has a count-equals-ground-truth contract test |
 | F51 | feature-flag | per-flag | shipped | every FeatureFlag has target_retire_in ≤ current scm version + 6 months |
 | F52 | feature-flag | per-flag | shipped | every flag("<name>") call site references a name that exists in REGISTRY |
-| F53 | feature-flag | cross-cutting | shipped | kairix features status CLI subcommand + tool_features_status MCP tool both exist |
+| F53 | feature-flag | cross-cutting | shipped | kairix features status CLI subcommand + features_status MCP tool both exist |
 | F3 | agent-affordance | per-file | shipped | every # noqa / # NOSONAR / # pragma / # type: ignore / # nosec has rationale text |
 | F10 | agent-affordance | cross-cutting | shipped | CI workflow silencers (continue-on-error, fail_ci_if_error: false) require rationale |
 | F14 | agent-affordance | cross-cutting | shipped | every sonar.issue.ignore.multicriteria entry has a preceding rationale comment |
@@ -1670,9 +1670,11 @@ that contains at least one of the three lowercase action markers:
 - `next:` — what to do after the fix (re-run, re-check, etc.).
 - `run:` — an exact command to copy-paste.
 
-Allow-listed: `_arch_lib.py`, `_lib.sh`, `run-all.sh`,
+Allow-listed: `_lib.sh`, `run-all.sh`,
 `audit_baselines.py`, `merge_coverage_xml.py` — shared helpers and the
-harness/orchestrator (no per-rule remediation of their own).
+harness/orchestrator (no per-rule remediation of their own). The Python
+gating helpers now live in the installed `three-cubes-fitness` package
+(`tc_fitness`), outside the F21 scan tree.
 
 #### Why
 
@@ -1755,7 +1757,7 @@ wins):
 | `tests/bdd/features/` | `*.feature` | `snake_case.feature` |
 | `tests/bdd/steps/` | `*.py` | `__init__.py`, `conftest.py`, `fakes.py`, or `_?snake_case.py` |
 | `tests/` (excl. `tests/bdd/`) | `*.py` | `test_<thing>.py`, `conftest.py`, `fakes.py`, `__init__.py`, or `_?snake_case.py` helpers |
-| `scripts/checks/` | `*.py` | `check_<rule>.py`, `_arch_lib.py`, `audit_baselines.py`, `merge_coverage_xml.py` |
+| `scripts/checks/` | `*.py` | `check_<rule>.py`, `_fitness_rule.py`, `audit_baselines.py`, `merge_coverage_xml.py` |
 | `scripts/checks/` | `*.sh` | `check-<rule>.sh`, `check_<rule>.sh`, `_lib.sh`, `run-all.sh` |
 | `docs/operations/runbooks/` | `*.md` | `INDEX.md` or `kebab-case.md` |
 | `docs/runbooks/` | `*.md` | `INDEX.md` or `kebab-case.md` |

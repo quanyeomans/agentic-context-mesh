@@ -18,7 +18,7 @@ next: see tests/integration/test_vec_index_lifecycle.py for the canonical
 pattern, and docs/architecture/test-discipline-hardening.md §4.2.
 run: bash scripts/checks/check-f47-integration-factory.sh"
 
-# The detector embeds its own baseline-diff gate (gate() from _arch_lib.py)
+# The detector embeds its own baseline-diff gate (gate() from the tc_fitness package)
 # — mirrors the F30 pattern. Echo the remediation if the script exits
 # non-zero so operators get the action markers regardless of how the
 # wrapper is invoked.

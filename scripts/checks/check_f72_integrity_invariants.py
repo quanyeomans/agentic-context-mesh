@@ -62,7 +62,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate
+from tc_fitness import REPO_ROOT, gate
 
 INVARIANT_TESTS_ROOT = Path("tests") / "integrity_invariants"
 REGISTRY_PATH = Path("scripts") / "checks" / "_integrity_invariants_registry.py"

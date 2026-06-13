@@ -38,7 +38,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate, repo_relative
+from tc_fitness import REPO_ROOT, gate, repo_relative
 
 REMEDIATION = """Refactor the step file to route work through a sanctioned
 entry point (CLI main / MCP tool function / factory.build_*) instead of

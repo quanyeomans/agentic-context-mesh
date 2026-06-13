@@ -27,12 +27,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 
+# The runner imports kairix + the shared three-cubes-fitness package
+# (tc_fitness), so it must run under the project venv, not the bare system
+# interpreter. Prefer `uv run` (resolves the synced .venv from the repo
+# root); fall back to a plain `python3` only when uv is unavailable (e.g.
+# an already-activated venv on PATH). Running bare system python3 here
+# silently masks every import-dependent rule as a vacuous pass — that is
+# the false-green this migration closes.
+if command -v uv >/dev/null 2>&1; then
+    RUNNER=(uv run python3 "${SCRIPT_DIR}/run_checks.py")
+else
+    RUNNER=(python3 "${SCRIPT_DIR}/run_checks.py")
+fi
+
 # The runner emits per-rule PASS/FAIL verdicts and a final aggregate
 # verdict line, and exits non-zero if any dispatched rule failed. The
 # aggregate "passed" / "FAILED" tokens below satisfy F83's run-all.sh
 # stage-verdict ledger contract even though dispatch now lives in Python.
 overall=0
-python3 "${SCRIPT_DIR}/run_checks.py" --all "$@" || overall=1
+"${RUNNER[@]}" --all "$@" || overall=1
 
 if [[ "$overall" -eq 0 ]]; then
     printf '\033[0;32m=== run-all: architecture fitness functions passed ===\033[0m\n'
