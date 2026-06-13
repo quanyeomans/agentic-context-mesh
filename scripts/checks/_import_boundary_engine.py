@@ -106,12 +106,30 @@ def _parse(path: Path) -> ast.AST | None:
         return None
 
 
-def _import_modules(tree: ast.AST) -> list[str]:
+def _import_modules(tree: ast.AST, *, skip_relative: bool = False) -> list[str]:
     """Every dotted module name referenced by an ``import`` / ``from ... import``.
 
     ``import a.b.c`` → ``"a.b.c"``; ``from a.b.c import x`` → ``"a.b.c"``.
-    Relative imports (``from . import x``, ``module is None``) are skipped —
-    they cannot reach a forbidden absolute target by construction.
+
+    ``skip_relative`` selects the ``ImportFrom.level`` policy, which MUST match
+    each original detector byte-for-behaviour (#499 Phase 2 faithfulness fix):
+
+    * ``False`` (default) — yield ``node.module`` for EVERY ``ImportFrom``,
+      regardless of ``node.level``. This is what the F26/F27/F34/F35/F44
+      originals did: their ``file_has_violation`` / ``_imported_names`` /
+      ``_plugin_dir_for`` walkers inspect ``node.module`` directly with no
+      ``node.level`` guard, so a relative import whose ``.module`` matches a
+      forbidden prefix / sibling plugin (``from .kairix.providers import x`` →
+      level=1, module=``kairix.providers``; ``from ..psycopg2 import bar`` →
+      level=2, module=``psycopg2``) IS flagged. Skipping ``node.level > 0``
+      here silently dropped those — the divergence this fix closes.
+    * ``True`` — skip any ``ImportFrom`` with ``node.level > 0``. This matches
+      the F37 original ``_import_targets``, which alone guards ``node.level``
+      (a relative import cannot reach a third-party sync library by
+      construction, so it is correctly ignored there).
+
+    ``module is None`` (``from . import x``) is always skipped — there is no
+    dotted target to match either way.
     """
     out: list[str] = []
     for node in ast.walk(tree):
@@ -120,7 +138,7 @@ def _import_modules(tree: ast.AST) -> list[str]:
                 if alias.name:
                     out.append(alias.name)
         elif isinstance(node, ast.ImportFrom):
-            if node.level and node.level > 0:
+            if skip_relative and node.level and node.level > 0:
                 continue
             if node.module:
                 out.append(node.module)
@@ -240,7 +258,13 @@ def _repo_relative(path: Path, root: Path) -> Path | None:
 
 def _file_violates(rule: ImportBoundaryRule, path: Path, rel: Path) -> bool:
     """Apply ``rule``'s mode discriminator to the file at ``path`` (repo-relative
-    ``rel``). Returns True when the file violates the rule."""
+    ``rel``). Returns True when the file violates the rule.
+
+    The ``prefix`` (F26/F34/F44) and ``sibling-plugin`` (F27/F35) modes use the
+    level-AGNOSTIC ``_import_modules`` (default ``skip_relative=False``) because
+    their originals inspected ``ImportFrom.module`` with no ``node.level`` guard.
+    The ``sync-lib`` mode (F37) passes ``skip_relative=True`` to match its
+    original ``_import_targets``, the one detector that guards ``node.level``."""
     if rule.mode == "prefix":
         if any(_under_prefix(rel, ex) or str(rel) == ex for ex in rule.exempt):
             return False
@@ -265,7 +289,8 @@ def _file_violates(rule: ImportBoundaryRule, path: Path, rel: Path) -> bool:
     tree = _parse(path)
     if tree is None:
         return False
-    if not any(_is_sync_lib_import(m, rule.forbidden_prefixes) for m in _import_modules(tree)):
+    modules = _import_modules(tree, skip_relative=True)
+    if not any(_is_sync_lib_import(m, rule.forbidden_prefixes) for m in modules):
         return False
     return not any(_under_prefix(rel, allowed) for allowed in rule.allowed_roots)
 
