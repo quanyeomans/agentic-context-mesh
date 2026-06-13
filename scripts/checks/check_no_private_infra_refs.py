@@ -1,10 +1,23 @@
 """Token-pattern scanner with externalised pattern source.
 
-Pattern definitions are loaded at runtime from one of:
+The canonical pattern source is org config in the three-cubes org,
+single-sourced for both CI and local dev:
 
-  * ``PRIVATE_INFRA_PATTERNS`` env var (CI: injected from a repo secret).
-  * ``.private-infra-patterns`` file at repo root (local-only fallback;
-    gitignored, template at ``.private-infra-patterns.example``).
+  * CI reads the org SECRET ``PRIVATE_INFRA_PATTERNS`` into the
+    ``PRIVATE_INFRA_PATTERNS`` env var (wired in ``.github/workflows/ci.yml``).
+  * Local dev reads the org VARIABLE ``PRIVATE_INFRA_PATTERNS``
+    (org-member-readable) via ``gh variable get`` —
+    ``eval "$(bash scripts/fetch-fitness-config.sh)"`` to export it,
+    or ``make fitness-config`` to cache it to the fallback file.
+
+Pattern definitions are loaded at runtime from, in order:
+
+  * ``PRIVATE_INFRA_PATTERNS`` env var (CI secret, or local export from the
+    org variable via ``scripts/fetch-fitness-config.sh``).
+  * ``.private-infra-patterns`` file at repo root (last-resort local
+    fallback / cache; gitignored, template at
+    ``.private-infra-patterns.example``). Prefer the org-variable fetch over
+    hand-maintaining this file.
 
 Each non-blank, non-comment line is one regex pattern. Optional
 ``label:regex`` shape lets the failure message name the category.
@@ -145,7 +158,9 @@ def main() -> int:
     if not patterns:
         print(
             f"ok [arch:no-private-infra-refs] — no patterns loaded "
-            f"(set ${PATTERNS_ENV_VAR} or create {PATTERNS_FILE.name})."
+            f'(local dev: run `eval "$(bash scripts/fetch-fitness-config.sh)"` '
+            f"to export ${PATTERNS_ENV_VAR} from the org variable, "
+            f"or `make fitness-config` to cache {PATTERNS_FILE.name})."
         )
         return 0
 
