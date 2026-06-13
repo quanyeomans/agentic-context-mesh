@@ -2701,6 +2701,23 @@ rename a loud `KeyError` instead of a silent always-pass.
 
 ---
 
+### F84 — config write/read round-trip
+
+Landed via [EPIC #499](https://github.com/three-cubes/kairix/issues/499)
+Phase 1. The caught class is the #492 overlay split-brain (H1): the
+setup wizard wrote `topology_v2` through the overlay writer
+(`write_config_updates`) while the worker read its config through a
+different, non-overlay resolver — the flagship feature was silently
+inert in Docker with every suite green. A composed test that writes
+through the production writer and reads the value back through the
+canonical layered reader would have failed immediately.
+
+| Rule | Locks | Mechanism |
+|---|---|---|
+| **F84** | Every production config-write site — a public `def` in `kairix/**` whose name compounds a write verb (`write`/`update`/`save`/`persist`) with `config` (`write_config_updates`, `update_config_file`, `write_config_yaml`), or any def with that naming convention containing a stream-form `yaml.dump`/`yaml.safe_dump` — has a composed write→read round-trip test. Coverage convention: a test module references BOTH the writer name AND a canonical-reader name (`load_merged_mapping` / `load_config` / `load_top_level_config` / `feature_flag_config_overlay`); OR carries a `# F84-round-trip: <writer>` registry tag (for tests driving the writer through a CLI/web surface); coverage propagates from a covered writer to the writers its body calls (one round-trip proves the delegation chain). `# F84-allowed: <why>` on the def line exempts writer-named functions that don't write operator config. Deliberately NOT caught (precision over recall): config writes in non-writer-named functions, arbitrary callers of the writer family, same-test-function pairing of write and read, non-YAML config writes. | `scripts/checks/check_f84_config_round_trip.py`; AST harvest of writer defs over `kairix/**` + referenced-name scan over `tests/**` + delegation fixed-point. Baseline: `.architecture/baseline/f84-files.txt` (empty at landing — the #492 fix's exemplar `tests/integration/test_wizard_config_overlay_split_brain.py` covers the whole tree). Pre-commit hook `arch-f84-config-round-trip`. |
+
+---
+
 ## Harness architecture
 
 ### File layout

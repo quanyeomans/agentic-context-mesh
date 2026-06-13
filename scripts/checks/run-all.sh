@@ -247,6 +247,14 @@ python3 "${SCRIPT_DIR}/check_f82_wall_clock_ceilings.py" || overall=1
 #        safe-commit.sh / run-all.sh).
 python3 "${SCRIPT_DIR}/check_f83_gate_runner_contract.py" || overall=1
 
+# F84 — every production config-write site (write_config_updates /
+#        update_config_file / write_config_yaml / config-writer-named
+#        yaml.dump) has a composed write→read round-trip test through
+#        the canonical layered reader (#492 overlay split-brain class:
+#        wizard wrote topology_v2 to the overlay, the worker read a
+#        different resolver — silently inert behind a green suite).
+python3 "${SCRIPT_DIR}/check_f84_config_round_trip.py" || overall=1
+
 bash "${SCRIPT_DIR}/check-f36-connector-bdd-parity.sh" || overall=1
 
 python3 "${SCRIPT_DIR}/check_f34_core_connector_layer_imports.py" || overall=1

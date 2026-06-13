@@ -258,3 +258,10 @@ repos:
         language: system
         pass_filenames: false
         files: ^scripts/.*\.sh$
+
+      - id: arch-f84-config-round-trip
+        name: "arch F84: config-write sites have composed write/read round-trip tests"
+        entry: python3 scripts/checks/check_f84_config_round_trip.py
+        language: system
+        pass_filenames: false
+        files: ^(kairix|tests)/.*\.py$

@@ -360,6 +360,19 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         ),
         adr_origin="EPIC #499 Phase 0 — #493 wall-clock flake family",
     ),
+    RuleEntry(
+        id="F84",
+        gate="f84",
+        check="f84_config_round_trip",
+        category="test-discipline",
+        scope="per-method",
+        summary=(
+            "every production config-write site (write_config_updates / update_config_file / "
+            "write_config_yaml / config-writer-named yaml.dump) has a composed write→read "
+            "round-trip test through the canonical layered reader (#492 overlay split-brain class)"
+        ),
+        adr_origin="EPIC #499 Phase 1 — #492 overlay split-brain (H1)",
+    ),
     # ----- plugin-contract -------------------------------------------------
     RuleEntry(
         id="F28",
