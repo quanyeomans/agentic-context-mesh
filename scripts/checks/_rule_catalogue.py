@@ -999,6 +999,19 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         status="vacuous",
     ),
     RuleEntry(
+        id="F93",
+        gate="f93-ci-fanin-parity",
+        check="f93_ci_fanin_parity",
+        category="observability",
+        scope="cross-cutting",
+        summary=(
+            "every ci.yml job is in the 'CI gate' aggregator's needs: closure (so its failure "
+            "blocks the merge) or carries a # fan-in: informational marker — a green merge can't "
+            "ship with an un-gated job failing"
+        ),
+        adr_origin="EPIC #499 Phase 2 — CI fan-in parity (dangling-job-ships-green class)",
+    ),
+    RuleEntry(
         id="F75",
         gate="f75-eval-suite-parity",
         check="(proposed)",

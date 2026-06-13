@@ -137,7 +137,7 @@ Mechanical, blocking checks encode rejected patterns into automation. F-numbers 
 - **F4** no os.environ.get("KAIRIX_*") outside paths.py / secrets.py. **F22** repo paths follow per-tree naming conventions. **F24** no `from tests.*` / `import tests` inside kairix/**/*.py — tests not shipped in wheel. **F29** performance-measurement code only under kairix/quality/probe/. **F32** no real names in test fixtures (use agent-alpha etc. + reference library). **F33** shellcheck disable directives require rationale. **no-hardcoded-user-paths** F31: no hardcoded /Users/ or /home/<dev>/ paths.
 
 **Observability**
-- **F74** every Stage subclass is only invoked via a StageRunner — never direct .process() call _(vacuous)_.
+- **F74** every Stage subclass is only invoked via a StageRunner — never direct .process() call _(vacuous)_. **F93** every ci.yml job is in the 'CI gate' aggregator's needs: closure (so its failure blocks the merge) or carries a # fan-in: informational marker — a green merge can't ship with an un-gated job failing.
 
 **Process**
 - **worktree-isolation** subagent worktree isolation — no shadow copies in primary checkout. **F92** catalogue currency — every check_*.{py,sh} has a RuleEntry, every RuleEntry maps to an existing check, and the generated doc regions match generate_catalogue_docs.py --check (the self-hosting guard for the catalogue-driven runner).
