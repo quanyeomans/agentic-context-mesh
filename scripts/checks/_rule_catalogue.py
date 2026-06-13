@@ -746,6 +746,21 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         ),
         adr_origin="EPIC #499 Phase 0 — #483 silent gate-death class",
     ),
+    RuleEntry(
+        id="F85",
+        gate="f85",
+        check="f85_contract_vocabulary_singularity",
+        category="agent-affordance",
+        scope="per-file",
+        summary=(
+            "registered cross-tier contract vocabularies single-sourced — a member of a DECLARED "
+            "vocabulary (source-auth PHASE_* strings, the azure provider-name set; owned by "
+            "kairix/platform/setup/service.py) re-declared as a constant/collection in another setup-tier "
+            "module, or used as a raw string in a template instead of the env.globals symbol, fails "
+            "(session-escape-8 phase-string class)"
+        ),
+        adr_origin="EPIC #499 Phase 1 — session-escape-8 cross-tier vocabulary drift",
+    ),
     # ----- repo-hygiene ---------------------------------------------------
     RuleEntry(
         id="F4",

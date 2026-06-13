@@ -290,6 +290,7 @@ _Generated from `scripts/checks/_rule_catalogue.py` — do not edit by hand._
 | F21 | agent-affordance | cross-cutting | shipped | every check_*.py failure-output carries fix:/next:/run: action markers |
 | F23 | agent-affordance | cross-cutting | shipped | every top-level directory has a README.md resolver |
 | F83 | agent-affordance | per-file | shipped | gate-runner contract for shell gate scripts — no unguarded VAR=$(...) under set -e (#483 silent-death class), \|\| true requires trailing rationale, shellcheck-clean at error severity, safe-commit.sh/run-all.sh stages emit named OK/FAIL verdicts |
+| F85 | agent-affordance | per-file | shipped | registered cross-tier contract vocabularies single-sourced — a member of a DECLARED vocabulary (source-auth PHASE_* strings, the azure provider-name set; owned by kairix/platform/setup/service.py) re-declared as a constant/collection in another setup-tier module, or used as a raw string in a template instead of the env.globals symbol, fails (session-escape-8 phase-string class) |
 | F4 | repo-hygiene | per-file | shipped | no os.environ.get("KAIRIX_*") outside paths.py / secrets.py |
 | F22 | repo-hygiene | per-file | shipped | repo paths follow per-tree naming conventions |
 | F24 | repo-hygiene | per-file | shipped | no `from tests.*` / `import tests` inside kairix/**/*.py — tests not shipped in wheel |
@@ -2826,6 +2827,26 @@ canonical layered reader would have failed immediately.
 | Rule | Locks | Mechanism |
 |---|---|---|
 | **F84** | Every production config-write site — a public `def` in `kairix/**` whose name compounds a write verb (`write`/`update`/`save`/`persist`) with `config` (`write_config_updates`, `update_config_file`, `write_config_yaml`), or any def with that naming convention containing a stream-form `yaml.dump`/`yaml.safe_dump` — has a composed write→read round-trip test. Coverage convention: a test module references BOTH the writer name AND a canonical-reader name (`load_merged_mapping` / `load_config` / `load_top_level_config` / `feature_flag_config_overlay`); OR carries a `# F84-round-trip: <writer>` registry tag (for tests driving the writer through a CLI/web surface); coverage propagates from a covered writer to the writers its body calls (one round-trip proves the delegation chain). `# F84-allowed: <why>` on the def line exempts writer-named functions that don't write operator config. Deliberately NOT caught (precision over recall): config writes in non-writer-named functions, arbitrary callers of the writer family, same-test-function pairing of write and read, non-YAML config writes. | `scripts/checks/check_f84_config_round_trip.py`; AST harvest of writer defs over `kairix/**` + referenced-name scan over `tests/**` + delegation fixed-point. Baseline: `.architecture/baseline/f84-files.txt` (empty at landing — the #492 fix's exemplar `tests/integration/test_wizard_config_overlay_split_brain.py` covers the whole tree). Pre-commit hook `arch-f84-config-round-trip`. |
+
+### F85 — cross-tier contract vocabularies single-sourced
+
+Landed via [EPIC #499](https://github.com/three-cubes/kairix/issues/499)
+Phase 1. The caught class is session escape 8: the source-sign-in
+`phase` strings (`idle` … `failed`) were encoded three times — in the
+backend, in the wizard routes, and as raw strings in the
+`source_auth_status.html` template — so a single rename broke the
+HX-Redirect choreography while every suite stayed green. The M11 fix
+single-sourced that vocabulary (and the azure provider-name grouping)
+into `kairix/platform/setup/service.py`: the backend imports the
+`PHASE_*` symbols, the routes layer republishes them through
+`env.globals`, and the template branches on the rendered symbol
+(`{% if status.phase == PHASE_CONSENT %}`), never the raw string. F85
+makes that end-state structural and prevents the next vocabulary from
+regressing.
+
+| Rule | Locks | Mechanism |
+|---|---|---|
+| **F85** | Each registered cross-tier contract vocabulary has exactly one owning module; a member literal re-declared in another tier fails. The DECLARED registry lives inside the check — `VOCABULARIES = {name: (owning_module, (member, ...))}` — seeded with the source-auth `PHASE_*` strings and the azure provider-name set, both owned by `kairix/platform/setup/service.py`. A violation is a member appearing in a *vocabulary-definition shape* — a const-assignment RHS, or an element of a set/frozenset/tuple/list/dict-key literal — in a non-owning setup-tier module, OR a raw member string quoted in a setup-tier template (the contract is to branch on the `env.globals` symbol). Imports from the owning module are the desired pattern and never flagged; `# F85-allowed: <why>` exempts a line. Deliberately NOT caught (precision over recall): incidental uses that are not vocabulary definitions (an OAuth `prompt=consent` dict *value*, a `getattr(obj, "failed")` attribute name); members outside the setup tier (provider plugins legitimately own `PROVIDER_NAME = "azure_foundry"`; phase words appear as English prose repo-wide); auto-discovery of un-registered shared constants; substrings of running prose. | `scripts/checks/check_f85_contract_vocabulary_singularity.py`; AST walk over `kairix/platform/setup/**/*.py` (definition-shape constants) + raw-literal scan over `kairix/platform/setup/web/templates/**/*.html`. Baseline: `.architecture/baseline/f85-files.txt` (2 pre-existing files — `backends.py` + `wizard.py` mirror the azure grouping instead of importing `AZURE_PROVIDER_NAMES`; the phase vocabulary is already single-sourced). Dispatched by the catalogue-driven runner (`arch-fitness-catalogue` pre-commit hook). |
 
 ---
 
