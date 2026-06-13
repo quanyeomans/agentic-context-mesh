@@ -435,6 +435,31 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         ),
         adr_origin="EPIC #499 Phase 1 — GitHub-PEM multi-line secret round-trip (session escape 2)",
     ),
+    RuleEntry(
+        id="F86",
+        gate="f86",
+        check="f86_di_default_execution_floor",
+        category="test-discipline",
+        scope="per-method",
+        summary=(
+            "DI-default execution floor (static half) — every _default_* production seam in "
+            "kairix/** stays visible to the coverage floor: no # pragma: no cover (escape-4 class)"
+        ),
+        adr_origin="EPIC #499 Phase 1 — escape 4, the terminal-wizard pragma'd embed seam",
+    ),
+    RuleEntry(
+        id="F86-dynamic",
+        gate="f86-dynamic",
+        check="f86_di_default_execution_floor",
+        category="test-discipline",
+        scope="per-method",
+        summary=(
+            "DI-default execution floor (dynamic half) — every _default_* seam body has ≥1 "
+            "executed line in the union coverage report; skips clean when no report (F9 stage)"
+        ),
+        adr_origin="EPIC #499 Phase 1 — escape 4, the terminal-wizard pragma'd embed seam",
+        run_all=False,
+    ),
     # ----- plugin-contract -------------------------------------------------
     RuleEntry(
         id="F28",
