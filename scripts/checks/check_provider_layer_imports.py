@@ -36,8 +36,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, repo_relative  # noqa: F401 — back-compat for test imports
 from _fitness_rule import FitnessRule
+from tc_fitness import REPO_ROOT, repo_relative  # noqa: F401 — back-compat for test imports
 
 # Module prefixes the core/ tree is forbidden from importing. Anchored
 # with a trailing dot so we don't accidentally flag a hypothetical

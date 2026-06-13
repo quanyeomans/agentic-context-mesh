@@ -30,8 +30,8 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import python_files, repo_relative  # noqa: F401 — back-compat
 from _fitness_rule import FitnessRule
+from tc_fitness import python_files, repo_relative  # noqa: F401 — back-compat
 
 MIN_LENGTH = 10  # only flag literals at least this long
 MIN_OCCURRENCES = 3  # only flag literals duplicated this many times

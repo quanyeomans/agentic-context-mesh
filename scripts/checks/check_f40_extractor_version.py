@@ -41,8 +41,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, repo_relative
 from _fitness_rule import FitnessRule
+from tc_fitness import REPO_ROOT, repo_relative
 
 # Root containing every Extractor plugin. ``_base.py`` / underscore-
 # prefixed module stubs are not plugins.

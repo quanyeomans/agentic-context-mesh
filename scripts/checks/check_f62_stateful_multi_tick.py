@@ -39,7 +39,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate, repo_relative
+from tc_fitness import REPO_ROOT, gate, repo_relative
 
 REMEDIATION = """F62: stateful component <ClassName> has no multi-tick idempotency test.
 

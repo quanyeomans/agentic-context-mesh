@@ -33,8 +33,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import python_files, repo_relative  # noqa: F401 — back-compat
 from _fitness_rule import FitnessRule
+from tc_fitness import python_files, repo_relative  # noqa: F401 — back-compat
 
 REMEDIATION = """F63: <file> has an unbounded ``.fetchall()`` call.
 

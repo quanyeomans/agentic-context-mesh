@@ -44,7 +44,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate
+from tc_fitness import REPO_ROOT, gate
 
 # Regex that matches a perf-measurement-shaped filename. Anchored at
 # both ends — we only flag files whose entire basename matches.

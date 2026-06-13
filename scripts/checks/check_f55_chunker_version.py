@@ -43,7 +43,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate
+from tc_fitness import REPO_ROOT, gate
 
 # Matches the bare ``Chunk(...)`` constructor (same shape as F39 — does
 # not match ``module.Chunk(...)`` attribute access, ``TemporalChunk``,

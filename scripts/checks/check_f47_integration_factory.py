@@ -36,8 +36,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, repo_relative  # noqa: F401 — back-compat for collect_violations callers
 from _fitness_rule import FitnessRule
+from tc_fitness import REPO_ROOT, repo_relative  # noqa: F401 — back-compat for collect_violations callers
 
 REMEDIATION = """F47: tests/integration/<file>.py constructs <Pipeline> directly.
 

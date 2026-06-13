@@ -1435,6 +1435,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-timeout" },
     { name = "ruff" },
+    { name = "three-cubes-fitness", marker = "python_full_version >= '3.12'" },
     { name = "types-pyyaml" },
     { name = "types-requests" },
 ]
@@ -1509,6 +1510,7 @@ requires-dist = [
     { name = "sentence-transformers", marker = "extra == 'rerank'", specifier = ">=3.0,<6" },
     { name = "spacy", marker = "extra == 'nlp'", specifier = ">=3.7,<4" },
     { name = "tenacity", specifier = ">=8,<10" },
+    { name = "three-cubes-fitness", marker = "python_full_version >= '3.12' and extra == 'dev'", git = "https://github.com/three-cubes/fitness-engine.git?rev=v0.1.0" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "types-requests", marker = "extra == 'dev'", specifier = ">=2.33.0.20260408" },
     { name = "usearch", specifier = ">=2.8,<3" },
@@ -5017,6 +5019,11 @@ sdist = { url = "https://files.pythonhosted.org/packages/b7/4d/08c89e34946fce2ae
 wheels = [
     { url = "https://files.pythonhosted.org/packages/32/d5/f9a850d79b0851d1d4ef6456097579a9005b31fea68726a4ae5f2d82ddd9/threadpoolctl-3.6.0-py3-none-any.whl", hash = "sha256:43a0b8fd5a2928500110039e43a5eed8480b918967083ea48dc3ab9f13c4a7fb", size = 18638, upload-time = "2025-03-13T13:49:21.846Z" },
 ]
+
+[[package]]
+name = "three-cubes-fitness"
+version = "0.1.0"
+source = { git = "https://github.com/three-cubes/fitness-engine.git?rev=v0.1.0#efe54908dc188567dc8728d01c265dc4a382c93c" }
 
 [[package]]
 name = "tokenizers"

@@ -54,8 +54,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT
 from _fitness_rule import FitnessRule
+from tc_fitness import REPO_ROOT
 
 # Regex matching a chunking function name. Anchored at both ends.
 _CHUNK_NAME_RE = re.compile(

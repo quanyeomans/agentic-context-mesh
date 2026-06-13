@@ -96,7 +96,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate
+from tc_fitness import REPO_ROOT, gate
 
 # ---------------------------------------------------------------------------
 # The DECLARED registry. Each vocabulary pins one owning module and the

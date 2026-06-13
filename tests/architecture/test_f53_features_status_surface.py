@@ -3,8 +3,10 @@
 F53 enforces that the operator surface for feature flags exists:
 
   1. ``kairix/cli.py:COMMANDS`` has a ``"features"`` entry.
-  2. ``kairix/agents/mcp/server.py`` has ``@server.tool()``
-     ``tool_features_status``.
+  2. ``kairix/agents/mcp/server.py`` registers a ``features_status`` MCP
+     tool — an ``@server.tool()``-decorated function named
+     ``features_status`` (codebase convention) or the ``tool_`` adapter
+     form.
   3. Neither appears in the F30 baseline as missing an outcome test.
 
 These tests exercise the AST-presence helpers against synthetic source
@@ -74,11 +76,34 @@ def test_commands_missing_features_returns_false(tmp_path: Path) -> None:
     assert detector._commands_has_features(cli) is False  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
 
 
-def test_mcp_has_tool_features_status_returns_true(tmp_path: Path) -> None:
-    """An @server.tool()-decorated tool_features_status function passes.
+def test_mcp_registers_features_status_convention_name_returns_true(tmp_path: Path) -> None:
+    """An @server.tool()-decorated ``features_status`` function (the
+    codebase convention) passes — this is the registration shape the
+    real server.py uses.
 
     Sabotage proof: change the decorator check to require ``@app.tool``
     instead of ``@server.tool`` and this assertion flips to False.
+    """
+    detector = _load_detector()
+    mcp = tmp_path / "server.py"
+    mcp.write_text(
+        """server = FastMCP("kairix")
+
+@server.tool()
+def features_status() -> dict:
+    return {"flags": []}
+""",
+        encoding="utf-8",
+    )
+    assert detector._mcp_registers_features_status(mcp) is True  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
+
+
+def test_mcp_registers_features_status_adapter_name_returns_true(tmp_path: Path) -> None:
+    """The ``tool_features_status`` adapter form is also accepted
+    (forward-compat for a future direct-decoration refactor).
+
+    Sabotage proof: drop ``tool_features_status`` from
+    ``_FEATURES_TOOL_NAMES`` and this assertion flips to False.
     """
     detector = _load_detector()
     mcp = tmp_path / "server.py"
@@ -91,15 +116,14 @@ def tool_features_status() -> dict:
 """,
         encoding="utf-8",
     )
-    assert detector._mcp_has_tool_features_status(mcp) is True  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
+    assert detector._mcp_registers_features_status(mcp) is True  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
 
 
-def test_mcp_missing_tool_features_status_returns_false(tmp_path: Path) -> None:
+def test_mcp_missing_features_status_returns_false(tmp_path: Path) -> None:
     """A different decorated tool does NOT satisfy F53.
 
-    Sabotage proof: weaken the function-name check from
-    ``tool_features_status`` to any name starting with ``tool_`` and
-    this assertion flips.
+    Sabotage proof: widen ``_FEATURES_TOOL_NAMES`` to include
+    ``search`` and this assertion flips.
     """
     detector = _load_detector()
     mcp = tmp_path / "server.py"
@@ -107,12 +131,12 @@ def test_mcp_missing_tool_features_status_returns_false(tmp_path: Path) -> None:
         """server = FastMCP("kairix")
 
 @server.tool()
-def tool_search(q: str) -> dict:
+def search(q: str) -> dict:
     return {"hits": []}
 """,
         encoding="utf-8",
     )
-    assert detector._mcp_has_tool_features_status(mcp) is False  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
+    assert detector._mcp_registers_features_status(mcp) is False  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
 
 
 def test_remediation_carries_action_markers() -> None:

@@ -31,8 +31,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, repo_relative  # noqa: F401 — back-compat
 from _fitness_rule import FitnessRule
+from tc_fitness import REPO_ROOT, repo_relative  # noqa: F401 — back-compat
 
 REMEDIATION = """Refactor to add at least one happy-path scenario per
 feature file (a scenario WITHOUT any of the negative tags @error /

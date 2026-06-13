@@ -54,7 +54,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate
+from tc_fitness import REPO_ROOT, gate
 
 INTEGRITY_PATH = Path("kairix") / "core" / "db" / "integrity.py"
 TRUTHFULNESS_TEST_PATH = Path("tests") / "contracts" / "test_integrity_truthfulness.py"

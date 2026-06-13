@@ -54,7 +54,7 @@ Forbidden example:
       _state['result'] = pipe.search('query')"
 
 # The Python detector emits its own gate() output (matching the F26
-# idiom in _arch_lib.py). The shell wrapper here exists so the gate is
+# idiom in the tc_fitness package). The shell wrapper here exists so the gate is
 # invocable via the same naming convention as F1/F2/F4 and to carry the
 # F21-required ``fix:`` / ``next:`` / ``run:`` markers in the shell
 # entry point itself.

@@ -35,8 +35,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT
 from _fitness_rule import FitnessRule
+from tc_fitness import REPO_ROOT
 
 # Name of the writer class whose construction F61 watches.
 _WRITER_CLASS_NAME = "_SqliteChunkWriter"

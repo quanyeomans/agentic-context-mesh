@@ -50,8 +50,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import python_files, repo_relative  # noqa: F401 — back-compat
 from _fitness_rule import FitnessRule
+from tc_fitness import python_files, repo_relative  # noqa: F401 — back-compat
 
 # Exact-path or prefix allow-list for ``sqlite3.connect`` call sites.
 # Match: rel-path starts with one of these prefixes (Path semantics).

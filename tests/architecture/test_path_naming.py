@@ -98,7 +98,7 @@ def test_check_script_naming() -> None:
     """
     detector = _load_detector()
     assert detector.file_violates("scripts/checks/check_path_naming.py") is False
-    assert detector.file_violates("scripts/checks/_arch_lib.py") is False
+    assert detector.file_violates("scripts/checks/_fitness_rule.py") is False
     assert detector.file_violates("scripts/checks/run-all.sh") is False
     assert detector.file_violates("scripts/checks/CheckPathNaming.py") is True
 

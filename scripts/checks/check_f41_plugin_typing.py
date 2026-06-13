@@ -50,8 +50,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT
 from _fitness_rule import FitnessRule
+from tc_fitness import REPO_ROOT
 
 _PLUGIN_TREES_REL: tuple[Path, ...] = (
     Path("kairix") / "connectors",

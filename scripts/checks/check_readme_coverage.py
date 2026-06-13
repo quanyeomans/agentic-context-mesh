@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import gate
+from tc_fitness import gate
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 

@@ -37,8 +37,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT
 from _fitness_rule import FitnessRule
+from tc_fitness import REPO_ROOT
 
 # Ensure the worktree's kairix package wins over any installed copy
 # regardless of cwd at invocation time. The check's whole point is to

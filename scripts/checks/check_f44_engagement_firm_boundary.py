@@ -49,8 +49,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, repo_relative  # noqa: F401 — kept for back-compat with importing tests
 from _fitness_rule import FitnessRule
+from tc_fitness import REPO_ROOT, repo_relative  # noqa: F401 — kept for back-compat with importing tests
 
 # Forbidden Postgres-client import-name prefixes. An import is flagged
 # if the imported module name equals one of these OR starts with one

@@ -4,8 +4,13 @@ Operations affordance — flags are useless if the operator can't see what
 is enabled. F53 enforces:
 
   1. ``kairix/cli.py:COMMANDS`` has a ``"features"`` entry.
-  2. ``kairix/agents/mcp/server.py`` has a function named
-     ``tool_features_status`` decorated by ``@server.tool()``.
+  2. ``kairix/agents/mcp/server.py`` registers a ``features_status`` MCP
+     tool — an ``@server.tool()``-decorated function whose name resolves
+     to the ``features_status`` capability. Per the codebase convention
+     (see ``worker_status`` / ``caches_status``), the registered inner
+     function is named ``features_status`` and delegates to the
+     module-level ``tool_features_status`` adapter; the bare
+     ``tool_<name>`` form is also accepted for forward-compat.
   3. Neither surface appears in F30's grandfather list as missing an
      outcome test (i.e. both have outcome tests).
 
@@ -29,10 +34,12 @@ F30_BASELINE_REL = Path(".architecture/baseline/f30-operator-outcome-tests-files
 
 REMEDIATION = """F53: operator surface missing for feature flags.
 fix: ensure kairix/cli.py:COMMANDS includes a 'features' entry (CLI
-     subcommand) AND kairix/agents/mcp/server.py has a function
-     'tool_features_status' decorated with @server.tool(). Both must
-     also have F30-compliant outcome tests (NOT appear in the F30
-     baseline as missing an outcome test).
+     subcommand) AND kairix/agents/mcp/server.py registers a
+     'features_status' MCP tool — an @server.tool() function named
+     'features_status' (codebase convention; delegates to the
+     module-level tool_features_status adapter). Both must also have
+     F30-compliant outcome tests (NOT appear in the F30 baseline as
+     missing an outcome test).
 next: see docs/architecture/feature-flag-architecture.md §3.5 (operator
       surface) + §6 (F53 mechanics).
 run: bash scripts/checks/check-f53-features-status-surface.sh
@@ -43,15 +50,17 @@ Pass example:
       "features": (run_features_status, "show feature flag state"),
       ...
   }
-  # kairix/agents/mcp/server.py
+  # kairix/agents/mcp/server.py — registered inside build_server()
   @server.tool()
-  def tool_features_status() -> dict[str, Any]:
-      return features_status().to_envelope()
+  @async_tool_handler
+  def features_status() -> dict[str, Any]:
+      return tool_features_status()
 
 Forbidden example:
   # kairix/cli.py COMMANDS has no 'features' entry; operators can only
-  # read flag state by grep-ing the registry source. MCP also missing
-  # tool_features_status — agents have no programmatic surface either."""
+  # read flag state by grep-ing the registry source. MCP also has no
+  # @server.tool() features_status — agents have no programmatic
+  # surface either, so a `features_status` MCP call is tool-not-found."""
 
 
 def _commands_has_features(cli_path: Path) -> bool:
@@ -85,8 +94,24 @@ def _is_server_tool_decorator(dec: ast.expr) -> bool:
     )
 
 
-def _mcp_has_tool_features_status(mcp_path: Path) -> bool:
-    """Return True if server.py declares ``tool_features_status`` under @server.tool()."""
+# The registered MCP tool name resolves to this capability. The codebase
+# convention (worker_status, caches_status, …) names the inner
+# @server.tool() function after the capability — ``features_status`` —
+# and delegates to the module-level ``tool_features_status`` adapter. The
+# bare ``tool_features_status`` form is also accepted so the gate stays
+# green if a future refactor decorates the adapter directly.
+_FEATURES_TOOL_NAMES = frozenset({"features_status", "tool_features_status"})
+
+
+def _mcp_registers_features_status(mcp_path: Path) -> bool:
+    """Return True if server.py registers a ``features_status`` MCP tool.
+
+    Looks for an ``@server.tool()``-decorated function whose name is the
+    ``features_status`` capability (or the ``tool_`` adapter form) — i.e.
+    the runtime MCP tool an agent calls. FastMCP derives the tool name
+    from the function's ``__name__``, so the function name IS the tool
+    name.
+    """
     try:
         tree = ast.parse(mcp_path.read_text(encoding="utf-8"))
     except (SyntaxError, UnicodeDecodeError, OSError):
@@ -94,7 +119,7 @@ def _mcp_has_tool_features_status(mcp_path: Path) -> bool:
     for node in ast.walk(tree):
         if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
-        if node.name != "tool_features_status":
+        if node.name not in _FEATURES_TOOL_NAMES:
             continue
         if any(_is_server_tool_decorator(d) for d in node.decorator_list):
             return True
@@ -160,8 +185,8 @@ def main() -> int:
     findings: list[str] = []
     if not _commands_has_features(cli_path):
         findings.append("kairix/cli.py:COMMANDS missing 'features' entry")
-    if not _mcp_has_tool_features_status(mcp_path):
-        findings.append("kairix/agents/mcp/server.py missing @server.tool() tool_features_status")
+    if not _mcp_registers_features_status(mcp_path):
+        findings.append("kairix/agents/mcp/server.py missing @server.tool() features_status")
     if not _features_surfaces_have_outcome_tests():
         findings.append(
             "F30 baseline lists 'features' CLI or 'features_status' MCP tool as "

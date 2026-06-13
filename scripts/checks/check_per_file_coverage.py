@@ -40,7 +40,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import gate
+from tc_fitness import gate
 
 FLOOR = 90.0  # per-file coverage percentage threshold
 

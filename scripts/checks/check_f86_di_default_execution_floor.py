@@ -93,7 +93,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate
+from tc_fitness import REPO_ROOT, gate
 
 DEFAULT_PREFIX = "_default_"
 PRAGMA_TAG = "pragma: no cover"
