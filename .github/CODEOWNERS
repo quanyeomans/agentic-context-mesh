@@ -18,3 +18,10 @@
 # CI/CD and security configuration
 /.github/                       @quanyeomans
 /pyproject.toml                 @quanyeomans
+
+# Canon + security policy — lead-only; never self-approved by an agent.
+# Enforced by the main ruleset (.github/rulesets/main.json: require_code_owner_review).
+/SECURITY.md                    @quanyeomans
+/CONSTRAINTS.md                 @quanyeomans
+/CONTRIBUTING.md                @quanyeomans
+/scripts/checks/                @quanyeomans
