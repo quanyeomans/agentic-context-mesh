@@ -87,6 +87,31 @@ class RuleEntry:
     (``f26`` → ``.architecture/baseline/f26-files.txt``). ``check``
     is the script filename minus the ``check_`` prefix and ``.py``
     suffix.
+
+    Runner dispatch (#499 Phase 2 — the catalogue-driven runner)
+    -----------------------------------------------------------
+    ``scripts/checks/run_checks.py`` derives the exact check
+    invocation for each entry from two optional fields:
+
+    * ``script`` — the exact script under ``scripts/checks/`` to run,
+      WHEN it diverges from the default. Default (``script is None``)
+      is the python check ``check_<check>.py`` invoked as
+      ``python3 scripts/checks/check_<check>.py``. Set ``script`` to a
+      ``check-*.sh`` name when the rule runs through a shell wrapper or
+      a pure-shell detector (the runner infers shell-vs-python from the
+      ``.sh`` / ``.py`` extension). This is required for the handful of
+      rules whose run-all invocation is NOT ``check_<check>.py``:
+      the pure-shell detectors (F3 / F4 / F10) whose ``check`` field
+      points at a different python file, and the F2/F4, F3/F14, F10/F21
+      duals that share a ``check`` field but run distinct scripts.
+
+    * ``run_all`` — whether ``run_checks.py --all`` (and so
+      ``run-all.sh`` / CI Stage 0 / pre-commit) dispatches this entry.
+      Defaults to ``True``. Set ``False`` for rules that run elsewhere
+      in the SDLC (``baseline-shrinking`` at release time;
+      ``sonar-new-code`` in the security stage; ``worktree-isolation``
+      and ``paydown-doc-currency`` invoked out-of-band) so the runner
+      reproduces exactly the set ``run-all.sh`` ran before this change.
     """
 
     id: str
@@ -98,6 +123,8 @@ class RuleEntry:
     adr_origin: str | None = None
     status: Status = "shipped"
     tags: tuple[str, ...] = field(default_factory=tuple)
+    script: str | None = None
+    run_all: bool = True
 
 
 _ENTRIES: tuple[RuleEntry, ...] = (
@@ -161,6 +188,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="layering",
         scope="per-file",
         summary="engagement-scope code may not import firm-scope storage clients (psycopg etc.)",
+        script="check-f44-engagement-firm-boundary.sh",
     ),
     RuleEntry(
         id="F61",
@@ -180,6 +208,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="test-discipline",
         scope="per-file",
         summary="no @patch / monkeypatch on kairix internals — inject Fake* through a seam",
+        script="check-no-internal-patches.sh",
     ),
     RuleEntry(
         id="F2",
@@ -188,6 +217,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="test-discipline",
         scope="per-file",
         summary='no monkeypatch.setenv("KAIRIX_*") — pass deps as kwargs instead',
+        script="check-no-env-monkeypatch.sh",
     ),
     RuleEntry(
         id="F5",
@@ -228,6 +258,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="coverage",
         scope="per-file",
         summary="per-file coverage ≥ 90% on union of unit + integration (Stage 5)",
+        run_all=False,
     ),
     RuleEntry(
         id="F11",
@@ -263,6 +294,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-commit",
         summary="every new CLI/MCP/provider/connector/extractor adds a BDD feature in the same commit",
         adr_origin="docs/architecture/test-discipline-hardening.md",
+        script="check-f45-new-capability-bdd.sh",
     ),
     RuleEntry(
         id="F46",
@@ -271,6 +303,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="test-discipline",
         scope="per-file",
         summary="BDD step impls compose via CLI/MCP/factory — no direct *Pipeline(...) construction",
+        script="check-f46-bdd-step-composition.sh",
     ),
     RuleEntry(
         id="F47",
@@ -287,6 +320,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="test-discipline",
         scope="cross-cutting",
         summary="tests/e2e/test_composed_production_path.py exists, runs in CI Stage 4.5",
+        script="check-f48-e2e-present.sh",
     ),
     RuleEntry(
         id="F54",
@@ -298,6 +332,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
             "every flag has OFF + ON BDD scenarios, integration tests, and (for top-level) an E2E composed-path test"
         ),
         tags=("test-discipline",),
+        script="check-f54-flag-both-branch-tested.sh",
     ),
     RuleEntry(
         id="F62",
@@ -360,6 +395,71 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         ),
         adr_origin="EPIC #499 Phase 0 — #493 wall-clock flake family",
     ),
+    RuleEntry(
+        id="F84",
+        gate="f84",
+        check="f84_config_round_trip",
+        category="test-discipline",
+        scope="per-method",
+        summary=(
+            "every production config-write site (write_config_updates / update_config_file / "
+            "write_config_yaml / config-writer-named yaml.dump) has a composed write→read "
+            "round-trip test through the canonical layered reader (#492 overlay split-brain class)"
+        ),
+        adr_origin="EPIC #499 Phase 1 — #492 overlay split-brain (H1)",
+    ),
+    RuleEntry(
+        id="F88",
+        gate="f88",
+        check="f88_docstring_raises_parity",
+        category="test-discipline",
+        scope="per-method",
+        summary=(
+            "every SetupService / KairixSetupService method documenting a concrete Raises: type "
+            "is either handled (except, incl. superclass) in the wizard route that calls it or "
+            "render-tested under tests/platform/setup (session-escape-5 raw-500 class)"
+        ),
+        adr_origin="EPIC #499 Phase 1 — session-escape-5 (save_source ValueError surfaced as 500)",
+    ),
+    RuleEntry(
+        id="F87",
+        gate="f87",
+        check="f87_persist_load_corpus",
+        category="test-discipline",
+        scope="cross-cutting",
+        summary=(
+            "every registered persist/load pair (set_secret/load_secrets_file, FileTokenStore/secrets "
+            "read, write_config_updates/load_merged_mapping, EmbeddingCache put_many/get_many) ships an "
+            "adversarial round-trip corpus — multi-line + unicode + large (>=64KiB) + escape-lookalike "
+            "(the GitHub-PEM consent-failure class)"
+        ),
+        adr_origin="EPIC #499 Phase 1 — GitHub-PEM multi-line secret round-trip (session escape 2)",
+    ),
+    RuleEntry(
+        id="F86",
+        gate="f86",
+        check="f86_di_default_execution_floor",
+        category="test-discipline",
+        scope="per-method",
+        summary=(
+            "DI-default execution floor (static half) — every _default_* production seam in "
+            "kairix/** stays visible to the coverage floor: no # pragma: no cover (escape-4 class)"
+        ),
+        adr_origin="EPIC #499 Phase 1 — escape 4, the terminal-wizard pragma'd embed seam",
+    ),
+    RuleEntry(
+        id="F86-dynamic",
+        gate="f86-dynamic",
+        check="f86_di_default_execution_floor",
+        category="test-discipline",
+        scope="per-method",
+        summary=(
+            "DI-default execution floor (dynamic half) — every _default_* seam body has ≥1 "
+            "executed line in the union coverage report; skips clean when no report (F9 stage)"
+        ),
+        adr_origin="EPIC #499 Phase 1 — escape 4, the terminal-wizard pragma'd embed seam",
+        run_all=False,
+    ),
     # ----- plugin-contract -------------------------------------------------
     RuleEntry(
         id="F28",
@@ -376,6 +476,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="plugin-contract",
         scope="per-plugin",
         summary="every connector + extractor plugin has matching BDD feature + Examples-table row",
+        script="check-f36-connector-bdd-parity.sh",
     ),
     RuleEntry(
         id="F40",
@@ -408,7 +509,11 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         check="f43_plugin_contract_tests",
         category="plugin-contract",
         scope="per-plugin",
-        summary="every plugin has tests/contracts/test_<name>_protocol.py exercising real + fake impls",
+        summary=(
+            "behavioural parity — every contract test runs ONE parametrized body over real + fake "
+            "(≥2 impl fixtures), not separate real-only/fake-only assertions; plus the per-plugin "
+            "contract-test presence limb"
+        ),
     ),
     RuleEntry(
         id="F55",
@@ -426,6 +531,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="plugin-contract",
         scope="per-plugin",
         summary="every connector declares SourceConnector + at least one of {Poll, Checkpointed, Event}Connector",
+        script="check-f56-connector-capability-declaration.sh",
     ),
     RuleEntry(
         id="F64",
@@ -469,6 +575,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="production-safety",
         scope="per-commit",
         summary="net-new files may not appear in any per-file F-rule baseline",
+        script="check-f50-net-new-file-violations.sh",
     ),
     RuleEntry(
         id="F63",
@@ -552,6 +659,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-flag",
         summary="every FeatureFlag has target_retire_in ≤ current scm version + 6 months",
         adr_origin="docs/architecture/feature-flag-architecture.md §6",
+        script="check-f51-flag-retirement.sh",
     ),
     RuleEntry(
         id="F52",
@@ -560,6 +668,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="feature-flag",
         scope="per-flag",
         summary='every flag("<name>") call site references a name that exists in REGISTRY',
+        script="check-f52-flag-call-sites.sh",
     ),
     RuleEntry(
         id="F53",
@@ -568,6 +677,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="feature-flag",
         scope="cross-cutting",
         summary="kairix features status CLI subcommand + tool_features_status MCP tool both exist",
+        script="check-f53-features-status-surface.sh",
     ),
     # ----- agent-affordance -----------------------------------------------
     RuleEntry(
@@ -577,6 +687,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="agent-affordance",
         scope="per-file",
         summary="every # noqa / # NOSONAR / # pragma / # type: ignore / # nosec has rationale text",
+        script="check-suppressions-have-rationale.sh",
     ),
     RuleEntry(
         id="F10",
@@ -585,6 +696,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="agent-affordance",
         scope="cross-cutting",
         summary="CI workflow silencers (continue-on-error, fail_ci_if_error: false) require rationale",
+        script="check-workflow-silencers-have-rationale.sh",
     ),
     RuleEntry(
         id="F14",
@@ -663,6 +775,21 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         ),
         adr_origin="EPIC #499 Phase 0 — #483 silent gate-death class",
     ),
+    RuleEntry(
+        id="F85",
+        gate="f85",
+        check="f85_contract_vocabulary_singularity",
+        category="agent-affordance",
+        scope="per-file",
+        summary=(
+            "registered cross-tier contract vocabularies single-sourced — a member of a DECLARED "
+            "vocabulary (source-auth PHASE_* strings, the azure provider-name set; owned by "
+            "kairix/platform/setup/service.py) re-declared as a constant/collection in another setup-tier "
+            "module, or used as a raw string in a template instead of the env.globals symbol, fails "
+            "(session-escape-8 phase-string class)"
+        ),
+        adr_origin="EPIC #499 Phase 1 — session-escape-8 cross-tier vocabulary drift",
+    ),
     # ----- repo-hygiene ---------------------------------------------------
     RuleEntry(
         id="F4",
@@ -671,6 +798,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="repo-hygiene",
         scope="per-file",
         summary='no os.environ.get("KAIRIX_*") outside paths.py / secrets.py',
+        script="check-env-reads-stay-in-paths.sh",
     ),
     RuleEntry(
         id="F22",
@@ -805,6 +933,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="coverage",
         scope="cross-cutting",
         summary="F49: each release tag reduces F30/F46/F47 baselines by ≥1 (or keeps at zero)",
+        run_all=False,
     ),
     RuleEntry(
         id="paydown-doc-currency",
@@ -813,6 +942,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="agent-affordance",
         scope="cross-cutting",
         summary="grandfathering paydown doc reflects current baseline state",
+        run_all=False,
     ),
     RuleEntry(
         id="sonar-new-code",
@@ -821,6 +951,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="coverage",
         scope="cross-cutting",
         summary="SonarCloud new-code parity gate — issues introduced after baseline date must be zero",
+        run_all=False,
     ),
     RuleEntry(
         id="worktree-isolation",
@@ -830,6 +961,20 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="cross-cutting",
         summary="subagent worktree isolation — no shadow copies in primary checkout",
         adr_origin="GH #208 — upstream anthropics/claude-code#59019",
+        run_all=False,
+    ),
+    RuleEntry(
+        id="F92",
+        gate="f92",
+        check="catalogue_currency",
+        category="process",
+        scope="cross-cutting",
+        summary=(
+            "catalogue currency — every check_*.{py,sh} has a RuleEntry, every RuleEntry maps to an "
+            "existing check, and the generated doc regions match generate_catalogue_docs.py --check "
+            "(the self-hosting guard for the catalogue-driven runner)"
+        ),
+        adr_origin="EPIC #499 Phase 2 — catalogue-driven runner single-source-of-truth",
     ),
     RuleEntry(
         id="capability-affordance",

@@ -26,7 +26,11 @@ Trees enforced (first match wins; the order matters):
   ``scripts/checks/``
       Fitness-function check scripts. ``check_<rule>.py``,
       ``check-<rule>.sh``, ``_arch_lib.py``, ``_lib.sh``,
-      ``run-all.sh``, ``audit_baselines.py``, ``merge_coverage_xml.py``.
+      ``run-all.sh``, ``audit_baselines.py``, ``merge_coverage_xml.py``,
+      the catalogue-runner tooling ``run_checks.py`` /
+      ``generate_catalogue_docs.py`` (#499 Phase 2), and the diff-scoped
+      mutation runner ``mutation_parity.py`` (#499 Phase 1) — a dynamic
+      safe-commit stage + nightly workflow, not a static catalogue check.
   ``docs/operations/runbooks/`` and ``docs/runbooks/``
       Runbook docs. ``<topic>-<scenario>.md`` (kebab-case) or
       ``INDEX.md``.
@@ -65,7 +69,8 @@ _SNAKE_PY = re.compile(r"^(__init__|conftest|fakes|_?[a-z][a-z0-9_]*)\.py$")
 _TEST_PY = re.compile(r"^(__init__|conftest|fakes|test_[a-z0-9_]+|_?[a-z][a-z0-9_]*)\.py$")
 _SNAKE_FEATURE = re.compile(r"^[a-z][a-z0-9_]*\.feature$")
 _CHECK_SCRIPT_PY = re.compile(
-    r"^(check_[a-z0-9_]+|_arch_lib|_fitness_rule|_rule_catalogue|_integrity_invariants_registry|audit_baselines|merge_coverage_xml)\.py$"
+    r"^(check_[a-z0-9_]+|_arch_lib|_fitness_rule|_rule_catalogue|_integrity_invariants_registry"
+    r"|audit_baselines|merge_coverage_xml|run_checks|generate_catalogue_docs|mutation_parity)\.py$"
 )
 _CHECK_SCRIPT_SH = re.compile(r"^(check[-_][a-z0-9-]+|_lib|run-all)\.sh$")
 _RUNBOOK_MD = re.compile(r"^(INDEX|README|[a-z][a-z0-9-]*)\.md$")

@@ -1,13 +1,25 @@
 #!/usr/bin/env bash
-# Architecture fitness function harness — run all checks; aggregate exit code.
+# Architecture fitness function harness — thin shim over the
+# catalogue-driven runner (EPIC #499 Phase 2).
+#
+# The single source of truth is scripts/checks/_rule_catalogue.py. This
+# script no longer enumerates individual checks; it delegates to
+# scripts/checks/run_checks.py, which reads the catalogue and dispatches
+# every ACTIVE rule (python check_<x>.py or shell check-<x>.sh). Adding a
+# fitness rule is now ONE RuleEntry row + the check script + its baseline
+# — run-all, pre-commit, and the docs all derive from the catalogue.
 #
 # Each check fails on net-new violations vs its baseline; pre-existing
-# violations are grandfathered. The aggregate exit code is non-zero if any
-# individual check fails.
+# violations are grandfathered. The aggregate exit code is non-zero if
+# any individual check fails (one failing check never aborts the
+# ledger — run_checks.py guards every subprocess).
 #
 # Usage:
-#   bash scripts/checks/run-all.sh                # run all
+#   bash scripts/checks/run-all.sh                  # run all
 #   bash scripts/checks/run-all.sh --skip-coverage  # skip F7 (needs coverage.xml)
+#
+# safe-commit.sh passes the per-invocation coverage report via
+# KAIRIX_COVERAGE_XML (consumed by run_checks.py's F7/F9 coverage stage).
 
 set -u
 
@@ -15,291 +27,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 
-skip_coverage=0
-for arg in "$@"; do
-    case "$arg" in
-        --skip-coverage) skip_coverage=1 ;;
-    esac
-done
-
-echo "=== Architecture fitness functions ==="
+# The runner emits per-rule PASS/FAIL verdicts and a final aggregate
+# verdict line, and exits non-zero if any dispatched rule failed. The
+# aggregate "passed" / "FAILED" tokens below satisfy F83's run-all.sh
+# stage-verdict ledger contract even though dispatch now lives in Python.
 overall=0
+python3 "${SCRIPT_DIR}/run_checks.py" --all "$@" || overall=1
 
-# F1
-bash "${SCRIPT_DIR}/check-no-internal-patches.sh" || overall=1
-
-# F2
-bash "${SCRIPT_DIR}/check-no-env-monkeypatch.sh" || overall=1
-
-# F4
-bash "${SCRIPT_DIR}/check-env-reads-stay-in-paths.sh" || overall=1
-
-# F3
-bash "${SCRIPT_DIR}/check-suppressions-have-rationale.sh" || overall=1
-
-# F5 — AST-based
-python3 "${SCRIPT_DIR}/check_no_internal_imports.py" || overall=1
-
-# F6 — AST-based
-python3 "${SCRIPT_DIR}/check_no_test_only_kwargs.py" || overall=1
-
-# F8 — AST-based
-python3 "${SCRIPT_DIR}/check_test_markers.py" || overall=1
-
-# F10 — workflow YAML silencer rationale (shell + grep)
-bash "${SCRIPT_DIR}/check-workflow-silencers-have-rationale.sh" || overall=1
-
-# F11 — test skip rationale (AST)
-python3 "${SCRIPT_DIR}/check_test_skip_rationale.py" || overall=1
-
-# F12 — BDD happy-path coverage
-python3 "${SCRIPT_DIR}/check_bdd_happy_path.py" || overall=1
-
-# F13 — BDD no implementation symbols
-python3 "${SCRIPT_DIR}/check_bdd_no_implementation_leaks.py" || overall=1
-
-# F14 — sonar.issue.ignore entries require rationale
-python3 "${SCRIPT_DIR}/check_sonar_ignore_rationale.py" || overall=1
-
-# F15 — no logging of secret-named variables in plaintext
-python3 "${SCRIPT_DIR}/check_no_logging_secrets.py" || overall=1
-
-# F16 — cognitive complexity per function
-python3 "${SCRIPT_DIR}/check_cognitive_complexity.py" || overall=1
-
-# F17 — no duplicated string literal ≥10 chars / ≥3 occurrences
-python3 "${SCRIPT_DIR}/check_no_duplicate_string.py" || overall=1
-
-# F18 — no commented-out code
-python3 "${SCRIPT_DIR}/check_no_commented_out_code.py" || overall=1
-
-# F19 — unused parameter must be _ prefixed
-python3 "${SCRIPT_DIR}/check_unused_params_named.py" || overall=1
-
-# F20 — empty function body requires docstring or intent comment
-python3 "${SCRIPT_DIR}/check_empty_body_intent.py" || overall=1
-
-# F21 — actionable-feedback marker rule for check scripts
-python3 "${SCRIPT_DIR}/check_actionable_feedback.py" || overall=1
-
-# F22 — repo path naming conventions per tree
-python3 "${SCRIPT_DIR}/check_path_naming.py" || overall=1
-
-# F23 — every top-level directory has a README.md
-python3 "${SCRIPT_DIR}/check_readme_coverage.py" || overall=1
-
-# F24 — no imports of tests.* in kairix production code
-python3 "${SCRIPT_DIR}/check_no_test_imports_in_prod.py" || overall=1
-
-# F25 — every CLI subcommand has an MCP affordance (real binding or escalation stub)
-python3 "${SCRIPT_DIR}/check_capability_affordance.py" || overall=1
-
-# F26 — kairix/core/** may not import providers/ or transport/
-python3 "${SCRIPT_DIR}/check_provider_layer_imports.py" || overall=1
-
-# F27 — providers/<a>/ may not import providers/<b>/
-python3 "${SCRIPT_DIR}/check_no_cross_provider.py" || overall=1
-
-# F28 — every provider/<name>/ has matching BDD coverage
-python3 "${SCRIPT_DIR}/check_provider_bdd_completeness.py" || overall=1
-
-# F29 — perf-measurement code only under kairix/quality/probe/
-python3 "${SCRIPT_DIR}/check_perf_singleton.py" || overall=1
-
-# F30 — every CLI subcommand + MCP tool has an outcome test
-python3 "${SCRIPT_DIR}/check_f30_operator_outcome_tests.py" || overall=1
-
-# F31 — no hardcoded /Users/<dev>/ or /home/<dev>/ paths in committed code
-python3 "${SCRIPT_DIR}/check_no_hardcoded_user_paths.py" || overall=1
-
-# F32 — no real first names or organisation/client names in fixtures + docs
-python3 "${SCRIPT_DIR}/check_no_real_names_in_fixtures.py" || overall=1
-
-# F33 — shellcheck disable directives require rationale
-python3 "${SCRIPT_DIR}/check_shellcheck_disable_with_reason.py" || overall=1
-
-# F44 — engagement-scope code (kairix/**) may not import firm-scope storage clients (Postgres)
-bash "${SCRIPT_DIR}/check-f44-engagement-firm-boundary.sh" || overall=1
-
-# F45 — every new top-level capability ships with a BDD feature
-bash "${SCRIPT_DIR}/check-f45-new-capability-bdd.sh" || overall=1
-
-# F46 — BDD step impls call factory-composed production code (no direct *Pipeline)
-bash "${SCRIPT_DIR}/check-f46-bdd-step-composition.sh" || overall=1
-
-# F47 — integration tests construct pipelines via kairix.core.factory.build_*
-python3 "${SCRIPT_DIR}/check_f47_integration_factory.py" || overall=1
-
-# F48 — composed production path e2e exemplar exists and is e2e-marked
-bash "${SCRIPT_DIR}/check-f48-e2e-present.sh" || overall=1
-
-# F50 — net-new files cannot accrete F-rule baseline debt
-bash "${SCRIPT_DIR}/check-f50-net-new-file-violations.sh" || overall=1
-
-# F51 — feature flag target_retire_in deadline
-bash "${SCRIPT_DIR}/check-f51-flag-retirement.sh" || overall=1
-
-# F52 — every flag("<name>") call site references a real registry entry
-bash "${SCRIPT_DIR}/check-f52-flag-call-sites.sh" || overall=1
-
-# F53 — operator surface (features CLI + tool_features_status MCP) exists
-bash "${SCRIPT_DIR}/check-f53-features-status-surface.sh" || overall=1
-
-# F54 — every flag in REGISTRY has both-branch test coverage
-bash "${SCRIPT_DIR}/check-f54-flag-both-branch-tested.sh" || overall=1
-
-# F55 — Chunker plugin declares version + every Chunk(...) carries chunker_version=
-python3 "${SCRIPT_DIR}/check_f55_chunker_version.py" || overall=1
-
-# F56 — every connector plugin declares the required capability set
-bash "${SCRIPT_DIR}/check-f56-connector-capability-declaration.sh" || overall=1
-
-# F57 — cc_pair lifecycle state-machine integrity (UPDATE topology_cc_pairs.status routed through _ALLOWED_TRANSITIONS)
-python3 "${SCRIPT_DIR}/check_f57_ccpair_lifecycle_integrity.py" || overall=1
-
-# F58 — HierarchyConnector requires a parent-before-child contract test under tests/contracts/
-python3 "${SCRIPT_DIR}/check_f58_hierarchy_parent_before_child.py" || overall=1
-
-# F61 — _SqliteChunkWriter constructor lives only under kairix/core/connectors/ (CollectionRouter singleton)
-python3 "${SCRIPT_DIR}/check_f61_collection_router_singleton.py" || overall=1
-
-# F62 — stateful component (tick / batch loop) requires multi-tick idempotency test
-python3 "${SCRIPT_DIR}/check_f62_stateful_multi_tick.py" || overall=1
-
-# F63 — unbounded .fetchall() requires LIMIT or rationale comment
-python3 "${SCRIPT_DIR}/check_f63_unbounded_fetchall.py" || overall=1
-
-# F64 — external HTTP client plugin requires rate-limit / Retry-After test
-python3 "${SCRIPT_DIR}/check_f64_external_api_rate_limit.py" || overall=1
-
-# F65 — every connector plugin implements metadata_for() + ships propagation test (ADR-021)
-python3 "${SCRIPT_DIR}/check_f65_connector_metadata.py" || overall=1
-
-# F66 — every connector + tick-driven component declares per_tick_max_items + disk_watermark (ADR-020)
-python3 "${SCRIPT_DIR}/check_f66_connector_tick_budget.py" || overall=1
-
-# F67 — every staging table with a pushed_to_<sink> column must have a drain code path
-#        (GH #334 — entity_signals had 2.3M rows un-pushed because no code flipped the flag)
-python3 "${SCRIPT_DIR}/check_f67_staging_drain_symmetry.py" || overall=1
-
-# F68 — every public Protocol method has a failure-injection contract test (ADR-024 Bundle A)
-#        (Bug 2 — SharePoint 429 dead-lettered every item because no rate-limit contract test existed)
-python3 "${SCRIPT_DIR}/check_f68_protocol_failure_modes.py" || overall=1
-
-# F69 — integration tests that walk a table / connector stream need a 10⁴-row variant
-#        (Bug 3 — unbounded fetchall in MaintenanceScheduler._prune_orphans was instantaneous at
-#         N=10 fixture scale and saturated disk IO at 989k chunks; ADR-024 Bundle D)
-python3 "${SCRIPT_DIR}/check_f69_scale_bound_tests.py" || overall=1
-
-# F70 — every CREATE TABLE in schema.py has at least one INSERT writer in production code
-#        (GH #336 — documents_media shipped with no writer; ADR-024 Bundle B)
-python3 "${SCRIPT_DIR}/check_f70_schema_writer_symmetry.py" || overall=1
-
-# F71 — every preflight check that reports a count has a paired truthfulness contract test
-#        (GH #334 — the staging preflight reported count=1000 because its SELECT had LIMIT 1000;
-#         a 2.3M-row backlog read out as "small enough to ignore". ADR-024 Bundle C.)
-python3 "${SCRIPT_DIR}/check_f71_preflight_truthfulness.py" || overall=1
-
-# F72 — every registered cross-layer integrity invariant has a matching test file
-#        under tests/integrity_invariants/ with both fixture-scale and soak-scale
-#        variants. Closes the "bronze-vs-content limbo" failure mode that the
-#        existing per-layer integration tests can't see. ADR-024 Bundle E.
-python3 "${SCRIPT_DIR}/check_f72_integrity_invariants.py" || overall=1
-
-# F73 — no private infrastructure references (specific Azure resource names,
-#        internal hostnames, private sibling-repo URLs) in committed code,
-#        docs, or tests. Generic placeholders document the shape without
-#        naming the operator's deployment.
-python3 "${SCRIPT_DIR}/check_no_private_infra_refs.py" || overall=1
-
-# F74 — every Stage subclass is only invoked via a StageRunner (ADR-026 §A.5).
-#        Vacuous-green until Track A.3/A.4 lands the first FetchStage etc.
-python3 "${SCRIPT_DIR}/check_f74_stage_runner_only.py" || overall=1
-
-# F76 — no f-string interpolation of content-like vars (raw/body/payload/…) in
-#        log/exception/dead-letter strings. Structural sibling of F15 catching
-#        the *content* leak path (F15 covers secret-named vars; F76 covers
-#        content-named vars).
-python3 "${SCRIPT_DIR}/check_f76_pii_content_interpolation.py" || overall=1
-
-# F77 — sqlite3.connect call sites must live in the writer-coordinator
-#        allow-list (worker / factory / db / scripts / tests). Structural
-#        proxy for the single-writer discipline (full runtime contract needs
-#        thread-boundary instrumentation; this catches the new-connection
-#        leak surface).
-python3 "${SCRIPT_DIR}/check_f77_sqlite_single_writer.py" || overall=1
-
-# F81 — fresh-install smoke stays wired: the smoke script + its CI workflow
-#        exist and the workflow invokes the script. The smoke itself (compose
-#        boot → healthz → MCP handshake → wizard 200 → BM25 hit) runs in
-#        .github/workflows/fresh-install-smoke.yml, not per-commit.
-python3 "${SCRIPT_DIR}/check_f81_fresh_install_smoke.py" || overall=1
-
-# F82 — wall-clock ceiling assertions banned outside soak/probe tiers
-#        (#493 flake family — `assert elapsed < N` measures host scheduling,
-#        not kairix behaviour; requires slow/soak/load/pvt marker or
-#        # F82-allowed: rationale).
-python3 "${SCRIPT_DIR}/check_f82_wall_clock_ceilings.py" || overall=1
-
-# F83 — gate-runner contract for shell gate scripts (#483 silent-death
-#        class: unguarded VAR=$(...) under set -e, bare || true, shellcheck
-#        at error severity, named stage OK/FAIL verdicts in
-#        safe-commit.sh / run-all.sh).
-python3 "${SCRIPT_DIR}/check_f83_gate_runner_contract.py" || overall=1
-
-bash "${SCRIPT_DIR}/check-f36-connector-bdd-parity.sh" || overall=1
-
-python3 "${SCRIPT_DIR}/check_f34_core_connector_layer_imports.py" || overall=1
-
-python3 "${SCRIPT_DIR}/check_f35_no_cross_connector.py" || overall=1
-
-python3 "${SCRIPT_DIR}/check_f37_singular_sync.py" || overall=1
-
-python3 "${SCRIPT_DIR}/check_f38_silver_singleton.py" || overall=1
-
-python3 "${SCRIPT_DIR}/check_f39_chunk_metadata.py" || overall=1
-
-python3 "${SCRIPT_DIR}/check_f40_extractor_version.py" || overall=1
-
-python3 "${SCRIPT_DIR}/check_f41_plugin_typing.py" || overall=1
-
-python3 "${SCRIPT_DIR}/check_f42_protocol_return_types.py" || overall=1
-
-python3 "${SCRIPT_DIR}/check_f43_plugin_contract_tests.py" || overall=1
-
-# G9 — every services/<name>/ has a README.md (Go side; mirrors F23)
-python3 "${SCRIPT_DIR}/check_go_readme_coverage.py" || overall=1
-
-# G1 — every Go binary exposes --version
-python3 "${SCRIPT_DIR}/check_go_version_flag.py" || overall=1
-
-# G10 — every direct Go dependency carries a rationale in DEPENDENCIES.md
-python3 "${SCRIPT_DIR}/check_go_dependency_rationale.py" || overall=1
-
-# G6 — no panic() in non-main packages
-python3 "${SCRIPT_DIR}/check_go_no_panic_outside_main.py" || overall=1
-
-# G8 — logging via log/slog only (no fmt.Print* / log.Print* in prod)
-python3 "${SCRIPT_DIR}/check_go_logging_discipline.py" || overall=1
-
-# F7 — needs a coverage XML report. Callers running per-invocation
-# coverage artifacts (safe-commit.sh, #483) pass the path via
-# KAIRIX_COVERAGE_XML; standalone runs default to coverage.xml in the
-# repo root. Skip if not present or skip flag set.
-if [[ "$skip_coverage" -eq 0 ]]; then
-    coverage_xml="${KAIRIX_COVERAGE_XML:-${REPO_ROOT}/coverage.xml}"
-    if [[ -f "$coverage_xml" ]]; then
-        python3 "${SCRIPT_DIR}/check_per_file_coverage.py" "$coverage_xml" || overall=1
-    else
-        printf '\033[0;33mskip [arch:per-file-coverage-floor]\033[0m — coverage report not found at %s.\n' "$coverage_xml"
-        printf '   Run: pytest --cov=kairix --cov-report=xml first, then re-run this check.\n'
-    fi
-fi
-
-echo
 if [[ "$overall" -eq 0 ]]; then
-    printf '\033[0;32m=== All architecture fitness functions passed ===\033[0m\n'
+    printf '\033[0;32m=== run-all: architecture fitness functions passed ===\033[0m\n'
 else
-    printf '\033[0;31m=== Architecture fitness functions FAILED ===\033[0m\n'
+    printf '\033[0;31m=== run-all: architecture fitness functions FAILED ===\033[0m\n'
 fi
 exit "$overall"

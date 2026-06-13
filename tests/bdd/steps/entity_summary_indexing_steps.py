@@ -18,6 +18,7 @@ import pytest
 from pytest_bdd import given, parsers, then, when
 
 from kairix.core.connectors.collection_router import legacy_chunk_writer
+from kairix.core.db.fts import rebuild_fts
 from kairix.core.db.scanner import CollectionConfig, DocumentScanner
 from kairix.core.db.schema import create_schema
 from kairix.core.factory import build_search_pipeline, reset_search_pipeline_cache
@@ -148,6 +149,19 @@ def _run_tick(entity_summary_ctx: _Ctx) -> None:
         projector_factory=_factory,
     )
     run_entity_summary_projector_tick(deps)
+    # Deterministic BM25 surfacing (#493): rebuild documents_fts from the
+    # committed documents+content rows after the tick, exactly as the
+    # production self-heal path does (kairix.core.db.fts.rebuild_fts, the
+    # `kairix embed --rebuild-fts` surface). The projector's chunk writer
+    # already lands a per-chunk documents_fts row, but rebuilding here makes
+    # the entity's BM25 row authoritative regardless of FTS5/WAL write-order
+    # timing under full-suite load — so the assertion surfaces the entity via
+    # the deterministic, per-test-isolated BM25 leg and never hinges on the
+    # process-shared vector-index singleton (which resolves against the global
+    # cache path, not FakePaths). The chunk writer leaves the connection mid
+    # transaction, so rebuild_fts folds its DROP/CREATE/INSERT into the open
+    # transaction and the step's commit below makes it atomic.
+    rebuild_fts(db)
     db.commit()
     db.close()
 
