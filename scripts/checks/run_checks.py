@@ -52,8 +52,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# The shared catalogue-driven runner + its primitives (the merged core both
-# kairix and tc-agent-zone consume). kairix supplies the injection seams below.
+# The shared catalogue-driven runner + its primitives (the merged core that
+# every consuming repo shares). kairix supplies the injection seams below.
 from _fitness_rule import FitnessRule
 from _rule_catalogue import ALL_ENTRIES
 from tc_fitness.catalogue import (  # noqa: F401  # is_dispatchable re-exported for the runner tests
