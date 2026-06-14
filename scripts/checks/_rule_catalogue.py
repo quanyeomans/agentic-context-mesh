@@ -443,9 +443,13 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         summary="BDD step impls compose via CLI/MCP/factory — no direct *Pipeline(...) construction",
         exemplar="tests/integration/test_vec_index_lifecycle.py",
         task_type=("writing-a-bdd-feature", "writing-a-test"),
-        # File-local: scans tests/bdd/steps/*.py for direct *Pipeline(...)
-        # construction; each step file is judged in isolation.
-        staged_scope=("tests/bdd/steps",),
+        # Relational, not file-local: collect_violations reads the cross-file
+        # source kairix/agents/mcp/server.py (via _discover_mcp_tool_names) to
+        # decide whether a step's bare call routes through an MCP tool — so a
+        # staged server.py edit (removing a @server.tool() a step relies on) can
+        # newly violate an UN-staged step file. Scope spans both sides.
+        staged_class="relational",
+        staged_scope=("tests/bdd/steps", "kairix/agents/mcp/server.py"),
     ),
     RuleEntry(
         id="F47",
@@ -773,6 +777,13 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="plugin-contract",
         scope="per-plugin",
         summary="every connector declares SourceConnector + at least one of {Poll, Checkpointed, Event}Connector",
+        # Relational, not file-local: _capability_names_via_runtime imports
+        # kairix/core/protocols.py and runtime-isinstance-checks each connector
+        # against the Protocols DEFINED there, so a staged protocols.py edit
+        # (removing a member from a runtime-checkable Protocol) can newly violate
+        # an UN-staged connector. Scope spans the connector tree + protocols.py.
+        staged_class="relational",
+        staged_scope=("kairix/connectors", "kairix/core/protocols.py"),
     ),
     RuleEntry(
         id="F64",

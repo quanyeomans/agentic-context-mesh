@@ -34,6 +34,7 @@ restore runs):
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import io
 import sys
 from collections.abc import Iterator
@@ -118,6 +119,35 @@ def _skipped_rule_ids(output: str) -> set[str]:
         if "skip [" in line:
             ids.add(line.split("skip [", 1)[1].split("]", 1)[0])
     return ids
+
+
+# ── cross-file-source mutation helper (F46 server.py dependency) ─────────
+
+
+@contextlib.contextmanager
+def _server_tool_unregistered(tool: str) -> Iterator[None]:
+    """Temporarily un-register one ``@server.tool()`` from the REAL
+    ``kairix/agents/mcp/server.py`` by renaming its ``def`` so
+    ``_discover_mcp_tool_names`` no longer yields it, then restore the file
+    byte-for-byte on exit (try/finally — a failed assert never leaves the
+    source mutated).
+
+    This is the EXACT cross-file edit the F46 soundness defect is about: a
+    staged ``server.py`` change that drops a tool a step file routes through.
+    The mutation is a single surgical text replacement of ``def <tool>(`` →
+    ``def <tool>_zzz_probe_unregistered(``; the original bytes are captured up
+    front and rewritten in ``finally``.
+    """
+    server_path = _REPO_ROOT / "kairix" / "agents" / "mcp" / "server.py"
+    original = server_path.read_text(encoding="utf-8")
+    needle = f"def {tool}("
+    replacement = f"def {tool}_zzz_probe_unregistered("
+    assert needle in original, f"expected a `def {tool}(` to un-register in server.py"
+    server_path.write_text(original.replace(needle, replacement, 1), encoding="utf-8")
+    try:
+        yield
+    finally:
+        server_path.write_text(original, encoding="utf-8")
 
 
 # ── baseline: a clean staged set passes ─────────────────────────────────
@@ -208,6 +238,134 @@ def test_relational_f36_new_plugin_without_feature_caught_end_to_end() -> None:
         code, out = _run_staged([conn_rel])
     assert code == 1, f"a new connector plugin without a BDD feature must fail staged mode; ledger:\n{out}"
     assert "F36" in _failed_rule_ids(out), f"F36 must be the failing rule; ledger:\n{out}"
+
+
+# ── audit-driven: cross-file source dependencies (F46 / F56) ────────────
+#
+# Two rules an adversarial audit found mis-classified ``file-local`` even
+# though their detectors read CROSS-FILE state, so a staged edit to the
+# cross-file SOURCE (not the obvious scanned file) could slip a violation
+# past a file-local scoping. Reclassifying them ``relational`` with a scope
+# that spans the source closes the gap. These cases prove the SELECTION
+# property — staging the source alone selects the rule — plus, for F46, an
+# executed end-to-end FAIL through the real ``server.py`` dependency.
+
+
+def test_f46_server_py_edit_selects_f46() -> None:
+    """SOUNDNESS (F46): F46's verdict for a step file depends on
+    ``kairix/agents/mcp/server.py`` (its ``@server.tool()`` set decides
+    whether a bare call routes through the MCP surface). So staging
+    server.py ALONE — with NO step file staged — must select F46. The
+    relational scope spans both ``tests/bdd/steps`` and the server source."""
+    f46 = next(e for e in run_checks._select_all() if e.id == "F46")
+    script = run_checks.resolve_script(f46)
+    d = decide(f46, script, ["kairix/agents/mcp/server.py"])
+    assert d.run is True, "staging server.py alone MUST select F46 (its tool set drives step verdicts)"
+    assert d.scope_files is None, "F46 is relational — full scope, never narrowed to staged files"
+    # And it appears in the ran-set of a REAL staged dispatch over server.py alone.
+    _code, out = _run_staged(["kairix/agents/mcp/server.py"])
+    assert "F46" in _ran_rule_ids(out), f"F46 must RUN on a server.py-only staged change; ledger:\n{out}"
+
+
+def test_f46_file_local_would_miss_server_py_edit_sabotage() -> None:
+    """SABOTAGE PROOF (F46): with F46 left ``file-local`` + its old narrow
+    scope (``tests/bdd/steps`` only), staging server.py ALONE does NOT select
+    F46 — the exact missed-violation route the audit found. The shipped
+    catalogue value (relational, scope spans server.py) DOES select it. Proven
+    here by reconstructing the pre-fix entry with ``dataclasses.replace``; the
+    real catalogue entry asserts the fixed behaviour."""
+    f46 = next(e for e in run_checks._select_all() if e.id == "F46")
+    script = run_checks.resolve_script(f46)
+    pre_fix = dataclasses.replace(f46, staged_class="file-local", staged_scope=("tests/bdd/steps",))
+    assert decide(pre_fix, script, ["kairix/agents/mcp/server.py"]).run is False, (
+        "the BUG: file-local F46 scoped to tests/bdd/steps SKIPS a server.py-only staged edit"
+    )
+    assert decide(f46, script, ["kairix/agents/mcp/server.py"]).run is True, (
+        "the FIX: relational F46 with server.py in scope SELECTS the same staged edit"
+    )
+
+
+def test_f46_server_py_tool_removal_fails_dependent_step_end_to_end() -> None:
+    """END-TO-END (F46): a step file that routes through the ``search`` MCP
+    tool (bare call to an imported ``search`` from server.py) is F46-clean
+    ONLY because ``search`` is a registered ``@server.tool()``. Un-register it
+    in the real server.py (the staged cross-file edit) → that same step file
+    now VIOLATES F46. Staging server.py drives the relational rule full-scope,
+    which re-checks the step file → staged mode FAILS F46. This is the missed
+    violation file-local scoping would have let through."""
+    step_rel = "tests/bdd/steps/zzz_staged_probe_f46_dependent_steps.py"
+    # A step file that constructs a *Pipeline directly (so it's "at risk") but
+    # routes through the MCP `search` tool — clean WHILE `search` is registered.
+    step_src = (
+        "from pytest_bdd import when\n"
+        "from kairix.agents.mcp.server import search\n"
+        "from kairix.core.search.pipeline import SearchPipeline\n"
+        "\n"
+        "\n"
+        "@when('the agent builds a pipeline directly')\n"
+        "def _build_pipeline_directly():\n"
+        "    return SearchPipeline(retriever=None, ranker=None)\n"
+        "\n"
+        "\n"
+        "@when('the agent searches')\n"
+        "def _do_search():\n"
+        "    return search('hello')\n"
+    )
+    with _probe_file(step_rel, step_src) as rel:
+        # Control: while `search` is registered, the dependent step is clean.
+        code_clean, out_clean = _run_staged([rel])
+        assert code_clean == 0, f"dependent step must be F46-clean while search is registered; ledger:\n{out_clean}"
+        # Stage the cross-file edit: un-register `search` in the real server.py
+        # and stage server.py. The relational rule re-checks the step full-scope.
+        with _server_tool_unregistered("search"):
+            code_broken, out_broken = _run_staged([rel, "kairix/agents/mcp/server.py"])
+    assert code_broken == 1, f"un-registering search must make the dependent step FAIL F46; ledger:\n{out_broken}"
+    assert "F46" in _failed_rule_ids(out_broken), f"F46 must be the failing rule; ledger:\n{out_broken}"
+
+
+def test_f56_protocols_py_edit_selects_f56() -> None:
+    """SOUNDNESS (F56): F56's runtime probe imports ``kairix/core/protocols.py``
+    and ``isinstance``-checks each connector against the Protocols DEFINED
+    there. A staged protocols.py edit (e.g. dropping a member from a
+    runtime-checkable Protocol) can change whether an UN-staged connector
+    satisfies its capability declaration — so staging protocols.py ALONE must
+    select F56. Selection is the soundness property the relational scope
+    guarantees.
+
+    Note (additive-probe nuance): the runtime ``isinstance`` probe is
+    fail→pass-only on the CONNECTOR side (it can only ADD a satisfied
+    capability, never remove the AST-declared one), so a true missed-violation
+    is hard to construct from the connector side alone. The genuine
+    missed-violation route is the protocols.py edit, which this asserts via
+    SELECTION — the property that closes the audit gap."""
+    f56 = next(e for e in run_checks._select_all() if e.id == "F56")
+    script = run_checks.resolve_script(f56)
+    d = decide(f56, script, ["kairix/core/protocols.py"])
+    assert d.run is True, "staging protocols.py alone MUST select F56 (its Protocols drive the runtime probe)"
+    assert d.scope_files is None, "F56 is relational — full scope, never narrowed to staged files"
+    # And it appears in the ran-set of a REAL staged dispatch over protocols.py.
+    _code, out = _run_staged(["kairix/core/protocols.py"])
+    assert "F56" in _ran_rule_ids(out), f"F56 must RUN on a protocols.py-only staged change; ledger:\n{out}"
+
+
+def test_f56_file_local_would_miss_protocols_py_edit_sabotage() -> None:
+    """SABOTAGE PROOF (F56): with F56 left ``file-local`` and its detector-
+    derived scope (``kairix/connectors`` only), staging protocols.py ALONE
+    does NOT select F56 — the missed-violation route the audit found. The
+    shipped catalogue value (relational, scope spans protocols.py) DOES select
+    it. Pre-fix entry reconstructed with ``dataclasses.replace``; the real
+    catalogue entry asserts the fixed behaviour."""
+    f56 = next(e for e in run_checks._select_all() if e.id == "F56")
+    script = run_checks.resolve_script(f56)
+    # Pre-fix: file-local + scope DERIVED from the F56 detector's roots
+    # ("kairix/connectors",), i.e. no protocols.py in scope.
+    pre_fix = dataclasses.replace(f56, staged_class="file-local", staged_scope=("kairix/connectors",))
+    assert decide(pre_fix, script, ["kairix/core/protocols.py"]).run is False, (
+        "the BUG: file-local F56 scoped to kairix/connectors SKIPS a protocols.py-only staged edit"
+    )
+    assert decide(f56, script, ["kairix/core/protocols.py"]).run is True, (
+        "the FIX: relational F56 with protocols.py in scope SELECTS the same staged edit"
+    )
 
 
 # ── relational deletion: breaking a paired invariant ────────────────────
