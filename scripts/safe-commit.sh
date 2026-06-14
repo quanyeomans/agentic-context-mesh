@@ -28,18 +28,30 @@ set -euo pipefail
 # workflow YAML, doc-only edits, sonar-project.properties tweaks, Dockerfile
 # build-only changes. The full gate stays the merge bar; --fast is the
 # iteration loop. See CLAUDE.md "Local-first feedback loops" for guidance.
+#
+# --check mode (opt-in): the sub-45s WARM inner loop, tighter than --fast.
+# Four stages only — (1) scoped ruff lint+format on the STAGED files, (2)
+# dmypy (warm daemon mypy) instead of cold `mypy`, (3) staged-path fitness
+# (run_checks.py --staged — 4b's sound precise per-rule selection), (4) the
+# impacted tests touching the staged paths. The first run is COLD (dmypy
+# daemon spins up, ~30s); every run after is WARM (~sub-second mypy). This
+# makes the CLAUDE.md "<60s local feedback" promise true. The FULL gate
+# (default safe-commit.sh) REMAINS the merge bar — --check does NOT replace
+# CI; it is purely the local inner loop. See CLAUDE.md "How to commit".
 FAST_MODE=0
+CHECK_MODE=0
 ARGS=()
 for arg in "$@"; do
     case "$arg" in
         --fast) FAST_MODE=1 ;;
+        --check) CHECK_MODE=1 ;;
         *) ARGS+=("$arg") ;;
     esac
 done
 set -- "${ARGS[@]}"
 
 if [[ $# -lt 1 ]]; then
-    echo "Usage: bash scripts/safe-commit.sh [--fast] \"commit message\""
+    echo "Usage: bash scripts/safe-commit.sh [--fast | --check] \"commit message\""
     exit 1
 fi
 
@@ -96,6 +108,155 @@ if git diff --cached --quiet; then
     echo "fix: stage files with 'git add <paths>' before running safe-commit.sh"
     echo "next: 'git status' to see what's modified but not yet staged"
     exit 1
+fi
+
+# ── --check: the sub-45s WARM inner loop ─────────────────────────────────────
+# Tighter than --fast: scoped lint/format on STAGED files + dmypy (warm
+# daemon mypy) + staged-path fitness (run_checks.py --staged, 4b's sound
+# precise selection) + impacted tests. Self-contained — runs its four stages,
+# commits on green, and exits BEFORE the full gate. The full gate (default
+# safe-commit.sh) is untouched; --check never falls through to it. Every
+# stage emits a named OK/FAIL verdict (F83 stage-ledger contract).
+if [[ "$CHECK_MODE" == "1" ]]; then
+    echo "=== Check gates (--check — scoped lint/format + dmypy + staged fitness + impacted tests, <45s warm) ==="
+
+    # Staged source files, split by language surface. --diff-filter=AM drops
+    # deletions (no file to lint). run_gate keeps the capture from tripping
+    # set -e (#483 / F83 sub-rule (a)).
+    run_gate git diff --cached --name-only --diff-filter=AM
+    if [[ "$GATE_RC" -ne 0 ]]; then
+        gate_died "staged-file enumeration" "$GATE_RC" "git diff --cached --name-only --diff-filter=AM"
+    fi
+    ALL_STAGED="$GATE_OUT"
+    # Python files among the staged set drive scoped lint/format + the
+    # impacted-test import grep. grep returns 1 on no-match under set -e, so
+    # the trailing rationale keeps it from aborting (#483 / F83 sub-rule (b)).
+    STAGED_PY=$(echo "$ALL_STAGED" | grep -E '\.py$' || true)  # no staged *.py is a valid state, not an error
+    STAGED_KAIRIX_PY=$(echo "$STAGED_PY" | grep -E '^kairix/' || true)  # impacted-test discovery keys off kairix/ modules
+
+    # ── check-stage 1: scoped ruff lint + format on the STAGED *.py only ──────
+    echo -n "  ruff lint (staged)... "
+    if [[ -z "$STAGED_PY" ]]; then
+        echo -e "${GREEN}OK${NC} (no staged *.py)"
+    else
+        mapfile -t STAGED_PY_ARGS <<< "$STAGED_PY"
+        run_gate uv run ruff check "${STAGED_PY_ARGS[@]}" --quiet
+        if [[ "$GATE_RC" -ne 0 ]]; then
+            echo -e "${RED}FAIL${NC}"
+            echo "$GATE_OUT" | tail -20
+            echo "fix: lint errors in the staged files above."
+            echo "next: uv run ruff check ${STAGED_PY_ARGS[*]} --fix"
+            exit 1
+        fi
+        echo -e "${GREEN}OK${NC}"
+
+        echo -n "  ruff format (staged)... "
+        run_gate uv run ruff format --check "${STAGED_PY_ARGS[@]}"
+        if [[ "$GATE_RC" -ne 0 ]]; then
+            echo -e "${RED}FAIL${NC}"
+            echo "$GATE_OUT" | tail -20
+            echo "fix: formatting drift in the staged files above."
+            echo "next: uv run ruff format ${STAGED_PY_ARGS[*]}"
+            exit 1
+        fi
+        echo -e "${GREEN}OK${NC}"
+    fi
+
+    # ── check-stage 2: dmypy (warm daemon mypy) ──────────────────────────────
+    # `dmypy run` starts the daemon if it isn't running, then type-checks
+    # incrementally against the warm in-memory state. The FIRST run is cold
+    # (~30s daemon spin-up + full check); every run after is warm (sub-second).
+    # We check kairix/ --strict, identical to the full gate's `mypy kairix/
+    # --strict`, so the verdict matches. The daemon is LEFT WARM on exit (no
+    # dmypy stop) — that is the whole point of the inner loop. .dmypy.json is
+    # gitignored so the status file never pollutes the tree.
+    echo -n "  dmypy strict (warm)... "
+    run_gate uv run dmypy status
+    if [[ "$GATE_RC" -ne 0 ]]; then
+        echo -n "(cold start — first run spins the daemon up, ~30s) "
+    fi
+    run_gate uv run dmypy run -- kairix/ --strict
+    DMYPY_OUT="$GATE_OUT"
+    if echo "$DMYPY_OUT" | grep -qE "error:|Daemon crashed"; then
+        echo -e "${RED}FAIL${NC}"
+        echo "$DMYPY_OUT" | grep -E "error:|Daemon crashed" | head -10
+        echo "fix: the type errors are listed above."
+        echo "next: uv run dmypy run -- kairix/ --strict"
+        exit 1
+    fi
+    if [[ "$GATE_RC" -ne 0 ]]; then
+        # Non-zero without an `error:` line: dmypy itself failed to launch
+        # (bad config, missing venv, daemon couldn't bind) — surface it as a
+        # named death rather than a silent set -e abort.
+        gate_died "dmypy" "$GATE_RC" "uv run dmypy run -- kairix/ --strict"
+    fi
+    echo -e "${GREEN}OK${NC}"
+
+    # ── check-stage 3: staged-path fitness (4b's sound precise selection) ─────
+    # run_checks.py --staged runs ONLY the rules whose scope intersects the
+    # staged files (file-local rules narrowed to staged ∩ scope; relational
+    # rules run their full scope when a staged path is in scope; always-run
+    # rules unconditional). Sound: no false negative on staged changes. The
+    # full --all gate is the backstop.
+    echo -n "  staged fitness... "
+    run_gate uv run python scripts/checks/run_checks.py --staged --skip-coverage
+    FITNESS_OUT="$GATE_OUT"
+    if [[ "$GATE_RC" -ne 0 ]]; then
+        echo -e "${RED}FAIL${NC}"
+        echo "$FITNESS_OUT" | tail -30
+        echo "fix: the failing fitness rules are listed above (see docs/architecture/fitness-functions.md)."
+        echo "next: uv run python scripts/checks/run_checks.py --staged --skip-coverage"
+        exit 1
+    fi
+    echo -e "${GREEN}OK${NC}"
+
+    # ── check-stage 4: impacted tests (tests touching the staged paths) ───────
+    # Same import-graph discovery as --fast: map staged kairix/*.py to dotted
+    # module paths, grep tests/ for files importing them, run those. No staged
+    # kairix source (or no test imports it) → no product tests to run.
+    echo -n "  impacted tests... "
+    if [[ -z "$STAGED_KAIRIX_PY" ]]; then
+        echo -e "${GREEN}OK${NC} (no staged kairix/*.py — no impacted tests)"
+    else
+        IMPORT_PATHS=$(echo "$STAGED_KAIRIX_PY" | sed 's|/|.|g; s|\.py$||' | sort -u)
+        CHECK_TEST_FILES=()
+        for imp in $IMPORT_PATHS; do
+            while IFS= read -r tf; do
+                [[ -n "$tf" ]] && CHECK_TEST_FILES+=("$tf")
+            done < <(grep -rl "$imp" tests/ --include='*.py' 2>/dev/null | sort -u)
+        done
+        if [[ "${#CHECK_TEST_FILES[@]}" -eq 0 ]]; then
+            echo -e "${GREEN}OK${NC} (no tests import the staged modules)"
+        else
+            UNIQ_CHECK_TESTS=$(printf '%s\n' "${CHECK_TEST_FILES[@]}" | sort -u | head -50)
+            mapfile -t CHECK_TEST_ARGS <<< "$UNIQ_CHECK_TESTS"
+            run_gate uv run python -m pytest "${CHECK_TEST_ARGS[@]}" -x --timeout=30 \
+                -m "unit or bdd or contract" --no-cov -q
+            CHECK_TEST_OUT="$GATE_OUT"
+            # `-x` stops at the first failure; under `-q` pytest then prints a
+            # `FAILED <nodeid>` line but not always a `N failed` summary, so
+            # match either — otherwise a single-failure run would fall through
+            # to the generic gate_died path with a less actionable message.
+            if echo "$CHECK_TEST_OUT" | grep -qE "[0-9]+ failed|^FAILED "; then
+                echo -e "${RED}FAIL${NC}"
+                echo "$CHECK_TEST_OUT" | grep -E "FAILED|passed|failed|error" | tail -10
+                echo "fix: the failing tests are listed above."
+                echo "next: uv run python -m pytest ${CHECK_TEST_ARGS[*]} -m 'unit or bdd or contract'"
+                exit 1
+            fi
+            if [[ "$GATE_RC" -ne 0 ]]; then
+                gate_died "impacted tests" "$GATE_RC" "uv run python -m pytest ${CHECK_TEST_ARGS[*]} -m 'unit or bdd or contract'"
+            fi
+            CHECK_PASSED=$(echo "$CHECK_TEST_OUT" | grep -oE '[0-9]+ passed' | head -1 || echo "0 passed")
+            [[ -z "$CHECK_PASSED" ]] && CHECK_PASSED="0 passed"
+            echo -e "${GREEN}OK${NC} ($CHECK_PASSED, impacted-only, no coverage)"
+        fi
+    fi
+
+    echo ""
+    echo -e "${GREEN}--check complete (sub-45s warm inner loop). The full gate remains the merge bar. Committing.${NC}"
+    git commit -m "$MESSAGE"
+    exit $?
 fi
 
 if [[ "$FAST_MODE" == "1" ]]; then
