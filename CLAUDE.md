@@ -109,6 +109,8 @@ Production-scale soak tests live under `tests/soak/` (and Bundle E's `tests/inte
 
 Mechanical, blocking checks encode rejected patterns into automation. F-numbers are permanent shipping IDs (never renumbered, never reused); the catalogue at [`scripts/checks/_rule_catalogue.py`](scripts/checks/_rule_catalogue.py) holds full metadata (category, scope, ADR origin, status) and is the canonical query surface. The groupings below match the catalogue's category dimension.
 
+The **runner is the shared `tc_fitness` engine** ([`three-cubes-fitness`](https://github.com/three-cubes/fitness-engine), pinned `@v0.3.0` in `pyproject.toml`) — EPIC #499 common-process convergence. kairix consumes it thin: `scripts/checks/run_checks.py` dispatches through `tc_fitness.runner` (the shared `run`/`main_cli` engine) plus four kairix injection seams (`scope_resolver`, `enumeration_narrower`, `conditional_check`, `subprocess_arg_env`), and `_rule_catalogue.py` imports `RuleEntry` from `tc_fitness.catalogue`. The model is **shared machinery, per-repo domain**: kairix keeps its own F-numbered catalogue rows + check implementations + baselines; the dispatch logic, `CheckContext` (parse-once), staged-selection, the ratchet, and the `RuleEntry` schema all live in the package. The schema is **id-agnostic** — kairix uses F-numbers, the sibling tc-agent-zone repo uses descriptive names; both run the same runner. (`_check_context.py` / `_staged_selection.py` were local once; they're now `tc_fitness.context` / `tc_fitness.staged`.)
+
 <!-- BEGIN F-CATALOGUE (generated; edit _rule_catalogue.py) -->
 
 **Layering**
@@ -149,7 +151,7 @@ Mechanical, blocking checks encode rejected patterns into automation. F-numbers 
 
 <!-- END F-CATALOGUE -->
 
-Pre-existing violations are grandfathered in `.architecture/baseline/`; net-new violations block at pre-commit, `safe-commit.sh`, and CI Stage 0 (or Stage 5 for F9). Full detail per rule: [`scripts/checks/_rule_catalogue.py`](scripts/checks/_rule_catalogue.py) (catalogue) + [`docs/architecture/fitness-functions.md`](docs/architecture/fitness-functions.md) (canonical reference). Read these before adding any silencer, skip, suppression, internal import, or BDD scenario — the gate rejects lazy bypasses.
+Pre-existing violations are grandfathered in `.architecture/baseline/`; net-new violations block at pre-commit, `safe-commit.sh`, and CI Stage 0 (or Stage 5 for F9). Full detail per rule: [`scripts/checks/_rule_catalogue.py`](scripts/checks/_rule_catalogue.py) (kairix's catalogue rows — schema imported from `tc_fitness.catalogue`) + [`docs/architecture/fitness-functions.md`](docs/architecture/fitness-functions.md) (canonical reference). Read these before adding any silencer, skip, suppression, internal import, or BDD scenario — the gate rejects lazy bypasses.
 
 ## CI
 
