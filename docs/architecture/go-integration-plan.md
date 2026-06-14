@@ -76,7 +76,7 @@ Python F-rules don't translate verbatim. Go has different idioms; some Python ru
 
 Pre-existing violations grandfathered in `.architecture/baseline/go-<rule>-files.txt` (same pattern as F1-F24).
 
-Detection scripts live in `scripts/checks/check_go_*.{py,sh}`. They walk `services/**` with `go/ast` (via shelling out to a small Go helper) or with `gofmt -d`-style probes. The Python F-rule pattern (`gate()` from `_arch_lib`) is reused for orchestration so failures still emit the universal affordance template.
+Detection scripts live in `scripts/checks/check_go_*.{py,sh}`. They walk `services/**` with `go/ast` (via shelling out to a small Go helper) or with `gofmt -d`-style probes. The Python F-rule pattern (`gate()` from the shared `tc_fitness` package) is reused for orchestration so failures still emit the universal affordance template.
 
 ## Standards — committed conventions
 

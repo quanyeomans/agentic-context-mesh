@@ -156,8 +156,10 @@ baselines that landed concurrently.
 When every baseline file is at zero entries AND no rule's behaviour
 depends on reading a baseline:
 
-1. Delete `_arch_lib.gate()`'s baseline-reading branch (the
-   `if baseline_file.exists()` block).
+1. Drop the shared `tc_fitness.gate()` baseline-reading branch (the
+   `if baseline_file.exists()` block) — coordinated upstream in the
+   `three-cubes-fitness` package, since the gate primitive is shared, not
+   local (the old `_arch_lib.py` was retired in EPIC #499).
 2. Delete the `.architecture/baseline/` directory entirely.
 3. Update the F50 test to assert "no baseline mechanism remains" instead
    of "F30 baseline file exists".

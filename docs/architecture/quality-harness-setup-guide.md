@@ -4,6 +4,8 @@ How to stand up the kairix quality harness on a new repo (e.g. a sibling infrast
 
 Everything in this document is the lived experience of getting the harness green on kairix — every gotcha section corresponds to a real failure that bit us during the rollout.
 
+> **Post-EPIC #499 — the runner machinery is now a shared package, not files you copy.** The "clone `scripts/checks/`" path below is the *original* (pre-#499) setup story. As of [EPIC #499](https://github.com/three-cubes/kairix/issues/499) (common-process convergence), the dispatch runner, ratchet, parse-once `CheckContext`, staged-selection, and the `RuleEntry` schema all live in the installed [`three-cubes-fitness`](https://github.com/three-cubes/fitness-engine) package (`tc_fitness`, pinned in `pyproject.toml`). A new repo now **depends on `tc_fitness`** and supplies only its own *domain*: catalogue rows (`_rule_catalogue.py`, id-agnostic — F-numbers or descriptive names), `check_*` implementations, and `.architecture/baseline/` files, plus the thin `run_checks.py` consumer shim (`from tc_fitness.runner import main_cli` + any repo-specific injection seams). The CI plumbing is likewise shared via `three-cubes/ci-workflows` (the `setup-uv-cached` composite + `python-quality-gate.yml` reusable workflow). kairix and the sibling tc-agent-zone repo both run on this shared engine. The **gotchas below remain accurate** — they cover Codecov / SonarCloud / coverage-XML / workflow wiring, which each consuming repo still configures locally. The canonical *what* and *why* lives in [`fitness-functions.md`](./fitness-functions.md#harness-architecture) ("Shared engine — kairix consumes `tc_fitness`").
+
 ## Contents
 
 1. [What you get](#what-you-get)
@@ -30,14 +32,34 @@ This document tells you how to put all the pieces in place and connect them.
 
 ## Step-by-step setup
 
-### 1. Clone the harness scripts
+### 1. Depend on `tc_fitness`, then bring your domain checks
 
-Copy the entire contents of `scripts/checks/` from kairix into the new repo:
+**Post-#499 path (current):** add the shared engine to `pyproject.toml`:
+
+```toml
+dependencies = [
+    # ...
+    "three-cubes-fitness @ git+https://github.com/three-cubes/fitness-engine.git@v0.3.0 ; python_version >= '3.12'",
+]
+```
+
+Then add the thin consumer shim `scripts/checks/run_checks.py`
+(`from tc_fitness.runner import main_cli`, declare your catalogue rows as
+`RULES`, wire any repo-specific injection seams) and bring your *domain* —
+the `check_*` implementations + `_rule_catalogue.py` rows + `.architecture/baseline/`
+files. The `gate()` / `python_files()` / `repo_relative()` primitives and the
+`RuleEntry` schema are imported from `tc_fitness` — there is no local `_arch_lib.py`.
+A `FitnessRule` ABC over `tc_fitness.gate` (kairix's `_fitness_rule.py`) lets each
+check be a ~3-line subclass. The catalogue is **id-agnostic**: kairix uses
+F-numbers; a new repo can use descriptive rule names.
+
+The starter set of `check_*` scripts (the domain you copy + adapt):
 
 ```
 scripts/checks/
-├── _arch_lib.py                                       # Python helper
-├── _lib.sh                                            # Shell helper
+├── run_checks.py                                      # Thin tc_fitness.runner consumer (catalogue dispatch + seams)
+├── _rule_catalogue.py                                 # Your RuleEntry rows (schema from tc_fitness.catalogue)
+├── _lib.sh                                            # Shell helper (arch_gate)
 ├── check-no-internal-patches.sh                       # F1
 ├── check-no-env-monkeypatch.sh                        # F2
 ├── check-suppressions-have-rationale.sh               # F3 (extended)
@@ -50,7 +72,7 @@ scripts/checks/
 ├── check_test_skip_rationale.py                       # F11
 ├── check_bdd_happy_path.py                            # F12
 ├── check_bdd_no_implementation_leaks.py               # F13
-└── run-all.sh                                         # Orchestrator
+└── run-all.sh                                         # Orchestrator (invokes run_checks.py --all)
 ```
 
 Adapt the package-name guards: F1, F2, F4, F5 reference `kairix.` and `KAIRIX_*` literals. Search-and-replace to your project's namespace (`tc_agent_zone.` and `TC_AGENT_ZONE_*` or whatever you settle on).
