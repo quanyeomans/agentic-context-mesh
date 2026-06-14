@@ -194,7 +194,7 @@ def test_retired_delegators_dispatch_in_process() -> None:
 def test_in_process_check_isolation_converts_crash_to_fail() -> None:
     """A check whose ``main()`` raises is isolated into a FAIL verdict (rc 1),
     never propagating the exception to abort the ledger."""
-    from _check_context import CheckContext
+    from tc_fitness.context import CheckContext
 
     boom = RuleEntry(id="BOOM", gate="boom", check="zzz_boom_probe", category="layering", scope="per-file", summary="s")
     # No check_zzz_boom_probe.py exists → import fails → caught → FAIL (rc 1).
@@ -213,7 +213,7 @@ def test_full_run_parses_each_file_at_most_once() -> None:
     import contextlib
     import io
 
-    from _check_context import CheckContext
+    from tc_fitness.context import CheckContext
 
     ctx = CheckContext(repo_root=run_checks.REPO_ROOT)
     seen: set[str] = set()
@@ -247,7 +247,7 @@ def test_in_process_verdict_matches_for_a_sample() -> None:
     rule (F26), a location rule (F61), a regex/text rule (F76), the
     catalogue-currency rule (F92), and a retired-delegator rule (F50) — the
     check kinds the equivalence proof covers."""
-    from _check_context import CheckContext
+    from tc_fitness.context import CheckContext
 
     sample_ids = {"F26", "F61", "F76", "F92", "F50"}
     by_id = {e.id: e for e in run_checks._select_all()}

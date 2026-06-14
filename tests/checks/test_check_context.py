@@ -41,7 +41,7 @@ _CHECKS_DIR = _REPO_ROOT / "scripts" / "checks"
 if str(_CHECKS_DIR) not in sys.path:
     sys.path.insert(0, str(_CHECKS_DIR))
 
-from _check_context import CheckContext  # noqa: E402
+from tc_fitness.context import CheckContext  # noqa: E402
 
 pytestmark = pytest.mark.unit
 
@@ -81,7 +81,7 @@ def test_walk_is_memoised() -> None:
     with ctx.install():
         tree = ast.parse(_SAMPLE_SRC, filename="w.py")
         # Reference order from the pristine walker (captured at import).
-        from _check_context import _REAL_AST_WALK
+        from tc_fitness.context import _REAL_AST_WALK
 
         expected = list(_REAL_AST_WALK(tree))
         for _ in range(5):
@@ -93,7 +93,7 @@ def test_walk_is_memoised() -> None:
 def test_install_restores_real_ast_functions() -> None:
     """On context exit, ``ast.parse`` and ``ast.walk`` are the pristine
     stdlib functions again — no leak past the run."""
-    from _check_context import _REAL_AST_PARSE, _REAL_AST_WALK
+    from tc_fitness.context import _REAL_AST_PARSE, _REAL_AST_WALK
 
     ctx = CheckContext(repo_root=_REPO_ROOT)
     with ctx.install():
@@ -106,7 +106,7 @@ def test_install_restores_real_ast_functions() -> None:
 def test_install_restores_even_on_exception() -> None:
     """The restore happens in a ``finally`` — a check raising inside the
     block must not leave ``ast.parse`` patched."""
-    from _check_context import _REAL_AST_PARSE
+    from tc_fitness.context import _REAL_AST_PARSE
 
     ctx = CheckContext(repo_root=_REPO_ROOT)
     with pytest.raises(RuntimeError):

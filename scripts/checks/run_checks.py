@@ -1,354 +1,463 @@
 #!/usr/bin/env python3
-"""Catalogue-driven fitness-function runner — the single dispatch surface.
+"""Catalogue-driven fitness-function runner — kairix's thin consumer shim.
 
-Motivation (EPIC #499 Phase 2)
-------------------------------
-Before this runner, registering a fitness rule meant editing five files
-in lockstep: ``_rule_catalogue.py`` (metadata), ``run-all.sh`` (explicit
-per-check invocations), ``.pre-commit-config.yaml`` (per-rule hooks),
-``docs/architecture/fitness-functions.md`` (prose), and ``CLAUDE.md``
-(the grouped section). Six parallel rule agents editing those five files
-produced six cherry-pick conflicts. This runner makes
-``scripts/checks/_rule_catalogue.py`` the single source of truth: it
-reads the catalogue and DERIVES the invocation set, so ``run-all.sh``,
-pre-commit, and the docs all consume the catalogue.
+kairix is a THIN CONSUMER of the shared ``tc_fitness.runner`` (EPIC #499
+common-process). The in-process + subprocess dispatch, the named verdict
+ledger, the ``--all`` / ``--gate`` / ``--staged`` modes, the parse-once
+``CheckContext``, and the sound staged-selection logic all live in the shared
+``three-cubes-fitness`` package now; this module only:
 
-Dispatch convention
--------------------
-Each :class:`~_rule_catalogue.RuleEntry` resolves to exactly one check
-script:
+* declares kairix's catalogue (``RULES = ALL_ENTRIES``);
+* wires the FOUR injection seams the shared runner exposes so kairix's behaviour
+  stays BYTE-IDENTICAL to the pre-migration local runner:
 
-* ``script`` unset → the default python check
-  ``check_<check>.py``. These run IN-PROCESS (#499 Phase 2 stage 4a):
-  the runner imports the module and calls its ``main() -> int`` inside a
-  single process, sharing one :class:`~_check_context.CheckContext` whose
-  AST cache parses every file at most once. The per-rule verdict is the
-  check's own ``main()`` return code; a check that raises is isolated into
-  a FAIL, never aborting the ledger.
-* ``script`` set to a ``check-*.sh`` (e.g.
-  ``"check-no-internal-patches.sh"``) → run that REAL shell detector as a
-  guarded subprocess. Only the handful of rules whose verdict is produced
-  by bash (the ``grep`` + ``arch_gate`` detectors F1/F2/F3/F4/F10) carry a
-  ``script`` override; the gating logic lives in the shell, not in a python
-  ``main()``, so they cannot run in-process.
-* The F7/F9 coverage check (``check_per_file_coverage.py``) runs as a
-  subprocess too — it takes a runtime Cobertura-XML argument and
-  ``sys.exit``s on a malformed report.
+    1. ``scope_resolver`` — kairix derives a file-local rule's staged scope from
+       its check module's own detector (the import-boundary ``RULE.roots``, the
+       ``FitnessRule.roots`` ABC attribute, or the location/singleton engine's
+       ``kairix/`` walk). See :func:`_kairix_scope_resolver`.
+    2. ``enumeration_narrower`` — kairix narrows TWO extra file-enumeration
+       surfaces the shared ``restrict_python_files`` doesn't know about: the
+       ``FitnessRule.enumerate_files`` ABC method and every already-imported
+       ``check_*`` module's ``from tc_fitness import python_files`` binding. See
+       :func:`_kairix_enumeration_narrower`.
+    3. ``conditional_check`` — the F7/F9 coverage check reads its Cobertura-XML
+       path from ``KAIRIX_COVERAGE_XML`` and is skipped when ``--skip-coverage``
+       is passed OR the report is absent, with kairix's EXACT skip text. See
+       :func:`_make_conditional_check`.
+    4. ``subprocess_arg_env`` — declared on the F7/F9 catalogue rows
+       (``KAIRIX_COVERAGE_XML`` / ``coverage.xml``) so the shared runner
+       dispatches the coverage check as a guarded subprocess with the resolved
+       path appended.
 
-Entries with ``status="proposed"`` / ``check="(proposed)"`` have no
-script yet and are skipped. Entries with ``run_all=False`` run elsewhere
-in the SDLC (release-time, security stage, out-of-band) and are excluded
-from ``--all`` — exactly mirroring what ``run-all.sh`` dispatched before
-this change. Distinct entries that resolve to the SAME script (e.g. F7
-and the conditional coverage path) dispatch that script once.
+* owns the ``--skip-coverage`` CLI flag (the shared ``main_cli`` parser doesn't
+  carry it — it is a kairix-specific affordance ``run-all.sh`` /
+  ``safe-commit.sh`` pass), strips it before dispatch, and threads it into the
+  conditional-check seam.
 
-Modes
------
-* ``--all`` — every in-scope rule (the full tree). The entrypoint
-  ``run-all.sh`` calls; safe-commit / CI Stage 0 consume it.
-* ``--staged`` — precise per-rule selection against the staged paths
-  (``git diff --cached --name-only``), single-sourced on each
-  :class:`~_rule_catalogue.RuleEntry` (``staged_class`` / ``staged_scope``)
-  and resolved by :mod:`_staged_selection` (stage 4b). File-local rules run
-  over ``staged ∩ scope`` (with the file index narrowed to the staged files);
-  relational rules run their FULL scope when any staged path is in scope;
-  always-run rules run unconditionally. The hard invariant is no false
-  negative on staged changes — when scope can't be resolved, the rule runs
-  (fail-safe). The transparent ledger prints which rules ran vs were skipped
-  as not-in-scope. pre-commit calls this; the ``--all`` gate is the backstop.
-* ``--gate <id>`` — one rule by catalogue id (e.g. ``F26``).
-
-Output contract (F83 gate-runner discipline)
---------------------------------------------
-The runner prints a named ``run`` line and a ``PASS`` / ``FAIL`` verdict
-line PER RULE, then a final aggregate verdict. Every subprocess is
-guarded — a check that raises or exits non-zero is recorded as a FAIL
-for its rule, never aborting the ledger. Exit code is non-zero iff any
-dispatched rule failed.
+``run-all.sh`` and ``.pre-commit-config.yaml`` invoke this module exactly as
+before: ``run_checks.py --all [--skip-coverage]`` / ``run_checks.py --staged
+[--skip-coverage]`` / ``run_checks.py --gate <id>``.
 """
 
 from __future__ import annotations
 
 import argparse
-import contextlib
 import importlib
 import inspect
-import io
-import os
-import subprocess
 import sys
-import traceback
-from collections.abc import Callable
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _check_context import CheckContext
-from _rule_catalogue import ALL_ENTRIES, RuleEntry
-from _staged_selection import StagedDecision, decide, restrict_enumeration
+
+# The shared catalogue-driven runner + its primitives (the merged core that
+# every consuming repo shares). kairix supplies the injection seams below.
+from _fitness_rule import FitnessRule
+from _rule_catalogue import ALL_ENTRIES
+from tc_fitness.catalogue import (  # noqa: F401  # is_dispatchable re-exported for the runner tests
+    RuleEntry,
+    is_dispatchable,
+)
+from tc_fitness.context import CheckContext
+from tc_fitness.runner import (
+    ConditionalCheck,
+    ConditionalResult,
+    RunnerConfig,
+    Verdicts,
+    resolve_script,
+    run,
+)
+from tc_fitness.runner import (
+    _dispatches_in_process as _pkg_dispatches_in_process,
+)
+from tc_fitness.runner import (
+    _load_check_main as _pkg_load_check_main,
+)
+from tc_fitness.runner import (
+    _run_one_inprocess as _pkg_run_one_inprocess,
+)
+from tc_fitness.runner import (
+    _run_one_subprocess as _pkg_run_one_subprocess,
+)
+from tc_fitness.runner import (
+    _select_all as _pkg_select_all,
+)
+from tc_fitness.runner import (
+    _select_gate as _pkg_select_gate,
+)
+from tc_fitness.staged import (
+    StagedDecision,
+    staged_in_scope,  # noqa: F401  # re-exported unchanged for the staged-selection tests
+)
+from tc_fitness.staged import decide as _pkg_decide
+from tc_fitness.staged import resolve_staged_scope as _pkg_resolve_staged_scope
+
+#: kairix's catalogue — the ``tuple[RuleEntry, ...]`` the shared runner reads.
+RULES: tuple[RuleEntry, ...] = ALL_ENTRIES
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CHECKS_DIR = REPO_ROOT / "scripts" / "checks"
 
-# The coverage check (F7 / F9) is the one rule taking a runtime argument
-# (the Cobertura XML path) and the one rule run-all.sh dispatches
-# conditionally — it needs a coverage report that only exists after a
-# coverage run. Callers (safe-commit.sh) pass the path via
-# KAIRIX_COVERAGE_XML; a standalone run defaults to coverage.xml. When
-# neither exists, the rule is skipped — exactly as run-all.sh did.
-_COVERAGE_CHECK = "check_per_file_coverage.py"
-
-_RED = "\033[0;31m"
-_GREEN = "\033[0;32m"
 _YELLOW = "\033[0;33m"
 _RESET = "\033[0m"
 
 
-def resolve_script(entry: RuleEntry) -> str:
-    """Return the check-script filename (under ``scripts/checks/``) for
-    ``entry`` — the ``script`` override, or the default
-    ``check_<check>.py``.
-    """
-    if entry.script:
-        return entry.script
-    return f"check_{entry.check}.py"
-
-
-def is_dispatchable(entry: RuleEntry) -> bool:
-    """True iff ``entry`` has a real check to run (not a ``proposed``
-    placeholder)."""
-    return entry.status != "proposed" and entry.check != "(proposed)"
-
-
-# ── scope → staged-path predicate (the --staged narrowing) ──────────────
+# ── seam 1: scope_resolver (kairix FitnessRule-aware staged scope) ───────────
 #
-# Stage 4b (#499 Phase 2) makes the narrowing PRECISE and SOUND. The per-rule
-# selection class + path-scope are single-sourced on each
-# :class:`~_rule_catalogue.RuleEntry` (``staged_class`` / ``staged_scope``)
-# and resolved by :mod:`_staged_selection`. The runner asks that module for a
-# :class:`~_staged_selection.StagedDecision` per rule and dispatches
-# accordingly. The hard invariant — never silently drop a rule a staged file
-# could violate — is enforced there: file-local rules run over ``staged ∩
-# scope``, relational rules run their FULL scope when any staged path is in
-# scope, and always-run rules run unconditionally.
+# The shared ``decide`` derives a file-local rule's staged scope by calling the
+# consumer's ``ScopeResolver(script) -> tuple[str, ...] | None``. kairix derives
+# it from the check module's own detector — preserving the exact scope the
+# pre-migration local ``_staged_selection.resolve_staged_scope`` computed.
+
+# The location/singleton engine (F29 / F38 / F61) always walks ``kairix/``
+# regardless of each rule's ``allowed_roots`` allow-list, so a check that
+# imports it is scoped to the production package.
+_LOCATION_ENGINE_MODULE = "_location_engine"
+# The boundary engine shims expose a module-level ``RULE`` carrying ``roots``.
+_BOUNDARY_RULE_ATTR = "RULE"
 
 
-def _rule_touches_staged(entry: RuleEntry, staged: list[str]) -> bool:
-    """Back-compat shim: True iff ``entry`` would be DISPATCHED for ``staged``.
+def _module_name_for(script: str) -> str | None:
+    """Module name for a ``check_<x>.py`` script, or ``None`` for a ``.sh``
+    detector (shell rules can't be introspected for scan roots — their scope
+    must be carried explicitly on the catalogue entry)."""
+    if not script.endswith(".py"):
+        return None
+    return script[: -len(".py")]
 
-    Delegates to the stage-4b :func:`_staged_selection.decide`. Kept so the
-    existing ``test_staged_narrowing_*`` cases keep asserting the run/skip
-    boundary; new code consumes :func:`_staged_selection.decide` directly for
-    the full decision (scope + file narrowing).
+
+def _imports_location_engine(module: object) -> bool:
+    """True if the check module is a location/singleton-engine shim.
+
+    The shims (F29 / F38 / F61) all ``from _location_engine import
+    LocationRule``, so the imported ``LocationRule`` name resolving to the
+    engine's class is the distinguishing signal. The import-boundary shims
+    import ``ImportBoundaryRule`` instead and are already handled by the
+    ``RULE.roots`` branch upstream of this call.
     """
-    return decide(entry, resolve_script(entry), staged).run
+    location_rule = getattr(module, "LocationRule", None)
+    return location_rule is not None and getattr(location_rule, "__module__", "") == _LOCATION_ENGINE_MODULE
 
 
-def _staged_paths() -> list[str]:
-    """``git diff --cached --name-only`` — staged file paths, repo-relative.
+def _roots_from_module(module_name: str) -> tuple[str, ...] | None:
+    """Derive a rule's scan roots by importing its check module and reading,
+    in order of specificity:
 
-    Guarded: a git failure returns an empty list, which the caller
-    treats as "run everything" (fail-safe)."""
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return []
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+      1. a module-level ``RULE`` with a ``roots`` tuple (import-boundary
+         engine shims: F26 / F27 / F34 / F35 / F37 / F44);
+      2. a ``FitnessRule`` subclass's ``roots`` class attribute (the ABC
+         checks: F8 / F15 / F47 / F63 / …);
+      3. ``("kairix",)`` when the module imports the location/singleton engine
+         (F29 / F38 / F61 — those always walk the production package).
+
+    Returns ``None`` when nothing resolves (the caller treats that as
+    always-in-scope — fail-safe, never a silent skip). Import failures are
+    swallowed into ``None`` for the same reason.
+    """
+    try:
+        module = importlib.import_module(module_name)
+    except BaseException:  # pragma: no cover - import hiccup → fail-safe None
+        # An un-importable check can't be narrowed; fall back to always-run.
+        return None
+
+    rule = getattr(module, _BOUNDARY_RULE_ATTR, None)
+    boundary_roots = getattr(rule, "roots", None)
+    if isinstance(boundary_roots, tuple) and boundary_roots:
+        return boundary_roots
+
+    for _name, obj in inspect.getmembers(module, inspect.isclass):
+        if obj is FitnessRule or not issubclass(obj, FitnessRule):
+            continue
+        if obj.__module__ != module.__name__:
+            # Skip the imported FitnessRule ABC / re-exports; only the check's
+            # OWN subclass declares its roots.
+            continue
+        roots = getattr(obj, "roots", None)
+        if isinstance(roots, tuple) and roots:
+            return roots
+
+    if _imports_location_engine(module):
+        return ("kairix",)
+
+    return None
 
 
-# ── dispatch ────────────────────────────────────────────────────────────
+def _kairix_scope_resolver(script: str) -> tuple[str, ...] | None:
+    """The ``ScopeResolver`` seam: derive ``script``'s scan roots from its check
+    module's own detector. ``None`` for a ``.sh`` detector or an unresolvable
+    module → the shared ``decide`` runs the rule unconditionally (fail-safe)."""
+    module_name = _module_name_for(script)
+    if module_name is None:
+        return None
+    return _roots_from_module(module_name)
+
+
+# kairix-resolver-bound staged-selection helpers. The shared ``decide`` /
+# ``resolve_staged_scope`` take an explicit ``resolver`` argument; these bind
+# kairix's FitnessRule-aware resolver as the default so existing call sites (and
+# tests/checks/test_staged_selection.py) get kairix's exact scope derivation
+# without threading the resolver through every call.
+
+
+def decide(
+    entry: RuleEntry,
+    script: str,
+    staged: list[str],
+    resolver: Any = _kairix_scope_resolver,
+) -> StagedDecision:
+    """Decide whether — and over what — to run ``entry`` given ``staged``,
+    binding kairix's scope resolver by default (the shared ``decide`` semantics)."""
+    return _pkg_decide(entry, script, staged, resolver)
+
+
+def resolve_staged_scope(
+    entry: RuleEntry,
+    script: str,
+    resolver: Any = _kairix_scope_resolver,
+) -> tuple[str, ...] | None:
+    """The repo-relative path-prefix scope for ``entry`` under ``script``,
+    binding kairix's scope resolver by default."""
+    return _pkg_resolve_staged_scope(entry, script, resolver)
+
+
+# ── seam 2: enumeration_narrower (kairix-specific file-index surfaces) ────────
+#
+# The shared ``restrict_python_files`` already narrows the package-level
+# ``tc_fitness.python_files`` to the staged set. kairix funnels file-local checks
+# through TWO additional enumeration surfaces the shared narrowing can't see:
+#
+#   * ``FitnessRule.enumerate_files`` — the ABC method the ~25 FitnessRule
+#     subclasses inherit;
+#   * each already-imported ``check_*`` module's ``from tc_fitness import
+#     python_files`` binding (bound BY VALUE at import, so re-patching
+#     ``tc_fitness.python_files`` alone doesn't reach the local name).
+#
+# This narrower layers both on top of the shared one, so a file-local staged run
+# walks ONLY the staged files while the per-file verdict stays byte-identical.
+
+
+def _filter_to_staged(paths: list[Path], staged_abs: frozenset[Path]) -> list[Path]:
+    """Keep only the ``paths`` that are in the staged set (by resolved path)."""
+    out: list[Path] = []
+    for p in paths:
+        try:
+            resolved = p.resolve()
+        except OSError:  # pragma: no cover - resolve hiccup → drop conservatively only if not staged
+            resolved = p
+        if resolved in staged_abs:
+            out.append(p)
+    return out
+
+
+@contextmanager
+def _kairix_enumeration_narrower(repo_root: Path, staged: list[str]) -> Iterator[None]:
+    """The ``EnumerationNarrower`` seam: narrow the kairix-specific enumeration
+    surfaces to ``staged`` for the duration of the ``with`` block, then restore.
+
+    Patches :meth:`FitnessRule.enumerate_files` and every already-imported
+    ``check_*`` module's local ``python_files`` binding so each yields only the
+    staged files (intersected with what it would otherwise walk). The detectors'
+    own ``is_in_scope`` / extension filtering still applies on top, so a staged
+    file outside a rule's scope is still skipped. Correctness-preserving for
+    file-local rules: the set a rule inspects is ``what-it-would-walk ∩ staged``
+    and the per-file verdict for each is identical to the full run.
+
+    The shared ``restrict_python_files`` narrows the package-level
+    ``tc_fitness.python_files`` itself; this narrower only adds the kairix
+    surfaces, so the two compose without double work.
+    """
+    import tc_fitness
+
+    staged_abs = frozenset((repo_root / s).resolve() for s in staged)
+
+    real_enumerate = FitnessRule.enumerate_files
+    real_python_files = tc_fitness.python_files
+
+    def _scoped_enumerate(self: FitnessRule) -> list[Path]:
+        return _filter_to_staged(real_enumerate(self), staged_abs)
+
+    def _scoped_python_files(*roots: str, repo_root: Path | None = None, **kwargs: Any) -> list[Path]:
+        full = real_python_files(*roots, repo_root=repo_root, **kwargs)
+        return _filter_to_staged(full, staged_abs)
+
+    # The ABC method file-local checks inherit. ``_fitness_rule`` itself does not
+    # bind ``python_files`` (it uses ``FitnessRule.enumerate_files``), so only
+    # the ABC method needs patching here; the per-check ``from tc_fitness import
+    # python_files`` bindings are patched in the loop below.
+    FitnessRule.enumerate_files = _scoped_enumerate  # type: ignore[method-assign]  # run-scoped staged narrowing; restored in finally
+
+    # Patch every already-imported check module that bound ``python_files`` by
+    # value so its local reference also narrows. Record originals to restore
+    # exactly. ``module`` is the dynamic check module object; ``setattr`` rebinds
+    # its local name.
+    patched_modules: list[tuple[Any, Any]] = []
+    for module in list(sys.modules.values()):
+        candidate: Any = module
+        name = getattr(candidate, "__name__", "")
+        if not name.startswith("check_"):
+            continue
+        if getattr(candidate, "python_files", None) is real_python_files:
+            patched_modules.append((candidate, real_python_files))
+            candidate.python_files = _scoped_python_files
+
+    try:
+        yield
+    finally:
+        FitnessRule.enumerate_files = real_enumerate  # type: ignore[method-assign]  # restore pristine enumeration
+        for patched, original in patched_modules:
+            patched.python_files = original
+
+
+# ── seam 3: conditional_check (coverage skip text + --skip-coverage flag) ────
+#
+# The F7/F9 coverage check declares ``subprocess_arg_env="KAIRIX_COVERAGE_XML"``,
+# so the shared runner dispatches it as a guarded subprocess with the resolved
+# Cobertura-XML path appended — UNLESS this hook says skip. The hook reproduces
+# kairix's EXACT skip text for both skip reasons:
+#
+#   * ``--skip-coverage`` passed → "skip [F7] check_per_file_coverage.py —
+#     --skip-coverage" (the run-all.sh / safe-commit.sh inner-loop path);
+#   * report absent → "skip [F7] ... — coverage report not found" + a "run:"
+#     hint line.
 
 
 def _coverage_xml_path() -> Path | None:
-    """The Cobertura XML the coverage check should read, or ``None`` to
-    skip. ``KAIRIX_COVERAGE_XML`` wins (safe-commit's per-invocation
-    artifact); else the repo-root ``coverage.xml``; skip if neither
-    exists."""
+    """The Cobertura XML the coverage check should read, or ``None`` to skip.
+    ``KAIRIX_COVERAGE_XML`` wins (safe-commit's per-invocation artifact); else
+    the repo-root ``coverage.xml``; skip if neither exists."""
+    import os
+
     env_path = os.environ.get("KAIRIX_COVERAGE_XML")
     candidate = Path(env_path) if env_path else (REPO_ROOT / "coverage.xml")
     return candidate if candidate.exists() else None
 
 
-# ── in-process vs subprocess dispatch policy ────────────────────────────
+def _make_conditional_check(*, skip_coverage: bool) -> ConditionalCheck:
+    """Build the ``ConditionalCheck`` hook for the F7/F9 coverage rule, bound to
+    the runner's ``--skip-coverage`` flag. Reproduces kairix's exact skip lines."""
+
+    def _conditional(entry: RuleEntry) -> ConditionalResult | None:
+        script = resolve_script(entry)
+        if skip_coverage:
+            return ConditionalResult(
+                run=False,
+                skip_lines=(f"{_YELLOW}skip [{entry.id}]{_RESET} {script} — --skip-coverage",),
+            )
+        coverage_xml = _coverage_xml_path()
+        if coverage_xml is None:
+            return ConditionalResult(
+                run=False,
+                skip_lines=(
+                    f"{_YELLOW}skip [{entry.id}]{_RESET} {script} — coverage report not found",
+                    "   run: pytest --cov=kairix --cov-report=xml first, then re-run this check.",
+                ),
+            )
+        return ConditionalResult(run=True, extra_args=(str(coverage_xml),))
+
+    return _conditional
+
+
+# ── seam 4: paved_road_footer (the affordance line under a FAIL) ─────────────
+
+
+def _paved_road_footer(entry: RuleEntry) -> str | None:
+    """The affordance line the shared runner prints under a FAIL when the rule
+    carries a curated ``exemplar`` — points the agent at the query surface."""
+    if entry.exemplar:
+        return f"  paved-road: python3 scripts/checks/rules.py --rule {entry.id}"
+    return None
+
+
+# ── shared injection-seam kwargs (one place; threaded into every dispatch) ───
+
+
+def _seam_kwargs(*, skip_coverage: bool) -> dict[str, Any]:
+    """The injection seams the shared runner consumes, as a kwargs dict."""
+    return {
+        "repo_root": REPO_ROOT,
+        "checks_dir": CHECKS_DIR,
+        "scope_resolver": _kairix_scope_resolver,
+        "enumeration_narrower": _kairix_enumeration_narrower,
+        "paved_road_footer": _paved_road_footer,
+        "conditional_check": _make_conditional_check(skip_coverage=skip_coverage),
+    }
+
+
+# ── back-compat surface for the runner / staged-selection unit tests ─────────
 #
-# Stage 4a (#499 Phase 2): most rules are pure-python AST/text checks with a
-# zero-arg ``main() -> int`` that prints its own ``ok``/``FAIL`` gate line and
-# returns the exit code. Those run IN-PROCESS, sharing one ``CheckContext`` so
-# the AST cache parses every file at most once. Two classes stay as guarded
-# subprocesses because they are genuinely NOT pure python:
-#
-#   * ``check-*.sh`` real shell detectors — F1/F2 (python emits paths, the
-#     shell ``arch_gate`` does the baseline diff + verdict), F3/F4/F10 (grep
-#     + arch_gate), and any other shell-scoped gate. Their verdict is produced
-#     by bash, not by the python ``main()``.
-#   * the F7/F9 coverage check — it takes a runtime Cobertura-XML argument and
-#     ``sys.exit``s on a malformed report; it is also conditionally skipped.
-#
-# A rule dispatches in-process iff its resolved script is ``check_<x>.py``
-# (not a ``.sh``) AND is not the coverage check.
-_SHELL_SUFFIX = ".sh"
+# tests/checks/test_catalogue_runner.py + tests/checks/test_staged_selection.py
+# drive the kairix runner through these module-level symbols. They now delegate
+# to the shared package (binding kairix's scope_resolver where the package
+# signature takes one), so the tests keep asserting kairix's exact selection +
+# dispatch behaviour without re-implementing it here.
+
+
+def _select_all() -> list[RuleEntry]:
+    """In-scope rules for ``--all``: dispatchable AND ``run_all``."""
+    return _pkg_select_all(RULES)
+
+
+def _select_gate(gate_id: str) -> list[RuleEntry]:
+    """Rules whose catalogue ``id`` matches ``gate_id`` (case-insensitive)."""
+    return _pkg_select_gate(RULES, gate_id)
 
 
 def _dispatches_in_process(entry: RuleEntry) -> bool:
     """True iff ``entry``'s check runs in-process (pure-python, no runtime arg)."""
-    script = resolve_script(entry)
-    if script.endswith(_SHELL_SUFFIX):
-        return False
-    return script != _COVERAGE_CHECK
+    return _pkg_dispatches_in_process(entry)
 
 
-def _load_check_main(script: str) -> Callable[[], int]:
-    """Import the check module for ``script`` (a ``check_<x>.py`` filename) and
-    return a zero-arg callable that invokes its ``main``.
+def _load_check_main(script: str) -> Any:
+    """Import ``script``'s check module and return a zero-arg ``main`` invoker."""
+    return _pkg_load_check_main(script)
 
-    Some checks declare ``main(argv: list[str] | None = None)`` and default to
-    ``argparse``'s ``parse_args(None)`` — which reads ``sys.argv``. Under the
-    subprocess runner that was the per-check process's empty argv (the static
-    half / no runtime arg); in-process, ``sys.argv`` is the RUNNER's
-    ``--all`` / ``--skip-coverage``, which the check's parser would reject. So
-    when ``main`` accepts an ``argv`` parameter we pass an explicit empty list
-    — reproducing exactly the no-arguments subprocess invocation. Imported once
-    per module; ``importlib`` caches it in ``sys.modules``."""
-    module_name = script[: -len(".py")]
-    module = importlib.import_module(module_name)
-    main_fn = module.main
-    accepts_argv = bool(inspect.signature(main_fn).parameters)
 
-    def _invoke() -> int:
-        result = main_fn([]) if accepts_argv else main_fn()
-        return int(result)
-
-    return _invoke
+def _footer_config() -> RunnerConfig:
+    """A minimal ``RunnerConfig`` carrying the paved-road footer hook + the
+    coverage conditional-check seam — used by the per-rule back-compat shims so
+    a FAILING rule with an exemplar still prints the affordance line."""
+    return RunnerConfig(
+        repo_root=REPO_ROOT,
+        checks_dir=CHECKS_DIR,
+        paved_road_footer=_paved_road_footer,
+        conditional_check=_make_conditional_check(skip_coverage=True),
+    )
 
 
 def _run_one_inprocess(entry: RuleEntry, ctx: CheckContext) -> int:
-    """Dispatch ``entry``'s pure-python check IN-PROCESS, sharing ``ctx``.
+    """Dispatch ``entry``'s pure-python check IN-PROCESS (the shared impl).
 
-    Prints the identical ``run`` / ``PASS`` / ``FAIL`` framing the subprocess
-    path prints, with the check's own stdout/stderr replayed inline between
-    them (so the ledger interleaves exactly as the unbuffered subprocess
-    runner did). The check is fully isolated:
-
-      * its ``main()`` is called inside a try/except over ``BaseException``;
-        a raised exception OR a ``SystemExit`` is converted to a FAIL with the
-        traceback, exactly as a non-zero subprocess exit would have been — one
-        crashing check never aborts the ledger;
-      * a non-int / non-zero return is treated as a failure;
-      * stdout/stderr are captured and replayed so a check that forgets to
-        flush, or writes to stderr, lands in the same stream the developer saw.
-    """
-    script = resolve_script(entry)
-    print(f"{_YELLOW}run [{entry.id}]{_RESET} {script}")
-
-    out_buf = io.StringIO()
-    err_buf = io.StringIO()
-    crashed = False
-    rc = 1
-    try:
-        check_main = _load_check_main(script)
-        with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
-            result = check_main()
-        rc = result if isinstance(result, int) else 1
-    except BaseException:
-        # Isolation boundary: one check must never abort the ledger. Every
-        # failure mode — a raised exception, a SystemExit, a KeyboardInterrupt
-        # bubbling out of a check's main() — is converted to a FAIL verdict,
-        # exactly as a non-zero subprocess exit would have been.
-        crashed = True
-        traceback.print_exc(file=err_buf)
-        rc = 1
-
-    # Replay the check's captured output inline, preserving stream separation
-    # so the merged ledger is byte-identical to the unbuffered subprocess form.
-    captured_out = out_buf.getvalue()
-    if captured_out:
-        sys.stdout.write(captured_out)
-    captured_err = err_buf.getvalue()
-    if captured_err:
-        sys.stderr.write(captured_err)
-
-    if rc == 0:
-        print(f"{_GREEN}PASS [{entry.id}]{_RESET} {entry.summary[:88]}")
-        return 0
-    suffix = "" if crashed else f" (exit {rc})"
-    print(f"{_RED}FAIL [{entry.id}]{_RESET} {entry.summary[:88]}{suffix}")
-    if entry.exemplar:
-        print(f"  paved-road: python3 scripts/checks/rules.py --rule {entry.id}")
-    return 1
+    The shared ``_run_one_inprocess`` takes the resolved ``RunnerConfig`` (for
+    the paved-road footer hook), not a bare context — the parse cache is shared
+    via the surrounding ``ctx.install()`` the caller wraps this in (the ``ctx``
+    argument is kept for the existing test signature)."""
+    return _pkg_run_one_inprocess(entry, _footer_config())
 
 
 def _run_one(entry: RuleEntry, *, skip_coverage: bool) -> int | None:
-    """Dispatch ``entry``'s check as a guarded subprocess. Print a named
-    ``run`` line and a ``PASS`` / ``FAIL`` verdict. Return 0 on pass,
-    1 on fail (including a missing script or a crashing check), or
-    ``None`` when the rule was intentionally skipped (coverage report
-    absent) — mirroring run-all.sh's conditional coverage stage."""
-    script = resolve_script(entry)
-    script_path = CHECKS_DIR / script
-    interpreter = "bash" if script.endswith(".sh") else sys.executable
-
-    extra_args: list[str] = []
-    if script == _COVERAGE_CHECK:
-        if skip_coverage:
-            print(f"{_YELLOW}skip [{entry.id}]{_RESET} {script} — --skip-coverage")
-            return None
-        coverage_xml = _coverage_xml_path()
-        if coverage_xml is None:
-            print(f"{_YELLOW}skip [{entry.id}]{_RESET} {script} — coverage report not found")
-            print("   run: pytest --cov=kairix --cov-report=xml first, then re-run this check.")
-            return None
-        extra_args = [str(coverage_xml)]
-
-    print(f"{_YELLOW}run [{entry.id}]{_RESET} {script}")
-
-    if not script_path.exists():
-        print(f"{_RED}FAIL [{entry.id}]{_RESET} — check script not found: scripts/checks/{script}")
-        print("   fix: restore the script or correct the catalogue entry's check/script field.")
-        return 1
-
-    try:
-        result = subprocess.run(
-            [interpreter, str(script_path), *extra_args],
-            cwd=REPO_ROOT,
-            check=False,
-        )
-        rc = result.returncode
-    except OSError as exc:
-        print(f"{_RED}FAIL [{entry.id}]{_RESET} — could not launch {script}: {exc}")
-        return 1
-
-    if rc == 0:
-        print(f"{_GREEN}PASS [{entry.id}]{_RESET} {entry.summary[:88]}")
-        return 0
-    print(f"{_RED}FAIL [{entry.id}]{_RESET} {entry.summary[:88]} (exit {rc})")
-    # Paved-road footer (#499 Phase 2): when a FAILING rule carries a
-    # curated exemplar, point the agent straight at the query surface
-    # that surfaces it. Only the existing FAIL verdict line is the F83
-    # named verdict; this is an ADDED affordance line, not a replacement.
-    if entry.exemplar:
-        print(f"  paved-road: python3 scripts/checks/rules.py --rule {entry.id}")
-    return 1
-
-
-def _select_all() -> list[RuleEntry]:
-    """In-scope rules for ``--all``: dispatchable AND ``run_all`` — the
-    set ``run-all.sh`` dispatched before the catalogue-driven cutover."""
-    return [e for e in ALL_ENTRIES if is_dispatchable(e) and e.run_all]
+    """Back-compat: dispatch ``entry`` once and print its named verdict +
+    paved-road footer — the per-rule output-contract surface
+    tests/architecture/test_rules_query.py drives. Routes through the shared
+    runner's in-process or subprocess path depending on the rule's shape;
+    returns 0 pass / 1 fail / ``None`` skip."""
+    cfg = RunnerConfig(
+        repo_root=REPO_ROOT,
+        checks_dir=CHECKS_DIR,
+        paved_road_footer=_paved_road_footer,
+        conditional_check=_make_conditional_check(skip_coverage=skip_coverage),
+    )
+    if _pkg_dispatches_in_process(entry):
+        ctx = CheckContext(repo_root=REPO_ROOT)
+        with ctx.install():
+            return _pkg_run_one_inprocess(entry, cfg)
+    return _pkg_run_one_subprocess(entry, cfg)
 
 
 def _staged_decisions(staged: list[str]) -> list[tuple[RuleEntry, StagedDecision]]:
-    """Per-rule staged decision for every ``--all`` entry, in catalogue order.
-
-    Deduped by resolved script (the same script runs once), mirroring the
-    ``--all`` dispatch. Each pair carries the rule's
-    :class:`~_staged_selection.StagedDecision` — run/skip, the reason (for the
-    transparent ledger), and the staged file subset to narrow a file-local
-    rule's file index to.
-    """
+    """Per-rule staged decision for every ``--all`` entry, in catalogue order,
+    deduped by resolved script — binding kairix's scope resolver."""
     out: list[tuple[RuleEntry, StagedDecision]] = []
     seen_scripts: set[str] = set()
     for entry in _select_all():
@@ -356,145 +465,38 @@ def _staged_decisions(staged: list[str]) -> list[tuple[RuleEntry, StagedDecision
         if script in seen_scripts:
             continue
         seen_scripts.add(script)
-        out.append((entry, decide(entry, script, staged)))
+        out.append((entry, decide(entry, script, staged, _kairix_scope_resolver)))
     return out
 
 
-def _select_staged() -> list[RuleEntry]:
-    """``--all`` set, narrowed to the rules a staged change could trip.
-
-    Back-compat surface (the dispatch now consumes :func:`_staged_decisions`
-    so it can also narrow file-local rules' file index). Returns only the
-    rules that WILL run.
-    """
-    staged = _staged_paths()
-    return [e for e, decision in _staged_decisions(staged) if decision.run]
-
-
-def _select_gate(gate_id: str) -> list[RuleEntry]:
-    """Rules whose catalogue ``id`` matches ``gate_id`` (case-insensitive)."""
-    return [e for e in ALL_ENTRIES if e.id.lower() == gate_id.lower() and is_dispatchable(e)]
-
-
-def _dispatch(entries: list[RuleEntry], *, skip_coverage: bool) -> int:
-    """Run every entry once per distinct resolved script (dedup), in
-    catalogue order. Aggregate ledger; return 0 iff all passed.
-
-    Pure-python rules run IN-PROCESS sharing one :class:`CheckContext` (so the
-    AST cache parses every file at most once); shell detectors and the coverage
-    check run as guarded subprocesses. The dispatch ORDER, the per-rule ``run``
-    / ``PASS`` / ``FAIL`` lines, and the aggregate verdict are identical to the
-    subprocess-per-rule runner — only the SOURCE of each verdict changes.
-    """
-    seen_scripts: set[str] = set()
-    failures: list[str] = []
-    ran = 0
-    skipped = 0
-    ctx = CheckContext(repo_root=REPO_ROOT)
-    with ctx.install():
-        for entry in entries:
-            script = resolve_script(entry)
-            if script in seen_scripts:
-                continue
-            seen_scripts.add(script)
-            if _dispatches_in_process(entry):
-                result: int | None = _run_one_inprocess(entry, ctx)
-            else:
-                result = _run_one(entry, skip_coverage=skip_coverage)
-            if result is None:
-                skipped += 1
-                continue
-            ran += 1
-            if result != 0:
-                failures.append(entry.id)
-
-    print()
-    if failures:
-        print(
-            f"{_RED}=== Architecture fitness functions FAILED ==={_RESET} "
-            f"({len(failures)}/{ran} rule(s) failed: {', '.join(failures)})"
-        )
-        return 1
-    print(f"{_GREEN}=== All {ran} architecture fitness functions passed ==={_RESET}")
-    return 0
+def _rule_touches_staged(entry: RuleEntry, staged: list[str]) -> bool:
+    """Back-compat shim: True iff ``entry`` would be DISPATCHED for ``staged``."""
+    return decide(entry, resolve_script(entry), staged, _kairix_scope_resolver).run
 
 
 def _dispatch_staged(staged: list[str], *, skip_coverage: bool) -> int:
-    """Precise staged dispatch (#499 Phase 2 stage 4b).
+    """Precise staged dispatch — delegates to the shared runner's staged mode
+    with kairix's seams. Returns the process exit code (0 clean, 1 any fail).
 
-    For every ``--all`` rule, ask :func:`_staged_selection.decide` whether — and
-    over what — to run it against ``staged``:
-
-    * SKIPPED rules print a transparent ``skip [id] — <reason>`` line, so the
-      narrowing is auditable, never silent.
-    * RUN rules dispatch exactly as ``--all`` does (in-process for pure-python,
-      guarded subprocess for shell / coverage). A FILE-LOCAL rule with a staged
-      file subset runs inside :func:`restrict_enumeration`, so its file
-      enumeration is narrowed to the staged files (the big inner-loop win)
-      while its per-file verdict stays byte-identical to a full run.
-
-    Aggregate ledger + exit code match the ``--all`` contract; only the
-    SELECTION (which rules, over which files) differs.
-    """
-    decisions = _staged_decisions(staged)
-    failures: list[str] = []
-    ran = 0
-    skipped = 0
-    ctx = CheckContext(repo_root=REPO_ROOT)
-    with ctx.install():
-        for entry, decision in decisions:
-            if not decision.run:
-                print(f"{_YELLOW}skip [{entry.id}]{_RESET} {resolve_script(entry)} — {decision.reason}")
-                skipped += 1
-                continue
-            result = _run_staged_one(entry, ctx, decision, staged=staged, skip_coverage=skip_coverage)
-            if result is None:
-                skipped += 1
-                continue
-            ran += 1
-            if result != 0:
-                failures.append(entry.id)
-
-    print()
-    print(f"{_YELLOW}staged selection:{_RESET} {ran} ran, {skipped} skipped (not in staged scope or report absent)")
-    if failures:
-        print(
-            f"{_RED}=== Architecture fitness functions FAILED ==={_RESET} "
-            f"({len(failures)}/{ran} rule(s) failed: {', '.join(failures)})"
-        )
-        return 1
-    print(f"{_GREEN}=== All {ran} staged architecture fitness functions passed ==={_RESET}")
-    return 0
+    Kept as a kairix-internal entry point for tests/checks/test_staged_selection.py,
+    which drives the real staged dispatch over probe files."""
+    return run(RULES, mode="staged", staged_files=staged, **_seam_kwargs(skip_coverage=skip_coverage)).exit_code
 
 
-def _run_staged_one(
-    entry: RuleEntry,
-    ctx: CheckContext,
-    decision: StagedDecision,
-    *,
-    staged: list[str],
-    skip_coverage: bool,
-) -> int | None:
-    """Dispatch one RUN-decided rule in staged mode.
-
-    File-local rules carrying a staged file subset run inside
-    :func:`restrict_enumeration` so the in-process check walks ONLY those
-    files. Everything else (relational / always-run / shell / coverage) runs
-    over its full natural scope, exactly as ``--all`` would.
-    """
-    if not _dispatches_in_process(entry):
-        return _run_one(entry, skip_coverage=skip_coverage)
-    if decision.scope_files:
-        with restrict_enumeration(REPO_ROOT, list(decision.scope_files)):
-            return _run_one_inprocess(entry, ctx)
-    return _run_one_inprocess(entry, ctx)
+# ── CLI entrypoint ───────────────────────────────────────────────────────────
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Parse mode flags and dispatch. ``--all`` is the default."""
+    """Parse ``--all`` / ``--staged`` / ``--gate`` + ``--skip-coverage`` and
+    dispatch through the shared runner with kairix's injection seams.
+
+    ``--skip-coverage`` is a kairix-specific flag the shared ``main_cli`` parser
+    doesn't carry (``run-all.sh`` / ``safe-commit.sh`` pass it for the F7/F9
+    coverage stage). This shim owns it, strips it, and threads it into the
+    conditional-check seam."""
     parser = argparse.ArgumentParser(
         prog="run_checks.py",
-        description="Catalogue-driven fitness-function runner (#499 Phase 2).",
+        description="Catalogue-driven fitness-function runner (kairix thin consumer of tc_fitness.runner).",
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--all", action="store_true", help="run every in-scope rule (default)")
@@ -507,26 +509,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    seams = _seam_kwargs(skip_coverage=args.skip_coverage)
+
     if args.gate:
-        entries = _select_gate(args.gate)
-        if not entries:
-            print(f"{_RED}no catalogue rule with id {args.gate!r}{_RESET}")
-            print("   fix: pass a real id (see scripts/checks/_rule_catalogue.py) or run --all.")
+        verdict: Verdicts = run(RULES, mode="gate", gate_id=args.gate, **seams)
+        if verdict.failures == ["<no-such-gate>"]:
             return 2
-        print(f"=== Architecture fitness function: {args.gate} ===")
-        return _dispatch(entries, skip_coverage=args.skip_coverage)
+        return verdict.exit_code
 
     if args.staged:
-        # Precise per-rule staged selection (#499 Phase 2 stage 4b): the
-        # dispatcher computes each rule's decision, prints the transparent
-        # run/skip ledger, and narrows file-local rules' file index to the
-        # staged files. Selection is sound — no false negative on staged
-        # changes; the full --all gate remains the merge backstop.
-        print("=== Architecture fitness functions (staged) ===")
-        return _dispatch_staged(_staged_paths(), skip_coverage=args.skip_coverage)
+        return run(RULES, mode="staged", **seams).exit_code
 
-    print("=== Architecture fitness functions ===")
-    return _dispatch(_select_all(), skip_coverage=args.skip_coverage)
+    return run(RULES, mode="all", **seams).exit_code
 
 
 if __name__ == "__main__":

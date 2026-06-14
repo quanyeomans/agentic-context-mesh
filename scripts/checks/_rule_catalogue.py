@@ -38,8 +38,19 @@ Status vocabulary
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Literal
+
+# The RuleEntry schema is now sourced from the shared three-cubes-fitness
+# package (EPIC #499 common-process) — kairix is a THIN CONSUMER of the
+# catalogue-driven runner, so the row schema is repo-agnostic and lives in
+# ``tc_fitness.catalogue``. kairix keeps its OWN F-number rows (below) and its
+# OWN closed ``Category`` / ``Scope`` / ``Status`` vocabularies (validated in
+# ``tests/checks/test_rule_catalogue.py``); the package's ``RuleEntry`` uses
+# open ``str`` for those dimensions so each repo curates its own taxonomy.
+from tc_fitness.catalogue import (  # noqa: F401  # StagedClass re-exported for the staged-selection consumers
+    RuleEntry,
+    StagedClass,
+)
 
 Category = Literal[
     "layering",
@@ -105,11 +116,9 @@ Status = Literal[
 # * ``"always-run"`` — the trigger is "any change at all": net-new-file
 #   detection (F50), catalogue currency (F92), README / path-naming
 #   invariants that fire on any new tracked path. → always run.
-StagedClass = Literal[
-    "file-local",
-    "relational",
-    "always-run",
-]
+#
+# ``StagedClass`` is now imported from ``tc_fitness.catalogue`` (above) — the
+# shared schema owns the closed three-member vocabulary; kairix consumes it.
 
 # ── paved-road task-type vocabulary (#499 Phase 2) ──────────────────────
 #
@@ -139,100 +148,21 @@ member. New tasks are added here deliberately (and only here)."""
 _TASK_TYPES_FROZEN: frozenset[str] = frozenset(TASK_TYPES)
 
 
-@dataclass(frozen=True)
-class RuleEntry:
-    """One row in the catalogue.
-
-    ``id`` is the human-facing F-number or named identifier ("F26",
-    "no-logging-secrets"). ``gate`` is the baseline filename root
-    (``f26`` → ``.architecture/baseline/f26-files.txt``). ``check``
-    is the script filename minus the ``check_`` prefix and ``.py``
-    suffix.
-
-    Runner dispatch (#499 Phase 2 — the catalogue-driven runner)
-    -----------------------------------------------------------
-    ``scripts/checks/run_checks.py`` derives the exact check
-    invocation for each entry from two optional fields:
-
-    * ``script`` — the exact script under ``scripts/checks/`` to run,
-      WHEN it diverges from the default. Default (``script is None``)
-      is the python check ``check_<check>.py`` invoked as
-      ``python3 scripts/checks/check_<check>.py``. Set ``script`` to a
-      ``check-*.sh`` name when the rule runs through a shell wrapper or
-      a pure-shell detector (the runner infers shell-vs-python from the
-      ``.sh`` / ``.py`` extension). This is required for the handful of
-      rules whose run-all invocation is NOT ``check_<check>.py``:
-      the pure-shell detectors (F3 / F4 / F10) whose ``check`` field
-      points at a different python file, and the F2/F4, F3/F14, F10/F21
-      duals that share a ``check`` field but run distinct scripts.
-
-    * ``run_all`` — whether ``run_checks.py --all`` (and so
-      ``run-all.sh`` / CI Stage 0 / pre-commit) dispatches this entry.
-      Defaults to ``True``. Set ``False`` for rules that run elsewhere
-      in the SDLC (``baseline-shrinking`` at release time;
-      ``sonar-new-code`` in the security stage; ``worktree-isolation``
-      and ``paydown-doc-currency`` invoked out-of-band) so the runner
-      reproduces exactly the set ``run-all.sh`` ran before this change.
-
-    Paved-road query surface (#499 Phase 2 — ``rules.py``)
-    -----------------------------------------------------
-    Two OPTIONAL agent-affordance fields answer "what pattern do I copy
-    for task X?" BEFORE an agent writes code, and link a failing gate
-    back to the exemplar:
-
-    * ``exemplar`` — a repo-relative path to a canonical PASSING file
-      that demonstrates the pattern an agent should copy to satisfy the
-      rule. ``None`` (the default) means no curated exemplar yet — only
-      the high-traffic capability-building rules carry one. When a rule
-      with an ``exemplar`` FAILS, ``run_checks.py`` prints a
-      ``paved-road:`` footer pointing at ``rules.py --rule <id>``.
-
-    * ``task_type`` — zero-or-more tags from the closed
-      :data:`TASK_TYPES` vocabulary. Tags the agent-facing tasks ("I'm
-      adding a connector") whose pattern this rule governs, so
-      ``rules.py --task <t>`` can list every rule an agent must satisfy
-      for that task. Empty (the default) for rules an agent doesn't hit
-      while building a capability.
-
-    Staged selection (#499 Phase 2 stage 4b — precise per-rule narrowing)
-    --------------------------------------------------------------------
-    Two OPTIONAL fields tell ``run_checks.py --staged`` how to select and
-    scope this rule against the staged file set. They are SINGLE-SOURCED
-    here so the staged narrowing can never drift from the rule's real
-    detection surface, and default conservatively so an un-annotated rule is
-    never under-run:
-
-    * ``staged_class`` — one of :data:`StagedClass`. Defaults to
-      ``"file-local"`` (the safe residue: most rules ARE file-local). Set
-      ``"relational"`` for cross-file / deletion-sensitive rules (run full
-      scope when touched) and ``"always-run"`` for any-change rules.
-
-    * ``staged_scope`` — the repo-relative path prefixes whose staged change
-      could trigger this rule. ``None`` (the default) means "derive it": the
-      runner asks the rule's own detector for its scan roots (the
-      ``FitnessRule.roots`` / import-boundary / location-engine roots), and
-      falls back to running the rule when no scope can be resolved
-      (fail-safe — never silently skip). Set an explicit tuple only when the
-      relational scope is BROADER than the file-local scan roots (e.g. F30's
-      scan walks ``tests/`` but its trigger also includes ``kairix/cli.py``).
-      An ``"always-run"`` rule ignores ``staged_scope``.
-    """
-
-    id: str
-    gate: str
-    check: str
-    category: Category
-    scope: Scope
-    summary: str
-    adr_origin: str | None = None
-    status: Status = "shipped"
-    tags: tuple[str, ...] = field(default_factory=tuple)
-    script: str | None = None
-    run_all: bool = True
-    exemplar: str | None = None
-    task_type: tuple[str, ...] = field(default_factory=tuple)
-    staged_class: StagedClass = "file-local"
-    staged_scope: tuple[str, ...] | None = None
+# ``RuleEntry`` is imported from ``tc_fitness.catalogue`` (top of module).
+#
+# It is the repo-agnostic row schema the shared runner reads. The schema carries
+# EVERY field kairix's rows below use — ``id`` / ``gate`` / ``check`` /
+# ``category`` / ``scope`` / ``summary`` / ``adr_origin`` / ``status`` / ``tags``
+# / ``script`` / ``run_all`` / ``exemplar`` / ``task_type`` / ``staged_class`` /
+# ``staged_scope`` — plus two OPTIONAL runtime-arg fields the conditional
+# coverage check uses (``subprocess_arg_env`` / ``subprocess_arg_default``).
+#
+# kairix's rows type-check against the package schema's open ``str`` category /
+# scope / status; kairix's OWN closed ``Category`` / ``Scope`` / ``Status``
+# Literals (above) stay the kairix-side taxonomy, validated at runtime by
+# ``tests/checks/test_rule_catalogue.py``. The runner's dispatch resolution,
+# paved-road affordance, and staged-selection semantics are documented in
+# ``tc_fitness.catalogue.RuleEntry`` and ``tc_fitness.staged``.
 
 
 _ENTRIES: tuple[RuleEntry, ...] = (
@@ -361,6 +291,13 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="coverage",
         scope="per-file",
         summary="per-file coverage ≥ 90% (unit) — Stage 2 floor",
+        # The coverage check takes a runtime Cobertura-XML argument read from an
+        # env var (safe-commit's per-invocation artifact path), and is SKIPPED
+        # when the report is absent. The shared runner dispatches it as a guarded
+        # subprocess with the resolved path appended (never in-process), via the
+        # conditional-check seam ``run_checks.py`` wires for the exact skip text.
+        subprocess_arg_env="KAIRIX_COVERAGE_XML",
+        subprocess_arg_default="coverage.xml",
     ),
     RuleEntry(
         id="F8",
@@ -380,6 +317,9 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-file",
         summary="per-file coverage ≥ 90% on union of unit + integration (Stage 5)",
         run_all=False,
+        # Same conditional Cobertura-XML runtime arg as F7 (shares the script).
+        subprocess_arg_env="KAIRIX_COVERAGE_XML",
+        subprocess_arg_default="coverage.xml",
     ),
     RuleEntry(
         id="F11",
