@@ -77,6 +77,40 @@ Status = Literal[
     "superseded",
 ]
 
+# ── staged-selection class (#499 Phase 2 stage 4b) ──────────────────────
+#
+# How ``run_checks.py --staged`` decides whether — and over WHAT — to run a
+# rule given the staged file set. Three classes, ordered by how much the
+# runner may safely narrow:
+#
+# * ``"file-local"`` — a violation is determinable from a single file in
+#   isolation (every import-boundary / location / marker / regex rule:
+#   F26 / F8 / F76 / …). A staged change can only NEWLY violate the rule if a
+#   staged file is in the rule's path-scope, AND only the staged files need
+#   re-checking — the non-staged files were clean at the previous commit and
+#   their content is unchanged, so the baseline-diff verdict for them is
+#   unchanged. Deleting a file can only REMOVE a file-local violation, never
+#   add one. → run over ``staged ∩ scope``; skip when that intersection is
+#   empty. This is the default residue.
+#
+# * ``"relational"`` — a violation depends on cross-file state: a code
+#   surface in tree A paired with a test / spec / route artefact in tree B
+#   (F30 CLI↔outcome-test, F45 capability↔BDD-feature, F54 flag↔both-branch,
+#   F90 template↔route, …). A staged change anywhere in the rule's broader
+#   scope — INCLUDING a deletion of the paired artefact, or a NEW surface
+#   file — can break the invariant even when the obviously-"in-scope" file
+#   isn't itself staged. → if any staged path is within the rule's scope,
+#   run the rule over its FULL scope (not just the staged files).
+#
+# * ``"always-run"`` — the trigger is "any change at all": net-new-file
+#   detection (F50), catalogue currency (F92), README / path-naming
+#   invariants that fire on any new tracked path. → always run.
+StagedClass = Literal[
+    "file-local",
+    "relational",
+    "always-run",
+]
+
 # ── paved-road task-type vocabulary (#499 Phase 2) ──────────────────────
 #
 # A CLOSED set of agent-facing "I'm about to do X" tasks. ``rules.py
@@ -159,6 +193,29 @@ class RuleEntry:
       ``rules.py --task <t>`` can list every rule an agent must satisfy
       for that task. Empty (the default) for rules an agent doesn't hit
       while building a capability.
+
+    Staged selection (#499 Phase 2 stage 4b — precise per-rule narrowing)
+    --------------------------------------------------------------------
+    Two OPTIONAL fields tell ``run_checks.py --staged`` how to select and
+    scope this rule against the staged file set. They are SINGLE-SOURCED
+    here so the staged narrowing can never drift from the rule's real
+    detection surface, and default conservatively so an un-annotated rule is
+    never under-run:
+
+    * ``staged_class`` — one of :data:`StagedClass`. Defaults to
+      ``"file-local"`` (the safe residue: most rules ARE file-local). Set
+      ``"relational"`` for cross-file / deletion-sensitive rules (run full
+      scope when touched) and ``"always-run"`` for any-change rules.
+
+    * ``staged_scope`` — the repo-relative path prefixes whose staged change
+      could trigger this rule. ``None`` (the default) means "derive it": the
+      runner asks the rule's own detector for its scan roots (the
+      ``FitnessRule.roots`` / import-boundary / location-engine roots), and
+      falls back to running the rule when no scope can be resolved
+      (fail-safe — never silently skip). Set an explicit tuple only when the
+      relational scope is BROADER than the file-local scan roots (e.g. F30's
+      scan walks ``tests/`` but its trigger also includes ``kairix/cli.py``).
+      An ``"always-run"`` rule ignores ``staged_scope``.
     """
 
     id: str
@@ -174,6 +231,8 @@ class RuleEntry:
     run_all: bool = True
     exemplar: str | None = None
     task_type: tuple[str, ...] = field(default_factory=tuple)
+    staged_class: StagedClass = "file-local"
+    staged_scope: tuple[str, ...] | None = None
 
 
 _ENTRIES: tuple[RuleEntry, ...] = (
@@ -261,6 +320,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-file",
         summary="no @patch / monkeypatch on kairix internals — inject Fake* through a seam",
         script="check-no-internal-patches.sh",
+        # Shell detector greps tests/ for @patch on kairix.* targets. File-local
+        # (per-test-file), but runs as a subprocess so it can't narrow to staged
+        # files — it runs its full tests/ grep when a tests/ path is staged.
+        staged_scope=("tests",),
     ),
     RuleEntry(
         id="F2",
@@ -270,6 +333,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-file",
         summary='no monkeypatch.setenv("KAIRIX_*") — pass deps as kwargs instead',
         script="check-no-env-monkeypatch.sh",
+        # Shell detector greps tests/ for monkeypatch.setenv("KAIRIX_*").
+        staged_scope=("tests",),
     ),
     RuleEntry(
         id="F5",
@@ -286,6 +351,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="test-discipline",
         scope="per-method",
         summary="no *_fn=None test-only kwargs in production",
+        # File-local: scans kairix/ for *_fn=None test-only kwargs in prod.
+        staged_scope=("kairix",),
     ),
     RuleEntry(
         id="F7",
@@ -361,6 +428,11 @@ _ENTRIES: tuple[RuleEntry, ...] = (
             "adding-a-provider",
             "writing-a-bdd-feature",
         ),
+        # Relational: a new capability surface (CLI/MCP/provider/connector/
+        # extractor) under kairix/, OR a deleted feature file, breaks the
+        # "ships a BDD feature in the same commit" invariant.
+        staged_class="relational",
+        staged_scope=("kairix", "tests/bdd/features"),
     ),
     RuleEntry(
         id="F46",
@@ -371,6 +443,13 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         summary="BDD step impls compose via CLI/MCP/factory — no direct *Pipeline(...) construction",
         exemplar="tests/integration/test_vec_index_lifecycle.py",
         task_type=("writing-a-bdd-feature", "writing-a-test"),
+        # Relational, not file-local: collect_violations reads the cross-file
+        # source kairix/agents/mcp/server.py (via _discover_mcp_tool_names) to
+        # decide whether a step's bare call routes through an MCP tool — so a
+        # staged server.py edit (removing a @server.tool() a step relies on) can
+        # newly violate an UN-staged step file. Scope spans both sides.
+        staged_class="relational",
+        staged_scope=("tests/bdd/steps", "kairix/agents/mcp/server.py"),
     ),
     RuleEntry(
         id="F47",
@@ -391,6 +470,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         summary="tests/e2e/test_composed_production_path.py exists, runs in CI Stage 4.5",
         exemplar="tests/e2e/test_composed_production_path.py",
         task_type=("writing-a-test",),
+        # Relational: presence/shape of the composed-path E2E file. Deleting or
+        # gutting it under tests/e2e breaks the invariant.
+        staged_class="relational",
+        staged_scope=("tests/e2e",),
     ),
     RuleEntry(
         id="F54",
@@ -404,6 +487,15 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         tags=("test-discipline",),
         exemplar="tests/bdd/features/feature_flag_connector_github.feature",
         task_type=("adding-a-feature-flag",),
+        # Relational: a flag added to REGISTRY, OR a deleted both-branch
+        # BDD/integration/e2e artefact, breaks coverage parity.
+        staged_class="relational",
+        staged_scope=(
+            "kairix/core/features",
+            "tests/bdd/features",
+            "tests/integration",
+            "tests/e2e",
+        ),
     ),
     RuleEntry(
         id="F62",
@@ -413,6 +505,15 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-class",
         summary="every stateful tick/run_batch component has a multi-tick advance/idempotency test",
         adr_origin="2026-05 production cursor-write incident",
+        # Relational: a new tick/run_batch class under kairix/core/connectors |
+        # maintenance, OR a deleted multi-tick test, breaks the pairing.
+        staged_class="relational",
+        staged_scope=(
+            "kairix/core/connectors",
+            "kairix/core/maintenance",
+            "tests/integration",
+            "tests/contracts",
+        ),
     ),
     RuleEntry(
         id="F68",
@@ -422,6 +523,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-protocol-method",
         summary="every Protocol method has a failure-injection contract test",
         adr_origin="docs/architecture/ADR-024-test-pyramid-redesign.md §F68",
+        # Relational: a Protocol declared anywhere under kairix/, OR a deleted
+        # failure-mode contract test, breaks the pairing.
+        staged_class="relational",
+        staged_scope=("kairix", "tests/contracts"),
     ),
     RuleEntry(
         id="F69",
@@ -431,6 +536,9 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-test",
         summary="every integration test with .fetchall()/list_changes has a ≥10K-row variant",
         adr_origin="docs/architecture/ADR-024-test-pyramid-redesign.md §F69",
+        # File-local: scans tests/integration/ for fetchall/list_changes tests
+        # lacking a scale variant; each test file is judged in isolation.
+        staged_scope=("tests/integration",),
     ),
     RuleEntry(
         id="F72",
@@ -440,6 +548,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="cross-cutting",
         summary="every cross-layer integrity invariant has a fixture-scale AND soak-scale test",
         adr_origin="docs/architecture/ADR-024-test-pyramid-redesign.md §F72",
+        # Relational: pairs a fixture-scale invariant test with its soak-scale
+        # sibling; deleting either (anywhere under tests/) breaks the pair.
+        staged_class="relational",
+        staged_scope=("tests",),
     ),
     RuleEntry(
         id="F81",
@@ -455,6 +567,11 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         ),
         adr_origin="onboarding tranche 3, 2026-06-11 — registered via EPIC #499 Phase 0; "
         "choreography stage added EPIC #499 Phase 3",
+        # Relational wiring check: the smoke script and the workflow that
+        # invokes it live in different trees; deleting either (or breaking the
+        # invocation) trips it.
+        staged_class="relational",
+        staged_scope=("scripts/checks/check-fresh-install-smoke.sh", ".github/workflows/fresh-install-smoke.yml"),
     ),
     RuleEntry(
         id="F82",
@@ -482,6 +599,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         adr_origin="EPIC #499 Phase 1 — #492 overlay split-brain (H1)",
         exemplar="tests/integration/test_wizard_config_overlay_split_brain.py",
         task_type=("a-schema-change", "writing-a-test"),
+        # Relational: a config-write site under kairix/, OR a deleted round-trip
+        # test under tests/, breaks the write→read coverage pairing.
+        staged_class="relational",
+        staged_scope=("kairix", "tests"),
     ),
     RuleEntry(
         id="F88",
@@ -497,6 +618,11 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         adr_origin="EPIC #499 Phase 1 — session-escape-5 (save_source ValueError surfaced as 500)",
         exemplar="tests/platform/setup/test_setup_service.py",
         task_type=("writing-a-test",),
+        # Relational: a documented Raises: on a SetupService method, the wizard
+        # route that must handle it, OR the render test, all live in different
+        # files; touching any can change the parity verdict.
+        staged_class="relational",
+        staged_scope=("kairix/platform/setup", "tests/platform/setup"),
     ),
     RuleEntry(
         id="F87",
@@ -513,6 +639,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         adr_origin="EPIC #499 Phase 1 — GitHub-PEM multi-line secret round-trip (session escape 2)",
         exemplar="tests/integration/test_secrets_pem_round_trip.py",
         task_type=("writing-a-test",),
+        # Relational: a registered persist/load pair in kairix/ pairs with an
+        # adversarial-corpus test under tests/; deleting either breaks it.
+        staged_class="relational",
+        staged_scope=("kairix", "tests"),
     ),
     RuleEntry(
         id="F86",
@@ -525,6 +655,9 @@ _ENTRIES: tuple[RuleEntry, ...] = (
             "kairix/** stays visible to the coverage floor: no # pragma: no cover (escape-4 class)"
         ),
         adr_origin="EPIC #499 Phase 1 — escape 4, the terminal-wizard pragma'd embed seam",
+        # File-local: scans kairix/ for _default_* seams carrying a no-cover
+        # pragma; each seam is judged in its own file.
+        staged_scope=("kairix",),
     ),
     RuleEntry(
         id="F86-dynamic",
@@ -547,6 +680,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="plugin-contract",
         scope="per-plugin",
         summary="every provider plugin has matching BDD feature + Examples-table row in E2E features",
+        # Relational: a provider plugin dir pairs with a per-plugin feature +
+        # an Examples-row in the E2E feature; deleting either breaks parity.
+        staged_class="relational",
+        staged_scope=("kairix/providers", "tests/bdd/features"),
     ),
     RuleEntry(
         id="F36",
@@ -557,6 +694,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         summary="every connector + extractor plugin has matching BDD feature + Examples-table row",
         exemplar="tests/bdd/features/e2e_connector_sync.feature",
         task_type=("adding-a-connector", "adding-an-extractor", "writing-a-bdd-feature"),
+        # Relational: a connector/extractor plugin dir pairs with a per-plugin
+        # feature + an Examples-row in e2e_connector_sync.feature.
+        staged_class="relational",
+        staged_scope=("kairix/connectors", "kairix/extractors", "tests/bdd/features"),
     ),
     RuleEntry(
         id="F40",
@@ -577,6 +718,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         summary="every plugin tree has py.typed marker + no unjustified # type: ignore",
         exemplar="kairix/connectors/obsidian/__init__.py",
         task_type=("adding-a-connector", "adding-an-extractor", "adding-a-provider"),
+        # Relational: the py.typed marker is a per-plugin-tree file separate
+        # from the plugin code; a new plugin dir needs it and deleting it
+        # breaks coverage. Scope derives from the FitnessRule plugin-tree roots.
+        staged_class="relational",
     ),
     RuleEntry(
         id="F42",
@@ -586,6 +731,9 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-protocol-method",
         summary="Protocol methods return frozen-dc/tuple — never dict[str, Any] or bare Any",
         tags=("observability",),
+        # File-local: scans the single kairix/core/protocols.py for surface
+        # Protocol method return annotations.
+        staged_scope=("kairix/core/protocols.py",),
     ),
     RuleEntry(
         id="F43",
@@ -598,6 +746,17 @@ _ENTRIES: tuple[RuleEntry, ...] = (
             "(≥2 impl fixtures), not separate real-only/fake-only assertions; plus the per-plugin "
             "contract-test presence limb"
         ),
+        # Relational: a plugin dir pairs with tests/contracts/test_<name>_
+        # protocol.py importing the real impl AND tests.fakes; deleting the
+        # contract test or a fake breaks parity.
+        staged_class="relational",
+        staged_scope=(
+            "kairix/connectors",
+            "kairix/extractors",
+            "kairix/providers",
+            "tests/contracts",
+            "tests/fakes.py",
+        ),
     ),
     RuleEntry(
         id="F55",
@@ -607,6 +766,9 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-plugin",
         summary="every Chunker plugin declares version + every Chunk(...) passes chunker_version=",
         status="vacuous",
+        # File-local (vacuous today): scans kairix/chunkers/<name>/ which does
+        # not yet exist.
+        staged_scope=("kairix/chunkers",),
     ),
     RuleEntry(
         id="F56",
@@ -615,6 +777,13 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="plugin-contract",
         scope="per-plugin",
         summary="every connector declares SourceConnector + at least one of {Poll, Checkpointed, Event}Connector",
+        # Relational, not file-local: _capability_names_via_runtime imports
+        # kairix/core/protocols.py and runtime-isinstance-checks each connector
+        # against the Protocols DEFINED there, so a staged protocols.py edit
+        # (removing a member from a runtime-checkable Protocol) can newly violate
+        # an UN-staged connector. Scope spans the connector tree + protocols.py.
+        staged_class="relational",
+        staged_scope=("kairix/connectors", "kairix/core/protocols.py"),
     ),
     RuleEntry(
         id="F64",
@@ -623,6 +792,16 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="plugin-contract",
         scope="per-plugin",
         summary="every plugin importing an HTTP client ships a rate-limit test (429/Retry-After)",
+        # Relational: a plugin that imports an HTTP client pairs with a
+        # rate-limit test under tests/integration | tests/bdd; deleting the
+        # test breaks the pairing.
+        staged_class="relational",
+        staged_scope=(
+            "kairix/connectors",
+            "kairix/providers",
+            "tests/integration",
+            "tests/bdd/features",
+        ),
     ),
     RuleEntry(
         id="F65",
@@ -632,6 +811,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-plugin",
         summary="every connector implements metadata_for + propagation test for chunk_date/author",
         adr_origin="docs/architecture/ADR-021-per-source-metadata-normalisation.md",
+        # Relational: a connector dir pairs with tests/integration/test_<name>_
+        # metadata_propagation.py; deleting the test breaks the pairing.
+        staged_class="relational",
+        staged_scope=("kairix/connectors", "tests/integration"),
     ),
     # ----- production-safety ----------------------------------------------
     RuleEntry(
@@ -660,6 +843,9 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="production-safety",
         scope="per-commit",
         summary="net-new files may not appear in any per-file F-rule baseline",
+        # Any net-new file in the commit can trip this — the trigger is "a
+        # file was added", not a path-scope. Always run.
+        staged_class="always-run",
     ),
     RuleEntry(
         id="F63",
@@ -687,6 +873,9 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-file",
         summary="token-pattern scanner for private infra identifiers (externalised pattern source)",
         tags=("security",),
+        # File-local: scans kairix/ + scripts/ + tests/ + docs/ for private
+        # infra identifier patterns; each file judged in isolation.
+        staged_scope=("kairix", "scripts", "tests", "docs"),
     ),
     RuleEntry(
         id="F89",
@@ -701,6 +890,11 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         ),
         adr_origin="EPIC #499 Phase 3 — un-pinned vendored browser-asset class",
         tags=("security",),
+        # Relational within a web/static tree: a served file pairs with its
+        # ASSETS.lock manifest row (sha256 + url); a new/swapped asset or a
+        # deleted manifest row breaks the pinning.
+        staged_class="relational",
+        staged_scope=("kairix",),
     ),
     RuleEntry(
         id="F91",
@@ -716,6 +910,11 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         ),
         adr_origin="EPIC #499 Phase 3 — browser-surface CSP/XSS/inline-JS governance",
         tags=("security",),
+        # Relational: Limb A pairs the render path (routes.py) with the headers
+        # it must set; Limb B's no-cross-template-duplication is inherently
+        # cross-file. A staged template / route change can break either.
+        staged_class="relational",
+        staged_scope=("kairix/platform/setup/web",),
     ),
     # ----- schema-integrity -----------------------------------------------
     RuleEntry(
@@ -735,6 +934,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="cross-cutting",
         summary="HierarchyConnector impls have a parent-before-child contract test",
         status="vacuous",
+        # Relational (vacuous today): a HierarchyConnector impl under kairix/
+        # pairs with a parent-before-child contract test under tests/contracts.
+        staged_class="relational",
+        staged_scope=("kairix", "tests/contracts"),
     ),
     RuleEntry(
         id="F67",
@@ -744,6 +947,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-table",
         summary="every pushed_to_<sink> column has a matching UPDATE site flipping 0 → 1",
         adr_origin="GH #334 — entity_signals 2.3M un-pushed rows",
+        # Relational: a pushed_to_<sink> column declared in schema.py needs a
+        # drain UPDATE elsewhere under kairix/; deleting the drain breaks it.
+        staged_class="relational",
+        staged_scope=("kairix",),
     ),
     RuleEntry(
         id="F70",
@@ -753,6 +960,11 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-table",
         summary="every CREATE TABLE has at least one INSERT INTO site OR a # table-is-derived: rationale",
         adr_origin="GH #336 — documents_media 1M-chunk empty-table incident",
+        # Relational: a CREATE TABLE in schema.py needs an INSERT site
+        # elsewhere under kairix/ (or a derived-rationale); deleting the writer
+        # breaks the symmetry.
+        staged_class="relational",
+        staged_scope=("kairix",),
     ),
     RuleEntry(
         id="F71",
@@ -762,6 +974,11 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-method",
         summary="every preflight _check_* counting external state has a count-equals-ground-truth contract test",
         adr_origin="docs/architecture/ADR-024-test-pyramid-redesign.md §F71",
+        # Relational: a preflight _check_* under kairix/ pairs with the
+        # truthfulness contract test under tests/contracts; deleting the test
+        # breaks the pairing.
+        staged_class="relational",
+        staged_scope=("kairix", "tests/contracts"),
     ),
     # ----- feature-flag ---------------------------------------------------
     RuleEntry(
@@ -772,6 +989,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-flag",
         summary="every FeatureFlag has target_retire_in ≤ current scm version + 6 months",
         adr_origin="docs/architecture/feature-flag-architecture.md §6",
+        # File-local: reads target_retire_in deadlines from the flag REGISTRY.
+        staged_scope=("kairix/core/features",),
     ),
     RuleEntry(
         id="F52",
@@ -780,6 +999,11 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="feature-flag",
         scope="per-flag",
         summary='every flag("<name>") call site references a name that exists in REGISTRY',
+        # Relational: a flag("<name>") call site anywhere under kairix/ is
+        # validated against REGISTRY. Removing a flag from the registry can
+        # make an UN-staged call site newly invalid → run full scope.
+        staged_class="relational",
+        staged_scope=("kairix",),
     ),
     RuleEntry(
         id="F53",
@@ -788,6 +1012,11 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="feature-flag",
         scope="cross-cutting",
         summary="kairix features status CLI subcommand + features_status MCP tool both exist",
+        # Relational: the CLI "features" entry (cli.py) and the features_status
+        # MCP tool (server.py) are the two surfaces; touching either can break
+        # the both-exist invariant.
+        staged_class="relational",
+        staged_scope=("kairix/cli.py", "kairix/agents/mcp/server.py"),
     ),
     # ----- agent-affordance -----------------------------------------------
     RuleEntry(
@@ -798,6 +1027,9 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-file",
         summary="every # noqa / # NOSONAR / # pragma / # type: ignore / # nosec has rationale text",
         script="check-suppressions-have-rationale.sh",
+        # Shell detector greps kairix/ + tests/ + scripts/ for un-rationalised
+        # suppressions. File-local (each suppression is judged in isolation).
+        staged_scope=("kairix", "tests", "scripts"),
     ),
     RuleEntry(
         id="F10",
@@ -807,6 +1039,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="cross-cutting",
         summary="CI workflow silencers (continue-on-error, fail_ci_if_error: false) require rationale",
         script="check-workflow-silencers-have-rationale.sh",
+        # Relational across the workflows dir: greps .github/workflows/*.yml
+        # for un-rationalised silencers.
+        staged_class="relational",
+        staged_scope=(".github/workflows",),
     ),
     RuleEntry(
         id="F14",
@@ -815,6 +1051,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="agent-affordance",
         scope="cross-cutting",
         summary="every sonar.issue.ignore.multicriteria entry has a preceding rationale comment",
+        # Relational to the single sonar config file: a staged edit to it can
+        # introduce an un-rationalised multicriteria entry.
+        staged_class="relational",
+        staged_scope=("sonar-project.properties",),
     ),
     RuleEntry(
         id="F16",
@@ -863,6 +1103,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="agent-affordance",
         scope="cross-cutting",
         summary="every check_*.py failure-output carries fix:/next:/run: action markers",
+        # Relational across the checks dir: a staged check_*.{py,sh} could lack
+        # action markers; the detector sweeps the whole scripts/checks tree.
+        staged_class="relational",
+        staged_scope=("scripts/checks",),
     ),
     RuleEntry(
         id="F23",
@@ -871,6 +1115,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="agent-affordance",
         scope="cross-cutting",
         summary="every top-level directory has a README.md resolver",
+        # A new top-level directory (a new path anywhere) can leave a README
+        # gap; deleting a README breaks it. The trigger is repo structure,
+        # not a path-scope. Always run.
+        staged_class="always-run",
     ),
     RuleEntry(
         id="F83",
@@ -884,6 +1132,9 @@ _ENTRIES: tuple[RuleEntry, ...] = (
             "severity, safe-commit.sh/run-all.sh stages emit named OK/FAIL verdicts"
         ),
         adr_origin="EPIC #499 Phase 0 — #483 silent gate-death class",
+        # File-local: scans the shell gate scripts under scripts/ (incl.
+        # safe-commit.sh / run-all.sh) for the gate-runner contract.
+        staged_scope=("scripts",),
     ),
     RuleEntry(
         id="F85",
@@ -899,6 +1150,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
             "(session-escape-8 phase-string class)"
         ),
         adr_origin="EPIC #499 Phase 1 — session-escape-8 cross-tier vocabulary drift",
+        # Relational: a vocabulary owned by service.py is re-declared in another
+        # setup-tier module or hardcoded in a template — cross-file drift.
+        staged_class="relational",
+        staged_scope=("kairix/platform/setup",),
     ),
     RuleEntry(
         id="F90",
@@ -913,6 +1168,11 @@ _ENTRIES: tuple[RuleEntry, ...] = (
             "(dangling-button class: the tour replacing first-search left no dead control)"
         ),
         adr_origin="EPIC #499 Phase 3 — dangling-button choreography class",
+        # Relational: a template's hx-* URL resolves against routes.py, and a
+        # template id resolves against another template — cross-file. A staged
+        # change to either (or a deleted route/template) breaks referentiality.
+        staged_class="relational",
+        staged_scope=("kairix/platform/setup/web",),
     ),
     # ----- repo-hygiene ---------------------------------------------------
     RuleEntry(
@@ -923,6 +1183,9 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         scope="per-file",
         summary='no os.environ.get("KAIRIX_*") outside paths.py / secrets.py',
         script="check-env-reads-stay-in-paths.sh",
+        # Shell detector greps kairix/ for os.environ KAIRIX_* reads outside the
+        # paths/secrets allow-list. File-local.
+        staged_scope=("kairix",),
     ),
     RuleEntry(
         id="F22",
@@ -931,6 +1194,9 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="repo-hygiene",
         scope="per-file",
         summary="repo paths follow per-tree naming conventions",
+        # Walks `git ls-files` over the whole repo; any net-new tracked path
+        # with a non-conforming name trips it, regardless of tree. Always run.
+        staged_class="always-run",
     ),
     RuleEntry(
         id="F24",
@@ -959,6 +1225,11 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         summary="every CLI subcommand + every MCP tool has an outcome test (subprocess or direct handler)",
         exemplar="tests/test_worker_cli_maintenance.py",
         task_type=("adding-a-cli-subcommand", "adding-an-mcp-tool", "writing-a-test"),
+        # Relational: a new subcommand in cli.py / a new @server.tool() in the
+        # MCP server, OR a DELETED outcome test under tests/, can break parity.
+        # Run full scope when any of those trees is touched.
+        staged_class="relational",
+        staged_scope=("kairix/cli.py", "kairix/agents/mcp/server.py", "tests"),
     ),
     RuleEntry(
         id="F32",
@@ -967,6 +1238,8 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="repo-hygiene",
         scope="per-file",
         summary="no real names in test fixtures (use agent-alpha etc. + reference library)",
+        # File-local: scans tests/ (.py + .feature) for embedded real names.
+        staged_scope=("tests",),
     ),
     RuleEntry(
         id="F33",
@@ -999,6 +1272,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
             "ship with an un-gated job failing"
         ),
         adr_origin="EPIC #499 Phase 2 — CI fan-in parity (dangling-job-ships-green class)",
+        # Relational to ci.yml: a new job (or a changed needs: closure) in the
+        # one workflow file can leave a job outside the CI-gate fan-in.
+        staged_class="relational",
+        staged_scope=(".github/workflows/ci.yml",),
     ),
     RuleEntry(
         id="F75",
@@ -1114,6 +1391,9 @@ _ENTRIES: tuple[RuleEntry, ...] = (
             "(the self-hosting guard for the catalogue-driven runner)"
         ),
         adr_origin="EPIC #499 Phase 2 — catalogue-driven runner single-source-of-truth",
+        # Self-hosting guard: a staged check script / catalogue / doc edit can
+        # break currency, and a doc region can drift from any edit. Always run.
+        staged_class="always-run",
     ),
     RuleEntry(
         id="capability-affordance",
@@ -1122,6 +1402,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="agent-affordance",
         scope="cross-cutting",
         summary="agent-callable capabilities surface their affordances at the call boundary",
+        # Relational: every COMMANDS entry in cli.py pairs with a tool_<cmd> in
+        # the MCP server; touching either side can break parity.
+        staged_class="relational",
+        staged_scope=("kairix/cli.py", "kairix/agents/mcp/server.py"),
     ),
     RuleEntry(
         id="no-hardcoded-user-paths",
@@ -1130,6 +1414,9 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="repo-hygiene",
         scope="per-file",
         summary="F31: no hardcoded /Users/ or /home/<dev>/ paths",
+        # Walks `git ls-files` over the whole repo (any text file can carry a
+        # hardcoded path); the trigger isn't a single tree. Always run.
+        staged_class="always-run",
     ),
     # ----- go-discipline (active when services/*/go.mod exists) -----------
     RuleEntry(
@@ -1139,6 +1426,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="go-discipline",
         scope="per-file",
         summary="every Go binary exposes --version",
+        staged_scope=("services",),
     ),
     RuleEntry(
         id="G6",
@@ -1147,6 +1435,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="go-discipline",
         scope="per-file",
         summary="no panic outside main/init",
+        staged_scope=("services",),
     ),
     RuleEntry(
         id="G8",
@@ -1155,6 +1444,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="go-discipline",
         scope="per-file",
         summary="logging via log/slog (no log.Println or fmt.Println in service code)",
+        staged_scope=("services",),
     ),
     RuleEntry(
         id="G9",
@@ -1163,6 +1453,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="go-discipline",
         scope="per-plugin",
         summary="every services/<name>/ has a README.md",
+        # Relational within services/: a new service dir needs a README; a
+        # deleted README breaks coverage.
+        staged_class="relational",
+        staged_scope=("services",),
     ),
     RuleEntry(
         id="G10",
@@ -1171,6 +1465,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="go-discipline",
         scope="per-plugin",
         summary="dependency-rationale registry per services/<name>/DEPENDENCIES.md",
+        # Relational within services/: a new service / new dep needs a
+        # DEPENDENCIES.md entry; a deleted registry breaks it.
+        staged_class="relational",
+        staged_scope=("services",),
     ),
 )
 

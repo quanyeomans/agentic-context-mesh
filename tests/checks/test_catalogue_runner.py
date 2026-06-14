@@ -107,18 +107,31 @@ def test_staged_narrowing_is_failsafe_on_empty() -> None:
     assert run_checks._rule_touches_staged(entry, []) is True
 
 
-def test_staged_narrowing_runs_cross_cutting_for_any_change() -> None:
-    """Cross-cutting rules walk the tree, so any staged change runs them."""
-    cross = next(e for e in run_checks._select_all() if e.scope == "cross-cutting")
-    assert run_checks._rule_touches_staged(cross, ["docs/only.md"]) is True
+def test_staged_narrowing_runs_always_run_for_any_change() -> None:
+    """An ``always-run`` rule (net-new-file / catalogue currency) fires on any
+    staged change, including a doc-only edit — its trigger is "any change"."""
+    always = next(e for e in run_checks._select_all() if e.staged_class == "always-run")
+    assert run_checks._rule_touches_staged(always, ["docs/only.md"]) is True
 
 
-def test_staged_narrowing_skips_python_rules_for_doc_only_change() -> None:
-    """A per-file python rule (walks kairix/ + tests/) does NOT run when
-    only a markdown file is staged — the narrowing earns its keep."""
+def test_staged_narrowing_skips_in_scope_python_rule_for_doc_only_change() -> None:
+    """A file-local rule scoped to kairix/ does NOT run when only a markdown
+    file is staged (precise stage-4b selection); a staged kairix/ file runs it.
+
+    Uses a real catalogue rule (F76, file-local, scope kairix/) so the scope
+    derivation is exercised end-to-end, not a synthetic stub whose check can't
+    be imported."""
+    f76 = next(e for e in run_checks._select_all() if e.id == "F76")
+    assert run_checks._rule_touches_staged(f76, ["docs/only.md"]) is False
+    assert run_checks._rule_touches_staged(f76, ["kairix/core/foo.py"]) is True
+
+
+def test_staged_narrowing_unresolvable_scope_runs_failsafe() -> None:
+    """A file-local rule whose check can't be imported (scope unresolvable)
+    runs anyway — the fail-safe residue, never a silent skip."""
     py_rule = RuleEntry(id="X", gate="x", check="some_python_check", category="layering", scope="per-file", summary="s")
-    assert run_checks._rule_touches_staged(py_rule, ["docs/only.md"]) is False
-    assert run_checks._rule_touches_staged(py_rule, ["kairix/core/foo.py"]) is True
+    # scope can't be derived (no such module) → run, never skip.
+    assert run_checks._rule_touches_staged(py_rule, ["docs/only.md"]) is True
 
 
 # ── run_checks: the equivalence invariant ───────────────────────────────

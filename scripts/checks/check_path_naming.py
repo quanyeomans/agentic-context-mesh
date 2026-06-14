@@ -29,6 +29,8 @@ Trees enforced (first match wins; the order matters):
       the shared table engines ``_import_boundary_engine.py`` /
       ``_location_engine.py`` (#499 Phase 2 — the nine boundary/location
       rules collapse into these two declarative tables),
+      ``_check_context.py`` / ``_staged_selection.py`` (#499 Phase 2 — the
+      in-process AST cache + precise staged selection for the runner),
       ``run-all.sh``, ``audit_baselines.py``, ``merge_coverage_xml.py``,
       the catalogue-runner tooling ``run_checks.py`` /
       ``generate_catalogue_docs.py`` (#499 Phase 2), and the diff-scoped
@@ -73,7 +75,7 @@ _TEST_PY = re.compile(r"^(__init__|conftest|fakes|test_[a-z0-9_]+|_?[a-z][a-z0-9
 _SNAKE_FEATURE = re.compile(r"^[a-z][a-z0-9_]*\.feature$")
 _CHECK_SCRIPT_PY = re.compile(
     r"^(check_[a-z0-9_]+|_fitness_rule|_rule_catalogue|_integrity_invariants_registry"
-    r"|_import_boundary_engine|_location_engine|_check_context"
+    r"|_import_boundary_engine|_location_engine|_check_context|_staged_selection"
     r"|audit_baselines|merge_coverage_xml|run_checks|generate_catalogue_docs|mutation_parity"
     r"|rules)\.py$"
 )
