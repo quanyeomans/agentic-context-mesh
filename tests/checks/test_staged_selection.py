@@ -49,7 +49,12 @@ if str(_CHECKS_DIR) not in sys.path:
 
 import run_checks  # noqa: E402
 from _rule_catalogue import ALL_ENTRIES  # noqa: E402
-from _staged_selection import decide, resolve_staged_scope, staged_in_scope  # noqa: E402
+
+# The staged-selection primitives now live in the shared three-cubes-fitness
+# package; kairix re-exports kairix-resolver-bound versions through run_checks
+# (so ``decide`` / ``resolve_staged_scope`` derive scope via kairix's
+# FitnessRule-aware resolver exactly as the pre-migration local module did).
+from run_checks import decide, resolve_staged_scope, staged_in_scope  # noqa: E402
 
 pytestmark = pytest.mark.unit
 
