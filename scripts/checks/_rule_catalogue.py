@@ -1366,7 +1366,12 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         check="sonar_new_code",
         category="coverage",
         scope="cross-cutting",
-        summary="SonarCloud new-code parity gate — issues introduced after baseline date must be zero",
+        summary=(
+            "SonarCloud per-file count ratchet — current per-file open-issue/hotspot counts "
+            "may not exceed the committed baseline (.architecture/baseline/sonar-per-file*.json); "
+            "deterministic, no live leak period, no skip flag"
+        ),
+        adr_origin="EPIC #499 Phase 2 — escape #11 KAIRIX_SKIP_SONAR_PARITY retirement",
         run_all=False,
     ),
     RuleEntry(

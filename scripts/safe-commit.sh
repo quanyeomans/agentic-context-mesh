@@ -499,16 +499,22 @@ echo -n "  confidential... "
 bash scripts/pre-commit-confidential-check.sh 2>/dev/null || { echo -e "${RED}FAIL${NC}"; exit 1; }
 echo -e "${GREEN}OK${NC}"
 
-# 8. Sonar new-code parity — mirror CI's `1 · Quality gate` locally so
-# Sonar findings are batched and fixed pre-push, not discovered per-cycle.
+# 8. Sonar per-file ratchet — deterministic parity against the committed
+# baseline (.architecture/baseline/sonar-per-file*.json) so Sonar findings are
+# batched and fixed pre-push, not discovered per-cycle. The gate compares the
+# project's CURRENT per-file open-issue counts to the committed snapshot and
+# fails any file over baseline. It is deterministic (no live leak period), so
+# there is no skip flag — the only non-failure path is "SonarCloud unreachable
+# -> warn + exit 0", which the check handles internally. Default scope is the
+# working set; pass --all for the full-repo view.
 # See docs/architecture/local-first-feedback-loops.md.
-# Skip with KAIRIX_SKIP_SONAR_PARITY=1 during a focused refactor series.
-echo -n "  sonar new-code parity... "
-SONAR_OUT=$(python3 scripts/checks/check_sonar_new_code.py 2>&1) || {
+echo -n "  sonar per-file ratchet... "
+run_gate python3 scripts/checks/check_sonar_new_code.py
+if [[ "$GATE_RC" -ne 0 ]]; then
     echo -e "${RED}FAIL${NC}"
-    echo "$SONAR_OUT"
+    echo "$GATE_OUT"
     exit 1
-}
+fi
 echo -e "${GREEN}OK${NC}"
 
 echo ""
