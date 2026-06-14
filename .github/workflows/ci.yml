@@ -742,8 +742,12 @@ jobs:
   # + "2 · Pre-merge PR gates (PR → main)"; SonarCloud is not a separately
   # required status context (the webhook-posted "SonarCloud Code Analysis"
   # check can race / temporarily disagree with this job — #269). The Sonar
-  # new-code parity gate is enforced locally + in the security stage via
-  # check_sonar_new_code.py, not through this job's pass/fail.
+  # per-file ratchet (check_sonar_new_code.py) is enforced locally via
+  # safe-commit.sh: it compares the project's current per-file open-issue
+  # counts against the committed baseline (.architecture/baseline/
+  # sonar-per-file*.json) deterministically — no live leak period, no skip
+  # flag (the KAIRIX_SKIP_SONAR_PARITY escape hatch was retired in #499
+  # Phase 2). It is not gated through this job's pass/fail.
   # TODO(#499): confirm gating intent — the job header comment below still
   # reads "branch protection should gate on this job"; reconcile that with the
   # current branch-protection contexts before promoting Sonar to a hard gate.

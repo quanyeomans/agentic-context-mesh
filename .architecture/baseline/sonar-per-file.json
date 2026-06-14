@@ -1,0 +1,10 @@
+{
+  "_meta": {
+    "project_key": "three-cubes_kairix",
+    "branch": "main",
+    "captured_at": "2026-06-14T01:02:53Z",
+    "snapshot": "ALL current open issues (smells/bugs/vulnerabilities) per file (unresolved), NOT the mutating new-code leak period, so this baseline is stable/deterministic.",
+    "generator": "scripts/checks/check_sonar_new_code.py --capture"
+  },
+  "files": {}
+}

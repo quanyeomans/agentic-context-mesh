@@ -313,7 +313,7 @@ _Generated from `scripts/checks/_rule_catalogue.py` — do not edit by hand._
 | F80 | layering | cross-cutting | proposed | engagement-scope code may not call firm-scope APIs at runtime — extends F44 from import to request |
 | baseline-shrinking | coverage | cross-cutting | shipped | F49: each release tag reduces F30/F46/F47 baselines by ≥1 (or keeps at zero) |
 | paydown-doc-currency | agent-affordance | cross-cutting | shipped | grandfathering paydown doc reflects current baseline state |
-| sonar-new-code | coverage | cross-cutting | shipped | SonarCloud new-code parity gate — issues introduced after baseline date must be zero |
+| sonar-new-code | coverage | cross-cutting | shipped | SonarCloud per-file count ratchet — current per-file open-issue/hotspot counts may not exceed the committed baseline (.architecture/baseline/sonar-per-file*.json); deterministic, no live leak period, no skip flag |
 | worktree-isolation | process | cross-cutting | shipped | subagent worktree isolation — no shadow copies in primary checkout |
 | F92 | process | cross-cutting | shipped | catalogue currency — every check_*.{py,sh} has a RuleEntry, every RuleEntry maps to an existing check, and the generated doc regions match generate_catalogue_docs.py --check (the self-hosting guard for the catalogue-driven runner) |
 | capability-affordance | agent-affordance | cross-cutting | shipped | agent-callable capabilities surface their affordances at the call boundary |
