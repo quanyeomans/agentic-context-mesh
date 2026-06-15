@@ -433,6 +433,16 @@ class FactoryDeps:
       :data:`QUERY_CACHE_DISABLED` to wire ``query_cache=None`` on the
       pipeline; pass an explicit ``QueryResultCache`` instance to wire
       a specific cache.
+    - ``reranker_override``: replace the cross-encoder rerank closure.
+      ``None`` builds the production default (the
+      ``sentence-transformers`` cross-encoder closure, gated per-call by
+      ``pipeline._maybe_rerank``). Use the sentinel
+      :data:`RERANK_DISABLED` to wire ``reranker=None`` (the rerank stage
+      becomes a structural no-op — ``_maybe_rerank`` short-circuits on
+      ``reranker is None``). Pass any ``Callable[[str, list[FusedResult]],
+      list[FusedResult]]`` to inject a no-op / fake reranker that skips
+      the ~5s torch import in integration tests whose assertions never
+      read the reranked order.
     """
 
     vec_index_factory: Callable[[], Any] = field(default_factory=lambda: _default_vec_index_factory)
@@ -452,6 +462,7 @@ class FactoryDeps:
     logger_override: Any = None
     resolver_override: Any = None
     query_cache_override: Any = None  # QueryResultCache | QUERY_CACHE_DISABLED | None
+    reranker_override: Any = None  # reranker closure | RERANK_DISABLED | None
 
 
 class _QueryCacheDisabledSentinel:
@@ -467,6 +478,24 @@ class _QueryCacheDisabledSentinel:
 
 
 QUERY_CACHE_DISABLED = _QueryCacheDisabledSentinel()
+
+
+class _RerankDisabledSentinel:
+    """Sentinel for ``FactoryDeps.reranker_override`` meaning ``reranker=None``.
+
+    A bare ``None`` is indistinguishable from "use the production default
+    cross-encoder closure" — this sentinel disambiguates "wire no reranker
+    at all" so the pipeline's ``_maybe_rerank`` short-circuits without
+    importing ``sentence-transformers`` / torch. Used by integration tests
+    that assert pre-rerank pipeline behaviour and never read the reranked
+    order.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover - cosmetic
+        return "RERANK_DISABLED"
+
+
+RERANK_DISABLED = _RerankDisabledSentinel()
 
 
 def _build_vector_repo(vec_index_factory: Callable[[], Any]) -> Any:
@@ -933,9 +962,10 @@ def _is_default_deps(deps: FactoryDeps) -> bool:
 
     Any non-``None`` pipeline-component override (classifier, doc_repo,
     vec_repo, embed_service, graph, fusion, boosts, logger, resolver,
-    query_cache) also flips this to ``False`` so tests get a fresh
-    pipeline per call — the cache key is the resolved RetrievalConfig
-    alone, so caching a fake-wired pipeline would leak across cases.
+    query_cache, reranker) also flips this to ``False`` so tests get a
+    fresh pipeline per call — the cache key is the resolved
+    RetrievalConfig alone, so caching a fake-wired pipeline would leak
+    across cases.
     """
     overrides_clean = (
         deps.classifier_override is None
@@ -948,6 +978,7 @@ def _is_default_deps(deps: FactoryDeps) -> bool:
         and deps.logger_override is None
         and deps.resolver_override is None
         and deps.query_cache_override is None
+        and deps.reranker_override is None
     )
     return (
         deps.vec_index_factory is _default_vec_index_factory
@@ -1070,18 +1101,13 @@ def _build_search_pipeline_uncached(
     # logs WARNING once. None-out the reranker only when the operator
     # has explicitly disabled rerank AND no intents are registered for
     # it — saves a closure allocation per build for the disabled path.
-    rerank_disabled = not cfg.rerank.enabled and not cfg.rerank_intents
-    pipeline_reranker = None
-    if not rerank_disabled:
-        from kairix.core.search.rerank import rerank as _rerank_impl
-
-        def pipeline_reranker(query: str, fused: list[FusedResult]) -> list[FusedResult]:
-            return _rerank_impl(
-                query,
-                fused,
-                model=cfg.rerank.model,
-                candidate_limit=cfg.rerank.candidate_limit,
-            )
+    #
+    # F47 paydown — ``reranker_override`` short-circuits the production
+    # closure: the ``RERANK_DISABLED`` sentinel wires ``reranker=None``
+    # (no torch import); any other non-``None`` value is used verbatim
+    # (a no-op / fake reranker for tests). Production callers leave the
+    # override ``None`` and the cross-encoder closure below is built.
+    pipeline_reranker = _resolve_reranker(deps.reranker_override, cfg)
 
     return SearchPipeline(
         classifier=classifier,
@@ -1139,6 +1165,46 @@ def _resolve_query_cache(override: Any, cfg: RetrievalConfig) -> Any:
     if override is not None:
         return override
     return _get_or_create_query_cache(cfg_hash=_compute_cfg_hash(cfg))
+
+
+def _resolve_reranker(override: Any, cfg: RetrievalConfig) -> Any:
+    """Return the wired ``reranker`` closure for the pipeline.
+
+    Three resolution branches (mirrors :func:`_resolve_query_cache`):
+      * ``override is RERANK_DISABLED`` → ``None`` (the pipeline's
+        ``_maybe_rerank`` short-circuits; no ``sentence-transformers`` /
+        torch import).
+      * ``override`` is any other non-``None`` value (a no-op / fake
+        reranker closure) → use it verbatim.
+      * ``override is None`` → the production cross-encoder closure
+        keyed on the config-derived model + candidate_limit, unless the
+        operator has fully disabled rerank (``rerank.enabled`` False and
+        no ``rerank_intents``), in which case ``None`` is wired to save
+        a per-build closure allocation.
+
+    The production closure is built lazily — the
+    ``kairix.core.search.rerank`` import (and its transitive
+    ``sentence-transformers`` load on first call) only happens when the
+    real closure is actually wired.
+    """
+    if override is RERANK_DISABLED:
+        return None
+    if override is not None:
+        return override
+    rerank_disabled = not cfg.rerank.enabled and not cfg.rerank_intents
+    if rerank_disabled:
+        return None
+    from kairix.core.search.rerank import rerank as _rerank_impl
+
+    def pipeline_reranker(query: str, fused: list[FusedResult]) -> list[FusedResult]:
+        return _rerank_impl(
+            query,
+            fused,
+            model=cfg.rerank.model,
+            candidate_limit=cfg.rerank.candidate_limit,
+        )
+
+    return pipeline_reranker
 
 
 def _compute_cfg_hash(cfg: RetrievalConfig) -> str:
