@@ -946,8 +946,30 @@ def test_init_probe_warns_when_include_path_returns_404(caplog: pytest.LogCaptur
 
 
 @pytest.mark.unit
-def test_init_probe_swallows_transient_errors_without_failing_init() -> None:
-    """Network failure during probe must not block connector construction."""
+def test_init_probe_swallows_transient_errors_without_failing_init(caplog: pytest.LogCaptureFixture) -> None:
+    """Network failure during probe must not block connector construction,
+    and the swallowed error surfaces as a ``sharepoint_probe_error`` warning.
+
+    The probe call against ``/Foo`` returns a sustained 503; the Graph
+    client's throttling-retry loop would otherwise pay the full
+    ``2+2+4+8 = 16s`` tenacity backoff. The Graph client exposes a
+    documented ``sleep_fn`` seam (``graph_client.py`` line 195) — the test
+    threads a no-op sleep so the retries collapse to ~0s while still
+    exercising every retry attempt and the final give-up.
+
+    Strengthened (medium→high): the prior ``connector is not None``
+    assertion only proved the constructor returned, not that the
+    transient error was actually swallowed at the documented site. We now
+    assert the ``sharepoint_probe_error`` warning is emitted naming the
+    failing drive + path, so a regression that re-raises (or swallows the
+    error silently without logging) is caught.
+
+    Sabotage proof: change ``_probe_include_paths``'s ``except Exception``
+    to re-raise — construction raises and the test fails. Drop the
+    ``logger.warning(... sharepoint_probe_error ...)`` line — the warning
+    assertion below fails.
+    """
+    import logging
 
     def handler(request: httpx.Request) -> httpx.Response:
         token = _token_response(request)
@@ -957,12 +979,41 @@ def test_init_probe_swallows_transient_errors_without_failing_init() -> None:
             return httpx.Response(503, json={"error": {"code": "serviceUnavailable"}})
         return httpx.Response(200, json=_delta_response([]))
 
-    # Constructor must not raise even when the probe call fails
-    connector = _build_connector_with_spec(
-        handler,
-        SharePointDriveSpec(drive_id=_DRIVE_ID, include_paths=("/Foo",)),
+    transport = httpx.MockTransport(handler)
+    shared = httpx.Client(transport=transport)
+    auth = OAuth2ClientCredsAuth(
+        tenant_id="t",
+        client_id="c",
+        client_secret="s-value",  # pragma: allowlist secret — test fixture
+        scope="https://graph.microsoft.com/.default",
+        http_client=shared,
     )
+    spec = SharePointDriveSpec(drive_id=_DRIVE_ID, include_paths=("/Foo",))
+
+    with caplog.at_level(logging.WARNING, logger="kairix.connectors.sharepoint.connector"):
+        # Constructor must not raise even when the probe call fails. The
+        # ``sleep_fn`` no-op collapses the tenacity backoff so this test is
+        # fast instead of paying 16s of real sleep.
+        connector = SharePointConnector(
+            drives=[spec],
+            credentials=SharePointCredentials(
+                tenant_id="t",
+                client_id="c",
+                client_secret="s-value",  # pragma: allowlist secret — test fixture
+            ),
+            auth=auth,
+            client_builder=lambda a: SharePointGraphClient(auth=a, http_client=shared, sleep_fn=lambda _s: None),
+        )
+
     assert connector is not None
+    probe_errors = [r for r in caplog.records if "sharepoint_probe_error" in r.getMessage()]
+    assert len(probe_errors) == 1, (
+        f"transient probe failure must surface exactly one sharepoint_probe_error warning; "
+        f"saw {[r.getMessage() for r in caplog.records]!r}"
+    )
+    message = probe_errors[0].getMessage()
+    assert _DRIVE_ID in message
+    assert "/Foo" in message
 
 
 # ---------------------------------------------------------------------------

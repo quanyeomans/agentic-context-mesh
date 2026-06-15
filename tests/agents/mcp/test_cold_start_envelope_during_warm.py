@@ -19,9 +19,12 @@ This module pins the contract against the production wiring:
     the readiness check (matches ``cli.py`` line 369).
   - Real :func:`kairix.agents.mcp.transport.build_mcp_app` composes
     the Starlette app (matches ``cli.py`` lines 372-377).
-  - A background thread that flips the gate after a fixed delay —
-    mirrors the production ``_default_warm_runner`` daemon-thread
-    pattern (``cli.py`` lines 178-196).
+  - The gate is left in its construction-default cold state — which is
+    exactly the warm-window state a freshly-restarted container is in,
+    so the during-warm assertion needs no background gate-flipping
+    thread. (The flip-to-ready transition is covered by the sibling
+    ``test_request_after_warm_completes_no_longer_returns_503`` and by
+    the unit test ``test_mark_ready_flips_state``.)
   - Starlette's ``TestClient`` drives the actual ASGI request path —
     the same path uvicorn drives in production.
 
@@ -41,8 +44,6 @@ and exercised manually before commit:
 
 from __future__ import annotations
 
-import threading
-import time
 from typing import Any
 
 import pytest
@@ -77,24 +78,6 @@ def _make_real_fastmcp_server() -> Any:
     return server
 
 
-def _spawn_warm_thread_flipping_gate_after(gate: EventReadinessGate, delay_s: float) -> threading.Thread:
-    """Mirror the production warm-runner: a daemon thread that flips
-    the readiness gate after ``delay_s`` seconds.
-
-    Production ``_default_warm_runner`` (``cli.py`` line 178-196) does
-    exactly this with ``warm_retrieval_stack`` as the body. The test
-    substitutes a fixed sleep so the warm window has a known duration.
-    """
-
-    def _warm_body() -> None:
-        time.sleep(delay_s)
-        gate.mark_ready()
-
-    thread = threading.Thread(target=_warm_body, daemon=True, name="kairix-mcp-warm-test")
-    thread.start()
-    return thread
-
-
 @pytest.mark.integration
 def test_first_mcp_request_during_warm_returns_503_envelope_not_fetch_failed() -> None:
     """During the warm window, the first ``POST /mcp`` returns HTTP 503
@@ -108,8 +91,20 @@ def test_first_mcp_request_during_warm_returns_503_envelope_not_fetch_failed() -
       - FastMCP ``streamable_http_app()`` lifespan + ``/mcp`` route.
       - ``build_mcp_app`` composing the outer Starlette + middleware.
       - ``ColdStartMiddleware`` short-circuiting non-health requests.
-      - Real ``EventReadinessGate`` flipping mid-test from a daemon
-        thread (production warm-runner shape).
+      - Real ``EventReadinessGate`` left in its construction-default
+        cold state — which is exactly the warm-window state a
+        freshly-restarted container is in.
+
+    A freshly-constructed ``EventReadinessGate`` is cold by default
+    (``is_ready() is False`` — pinned by
+    ``tests/agents/mcp/test_readiness.py``), so the during-warm 503
+    assertion needs no background thread to flip it. The previous shape
+    spawned a daemon thread that slept 5s then flipped the gate, paying a
+    real 5s wall-clock tax to manufacture a window the gate is already in
+    at construction. The flip-to-ready behaviour is owned by the sibling
+    ``test_request_after_warm_completes_no_longer_returns_503`` (same file,
+    through the production wiring) and by the unit test
+    ``test_mark_ready_flips_state`` — zero coverage is lost here.
 
     Envelope shape pinned (matches ``cold_start.py`` +
     ``_build_cold_start_body``):
@@ -124,55 +119,44 @@ def test_first_mcp_request_during_warm_returns_503_envelope_not_fetch_failed() -
         affordance markers (``next:`` and ``fix:``).
     """
     server = _make_real_fastmcp_server()
-    gate = EventReadinessGate()
+    gate = EventReadinessGate()  # cold at construction — the warm-window state
     app = build_mcp_app(server, with_sse=False, readiness_check=gate.is_ready)
 
-    # Spawn a warm thread that flips the gate after 5s — long enough that
-    # the first request below lands before it. Mirrors production where
-    # ``warm_retrieval_stack`` runs in the background.
-    warm_thread = _spawn_warm_thread_flipping_gate_after(gate, delay_s=5.0)
+    with TestClient(app) as client:
+        assert not gate.is_ready(), "gate must be cold for the first assertion to be meaningful"
 
-    try:
-        with TestClient(app) as client:
-            assert not gate.is_ready(), "gate must be cold for the first assertion to be meaningful"
+        response = client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "method": "tools/list", "id": 1},
+        )
 
-            response = client.post(
-                "/mcp",
-                json={"jsonrpc": "2.0", "method": "tools/list", "id": 1},
-            )
+        assert response.status_code == 503, (
+            f"first MCP call during warm must return 503; got {response.status_code}. "
+            f"body={response.text!r}. If status is 200 the middleware is bypassed; "
+            f"if connection refused, uvicorn never bound the port. "
+            f"fix: check ColdStartMiddleware mount in build_mcp_app."
+        )
+        retry_after_header = response.headers.get("Retry-After")
+        assert retry_after_header is not None
+        assert int(retry_after_header) > 0, f"Retry-After must be a positive int; got {retry_after_header!r}"
 
-            assert response.status_code == 503, (
-                f"first MCP call during warm must return 503; got {response.status_code}. "
-                f"body={response.text!r}. If status is 200 the middleware is bypassed; "
-                f"if connection refused, uvicorn never bound the port. "
-                f"fix: check ColdStartMiddleware mount in build_mcp_app."
-            )
-            retry_after_header = response.headers.get("Retry-After")
-            assert retry_after_header is not None
-            assert int(retry_after_header) > 0, f"Retry-After must be a positive int; got {retry_after_header!r}"
+        body = response.json()
+        assert body["error"] == "ColdStart", f"envelope error must be 'ColdStart'; got {body.get('error')!r}"
+        assert body["error_code"] == "KAIRIX_COLD_START"
+        assert body["status"] == "retryable_not_ready"
 
-            body = response.json()
-            assert body["error"] == "ColdStart", f"envelope error must be 'ColdStart'; got {body.get('error')!r}"
-            assert body["error_code"] == "KAIRIX_COLD_START"
-            assert body["status"] == "retryable_not_ready"
+        retry_after_ms = body["retry_after_ms"]
+        assert isinstance(retry_after_ms, int) and retry_after_ms > 0, (
+            f"retry_after_ms must be a positive int; got {retry_after_ms!r}"
+        )
+        estimated = body["estimated_seconds_remaining"]
+        assert isinstance(estimated, (int, float)) and estimated > 0
 
-            retry_after_ms = body["retry_after_ms"]
-            assert isinstance(retry_after_ms, int) and retry_after_ms > 0, (
-                f"retry_after_ms must be a positive int; got {retry_after_ms!r}"
-            )
-            estimated = body["estimated_seconds_remaining"]
-            assert isinstance(estimated, (int, float)) and estimated > 0
-
-            # F21 affordance markers — agent reading this envelope needs a
-            # positive ``next:`` action and a ``fix:`` fallback.
-            assert "next:" in body["guidance"]
-            assert "next:" in body["agent_instruction"]
-            assert "fix:" in body["agent_instruction"]
-    finally:
-        # Daemon thread will die with the process, but join briefly so
-        # the gate-flip log line lands before pytest tears down — keeps
-        # log output deterministic for the next test in the suite.
-        warm_thread.join(timeout=6.0)
+        # F21 affordance markers — agent reading this envelope needs a
+        # positive ``next:`` action and a ``fix:`` fallback.
+        assert "next:" in body["guidance"]
+        assert "next:" in body["agent_instruction"]
+        assert "fix:" in body["agent_instruction"]
 
 
 @pytest.mark.integration
