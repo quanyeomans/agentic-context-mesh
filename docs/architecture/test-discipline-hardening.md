@@ -262,6 +262,8 @@ def e2e_db(tmp_path) -> KairixPaths:
     return paths
 ```
 
+> Re-tiering note: a per-function `@pytest.mark.soak`/`@pytest.mark.slow` stacks on top of a module-level `pytestmark = pytest.mark.unit` rather than replacing it, so the test still runs on the per-commit path. To move a test to a slower tier put it in a dedicated module with the tier marker at module scope. See [`ENGINEERING.md §3.7`](ENGINEERING.md) (test cost and isolation hygiene).
+
 ## 5. F30 paydown plan — full, not triaged
 
 Per the standing direction ("we need to get it all done; let's continue to lift the codebase standard as we are only going to keep moving quicker"), the F30 baseline pays down **to zero** in Wave 0, not in phases.

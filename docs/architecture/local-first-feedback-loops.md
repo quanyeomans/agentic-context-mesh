@@ -220,6 +220,26 @@ exit 0", which fires only when SonarCloud is genuinely down (offline
 pre-commit), never as a routine bypass. CI's quality gate remains
 authoritative.
 
+## Reusable-workflow callers: force a triggering change in the same PR
+
+Change-detection path filters that gate a `uses:` reusable-workflow
+(`workflow_call`) job ON only for relevant diffs have a sharp edge: a
+workflow-only PR can merge with that job gated OFF, so a broken
+caller↔reusable-workflow input contract reaches `main` and breaks CI at
+*startup* on the next unrelated push. This is not locally reproducible
+from the diff alone — the failing job never ran on the PR that introduced
+the break.
+
+Discipline: when a change edits a reusable-workflow caller (the
+`uses:`/`with:` block) or the reusable workflow's input contract, include
+a change in the SAME PR that satisfies the job's path filter (e.g. a
+trivial source-touching edit) so the caller actually executes before
+merge. CI confirming green on the PR is only meaningful if the changed job
+ran. See
+[`docs/operations/runbooks/how-to-consume-a-shared-reusable-workflow.md`](../operations/runbooks/how-to-consume-a-shared-reusable-workflow.md)
+and
+[`docs/operations/runbooks/runbook-ci-startup-failure.md`](../operations/runbooks/runbook-ci-startup-failure.md).
+
 ## Related
 
 - `scripts/safe-commit.sh` — local gate composition

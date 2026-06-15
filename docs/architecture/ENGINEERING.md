@@ -155,18 +155,26 @@ Mark every test class or function with the appropriate marker:
 ```python
 @pytest.mark.contract    # interface agreement — schema, API shape, data format
 @pytest.mark.unit        # individual component logic
+@pytest.mark.bdd         # behaviour scenarios (tests/bdd/)
 @pytest.mark.integration # multi-component, real usearch
 @pytest.mark.e2e         # live Azure API (requires KAIRIX_E2E=1)
 @pytest.mark.slow        # takes >5s
+@pytest.mark.invariant   # F72 / ADR-024 Bundle E cross-layer integrity tier
+@pytest.mark.soak        # ADR-024 production-scale soak tier (nightly, not per-commit)
 ```
+
+The live catalogue (F8) recognises all eight markers above — `unit`, `bdd`, `contract`, `integration`, `e2e`, `slow`, `soak`, `invariant`. Every `test_*` carries exactly one category marker (module-level `pytestmark` or per-function decorator).
 
 Run by stage:
 ```bash
 pytest -m contract               # Stage 1: <30s, must pass
 pytest -m "not integration"      # Stage 2: unit only (CI)
 pytest -m integration            # Stage 3: requires usearch
+pytest -m soak                   # Nightly soak-suite.yml only
 KAIRIX_E2E=1 pytest -m e2e      # Manual only
 ```
+
+**Re-tiering a test off the per-commit path: a per-function marker STACKS, it does not replace.** A module-level `pytestmark = pytest.mark.unit` applies to every test in the file; adding `@pytest.mark.soak` (or `slow`) to one function inside that module gives that function *both* markers, so it still runs on the per-commit `unit` path. To actually move a test to a slower tier you must put it in a dedicated module with the tier marker at module scope (e.g. a `tests/soak/` module carrying `pytestmark = pytest.mark.soak`) — not a per-function decorator layered on top of a `unit` module. See §3.7 for the cost rationale.
 
 ### 3.3 Mocking rules
 
@@ -207,6 +215,19 @@ The benchmark (`kairix benchmark`) is NOT a CI test. It's an evaluation tool:
 - Required in PR description when retrieval logic changes
 
 Phase gate rule: Phase N+1 does not start until Phase N benchmark confirms gate score.
+
+### 3.7 Test cost and isolation hygiene
+
+**Inject the slow dependency through a seam — never a real `time.sleep`, network call, or subprocess in a unit/contract/integration test.** When a test needs to exercise timing, retry, or rate-limit behaviour, pass the clock / sleeper / HTTP client in through the dependency seam the production code already exposes (the `*Deps` dataclass, `FakePaths`, a `FakeClock`/recording fake from `tests/fakes.py`) and assert on the recorded calls. A literal `time.sleep(...)` or live network/subprocess call in a per-commit test is the single most common avoidable cost: it slows the whole suite and proves nothing the seam can't prove deterministically. If a test genuinely measures wall-clock behaviour it belongs in the `slow`/`soak`/probe tier, not the per-commit path (and F82 enforces that wall-clock-ceiling assertions carry the right marker).
+
+**A high-cost test with low bug-catching power is a delete-or-retier candidate, not a keep.** Sabotage-prove every test (mutate the production path it covers, confirm it fails, restore). A test that *survives* a production mutation catches no regression — if it is also expensive (real sleep, large fixture, slow setup) it is either redundant with a cheaper test (delete it) or a scale check mis-filed on the per-commit path (move it to `@pytest.mark.soak`). Cost is only justified by bug-catching power demonstrated under sabotage.
+
+**Write scratch and probe files under `tmp_path`, never the live source tree.** Any test that emits a file — a generated config, a probe artefact, a scratch fixture — must write it under the pytest `tmp_path` (or another tempdir), so it is torn down automatically and never lands in the working tree. Orphaned probe files written into the repo are picked up by the full-tree fitness scanners and surface as non-deterministic gate failures that reproduce only when the debris is present. Two corollaries:
+
+- **Narrow whole-tree detector scans to the staged set** when adding or running a check, so a scan reasons about the change under test, not stray artefacts elsewhere in the tree (this is what `run_checks.py --staged` already does for the staged inner loop).
+- **Add a sweep/cleanup fixture** for any test or helper that can leave debris — a fixture that removes the artefacts on teardown even when the test body raises. A test that writes outside `tmp_path` AND has no sweep is the canonical flake root cause.
+
+Re-tiering caveat (see §3.2): a per-function `@pytest.mark.soak` STACKS on a module-level `pytestmark = pytest.mark.unit` rather than replacing it, so the decorated test still runs on the per-commit path. Move it into a dedicated soak module to actually re-tier it.
 
 ---
 
