@@ -143,3 +143,77 @@ def test_probe_config_cli_subprocess_rejects_zero_iterations(tmp_path: Path) -> 
     assert proc.returncode == 2, f"expected exit 2, got {proc.returncode}. stderr={proc.stderr!r}"
     assert "perf iterations must be >= 1" in proc.stderr, f"stderr missing range diagnostic: {proc.stderr!r}"
     assert "fix:" in proc.stderr, f"stderr missing F21 fix: marker: {proc.stderr!r}"
+
+
+def test_probe_config_cli_subprocess_rejects_nonpositive_degraded_threshold() -> None:
+    """``--degraded-p95-ms 0`` exits 2 + actionable stderr on the real binary.
+
+    F45/F30 outcome coverage for the new ``--degraded-p95-ms`` operator
+    tuning flag: proves it is wired through the production
+    ``kairix.cli`` dispatch (argparse parses it, the range guard fires)
+    on the real subprocess surface — not just the in-process function.
+    The threshold guard runs before provider resolution, so no provider
+    config is needed and the test is hermetic and fast.
+
+    Sabotage-proof (executed locally — see commit message): mutate the
+    ``if args.degraded_p95_ms <= 0`` guard to ``< 0`` → ``--degraded-p95-ms 0``
+    falls through to provider resolution → exits 2 for "no provider
+    configured" instead, so the ``"must be > 0"`` substring assertion
+    fails. Restored.
+    """
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "kairix.cli",
+            "probe-config",
+            "--provider",
+            "fake",
+            "--degraded-p95-ms",
+            "0",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 2, f"expected exit 2, got {proc.returncode}. stderr={proc.stderr!r}"
+    assert "--degraded-p95-ms must be > 0" in proc.stderr, f"stderr missing range diagnostic: {proc.stderr!r}"
+    assert "fix:" in proc.stderr, f"stderr missing F21 fix: marker: {proc.stderr!r}"
+
+
+def test_probe_config_cli_subprocess_rejects_critical_below_degraded() -> None:
+    """``--critical-p95-ms`` below ``--degraded-p95-ms`` exits 2 on the real binary.
+
+    Proves the cross-flag guard (critical must be the harsher
+    threshold) is wired through the production dispatch. Like the
+    sibling guard test, this runs before provider resolution so it is
+    hermetic.
+
+    Sabotage-proof (executed locally — see commit message): drop the
+    ``if args.critical_p95_ms < args.degraded_p95_ms`` guard → the run
+    proceeds to provider resolution and exits 2 for "no provider
+    configured" instead, so the ``"must be >="`` substring assertion
+    fails. Restored.
+    """
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "kairix.cli",
+            "probe-config",
+            "--provider",
+            "fake",
+            "--degraded-p95-ms",
+            "1000",
+            "--critical-p95-ms",
+            "500",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 2, f"expected exit 2, got {proc.returncode}. stderr={proc.stderr!r}"
+    assert "must be >=" in proc.stderr, f"stderr missing cross-flag diagnostic: {proc.stderr!r}"
+    assert "fix:" in proc.stderr, f"stderr missing F21 fix: marker: {proc.stderr!r}"

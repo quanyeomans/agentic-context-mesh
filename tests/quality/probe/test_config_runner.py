@@ -99,13 +99,22 @@ def test_healthy_provider_yields_status_healthy_with_zero_warnings() -> None:
 
 
 def test_slow_provider_yields_status_degraded() -> None:
-    """Latency >1 s → warm_p95 > WARM_P95_DEGRADED_MS → degraded.
+    """warm_p95 above ``degraded_p95_ms`` → status degraded.
 
-    Sabotage: raise ``WARM_P95_DEGRADED_MS = 1e9`` → no sample exceeds →
-    status healthy → this assertion fails. Confirmed; restored.
+    Drives the degraded branch with a low ``degraded_p95_ms`` (25 ms)
+    against a small ~50 ms fake latency instead of sleeping >1 s per
+    call to cross the production 1000 ms default. The runner already
+    accepts ``degraded_p95_ms`` as an injectable threshold, so the
+    same classification logic is exercised at a fraction of the
+    wall-clock cost (~0.5 s instead of ~9 s).
+
+    Sabotage: raise ``degraded_p95_ms`` to ``1e9`` (or drop the
+    ``> degraded_p95_ms`` check in ``_classify_status``) → no sample
+    exceeds → status healthy → this assertion fails. Confirmed;
+    restored.
     """
-    provider = FakeProvider(name="fake_d", dim=1536, embed_latency_s=1.1)
-    report = run_probe_config(provider, **_fast_runner_kwargs())
+    provider = FakeProvider(name="fake_d", dim=1536, embed_latency_s=0.05)
+    report = run_probe_config(provider, degraded_p95_ms=25.0, **_fast_runner_kwargs())
     assert report.status == STATUS_DEGRADED
     assert report.exit_code == EXIT_CODE_DEGRADED
 

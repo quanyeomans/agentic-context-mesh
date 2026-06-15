@@ -51,6 +51,8 @@ from kairix.quality.probe.config_runner import (
     DEFAULT_CONCURRENCY,
     DEFAULT_REPEATED_SAMPLES,
     DEFAULT_WARM_SAMPLES,
+    WARM_P95_CRITICAL_MS,
+    WARM_P95_DEGRADED_MS,
     TransportSnapshotter,
     run_probe_config,
 )
@@ -141,6 +143,28 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_REPEATED_SAMPLES,
         help=f"repeated-query samples for the cache phase (>=1). Default {DEFAULT_REPEATED_SAMPLES}.",
+    )
+    p.add_argument(
+        "--degraded-p95-ms",
+        type=float,
+        default=WARM_P95_DEGRADED_MS,
+        metavar="MS",
+        help=(
+            f"warm-p95 latency (ms) above which the verdict is 'degraded' (exit 1). "
+            f"Lower it for endpoints you expect to be local/fast; raise it for distant "
+            f"endpoints where a higher tail is acceptable. Default {WARM_P95_DEGRADED_MS:.0f}."
+        ),
+    )
+    p.add_argument(
+        "--critical-p95-ms",
+        type=float,
+        default=WARM_P95_CRITICAL_MS,
+        metavar="MS",
+        help=(
+            f"warm-p95 latency (ms) above which the verdict is still 'degraded' but a "
+            f"critical warning is added (endpoint effectively unusable). "
+            f"Default {WARM_P95_CRITICAL_MS:.0f}."
+        ),
     )
     p.add_argument(
         "--perf",
@@ -432,6 +456,12 @@ def main(
       :func:`kairix.paths.provider_name` (canonical F4-clean reader).
       Tests pass a fixed-value lookup so they don't have to mutate the
       real process env.
+
+    The ``--degraded-p95-ms`` / ``--critical-p95-ms`` flags let an
+    operator tune the warm-p95 verdict thresholds to their endpoint
+    distance without a code change; they default to
+    :data:`WARM_P95_DEGRADED_MS` / :data:`WARM_P95_CRITICAL_MS` so the
+    verdict is unchanged for operators who don't pass them.
     """
     if env_provider_lookup is None:
         env_provider_lookup = _default_env_provider_lookup
@@ -450,6 +480,15 @@ def main(
         return _invalid_args(f"--concurrency must be >= 1; got {args.concurrency}")
     if args.repeated_samples < 1:
         return _invalid_args(f"--repeated-samples must be >= 1; got {args.repeated_samples}")
+    if args.degraded_p95_ms <= 0:
+        return _invalid_args(f"--degraded-p95-ms must be > 0; got {args.degraded_p95_ms}")
+    if args.critical_p95_ms <= 0:
+        return _invalid_args(f"--critical-p95-ms must be > 0; got {args.critical_p95_ms}")
+    if args.critical_p95_ms < args.degraded_p95_ms:
+        return _invalid_args(
+            f"--critical-p95-ms ({args.critical_p95_ms}) must be >= --degraded-p95-ms "
+            f"({args.degraded_p95_ms}); critical is the harsher threshold"
+        )
 
     provider, err = _resolve_provider(args, registry, env_provider_lookup)
     if provider is None:
@@ -461,6 +500,8 @@ def main(
         concurrency=args.concurrency,
         repeated_samples=args.repeated_samples,
         snapshotter=snapshotter,
+        degraded_p95_ms=args.degraded_p95_ms,
+        critical_p95_ms=args.critical_p95_ms,
     )
 
     if args.compare:
