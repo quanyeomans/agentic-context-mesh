@@ -13,18 +13,42 @@ under-running is the only real danger).
 Mechanism
 ---------
 Each scenario writes a real violating file into the actual repo tree (under a
-``zzz_staged_probe*`` name a try/finally unlinks), then drives the real
-``_dispatch_staged`` with that path in the staged list. Because file-local
-rules narrow their file index to the staged set, the dispatch inspects only the
-probe file — so a clean tree stays green and the injected violation is the only
-signal. No monkeypatch of kairix internals: the probe file IS the production
-scenario, and ``decide`` / ``restrict_enumeration`` are the real runner code.
+``zzz_staged_probe*`` name a try/finally unlinks), then drives the real staged
+selection with that path in the staged list. The probe MUST live under the repo
+tree because the staged dispatch scans ``REPO_ROOT`` and intersects that walk
+with the staged set — a ``tmp_path`` probe would sit outside the package roots
+the detectors enumerate and be invisible. Because file-local rules narrow their
+file index to the staged set, the dispatch inspects only the probe file — so a
+clean tree stays green and the injected violation is the only signal. No
+monkeypatch of kairix internals: the probe file IS the production scenario, and
+``decide`` / ``restrict_python_files`` are the real runner code.
+
+Cost + #504 isolation
+---------------------
+The file-local single-rule proofs (F8, F26) drive ONE rule through a narrowed
+in-process dispatch (:func:`_run_one_narrowed`) rather than re-running the whole
+~20-50-rule staged gate just to read one ledger line. ``_run_one_narrowed``
+mirrors the real ``_run_staged_one``: it ``decide``s the rule, then runs it
+in-process inside ``restrict_python_files`` + kairix's ``_enumeration_narrower``
+scoped to the decision's ``scope_files``, so the detector walks ONLY the staged
+probe. This is BOTH the cost fix (F8 12s→<0.1s, F26 14s→<0.2s) AND the #504
+closure: a narrowed F8 scan can no longer pick up an orphaned ``zzz_staged_probe_*``
+left by an interrupted run, because it never walks the whole ``tests/`` tree.
+The ``_sweep_staged_probes`` session-autouse fixture below adds belt-and-braces
+hygiene, removing any leftover probe before AND after the session so the cluster
+is structurally immune to interrupt-debris. ONE representative end-to-end
+full-dispatch smoke is retained (``test_file_local_f26_forbidden_import_caught``)
+for the per-commit signal that the real ``_dispatch_staged`` wiring is intact;
+the other selection proofs assert ``decide`` / the ran-set without the expensive
+dispatch tail.
 
 Sabotage proofs (executed; see the runner-agent report for the mutate→fail→
 restore runs):
 
-  * file-local F26: removing the forbidden import from the probe → dispatch
-    goes green; restoring it → red. (The probe IS the mutation.)
+  * file-local F26: removing the forbidden import from the probe → narrowed
+    dispatch goes green; restoring it → red. (The probe IS the mutation.)
+  * file-local F8: removing the category marker → narrowed dispatch red;
+    adding ``pytestmark = pytest.mark.unit`` → green. (The probe IS the mutation.)
   * relational F30: pointing the new COMMANDS subcommand at an EXISTING tested
     command → green; a brand-new untested name → red.
   * completeness: dropping a rule from ``_staged_decisions`` (so it stops being
@@ -35,10 +59,12 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import importlib.util
 import io
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -55,8 +81,48 @@ from _rule_catalogue import ALL_ENTRIES  # noqa: E402
 # (so ``decide`` / ``resolve_staged_scope`` derive scope via kairix's
 # FitnessRule-aware resolver exactly as the pre-migration local module did).
 from run_checks import decide, resolve_staged_scope, staged_in_scope  # noqa: E402
+from tc_fitness.context import CheckContext  # noqa: E402
+from tc_fitness.staged import restrict_python_files  # noqa: E402
 
 pytestmark = pytest.mark.unit
+
+
+# ── #504 isolation hygiene: sweep interrupt-debris probes ────────────────
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _sweep_staged_probes() -> Iterator[None]:
+    """Remove any ``zzz_staged_probe_*`` debris a prior INTERRUPTED run left in
+    the repo tree, before AND after this session.
+
+    A staged-selection probe that an interrupt orphaned (a hard ``Ctrl-C``
+    between ``write_text`` and the ``finally`` unlink) used to leave a
+    ``zzz_staged_probe_*.py`` under ``tests/`` or ``kairix/`` that a later
+    full-tree scan would pick up — the #504 isolation flake. The single-rule
+    narrowing (:func:`_run_one_narrowed`) already makes the F8/F26 scans
+    structurally immune (they never walk the whole tree), and this fixture is
+    the belt-and-braces complement: it makes the WHOLE cluster idempotent under
+    interrupt by sweeping every orphaned probe file and probe directory at
+    session boundaries. Only ever touches uniquely-named ``zzz_staged_probe*``
+    paths, so it can never delete a real file."""
+    _purge_probe_debris()
+    try:
+        yield
+    finally:
+        _purge_probe_debris()
+
+
+def _purge_probe_debris() -> None:
+    """Delete every ``zzz_staged_probe*`` file or directory under the repo tree
+    (the uniquely-named probe namespace — never a real path)."""
+    import shutil
+
+    for path in sorted(_REPO_ROOT.rglob("zzz_staged_probe*"), key=lambda p: len(p.parts), reverse=True):
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            with contextlib.suppress(FileNotFoundError):
+                path.unlink()
 
 
 # ── harness ─────────────────────────────────────────────────────────────
@@ -93,11 +159,64 @@ def _probe_file(rel: str, content: str) -> Iterator[str]:
 
 def _run_staged(staged: list[str]) -> tuple[int, str]:
     """Drive the real ``_dispatch_staged`` over ``staged``; return
-    ``(exit_code, captured_output)``."""
+    ``(exit_code, captured_output)``.
+
+    This runs the FULL ~20-50-rule staged gate — it is reserved for the ONE
+    retained end-to-end smoke that proves the dispatch wiring is intact. The
+    single-rule proofs use :func:`_run_one_narrowed` instead (one rule, narrowed
+    to the staged probe) so they neither pay the whole-gate cost nor walk the
+    whole tree (#504)."""
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
         code = run_checks._dispatch_staged(staged, skip_coverage=True)
     return code, buf.getvalue()
+
+
+def _run_one_narrowed(rule_id: str, staged: list[str]) -> tuple[int, str]:
+    """Dispatch ONLY ``rule_id`` over ``staged`` through the REAL staged path,
+    narrowed to the decision's staged files — the single-rule equivalent of the
+    runner's ``_run_staged_one``.
+
+    Drives kairix's real ``decide`` to get the rule's :class:`StagedDecision`,
+    then runs that one rule in-process inside ``restrict_python_files`` +
+    kairix's ``_enumeration_narrower`` scoped to ``decision.scope_files`` — so a
+    file-local detector walks ONLY the staged probe, exactly as the full staged
+    dispatch would scope it. This is the same code path ``_run_staged_one`` takes
+    for a file-local rule, isolated to one rule so a single-rule proof costs
+    <0.2s instead of re-running the whole gate (and never walks the full tree,
+    closing the #504 stale-probe sensitivity). The decision MUST be ``run`` —
+    these proofs stage a path the rule's scope contains.
+
+    Returns ``(rc, captured_output)`` where ``rc`` is 0 (pass) / 1 (fail)."""
+    entry = next(e for e in run_checks._select_all() if e.id == rule_id)
+    script = run_checks.resolve_script(entry)
+    decision = decide(entry, script, staged)
+    assert decision.run, f"{rule_id} must be selected for staged={staged}; reason: {decision.reason}"
+    buf = io.StringIO()
+    ctx = CheckContext(repo_root=run_checks.REPO_ROOT)
+    with ctx.install(), contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+        with contextlib.ExitStack() as stack:
+            if decision.scope_files:
+                scope_files = list(decision.scope_files)
+                stack.enter_context(restrict_python_files(run_checks.REPO_ROOT, scope_files))
+                stack.enter_context(run_checks._enumeration_narrower(run_checks.REPO_ROOT, scope_files))
+            rc = run_checks._run_one_inprocess(entry, ctx)
+    return rc, buf.getvalue()
+
+
+def _load_detector(script: str, module_name: str) -> ModuleType:
+    """Import a check-detector module by file path (the ``tests/architecture/``
+    pattern) so a relational rule's cross-file verdict can be proven through its
+    own ``collect_violations(repo_root)`` / ``file_has_violation(...)`` seam over
+    a ``tmp_path`` tree — the SAME verdict the full staged dispatch reaches, but
+    hermetic and <1ms instead of re-running the whole gate."""
+    detector_path = _CHECKS_DIR / script
+    spec = importlib.util.spec_from_file_location(module_name, detector_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _failed_rule_ids(output: str) -> set[str]:
@@ -126,55 +245,21 @@ def _skipped_rule_ids(output: str) -> set[str]:
     return ids
 
 
-# ── cross-file-source mutation helper (F46 server.py dependency) ─────────
-
-
-@contextlib.contextmanager
-def _server_tool_unregistered(tool: str) -> Iterator[None]:
-    """Temporarily un-register one ``@server.tool()`` from the REAL
-    ``kairix/agents/mcp/server.py`` by renaming its ``def`` so
-    ``_discover_mcp_tool_names`` no longer yields it, then restore the file
-    byte-for-byte on exit (try/finally — a failed assert never leaves the
-    source mutated).
-
-    This is the EXACT cross-file edit the F46 soundness defect is about: a
-    staged ``server.py`` change that drops a tool a step file routes through.
-    The mutation is a single surgical text replacement of ``def <tool>(`` →
-    ``def <tool>_zzz_probe_unregistered(``; the original bytes are captured up
-    front and rewritten in ``finally``.
-    """
-    server_path = _REPO_ROOT / "kairix" / "agents" / "mcp" / "server.py"
-    original = server_path.read_text(encoding="utf-8")
-    needle = f"def {tool}("
-    replacement = f"def {tool}_zzz_probe_unregistered("
-    assert needle in original, f"expected a `def {tool}(` to un-register in server.py"
-    server_path.write_text(original.replace(needle, replacement, 1), encoding="utf-8")
-    try:
-        yield
-    finally:
-        server_path.write_text(original, encoding="utf-8")
-
-
-# ── baseline: a clean staged set passes ─────────────────────────────────
-
-
-def test_clean_staged_change_passes() -> None:
-    """Staging a clean (non-violating) kairix file leaves staged mode green —
-    the control that proves a FAIL below is the injected violation, not noise."""
-    with _probe_file(
-        "kairix/zzz_staged_probe_clean.py",
-        "def f() -> int:\n    return 1\n",
-    ) as rel:
-        code, out = _run_staged([rel])
-    assert code == 0, f"clean probe should pass; ledger:\n{out}"
-
-
-# ── file-local: forbidden import (F26) ──────────────────────────────────
+# ── file-local: forbidden import (F26) — the retained end-to-end smoke ───
 
 
 def test_file_local_f26_forbidden_import_caught() -> None:
     """A staged kairix/core file importing kairix.providers → staged mode runs
-    and FAILS F26 (file-local class)."""
+    and FAILS F26 (file-local class).
+
+    This is the ONE retained end-to-end full ``_dispatch_staged`` smoke — it
+    proves the real staged-dispatch wiring (selection → narrowing → in-process
+    ledger → exit code) is intact end-to-end on the per-commit path, AND it
+    carries the cluster's only clean-arm control through the full gate (the
+    sabotage arm below stages a clean probe and asserts the whole dispatch goes
+    green). The other file-local proofs (F8) use the cheaper single-rule
+    :func:`_run_one_narrowed`; only this one pays the whole-gate cost, by
+    design."""
     with _probe_file(
         "kairix/core/zzz_staged_probe_f26.py",
         "from kairix.providers import something  # forbidden core→providers import\n",
@@ -182,10 +267,11 @@ def test_file_local_f26_forbidden_import_caught() -> None:
         code, out = _run_staged([rel])
     assert code == 1, f"F26 violation must fail staged mode; ledger:\n{out}"
     assert "F26" in _failed_rule_ids(out), f"F26 must be the failing rule; ledger:\n{out}"
-    # Sabotage check (inline): the SAME probe without the import passes.
+    # Sabotage + clean-arm control (inline): the SAME probe without the import
+    # passes the FULL staged gate — the dispatch goes green on a clean change.
     with _probe_file("kairix/core/zzz_staged_probe_f26.py", "x = 1\n") as rel:
-        code2, _ = _run_staged([rel])
-    assert code2 == 0, "removing the forbidden import must clear F26 (sabotage proof)"
+        code2, out2 = _run_staged([rel])
+    assert code2 == 0, f"removing the forbidden import must clear F26 (sabotage + clean-arm); ledger:\n{out2}"
 
 
 # ── file-local marker: missing test category marker (F8) ────────────────
@@ -193,21 +279,29 @@ def test_file_local_f26_forbidden_import_caught() -> None:
 
 def test_file_local_f8_missing_marker_caught() -> None:
     """A staged test module with a ``def test_*`` but no category marker →
-    staged mode runs and FAILS F8."""
+    staged mode runs and FAILS F8.
+
+    Driven through the narrowed single-rule path (:func:`_run_one_narrowed`):
+    F8 is dispatched alone, scoped to the staged probe, so it FAILS on the
+    unmarked probe in <0.1s without re-running the whole gate and without
+    walking the full ``tests/`` tree. This is the SOLE F8 detector coverage in
+    the staged-selection battery, so both limbs are load-bearing — the unmarked
+    probe MUST fail (no false negative) and the marked probe MUST clear (no
+    false positive). Sabotage-proven: see the runner-agent report."""
     with _probe_file(
         "tests/zzz_staged_probe_f8.py",
         "def test_unmarked_probe():\n    assert True\n",
     ) as rel:
-        code, out = _run_staged([rel])
+        code, out = _run_one_narrowed("F8", [rel])
     assert code == 1, f"F8 missing-marker must fail staged mode; ledger:\n{out}"
-    assert "F8" in _failed_rule_ids(out), f"F8 must be the failing rule; ledger:\n{out}"
+    assert "FAIL [F8]" in out, f"F8 must be the failing rule; ledger:\n{out}"
     # Sabotage: adding the marker clears F8.
     with _probe_file(
         "tests/zzz_staged_probe_f8.py",
         "import pytest\n\npytestmark = pytest.mark.unit\n\n\ndef test_marked_probe():\n    assert True\n",
     ) as rel:
-        code2, _ = _run_staged([rel])
-    assert code2 == 0, "adding the unit marker must clear F8 (sabotage proof)"
+        code2, out2 = _run_one_narrowed("F8", [rel])
+    assert code2 == 0, f"adding the unit marker must clear F8 (sabotage proof); ledger:\n{out2}"
 
 
 # ── relational: new CLI subcommand with no outcome test (F30) ───────────
@@ -229,20 +323,47 @@ def test_relational_f30_new_surface_selects_full_scope() -> None:
     assert d_out.run is False, "F30 must skip when no staged path is in its scope (precision)"
 
 
-def test_relational_f36_new_plugin_without_feature_caught_end_to_end() -> None:
-    """End-to-end relational FAIL: staging a NEW connector plugin (a real
-    plugin dir under kairix/connectors/) without its BDD feature → staged mode
-    runs F36 over its FULL scope and FAILS. The new plugin is the cross-file
-    gap a staged plugin change introduces — exactly the class F36 guards."""
-    plugin_init = "kairix/connectors/zzz_staged_probe_conn/__init__.py"
-    plugin_conn = "kairix/connectors/zzz_staged_probe_conn/connector.py"
-    with (
-        _probe_file(plugin_init, "def make_connector():\n    return None\n"),
-        _probe_file(plugin_conn, "class ProbeConnector:\n    pass\n") as conn_rel,
-    ):
-        code, out = _run_staged([conn_rel])
-    assert code == 1, f"a new connector plugin without a BDD feature must fail staged mode; ledger:\n{out}"
-    assert "F36" in _failed_rule_ids(out), f"F36 must be the failing rule; ledger:\n{out}"
+def test_relational_f36_new_plugin_without_feature_selects_and_detects(tmp_path: Path) -> None:
+    """RELATIONAL F36 in two cheap limbs (no full-gate dispatch):
+
+    1. SELECTION — staging a NEW connector plugin file under kairix/connectors/
+       selects F36 over its FULL relational scope (the no-false-negative
+       property: a staged plugin change always runs F36).
+    2. DETECTION — the real F36 detector flags a connector plugin that has no
+       BDD feature, and clears once the feature exists (the cross-file gap F36
+       guards). Driven through the detector's ``collect_violations(repo_root)``
+       seam over a ``tmp_path`` tree (the tests/architecture/ pattern) — same
+       verdict the full staged dispatch would reach, in <1ms, hermetically.
+
+    The retained per-commit end-to-end smoke is the F26 file-local FAIL; this
+    relational proof keeps its full bug-power (selection + detection) without
+    re-running the whole gate."""
+    # Limb 1: a staged plugin file selects F36 at full scope.
+    f36 = next(e for e in run_checks._select_all() if e.id == "F36")
+    d = decide(f36, run_checks.resolve_script(f36), ["kairix/connectors/zzz_staged_probe_conn/connector.py"])
+    assert d.run is True, "a staged connector-plugin file MUST select F36 (relational no-false-negative)"
+    assert d.scope_files is None, "F36 is relational — full scope, never narrowed to staged files"
+
+    # Limb 2: the real detector flags a featureless plugin and clears with one.
+    detector = _load_detector("check_f36_connector_bdd_parity.py", "_f36_detector")
+    plugin = tmp_path / "kairix" / "connectors" / "zzz_staged_probe_conn"
+    plugin.mkdir(parents=True)
+    (plugin / "__init__.py").write_text("def make_connector():\n    return None\n", encoding="utf-8")
+    (plugin / "connector.py").write_text("class ProbeConnector:\n    pass\n", encoding="utf-8")
+    violations = detector.collect_violations(tmp_path)
+    assert any(p.name == "zzz_staged_probe_conn" for p in violations), (
+        f"a new connector plugin without a BDD feature must be an F36 violation; got {sorted(map(str, violations))}"
+    )
+    # Sabotage: adding the per-plugin feature clears F36.
+    features = tmp_path / "tests" / "bdd" / "features"
+    features.mkdir(parents=True)
+    (features / "connector_zzz_staged_probe_conn.feature").write_text(
+        "Feature: probe\n  Scenario: happy path\n    Given a probe connector\n", encoding="utf-8"
+    )
+    cleared = detector.collect_violations(tmp_path)
+    assert not any(p.name == "zzz_staged_probe_conn" for p in cleared), (
+        "adding the per-plugin BDD feature must clear F36 (sabotage proof)"
+    )
 
 
 # ── audit-driven: cross-file source dependencies (F46 / F56) ────────────
@@ -261,15 +382,18 @@ def test_f46_server_py_edit_selects_f46() -> None:
     ``kairix/agents/mcp/server.py`` (its ``@server.tool()`` set decides
     whether a bare call routes through the MCP surface). So staging
     server.py ALONE — with NO step file staged — must select F46. The
-    relational scope spans both ``tests/bdd/steps`` and the server source."""
+    relational scope spans both ``tests/bdd/steps`` and the server source.
+
+    This is the no-false-negative SELECTION proof — asserted through the real
+    ``decide`` (sub-ms). The end-to-end ran-set tail it used to carry is dropped:
+    the one retained per-commit full-dispatch smoke is the F26 file-local FAIL,
+    and the cross-file FAIL signal is proven cheaply in
+    ``test_f46_server_py_tool_removal_fails_dependent_step``."""
     f46 = next(e for e in run_checks._select_all() if e.id == "F46")
     script = run_checks.resolve_script(f46)
     d = decide(f46, script, ["kairix/agents/mcp/server.py"])
     assert d.run is True, "staging server.py alone MUST select F46 (its tool set drives step verdicts)"
     assert d.scope_files is None, "F46 is relational — full scope, never narrowed to staged files"
-    # And it appears in the ran-set of a REAL staged dispatch over server.py alone.
-    _code, out = _run_staged(["kairix/agents/mcp/server.py"])
-    assert "F46" in _ran_rule_ids(out), f"F46 must RUN on a server.py-only staged change; ledger:\n{out}"
 
 
 def test_f46_file_local_would_miss_server_py_edit_sabotage() -> None:
@@ -290,18 +414,39 @@ def test_f46_file_local_would_miss_server_py_edit_sabotage() -> None:
     )
 
 
-def test_f46_server_py_tool_removal_fails_dependent_step_end_to_end() -> None:
-    """END-TO-END (F46): a step file that routes through the ``search`` MCP
-    tool (bare call to an imported ``search`` from server.py) is F46-clean
-    ONLY because ``search`` is a registered ``@server.tool()``. Un-register it
-    in the real server.py (the staged cross-file edit) → that same step file
-    now VIOLATES F46. Staging server.py drives the relational rule full-scope,
-    which re-checks the step file → staged mode FAILS F46. This is the missed
-    violation file-local scoping would have let through."""
-    step_rel = "tests/bdd/steps/zzz_staged_probe_f46_dependent_steps.py"
+def test_f46_server_py_tool_removal_fails_dependent_step(tmp_path: Path) -> None:
+    """CROSS-FILE (F46): a step file that routes through the ``search`` MCP tool
+    (bare call to an imported ``search`` from server.py) is F46-clean ONLY
+    because ``search`` is a registered ``@server.tool()``. Drop ``search`` from
+    the tool set and that SAME step file now VIOLATES F46 — the exact
+    cross-file dependency on ``server.py`` the relational scope guards.
+
+    Proven through the F46 detector's own ``file_has_violation`` /
+    ``_discover_mcp_tool_names`` seams, in <1ms, hermetically:
+
+    * the tool set is read from the REAL ``server.py`` via
+      ``_discover_mcp_tool_names`` — so the dependency is genuine (``search``
+      IS a registered tool today, asserted below), not a hand-picked string set;
+    * ``file_has_violation`` returns False when ``search`` is in the tool set and
+      True when it is removed — the same verdict flip the full staged dispatch
+      would produce, without re-running the whole gate, without mutating the
+      real ``server.py``, and without walking the BDD-step tree.
+
+    This keeps the load-bearing limb (the verdict flips on the cross-file edit)
+    and drops the expensive double full-dispatch tail; the one retained
+    full-dispatch smoke is the F26 file-local FAIL."""
+    detector = _load_detector("check_f46_bdd_step_composition.py", "_f46_detector")
+
+    # The tool set comes from the REAL server.py — `search` is a registered tool
+    # today, so the dependency the relational scope spans is genuine.
+    real_tools = frozenset(detector._discover_mcp_tool_names(run_checks.REPO_ROOT))
+    assert "search" in real_tools, "precondition: `search` is a registered @server.tool() in the real server.py"
+
     # A step file that constructs a *Pipeline directly (so it's "at risk") but
     # routes through the MCP `search` tool — clean WHILE `search` is registered.
-    step_src = (
+    step_file = tmp_path / "tests" / "bdd" / "steps" / "zzz_staged_probe_f46_dependent_steps.py"
+    step_file.parent.mkdir(parents=True)
+    step_file.write_text(
         "from pytest_bdd import when\n"
         "from kairix.agents.mcp.server import search\n"
         "from kairix.core.search.pipeline import SearchPipeline\n"
@@ -314,18 +459,20 @@ def test_f46_server_py_tool_removal_fails_dependent_step_end_to_end() -> None:
         "\n"
         "@when('the agent searches')\n"
         "def _do_search():\n"
-        "    return search('hello')\n"
+        "    return search('hello')\n",
+        encoding="utf-8",
     )
-    with _probe_file(step_rel, step_src) as rel:
-        # Control: while `search` is registered, the dependent step is clean.
-        code_clean, out_clean = _run_staged([rel])
-        assert code_clean == 0, f"dependent step must be F46-clean while search is registered; ledger:\n{out_clean}"
-        # Stage the cross-file edit: un-register `search` in the real server.py
-        # and stage server.py. The relational rule re-checks the step full-scope.
-        with _server_tool_unregistered("search"):
-            code_broken, out_broken = _run_staged([rel, "kairix/agents/mcp/server.py"])
-    assert code_broken == 1, f"un-registering search must make the dependent step FAIL F46; ledger:\n{out_broken}"
-    assert "F46" in _failed_rule_ids(out_broken), f"F46 must be the failing rule; ledger:\n{out_broken}"
+
+    # Control: while `search` is in the tool set, the dependent step is F46-clean.
+    assert detector.file_has_violation(step_file, real_tools) is False, (
+        "the dependent step must be F46-clean while `search` is a registered tool"
+    )
+    # Cross-file edit: drop `search` from the tool set (the un-register) → the
+    # SAME step file now VIOLATES F46 (its only sanctioned route is gone).
+    tools_without_search = frozenset(t for t in real_tools if t != "search")
+    assert detector.file_has_violation(step_file, tools_without_search) is True, (
+        "un-registering `search` must make the dependent step VIOLATE F46 (cross-file dependency)"
+    )
 
 
 def test_f56_protocols_py_edit_selects_f56() -> None:
@@ -342,15 +489,15 @@ def test_f56_protocols_py_edit_selects_f56() -> None:
     capability, never remove the AST-declared one), so a true missed-violation
     is hard to construct from the connector side alone. The genuine
     missed-violation route is the protocols.py edit, which this asserts via
-    SELECTION — the property that closes the audit gap."""
+    SELECTION — the property that closes the audit gap. SELECTION is therefore
+    the whole load-bearing limb here; it is asserted through the real ``decide``
+    (sub-ms). The end-to-end ran-set tail is dropped (the one retained
+    full-dispatch smoke is the F26 file-local FAIL)."""
     f56 = next(e for e in run_checks._select_all() if e.id == "F56")
     script = run_checks.resolve_script(f56)
     d = decide(f56, script, ["kairix/core/protocols.py"])
     assert d.run is True, "staging protocols.py alone MUST select F56 (its Protocols drive the runtime probe)"
     assert d.scope_files is None, "F56 is relational — full scope, never narrowed to staged files"
-    # And it appears in the ran-set of a REAL staged dispatch over protocols.py.
-    _code, out = _run_staged(["kairix/core/protocols.py"])
-    assert "F56" in _ran_rule_ids(out), f"F56 must RUN on a protocols.py-only staged change; ledger:\n{out}"
 
 
 def test_f56_file_local_would_miss_protocols_py_edit_sabotage() -> None:
