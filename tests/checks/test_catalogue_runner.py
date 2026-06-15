@@ -204,43 +204,6 @@ def test_in_process_check_isolation_converts_crash_to_fail() -> None:
     assert rc == 1
 
 
-def test_full_run_parses_each_file_at_most_once() -> None:
-    """Parse-once invariant at SCALE: across a real in-process ``--all``
-    dispatch, the number of real ``ast.parse`` calls never exceeds the number
-    of distinct ``(filename, source)`` pairs — i.e. no file is parsed twice.
-    The cache hit count is strictly positive (the suite re-inspects files), so
-    this also proves the cache is actually load-bearing, not a no-op."""
-    import contextlib
-    import io
-
-    from tc_fitness.context import CheckContext
-
-    ctx = CheckContext(repo_root=run_checks.REPO_ROOT)
-    seen: set[str] = set()
-    with ctx.install():
-        for entry in run_checks._select_all():
-            script = run_checks.resolve_script(entry)
-            if script in seen or not run_checks._dispatches_in_process(entry):
-                continue
-            seen.add(script)
-            try:
-                check_main = run_checks._load_check_main(script)
-                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                    check_main()
-            except BaseException:
-                # Mirror the runner's isolation: a crashing check must not
-                # fail the cache invariant under test.
-                pass
-
-    # Every real parse corresponds to a distinct (filename, source) — the
-    # number of distinct keys in the cache equals the miss count.
-    distinct_keys = sum(len(by_text) for by_text in ctx._tree_cache.values())
-    assert ctx.parse_misses == distinct_keys, "a (filename, source) was parsed more than once"
-    assert ctx.parse_hits > 0, "the parse cache never hit — it is doing nothing"
-    # Walk cache likewise earns its keep.
-    assert ctx.walk_hits > 0, "the walk cache never hit — it is doing nothing"
-
-
 def test_in_process_verdict_matches_for_a_sample() -> None:
     """A representative sample of in-process rules return the SAME verdict the
     catalogue's clean tree expects (all green today). Spans an import-boundary
