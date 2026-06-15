@@ -626,6 +626,129 @@ def test_build_search_pipeline_propagates_provider_not_registered() -> None:
     assert "fake" in excinfo.value.available
 
 
+# ── reranker resolution wiring (FactoryDeps.reranker_override) ─────────
+
+
+@pytest.mark.unit
+def test_build_search_pipeline_wires_cross_encoder_closure_by_default() -> None:
+    """Default config (rerank_intents non-empty) builds the production
+    cross-encoder closure so per-intent rerank can fire at search time.
+
+    Building the closure does NOT import torch — that happens only when
+    the closure is *called*. This test asserts the closure is wired, not
+    that it runs, so it stays sub-second.
+
+    Sabotage proof: forcing ``reranker=None`` in the factory's resolution
+    would fail the ``is not None`` assertion.
+    """
+    cfg = RetrievalConfig(fusion_strategy="rrf", rerank_intents=("semantic",))
+    assert cfg.rerank.enabled is False  # not force-enabled — intents alone wire it
+    pipeline = build_search_pipeline(config=_wire_cfg(cfg), registry=_provider_registry())
+
+    assert pipeline.reranker is not None
+
+
+@pytest.mark.unit
+def test_build_search_pipeline_wires_cross_encoder_when_force_enabled_no_intents() -> None:
+    """``rerank.enabled=True`` builds the closure even with empty rerank_intents.
+
+    Pins the ``not cfg.rerank.enabled`` operand of the rerank-disabled
+    test: with ``enabled=True`` the closure must be built regardless of
+    ``rerank_intents``. An ``or`` swap in ``not enabled and not intents``
+    would wrongly disable rerank here (``True or ...``), so this kills
+    that mutant from the enabled side.
+    """
+    from kairix.core.search.config import RerankConfig
+
+    cfg = RetrievalConfig(
+        fusion_strategy="rrf",
+        rerank=RerankConfig(enabled=True),
+        rerank_intents=(),
+    )
+    pipeline = build_search_pipeline(config=_wire_cfg(cfg), registry=_provider_registry())
+
+    assert pipeline.reranker is not None
+
+
+@pytest.mark.unit
+def test_build_search_pipeline_wires_cross_encoder_when_intents_only() -> None:
+    """``rerank_intents`` non-empty (enabled=False) builds the closure.
+
+    The complementary kill for the ``and`` at the rerank-disabled check:
+    ``not False and not ("semantic",)`` = ``True and False`` = False →
+    NOT disabled → closure built. An ``or`` swap gives ``True or False`` =
+    True → wrongly disabled → ``reranker is None`` → this assertion fails.
+    """
+    cfg = RetrievalConfig(fusion_strategy="rrf", rerank_intents=("multi_hop",))
+    assert cfg.rerank.enabled is False
+    pipeline = build_search_pipeline(config=_wire_cfg(cfg), registry=_provider_registry())
+
+    assert pipeline.reranker is not None
+
+
+@pytest.mark.unit
+def test_build_search_pipeline_wires_no_reranker_when_fully_disabled() -> None:
+    """``rerank.enabled=False`` AND empty ``rerank_intents`` → ``reranker=None``.
+
+    Both operands of ``not enabled and not intents`` are True → rerank
+    disabled → the factory wires no closure (no sentence-transformers
+    import even on the production path).
+
+    Sabotage proof: dropping the disabled short-circuit would build a
+    closure and fail the ``is None`` assertion.
+    """
+    cfg = RetrievalConfig(fusion_strategy="rrf", rerank_intents=())
+    assert cfg.rerank.enabled is False
+    pipeline = build_search_pipeline(config=_wire_cfg(cfg), registry=_provider_registry())
+
+    assert pipeline.reranker is None
+
+
+@pytest.mark.unit
+def test_build_search_pipeline_rerank_disabled_sentinel_wires_no_reranker() -> None:
+    """``FactoryDeps(reranker_override=RERANK_DISABLED)`` wires ``reranker=None``.
+
+    The sentinel overrides the production resolution: even with a default
+    config whose ``rerank_intents`` would otherwise build the closure, the
+    pipeline carries no reranker — the seam integration tests rely on this
+    to skip the ~5s torch import.
+
+    Sabotage proof: ignoring the sentinel would build the closure and fail
+    the ``is None`` assertion.
+    """
+    from kairix.core.factory import RERANK_DISABLED
+
+    cfg = RetrievalConfig(fusion_strategy="rrf", rerank_intents=("semantic",))
+    pipeline = build_search_pipeline(
+        config=_wire_cfg(cfg),
+        registry=_provider_registry(),
+        deps=FactoryDeps(reranker_override=RERANK_DISABLED),
+    )
+
+    assert pipeline.reranker is None
+
+
+@pytest.mark.unit
+def test_build_search_pipeline_reranker_override_callable_used_verbatim() -> None:
+    """A callable ``reranker_override`` is wired onto the pipeline verbatim.
+
+    Sabotage proof: building the production closure instead of using the
+    injected callable would fail the identity assertion.
+    """
+
+    def fake_reranker(query: str, fused: list) -> list:
+        return fused
+
+    cfg = RetrievalConfig(fusion_strategy="rrf", rerank_intents=("semantic",))
+    pipeline = build_search_pipeline(
+        config=_wire_cfg(cfg),
+        registry=_provider_registry(),
+        deps=FactoryDeps(reranker_override=fake_reranker),
+    )
+
+    assert pipeline.reranker is fake_reranker
+
+
 @pytest.mark.unit
 def test_build_search_pipeline_auto_hydrates_secrets_via_bootstrap() -> None:
     """Every Python-API entry into ``build_search_pipeline`` auto-bootstraps

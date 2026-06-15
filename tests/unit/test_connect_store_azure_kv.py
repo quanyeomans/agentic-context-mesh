@@ -270,42 +270,49 @@ def test_lazy_import_real_azure_identity_returns_credential() -> None:
 
 @_SKIP_NO_AZURE
 def test_lazy_import_real_azure_keyvault_returns_client() -> None:
-    """When ``azure-keyvault-secrets`` IS installed, ``_build_secret_client`` returns a real client.
+    """When ``azure-keyvault-secrets`` IS installed, ``_build_secret_client``
+    constructs a real ``SecretClient``.
 
-    Drives the import-success branch via the public store() path.
-    Strengthened: previously the test wrapped the entire ``store()`` call
-    in a try/except where BOTH outcomes (raise or no-raise) returned
-    silently — the test passed even when ``SecretClient`` was never
-    constructed (i.e. a stub was returned). The strengthened form asserts
-    on an OBSERVABLE side-effect: the real SDK's ``set_secret`` call
-    raises a credential-bound error (proves a real SecretClient was
-    instantiated), and the rationale string we check pins the SDK class
-    name to confirm it came from the real azure-keyvault-secrets SDK.
+    Mirrors the offline ``isinstance`` shape of the sibling
+    ``test_lazy_import_real_azure_identity_returns_credential`` (which
+    asserts the built credential ``isinstance DefaultAzureCredential``).
+    A ``SecretClient`` performs no DNS/TCP at construction — the network
+    is only touched on the first request — so building one and asserting
+    its type is fully offline (~0.15s) and strictly stronger than the
+    previous shape.
+
+    The previous shape drove ``store()`` to completion so the real SDK's
+    ``set_secret`` paid a real Azure DNS/TCP timeout (~4.8s), then
+    asserted on a URL substring in the wrapped error — but that substring
+    is present on ANY failure branch (the wrap message names the vault URL
+    regardless of whether a real ``SecretClient`` was ever built), so it
+    did not actually prove the lazy import + real construction ran.
+
+    Strengthened: assert the constructed object IS an
+    ``azure.keyvault.secrets.SecretClient`` instance, proving the lazy
+    import + real construction executed. A stub return (or a regression
+    that swaps in a fake) fails the ``isinstance`` check rather than
+    slipping through a substring match.
+
+    Sabotage proof: replace the ``SecretClient(...)`` construction in
+    ``_build_secret_client`` with ``return object()`` — the
+    ``isinstance`` assertion fails. (The companion direct-call import
+    tests in this file establish the same ``_build_*`` direct-drive
+    pattern.)
     """
     from azure.keyvault.secrets import SecretClient
 
     store = AzureKeyVaultTokenStore(
         vault_name="x",
         env={},
+        # Stand-in credential so the identity lazy-import path is bypassed
+        # and only the keyvault construction branch under test runs.
         credential_factory=lambda: object(),
     )
-    # The real SDK's ``set_secret`` rejects the stub credential. We
-    # confirm the error came from the real SDK by checking the wrap
-    # message that names the vault URL the SDK was given — this proves
-    # the SDK's construction + ``set_secret`` call ran, which is what
-    # the test pins.
-    with pytest.raises(TokenStoreUnauthorizedError, match=r"https://x\.vault\.azure\.net/"):
-        store.store(
-            scope="connector",
-            area="gmail",
-            instance=None,
-            tokens=_tokens(),
-            client=_client(),
-        )
-    # And a sanity check that the SDK is actually importable in this env
-    # (the test would have ImportError'd at the top-of-function import
-    # otherwise; this re-states the contract for the reader).
-    assert SecretClient is not None
+    secret_client = store._build_secret_client("https://x.vault.azure.net/")
+    assert isinstance(secret_client, SecretClient), (
+        f"lazy import + real construction must yield an azure SecretClient; got {type(secret_client)!r}"
+    )
 
 
 def test_lazy_import_azure_keyvault_raises_typed(monkeypatch: Any) -> None:
