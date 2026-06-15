@@ -20,7 +20,12 @@ from __future__ import annotations
 
 import pytest
 
-from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
+from kairix.core.factory import (
+    QUERY_CACHE_DISABLED,
+    RERANK_DISABLED,
+    FactoryDeps,
+    build_search_pipeline,
+)
 from kairix.core.protocols import (
     DocumentRepository,
     EmbeddingService,
@@ -107,6 +112,7 @@ def _build_pipeline(
     intent: QueryIntent = QueryIntent.SEMANTIC,
     logger: FakeSearchLogger | None = None,
     graph_available: bool = False,
+    reranker_override: object = RERANK_DISABLED,
 ):
     """Compose a SearchPipeline through the factory with protocol-compliant fakes.
 
@@ -114,6 +120,16 @@ def _build_pipeline(
     ``(embed, vec_repo)`` in ``VectorSearchBackend`` exactly as production
     does — the test wires the fakes at the same boundary the
     SQLite/Azure/usearch implementations sit on.
+
+    Rerank seam: ``reranker_override`` defaults to ``RERANK_DISABLED`` so
+    these backend-composition tests never pull the production
+    cross-encoder closure — the ~5s ``sentence-transformers``/torch import
+    that every SEMANTIC-intent search would otherwise trigger via
+    ``pipeline._maybe_rerank`` (``RetrievalConfig.defaults().rerank_intents``
+    includes ``"semantic"``). None of these tests assert the reranked
+    order, so disabling rerank is behaviour-preserving for their
+    assertions. A test that wants to prove the seam is exercised passes a
+    tracking no-op closure instead.
     """
     return build_search_pipeline(
         config=RetrievalConfig.defaults(),
@@ -129,6 +145,7 @@ def _build_pipeline(
             logger_override=logger,
             resolver_override=FakeCollectionResolver(),
             query_cache_override=QUERY_CACHE_DISABLED,
+            reranker_override=reranker_override,
         ),
     )
 
@@ -296,6 +313,135 @@ class TestVectorBackendInPipeline:
 
         assert result.vec_count == 1
         assert _result_paths(result) == ["b.md"]
+
+    @pytest.mark.integration
+    def test_injected_reranker_seam_is_invoked_on_semantic_intent(self) -> None:
+        """The factory's ``reranker_override`` seam reaches the pipeline rerank stage.
+
+        Proves the seam is wired end-to-end: a SEMANTIC-intent search with
+        ``RetrievalConfig.defaults()`` (whose ``rerank_intents`` includes
+        ``"semantic"``) passes through ``pipeline._maybe_rerank``, which
+        invokes the *injected* closure rather than the production
+        cross-encoder. This is what lets the SEMANTIC tests skip the ~5s
+        torch import: the seam is the live code path, not a bypass.
+        """
+        calls: list[tuple[str, int]] = []
+
+        def tracking_noop_reranker(query: str, fused: list) -> list:
+            calls.append((query, len(fused)))
+            return fused
+
+        vec_results = [_vec_hit(path="sem.md", distance=0.1, collection="shared")]
+        pipeline = _build_pipeline(
+            doc_repo=FakeDocumentRepository(),
+            embed=FakeEmbeddingService(),
+            vec_repo=FakeVectorRepository(results=vec_results),
+            intent=QueryIntent.SEMANTIC,
+            reranker_override=tracking_noop_reranker,
+        )
+
+        result = pipeline.search("semantic query")
+
+        # The injected reranker was called exactly once for the SEMANTIC
+        # query, and the result still surfaces (no-op returns input order).
+        assert len(calls) == 1
+        assert calls[0][0] == "semantic query"
+        assert _result_paths(result) == ["sem.md"]
+
+    @pytest.mark.integration
+    def test_disabled_reranker_seam_skips_rerank_stage(self) -> None:
+        """``RERANK_DISABLED`` wires ``reranker=None`` so the rerank stage is a no-op.
+
+        This is the default the SEMANTIC tests use to avoid the torch
+        import. With ``reranker=None``, ``pipeline._maybe_rerank``
+        short-circuits before any ``sentence-transformers`` import, and the
+        pipeline still returns the fused results unchanged.
+        """
+        vec_results = [
+            _vec_hit(path="sem-a.md", distance=0.1, collection="shared"),
+            _vec_hit(path="sem-b.md", distance=0.2, collection="shared"),
+        ]
+        pipeline = _build_pipeline(
+            doc_repo=FakeDocumentRepository(),
+            embed=FakeEmbeddingService(),
+            vec_repo=FakeVectorRepository(results=vec_results),
+            intent=QueryIntent.SEMANTIC,
+            reranker_override=RERANK_DISABLED,
+        )
+        # The pipeline carries no reranker — the rerank stage cannot fire.
+        assert pipeline.reranker is None
+
+        result = pipeline.search("semantic query")
+
+        assert result.vec_count == 2
+        assert sorted(_result_paths(result)) == ["sem-a.md", "sem-b.md"]
+
+    @staticmethod
+    def _build_production_reranker_pipeline(config: RetrievalConfig):
+        """Build a pipeline through the *production* reranker path (no override).
+
+        Every component except the reranker is a fake so the only live
+        wiring under test is the factory's config-driven choice of whether
+        to build the cross-encoder closure. ``reranker_override`` is left
+        unset, so ``cfg`` alone decides ``pipeline.reranker``.
+        """
+        return build_search_pipeline(
+            config=config,
+            paths=FakePaths(),
+            deps=FactoryDeps(
+                classifier_override=FakeClassifier(intent=QueryIntent.SEMANTIC),
+                doc_repo_override=FakeDocumentRepository(),
+                embed_service_override=FakeEmbeddingService(),
+                vec_repo_override=FakeVectorRepository(
+                    results=[_vec_hit(path="x.md", distance=0.1, collection="shared")]
+                ),
+                graph_override=FakeGraphRepository(available=False),
+                fusion_override=RRFFusion(k=60),
+                boosts_override=[],
+                logger_override=FakeSearchLogger(),
+                resolver_override=FakeCollectionResolver(),
+                query_cache_override=QUERY_CACHE_DISABLED,
+                # No reranker_override — the production default path runs.
+            ),
+        )
+
+    @pytest.mark.integration
+    def test_rerank_fully_disabled_in_config_wires_no_reranker(self) -> None:
+        """A config with rerank disabled AND no rerank_intents wires ``reranker=None``.
+
+        Exercises the *production default* path (no ``reranker_override``):
+        when ``cfg.rerank.enabled`` is False AND ``cfg.rerank_intents`` is
+        empty, the factory skips building the cross-encoder closure
+        entirely — no ``sentence-transformers`` import even with production
+        wiring. Proves the operator-config "rerank off" branch.
+        """
+        # rerank.enabled defaults to False; rerank_intents=() — BOTH operands
+        # of ``not enabled and not intents`` are True → rerank disabled.
+        pipeline = self._build_production_reranker_pipeline(RetrievalConfig(rerank_intents=()))
+
+        assert pipeline.reranker is None
+
+        result = pipeline.search("semantic query")
+        assert _result_paths(result) == ["x.md"]
+
+    @pytest.mark.integration
+    def test_rerank_built_when_intents_registered_even_if_not_force_enabled(self) -> None:
+        """Non-empty ``rerank_intents`` builds the closure even with ``enabled=False``.
+
+        Pins the ``and`` in ``not enabled AND not intents``: with
+        ``rerank.enabled`` False but ``rerank_intents`` non-empty (the
+        ``RetrievalConfig.defaults()`` shape), the closure MUST be built so
+        per-intent rerank can fire. An ``or`` here would wrongly disable
+        rerank for the default config — this assertion kills that mutant.
+        """
+        # enabled=False, intents non-empty → ``not False and not (...)`` =
+        # ``True and False`` = False → NOT disabled → closure built.
+        config = RetrievalConfig(rerank_intents=("semantic",))
+        assert config.rerank.enabled is False  # guards the precondition
+
+        pipeline = self._build_production_reranker_pipeline(config)
+
+        assert pipeline.reranker is not None
 
 
 # ---------------------------------------------------------------------------
