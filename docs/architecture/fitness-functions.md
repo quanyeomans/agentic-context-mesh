@@ -2907,7 +2907,7 @@ runner — `scope_resolver`
 F7/F9 coverage rows dispatched as guarded subprocesses). `_rule_catalogue.py`
 imports `RuleEntry` from `tc_fitness.catalogue` and keeps kairix's own rows +
 closed `Category`/`Scope`/`Status` `Literal`s. The schema is **id-agnostic** —
-kairix uses F-numbers; the sibling tc-agent-zone repo (also migrated onto the
+kairix uses F-numbers; a sibling repo (also migrated onto the
 shared runner) uses descriptive names; both dispatch through the same engine.
 The local `_check_context.py` / `_staged_selection.py` / `_arch_lib.py` modules
 were **deleted** — their `CheckContext`, staged-selection, and `gate()` /
@@ -2919,8 +2919,8 @@ schema + context + staged + runner) plus `three-cubes/ci-workflows` (the
 `setup-uv-cached` composite + `python-quality-gate.yml` reusable workflow). The
 EPIC #499 convergence narrative is captured inline in the F81–F85 rule sections
 above. **Forward backlog:** runner v0.4.0 adds first-class subprocess support
-(so tc-agent-zone becomes a pure consumer); reusable mutation / Sonar / Docker
-workflows follow; the tc-agent-zone `ci.yml` collapses to a thin caller.
+(so a sibling repo becomes a pure consumer); reusable mutation / Sonar / Docker
+workflows follow; a sibling repo's `ci.yml` collapses to a thin caller.
 
 ### File layout
 
