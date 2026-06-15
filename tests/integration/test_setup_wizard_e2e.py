@@ -60,11 +60,27 @@ def state_path(tmp_path: Path) -> Path:
     return tmp_path / ".setup-state.json"
 
 
+_FAKE_HEALTH_CHECK_SENTINEL = "[fake health check ran]"
+
+
+def _fake_health_check() -> None:
+    """Fast stand-in for ``_run_health_check_summary`` via the seam.
+
+    The production default runs ~18 real probes (sockets/subprocess); a
+    full setup run paid that tax on every successful path. Injecting this
+    no-op through ``WizardDeps.health_check`` keeps the orchestration
+    under test without the probe cost. The sentinel makes "the seam
+    routed here" provable from captured stdout.
+    """
+    print(f"  ✓ {_FAKE_HEALTH_CHECK_SENTINEL}\n")
+
+
 def _deps(tmp_path: Path, service: Any) -> WizardDeps:
     return WizardDeps(
         setup_service=lambda: service,
         persist_credentials=lambda *_a: tmp_path / "unwritten-kairix.env",
         index_poll_seconds=0.0,
+        health_check=_fake_health_check,
     )
 
 
@@ -216,7 +232,7 @@ def test_setup_scan_numbers_match_backend_scan_of_same_corpus(
         ctx=ctx,
         preset="general",
         document_path=str(corpus),
-        deps=WizardDeps(setup_service=lambda: build_setup_service()),
+        deps=WizardDeps(setup_service=lambda: build_setup_service(), health_check=_fake_health_check),
     )
     assert success is True
     out = capsys.readouterr().out
@@ -271,6 +287,7 @@ def test_setup_survives_system_exit_from_real_index_worker(
         persist_credentials=lambda *_a: tmp_path / "kairix.env",
         provider_names=lambda: ("azure_foundry", "openai"),
         index_poll_seconds=0.01,
+        health_check=_fake_health_check,
     )
 
     # Interactive script: defaults through provider (azure_foundry pick,
@@ -306,3 +323,90 @@ def test_setup_survives_system_exit_from_real_index_worker(
     assert "another indexing run is already in progress" in out, f"lock guidance missing:\n{out}"
     assert "Setup complete" in out, f"setup did not reach the epilogue:\n{out}"
     assert output.exists()
+
+
+def test_health_check_seam_injected_fake_is_called_not_the_real_probes(
+    doc_root: Path, output_path: Path, state_path: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The ``WizardDeps.health_check`` seam routes the wizard's final step
+    to the injected callable, NOT the real ~18-probe summary.
+
+    Proves the seam (not just that *a* function ran): a recorder fires
+    exactly once, the fake's sentinel reaches stdout, and the real
+    summary's ``Running health check...`` banner does NOT — so the
+    expensive socket/subprocess probes were never run.
+
+    Sabotage: if ``run_setup`` reverted to calling
+    ``_run_health_check_summary()`` directly (ignoring the seam),
+    ``calls`` would stay empty and the ``Running health check...``
+    banner would appear — both assertions below would fail.
+    """
+    calls: list[int] = []
+
+    def _recorder() -> None:
+        calls.append(1)
+        print(f"  ✓ {_FAKE_HEALTH_CHECK_SENTINEL}\n")
+
+    ctx = SetupContext(interactive=False, json_mode=False, state_path=state_path)
+    deps = WizardDeps(
+        setup_service=lambda: FakeSetupService(),
+        persist_credentials=lambda *_a: tmp_path / "unwritten-kairix.env",
+        index_poll_seconds=0.0,
+        health_check=_recorder,
+    )
+
+    success = run_setup(
+        output_path=str(output_path),
+        ctx=ctx,
+        preset="general",
+        document_path=str(doc_root),
+        deps=deps,
+    )
+
+    assert success is True
+    assert calls == [1], "injected health_check seam was not called exactly once"
+    out = capsys.readouterr().out
+    assert _FAKE_HEALTH_CHECK_SENTINEL in out, f"injected fake's output missing:\n{out}"
+    # The real summary's banner must be absent — the probes were bypassed.
+    assert "Running health check..." not in out, f"real health-check probes ran despite the seam:\n{out}"
+
+
+def test_health_check_seam_default_runs_the_real_summary(
+    doc_root: Path, output_path: Path, state_path: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Omitting ``health_check`` from ``WizardDeps`` wires the production
+    default — the REAL onboarding health-check summary — so operators see
+    no behaviour change from the seam landing.
+
+    This is the one test that intentionally pays the real probe cost: it
+    proves the default factory points at the production callable, not a
+    silently-swapped no-op.
+
+    Sabotage: if the ``health_check`` default factory were changed to a
+    no-op (or the call site stopped invoking ``deps.health_check()``),
+    the ``Running health check...`` banner the real summary prints would
+    never reach stdout and this assertion would fail.
+    """
+    ctx = SetupContext(interactive=False, json_mode=False, state_path=state_path)
+    # Every seam below the health-check is faked; health_check is OMITTED
+    # so its default_factory wires the production summary.
+    deps = WizardDeps(
+        setup_service=lambda: FakeSetupService(),
+        persist_credentials=lambda *_a: tmp_path / "unwritten-kairix.env",
+        index_poll_seconds=0.0,
+    )
+
+    success = run_setup(
+        output_path=str(output_path),
+        ctx=ctx,
+        preset="general",
+        document_path=str(doc_root),
+        deps=deps,
+    )
+
+    assert success is True
+    out = capsys.readouterr().out
+    # The real summary's banner — proof the default ran the production
+    # probes, not the fake (whose sentinel must be absent).
+    assert "Running health check..." in out, f"default health_check did not run the real summary:\n{out}"
+    assert _FAKE_HEALTH_CHECK_SENTINEL not in out, f"a fake leaked into the default path:\n{out}"

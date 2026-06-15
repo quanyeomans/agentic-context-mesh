@@ -240,6 +240,13 @@ class WizardDeps:
     # Seconds between index-progress polls. Tests pass 0.0 so a scripted
     # FakeSetupService run finishes without sleeping.
     index_poll_seconds: float = 0.5
+    # The wizard's final step — run the onboarding health checks and print
+    # a one-line summary. The production default runs ~18 real probes
+    # (sockets/subprocess); tests inject ``lambda: None`` (or a recorder)
+    # so a scripted run doesn't pay the probe tax. This was the last
+    # un-seamed side-effecting step in ``run_setup`` — closing it keeps
+    # every step of the orchestrator injectable.
+    health_check: Callable[[], None] = field(default_factory=lambda: _run_health_check_summary)
 
 
 _USE_CASE_OPTIONS = [
@@ -740,6 +747,6 @@ def run_setup(
         return False
 
     _maybe_run_initial_index(ctx, service, scan, poll_seconds=deps.index_poll_seconds)
-    _run_health_check_summary()
+    deps.health_check()
     _print_setup_summary(output, secrets_path)
     return True

@@ -1042,11 +1042,37 @@ def test_run_onboard_check_failure_check_id_matches_a_known_check() -> None:
     Sabotage check: if the failure check ID ever drifts from CheckResult.name
     (e.g. someone renames a check but doesn't update CANONICAL_REMEDIATIONS),
     this catches the mismatch.
-    """
-    from kairix.platform.onboard.check import run_all_checks, run_onboard_check
 
-    all_names = {r.name for r in run_all_checks()}
-    result = run_onboard_check()
+    Driven through the public ``checks=`` DI seam (the same seam
+    ``run_all_checks`` / ``run_onboard_check`` expose) with a small fake
+    check list — one passing, one failing. The prior shape ran the full
+    unmocked ``ALL_CHECKS`` registry TWICE (real subprocess spawns for
+    ``check_mcp_service`` + real socket timeouts), paying ~5.8s of
+    wall-clock to assert a near-definitional subset relation. The fake
+    list exercises the identical collation path (``run_onboard_check`` ->
+    ``run_all_checks`` -> ``CheckFailure(check=r.name, ...)``) in <0.1s,
+    and pins the invariant the same way: every ``CheckFailure.check``
+    must be the ``.name`` of a result the runner actually produced.
+
+    Sabotage proof: change ``CheckFailure(check=r.name, ...)`` in
+    ``run_onboard_check`` to ``check=r.name + "-typo"`` — the failing
+    check's id no longer appears in ``all_names`` and the assertion fails.
+    """
+    from kairix.platform.onboard.check import CheckResult, run_all_checks, run_onboard_check
+
+    def _passing_check() -> CheckResult:
+        return CheckResult(name="alpha", ok=True, detail="ok")
+
+    def _failing_check() -> CheckResult:
+        return CheckResult(name="beta", ok=False, detail="boom", fix="run `kairix fix beta`")
+
+    fake_checks = [_passing_check, _failing_check]
+
+    all_names = {r.name for r in run_all_checks(checks=fake_checks)}
+    result = run_onboard_check(checks=fake_checks)
+    # The fake list guarantees exactly one failure surfaces, so the
+    # subset relation is exercised against a real (non-empty) failure.
+    assert [f.check for f in result.failures] == ["beta"]
     for failure in result.failures:
         assert failure.check in all_names, f"unknown check id: {failure.check!r}"
 
