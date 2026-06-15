@@ -204,18 +204,63 @@ def test_api_timeout_error_class_name_maps_to_provider_unreachable() -> None:
 def test_chat_uses_lazily_resolved_client_when_transport_not_supplied() -> None:
     """When ``transport_client=None`` the plugin resolves via the pool.
 
-    Drives the production-path lines (236-242). The real openai-compat
-    client is constructed; the network is not actually contacted
-    because the fake api_key surfaces an auth error first.
+    Drives the production-path lines (236-242): ``_client()`` calls
+    ``kairix.transport.pool.get_client`` with the credential's
+    ``(api_key, endpoint, timeout)``. We inject a fake builder via the
+    documented ``install_production_builder`` seam so the openai SDK never
+    builds a real client and **no network is contacted** (the prior shape
+    paid a real 5x connection retry against dead ``localhost:4000`` — the
+    old docstring claiming "the network is not actually contacted" was
+    false).
+
+    Strengthened: the prior over-broad ``pytest.raises(ProviderError)``
+    only proved *some* error surfaced. We now assert the exact
+    ``(api_key, endpoint, timeout)`` tuple the provider forwards into the
+    pool builder — proving the credential plumbing, not just that the
+    lazy path ran.
 
     Sabotage-proof: removing the ``return get_client(...)`` line means
-    ``_client()`` returns ``None``; next attribute access surfaces a
-    TypeError that doesn't pattern-match ProviderError.
-    """
-    provider = LiteLLMProxyProvider(credentials=_creds(), transport_client=None)
+    ``_client()`` returns ``None``; the fake builder never records a call
+    and the captured-tuple assertion fails. Swapping ``credentials.api_key``
+    for ``endpoint`` (or vice versa) in the ``get_client(...)`` call flips
+    the recorded tuple and fails too.
 
-    with pytest.raises(ProviderError):
-        provider.chat([{"role": "user", "content": "hi"}])
+    The autouse ``_reset_client_pool`` fixture in ``tests/conftest.py``
+    drops the production pool's cached client at teardown, so this
+    builder swap does not leak into sibling tests.
+    """
+    from kairix.transport.pool.client_pool import install_production_builder
+
+    captured: list[tuple[str, str, float]] = []
+
+    class _RecordingFakeClient:
+        """Surfaces a recognised-shape error so ``chat`` maps to ProviderError."""
+
+        class _Chat:
+            class _Completions:
+                def create(self, **_kwargs: object) -> object:
+                    raise RuntimeError("fake-no-network")
+
+            completions = _Completions()
+
+        chat = _Chat()
+
+    def _fake_builder(api_key: str, endpoint: str, *, timeout: float) -> _RecordingFakeClient:
+        captured.append((api_key, endpoint, timeout))
+        return _RecordingFakeClient()
+
+    original_builder = install_production_builder(_fake_builder)
+    try:
+        provider = LiteLLMProxyProvider(credentials=_creds(), transport_client=None)
+        with pytest.raises(ProviderError):
+            provider.chat([{"role": "user", "content": "hi"}])
+    finally:
+        install_production_builder(original_builder)
+
+    assert captured == [("litellm-virtual-key", "http://localhost:4000/v1", 30.0)], (
+        f"provider must forward credentials.(api_key, endpoint) + the default 30s timeout "
+        f"into the pool builder; recorded {captured!r}"
+    )
 
 
 @pytest.mark.unit
