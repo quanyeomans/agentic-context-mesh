@@ -123,6 +123,10 @@ BDD feature files in `tests/bdd/features/`. Step definitions in `tests/bdd/steps
 
 `@pytest.mark.unit`, `@pytest.mark.contract`, `@pytest.mark.bdd`, or `@pytest.mark.integration`. Unmarked tests are invisible.
 
+### Scratch and probe files stay under `tmp_path`
+
+Tests that write scratch, probe, or fixture files MUST write them under pytest's `tmp_path`, never into the live source tree. Orphaned probe files left in-tree get picked up by whole-tree scanners (fitness-function detectors, coverage walks, lint) and produce flaky, hard-to-trace failures on unrelated runs. If a test must scan the repo, narrow the scan to the staged/changed set rather than the whole tree, and add a cleanup/sweep fixture for any debris a probe can leave behind. A test that writes outside `tmp_path` is the same smell as a test that mutates process env — it leaks state past its own boundary.
+
 ---
 
 ## Common code smells and their fixes

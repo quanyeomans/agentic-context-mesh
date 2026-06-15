@@ -350,6 +350,14 @@ fallback/cache only** — the org variable is the canonical local source.
 With no patterns loaded the scanner is a no-op locally (CI remains the
 backstop), so a fresh clone never hard-fails on a missing file.
 
+F73 is also why shared, reusable CI workflows stay **secret-free**: a
+reusable workflow must take secrets from its caller (`secrets:` inputs /
+`${{ secrets.* }}`), never hard-code a literal, and public artefacts
+(committed workflows, docs, BDD scenarios) must not name private sibling
+repositories or infrastructure. The token-pattern scanner backstops the
+second half; the first half is review-time discipline on every
+`workflow_call` author.
+
 ---
 
 ## The rules in detail
@@ -1028,10 +1036,19 @@ Pick the marker that matches the test's tier:
 | Protocol compliance | `contract` | `tests/contracts/` |
 | Real DB / external | `integration` | `tests/integration/` |
 | End-to-end pipelines | `e2e` | `tests/e2e/` |
+| Cross-layer integrity (F72 / Bundle E) | `invariant` | `tests/integrity_invariants/` |
+| Production-scale soak (nightly) | `soak` | `tests/soak/`, `*_soak` modules |
 | Anything > 5s | `slow` | (orthogonal — combine with tier) |
 
 If every test in a file is the same tier, prefer module-level
 `pytestmark` over decorating each function.
+
+Re-tiering caveat: a per-function `@pytest.mark.soak` does NOT cancel a
+module-level `pytestmark = pytest.mark.unit` — pytest STACKS markers, so
+the test still runs on the per-commit `unit` path. To actually move a test
+off the per-commit path, relocate it into a dedicated soak module
+(`tests/soak/…`) carrying `pytestmark = pytest.mark.soak`, don't just add
+the decorator. (Canonical tiering spec: ADR-024.)
 
 #### Allowed exceptions
 
@@ -2887,24 +2904,28 @@ regressing.
 ### Shared engine — kairix consumes `tc_fitness` (EPIC #499)
 
 The runner machinery is no longer local to kairix. As of [EPIC #499](https://github.com/three-cubes/kairix/issues/499)
-(common-process convergence), kairix is a **thin consumer** of the shared
+(common-process convergence), kairix is a **pure consumer** of the shared
 [`three-cubes-fitness`](https://github.com/three-cubes/fitness-engine) package
-(`tc_fitness`, pinned `@v0.3.0` in `pyproject.toml`). The split is **shared
+(`tc_fitness`, pinned `@v0.4.1` in `pyproject.toml`). The split is **shared
 machinery, per-repo domain**:
 
 | Concern | Lives where |
 |---|---|
 | In-process + subprocess dispatch, the named verdict ledger, the `--all` / `--gate` / `--staged` modes, parse-once `CheckContext`, staged-selection logic, the ratcheting `gate()` primitive, `python_files`/`repo_relative`, the `RuleEntry` schema | **shared** — the installed `tc_fitness` package |
-| The F-numbered catalogue rows, every `check_*.{py,sh}` implementation, the `.architecture/baseline/` files, the four kairix injection seams | **kairix** — `scripts/checks/` + `.architecture/baseline/` |
+| The F-numbered catalogue rows, every `check_*.{py,sh}` implementation, the `.architecture/baseline/` files, and the domain config kairix feeds the engine's declarative factories | **kairix** — `scripts/checks/` + `.architecture/baseline/` |
 
 `scripts/checks/run_checks.py` is the consumer shim: it dispatches through
-`tc_fitness.runner` (the shared `run` / `main_cli` engine) plus four injection
-seams that keep kairix's behaviour **byte-identical** to the pre-migration local
-runner — `scope_resolver`
-(file-local staged scope from each check's own detector), `enumeration_narrower`
-(the two extra file-enumeration surfaces kairix exposes), `conditional_check`
-(F7/F9 coverage-XML gating + `--skip-coverage`), and `subprocess_arg_env` (the
-F7/F9 coverage rows dispatched as guarded subprocesses). `_rule_catalogue.py`
+`tc_fitness.runner` (the shared `run` / `main_cli` engine). From v0.4.x the
+engine absorbs the four legacy seams as **declarative factories** fed kairix's
+domain config — `run_checks.py` no longer hand-writes them. `scope_resolver` is
+built by `tc_fitness.staged.make_module_roots_resolver`; `enumeration_narrower`
+by `tc_fitness.staged.make_binding_narrower`; `conditional_check` (F7/F9
+coverage-XML gating) by `tc_fitness.runner.make_env_path_conditional_check`; and
+`--skip-coverage` is threaded through the engine's `main_cli` via `extra_flags` +
+`post_parse` (no forked argparse). kairix supplies only the domain config (its
+module roots, the extra enumeration method, the `KAIRIX_COVERAGE_XML` env path);
+the engine owns the machinery. Behaviour stays **byte-identical** to the
+pre-migration local runner. `_rule_catalogue.py`
 imports `RuleEntry` from `tc_fitness.catalogue` and keeps kairix's own rows +
 closed `Category`/`Scope`/`Status` `Literal`s. The schema is **id-agnostic** —
 kairix uses F-numbers; a sibling repo (also migrated onto the
@@ -2918,15 +2939,18 @@ consuming repos — the shared layer is `tc_fitness` (lib + ratchet + catalogue
 schema + context + staged + runner) plus `three-cubes/ci-workflows` (the
 `setup-uv-cached` composite + `python-quality-gate.yml` reusable workflow). The
 EPIC #499 convergence narrative is captured inline in the F81–F85 rule sections
-above. **Forward backlog:** runner v0.4.0 adds first-class subprocess support
-(so a sibling repo becomes a pure consumer); reusable mutation / Sonar / Docker
-workflows follow; a sibling repo's `ci.yml` collapses to a thin caller.
+above. As of v0.4.1 BOTH consuming repos (kairix and the sibling repo) are pure
+consumers of the shared engine via these declarative factories — there are no
+remaining local injection seams. The schema stays **id-agnostic**: kairix uses
+F-numbers, the sibling uses descriptive names, both dispatch through the same
+`main_cli`. **Forward backlog:** reusable mutation / Sonar / Docker workflows
+converge next.
 
 ### File layout
 
 ```
 scripts/checks/
-├── run_checks.py                         # Thin consumer of tc_fitness.runner (catalogue dispatch + 4 injection seams)
+├── run_checks.py                         # Pure consumer of tc_fitness.runner (catalogue dispatch + declarative-factory domain config)
 ├── _rule_catalogue.py                    # kairix's F-numbered RuleEntry rows (RuleEntry schema from tc_fitness.catalogue)
 ├── _fitness_rule.py                      # FitnessRule ABC — 3-line check subclasses over tc_fitness.gate()
 ├── generate_catalogue_docs.py            # Regenerates the F-CATALOGUE doc regions (F92 currency gate)
@@ -3351,6 +3375,33 @@ enforcement mechanism (review, runtime check, or human judgement):
 
 - **Documentation drift.** This file claims to be canonical; only
   reviewer attention keeps it in sync with the scripts.
+
+- **Un-exercised reusable-workflow callers.** When CI uses
+  change-detection path filters to gate a `uses:` reusable-workflow
+  (`workflow_call`) job ON only for relevant changes, a workflow-only PR
+  can land with that job gated OFF — so a broken caller↔reusable-workflow
+  input contract reaches `main` and fails CI at *startup* on the next
+  triggering change. F93 gates that the job is in the aggregator's
+  `needs:` closure; it does not model the path filter, so it can't tell
+  that the caller never actually ran on this PR. Mechanically detecting
+  this would require modelling each job's path filter against the diff AND
+  the reusable-workflow input contract — fragile and not worth the cost.
+  The discipline is review-time: when a PR edits a `uses:`
+  reusable-workflow caller or its inputs, force a triggering change in the
+  SAME PR (e.g. a no-op source touch matching the job's path filter) so
+  the caller actually runs before merge. See
+  [`docs/operations/runbooks/how-to-consume-a-shared-reusable-workflow.md`](../operations/runbooks/how-to-consume-a-shared-reusable-workflow.md).
+
+- **Probe/scratch files written outside `tmp_path`.** A test that writes
+  scratch or probe files into the live source tree (instead of pytest's
+  `tmp_path`) can leave orphaned files that whole-tree scanners —
+  fitness-function detectors, coverage walks — later pick up, producing
+  flaky failures on unrelated runs. Statically distinguishing a write that
+  targets the source tree from one that targets `tmp_path` needs data-flow
+  analysis that isn't worth the cost; this is review-time discipline (see
+  CONSTRAINTS.md > Testing patterns). The complementary mechanical lever
+  is on the detector side: narrow whole-tree scans to the staged set so
+  stray in-tree debris can't contaminate an unrelated run.
 
 ---
 

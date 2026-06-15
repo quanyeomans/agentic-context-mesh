@@ -155,6 +155,29 @@ Dependabot is configured (`.github/dependabot.yml`) to open PRs for dependency u
 
 ---
 
+## CI / Workflow Secret Hygiene
+
+Kairix shares reusable GitHub Actions workflows (and composite actions) across repositories. Two rules keep shared CI free of leaked credentials and traceable to public sources:
+
+- **Reusable workflows stay secret-free.** A shared/reusable workflow (`workflow_call`) must never embed a secret literal. The *calling* workflow passes secrets in — either explicitly under `secrets:` or with `secrets: inherit` — so the shared definition holds no credential material of its own. A secret value committed into a reusable workflow is exposed to every repository that calls it.
+
+  ```yaml
+  # Correct — caller passes the secret; the reusable workflow only names it
+  jobs:
+    quality:
+      uses: <org>/ci-workflows/.github/workflows/python-quality-gate.yml@<sha>
+      secrets:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # Wrong — secret literal baked into the shared workflow definition
+  env:
+    SONAR_TOKEN: "squ_abcdef..."   # leaks to every caller
+  ```
+
+- **Public artefacts name no private infrastructure.** Workflow files, scripts, docs, and BDD scenarios that ship in a public repository must not reference private sibling repositories, internal hostnames, or private-infra identifiers. This is enforced mechanically by the F73 private-infra-pattern scanner (run over `kairix/`, `scripts/`, `tests/`, and `docs/`); keep shared references generic (e.g. "a sibling repo", "the shared CI workflows") so a private identifier never reaches a public artefact.
+
+---
+
 ## Audit Logging
 
 Kairix does not produce a dedicated audit log. Operational visibility:
