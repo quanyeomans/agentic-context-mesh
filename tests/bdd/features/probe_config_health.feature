@@ -17,10 +17,19 @@ Feature: Operator probes their configured provider for health and tuning
     And the process exits with code 0
 
   Scenario: Degraded provider yields tuning advice and a non-zero exit
-    Given a configured provider whose responses exceed 2 seconds
-    When the operator runs "kairix probe-config"
+    Given a configured provider whose responses exceed the operator's degraded threshold
+    When the operator runs "kairix probe-config" with a low degraded threshold
     Then the JSON report has status "degraded"
     And the JSON report tuning_recommendations contains advice to increase pool_size or decrease coalesce_window_ms
+    And the process exits with code 1
+
+  Scenario: A stricter degraded threshold flips the same endpoint from healthy to degraded
+    Given a configured provider whose responses exceed the operator's degraded threshold
+    When the operator runs "kairix probe-config" with the default thresholds
+    Then the JSON report has status "healthy"
+    And the process exits with code 0
+    When the operator runs "kairix probe-config" with a low degraded threshold
+    Then the JSON report has status "degraded"
     And the process exits with code 1
 
   Scenario: Unreachable provider is flagged with an error

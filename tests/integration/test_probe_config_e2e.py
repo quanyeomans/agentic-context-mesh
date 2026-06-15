@@ -23,8 +23,10 @@ Sabotage notes per test (mutate prod → confirm fail → restore):
     fails. Confirmed; restored.
 
 * ``test_degraded_provider_writes_one_exit_and_recommendations``
-    sabotage: raise ``WARM_P95_DEGRADED_MS = 1e9`` → status stays
-    healthy → exit-code assertion fails. Confirmed; restored.
+    sabotage: raise the ``--degraded-p95-ms`` threshold passed by the
+    test to ``1e9`` (or drop the ``> degraded_p95_ms`` check in
+    ``_classify_status``) → status stays healthy → exit-code assertion
+    fails. Confirmed; restored.
 
 * ``test_unreachable_provider_writes_two_exit_with_error``
     sabotage: swallow exceptions in ``_measure_call`` (return True
@@ -138,10 +140,18 @@ def test_healthy_provider_writes_zero_exit() -> None:
 def test_degraded_provider_writes_one_exit_and_recommendations() -> None:
     """A slow provider yields exit 1 + status degraded + pool/coalesce advice.
 
-    Sabotage: raise ``WARM_P95_DEGRADED_MS = 1e9`` → healthy status →
-    rc == 1 fails.
+    Drives the degraded branch via the operator-tunable
+    ``--degraded-p95-ms 25`` flag against a small ~50 ms fake latency,
+    rather than sleeping >1 s per call to cross the production 1000 ms
+    default. Same CLI dispatch, same classification, ~0.5 s instead of
+    ~9 s. The flag defaults to the production threshold, so this
+    exercises the genuine operator knob.
+
+    Sabotage: raise ``--degraded-p95-ms`` to ``1e9`` (or drop the
+    ``> degraded_p95_ms`` check in ``_classify_status``) → healthy
+    status → rc == 1 fails.
     """
-    provider = FakeProvider(name="fake_d", dim=1536, embed_latency_s=1.2)
+    provider = FakeProvider(name="fake_d", dim=1536, embed_latency_s=0.05)
     snap = TransportSnapshot(
         coalesce_ratio=0.85,
         cache_hit_rate=0.4,
@@ -149,7 +159,7 @@ def test_degraded_provider_writes_one_exit_and_recommendations() -> None:
         current_pool_size=4,
         current_coalesce_window_ms=50,
     )
-    rc, stdout = _run(provider, snap=snap)
+    rc, stdout = _run(provider, snap=snap, extra_argv=["--degraded-p95-ms", "25"])
     assert rc == 1, f"expected exit 1; got {rc}"
     report = json.loads(stdout)
     assert report["status"] == "degraded"

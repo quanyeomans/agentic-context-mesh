@@ -173,16 +173,24 @@ def test_main_returns_2_when_provider_not_registered(capsys: pytest.CaptureFixtu
         (["--warm-samples", "0", "--concurrency", "1", "--repeated-samples", "1"], "warm-samples"),
         (["--warm-samples", "1", "--concurrency", "0", "--repeated-samples", "1"], "concurrency"),
         (["--warm-samples", "1", "--concurrency", "1", "--repeated-samples", "0"], "repeated-samples"),
+        (["--degraded-p95-ms", "0"], "--degraded-p95-ms must be > 0"),
+        (["--critical-p95-ms", "-1"], "--critical-p95-ms must be > 0"),
+        # ``0`` (not just a negative) must be rejected — pins the ``<= 0``
+        # boundary against a ``< 0`` weakening on the critical guard.
+        (["--critical-p95-ms", "0"], "--critical-p95-ms must be > 0"),
+        (["--degraded-p95-ms", "1000", "--critical-p95-ms", "500"], "must be >="),
     ],
 )
 def test_main_returns_2_when_sample_flag_below_minimum(
     capsys: pytest.CaptureFixture[str], argv: list[str], needle: str
 ) -> None:
-    """Sample-count flags below 1 → exit code 2 + actionable stderr.
+    """Out-of-range sample/threshold flags → exit code 2 + actionable stderr.
 
-    Sabotage-proof: dropping any of the three ``if args.X < 1: return
-    _invalid_args(...)`` guards lets the runner attempt N=0 samples
-    and either hangs or surfaces a different error class.
+    Sabotage-proof: dropping any of the ``if args.X < 1`` /
+    ``args.degraded_p95_ms <= 0`` / ``args.critical_p95_ms <
+    args.degraded_p95_ms`` guards lets the runner attempt the invalid
+    value and either hangs or surfaces a different error class — the
+    per-row ``needle`` substring then misses.
     """
     rc = main(
         [*argv, "--provider", "openai"],
@@ -194,6 +202,88 @@ def test_main_returns_2_when_sample_flag_below_minimum(
     assert rc == 2
     captured = capsys.readouterr()
     assert needle in captured.err
+
+
+@pytest.mark.unit
+def test_equal_degraded_and_critical_thresholds_are_accepted(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--critical-p95-ms == --degraded-p95-ms`` is valid, not a usage error.
+
+    Critical is the "harsher or equal" threshold, so equal values are
+    a legitimate operator choice (every degraded run is also critical).
+    The run proceeds to a real verdict rather than exiting 2 for the
+    cross-flag guard.
+
+    Sabotage-proof (executed locally — see commit message): weaken the
+    cross-flag guard from ``args.critical_p95_ms < args.degraded_p95_ms``
+    to ``<=`` → equal values are rejected → ``rc != 2`` fails. Restored.
+    """
+    rc = main(
+        _short_argv("--provider", "openai", "--degraded-p95-ms", "1000", "--critical-p95-ms", "1000"),
+        registry=_registry_with("openai"),
+        snapshotter=_StubSnapshotter(),
+        env_provider_lookup=lambda: None,
+    )
+
+    captured = capsys.readouterr()
+    assert rc != 2, f"equal thresholds should be accepted; got usage-error rc=2. stderr={captured.err!r}"
+    assert "must be >=" not in captured.err, f"cross-flag guard fired on equal thresholds: {captured.err!r}"
+    # The fast fake's ~0 ms latency sits under the 1000 ms threshold → healthy.
+    assert rc == 0, f"expected healthy verdict (exit 0); got {rc}"
+
+
+@pytest.mark.unit
+def test_degraded_threshold_flag_flips_verdict_for_the_same_endpoint(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--degraded-p95-ms`` tunes the verdict for one fixed endpoint.
+
+    The default 1000 ms threshold classifies a ~50 ms endpoint as
+    healthy (exit 0); lowering it to 25 ms re-classifies the SAME
+    endpoint as degraded (exit 1). This is the operator tuning knob —
+    no provider change, only the threshold.
+
+    Sabotage-proof (executed locally — see commit message): drop the
+    ``degraded_p95_ms=args.degraded_p95_ms`` wiring in ``main``'s
+    ``run_probe_config`` call → the low-threshold run reverts to the
+    1000 ms default → stays healthy (exit 0) → the ``rc_strict == 1``
+    assertion fails. Restored.
+    """
+    registry = FakeProviderRegistry({"openai": FakeProvider(name="openai", dim=8, embed_latency_s=0.05)})
+
+    # Default thresholds: ~50 ms p95 sits well under the 1000 ms default → healthy.
+    rc_default = main(
+        ["--warm-samples", "3", "--concurrency", "2", "--repeated-samples", "3", "--provider", "openai"],
+        registry=registry,
+        snapshotter=_StubSnapshotter(),
+        env_provider_lookup=lambda: None,
+    )
+    default_payload = json.loads(capsys.readouterr().out)
+    assert rc_default == 0, f"expected healthy (exit 0) at default threshold; got {rc_default}"
+    assert default_payload["status"] == "healthy"
+
+    # Strict threshold: the SAME endpoint is now degraded purely because the operator lowered the bar.
+    rc_strict = main(
+        [
+            "--warm-samples",
+            "3",
+            "--concurrency",
+            "2",
+            "--repeated-samples",
+            "3",
+            "--provider",
+            "openai",
+            "--degraded-p95-ms",
+            "25",
+        ],
+        registry=registry,
+        snapshotter=_StubSnapshotter(),
+        env_provider_lookup=lambda: None,
+    )
+    strict_payload = json.loads(capsys.readouterr().out)
+    assert rc_strict == 1, f"expected degraded (exit 1) at 25 ms threshold; got {rc_strict}"
+    assert strict_payload["status"] == "degraded"
 
 
 # ---------------------------------------------------------------------------

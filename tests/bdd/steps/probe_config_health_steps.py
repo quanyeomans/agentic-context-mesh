@@ -23,9 +23,15 @@ Sabotage notes per scenario (mutate prod → confirm fail → restore):
   change ``STATUS_HEALTHY = "broken"`` → scenario fails on status
   mismatch. Confirmed locally; restored.
 
-* "Degraded provider..." — set
-  ``WARM_P95_DEGRADED_MS = 100000`` → 2 s sleep falls under it → no
-  degraded → scenario fails on status. Confirmed; restored.
+* "Degraded provider..." — raise the ``--degraded-p95-ms`` threshold
+  passed by the When step to ``1e9`` → the ~50 ms p95 falls under it →
+  no degraded → scenario fails on status. Confirmed; restored.
+
+* "A stricter degraded threshold flips..." — drop the
+  ``degraded_p95_ms=args.degraded_p95_ms`` wiring in
+  ``config_cli.main`` (so the flag is ignored) → the low-threshold run
+  stays healthy like the default run → the second "degraded" status
+  assertion fails. Confirmed; restored.
 
 * "Unreachable provider..." — set the runner to ignore
   ``embed_raises`` (catch + return empty list) → no errors counted →
@@ -132,17 +138,19 @@ def _given_healthy(_probe_state: dict[str, Any]) -> None:
     _probe_state["provider"] = FakeProvider(name="fake", dim=1536, embed_latency_s=0.005)
 
 
-@given("a configured provider whose responses exceed 2 seconds")
+@given("a configured provider whose responses exceed the operator's degraded threshold")
 def _given_degraded(_probe_state: dict[str, Any]) -> None:
-    """Slow fake: 1.2 s latency — over the 1 s degraded threshold.
+    """Fake with a small ~50 ms latency that exceeds a low degraded threshold.
 
-    1.2 s (not 2 s) keeps the BDD run wall-clock manageable while
-    still firing the WARM_P95_DEGRADED_MS branch. The feature file's
-    "exceed 2 seconds" wording is the operator's mental model; the
-    runner cares about the 1 s degraded threshold, which 1.2 s does
-    exceed.
+    The operator's mental model is "responses are slower than I'm
+    willing to accept". The runner classifies that by comparing
+    warm_p95 against the ``--degraded-p95-ms`` threshold. Pairing a
+    ~50 ms fake latency with a low 25 ms threshold (set by the When
+    step) fires the degraded branch in ~0.5 s instead of sleeping
+    >1 s per call to cross the production 1000 ms default — same
+    classification logic, a fraction of the wall-clock cost.
     """
-    _probe_state["provider"] = FakeProvider(name="fake", dim=1536, embed_latency_s=1.2)
+    _probe_state["provider"] = FakeProvider(name="fake", dim=1536, embed_latency_s=0.05)
     # Also seed a high pool_acquire so the degraded scenario's
     # tuning advice ("increase pool_size") has a snapshot to read.
     _probe_state["snapshot"] = TransportSnapshot(
@@ -259,6 +267,28 @@ def _run_cli(_probe_state: dict[str, Any], extra_argv: list[str]) -> None:
 @when(parsers.parse('the operator runs "kairix probe-config"'))
 def _when_run(_probe_state: dict[str, Any]) -> None:
     _run_cli(_probe_state, extra_argv=[])
+
+
+@when('the operator runs "kairix probe-config" with the default thresholds')
+def _when_run_default_thresholds(_probe_state: dict[str, Any]) -> None:
+    """Run with no threshold flags — the production defaults apply.
+
+    A ~50 ms endpoint sits well under the 1000 ms default degraded
+    threshold, so the verdict is healthy. The sibling low-threshold
+    When step flips the same endpoint to degraded purely via the flag.
+    """
+    _run_cli(_probe_state, extra_argv=[])
+
+
+@when('the operator runs "kairix probe-config" with a low degraded threshold')
+def _when_run_low_degraded_threshold(_probe_state: dict[str, Any]) -> None:
+    """Run with ``--degraded-p95-ms 25`` so a ~50 ms endpoint is degraded.
+
+    Exercises the operator-tunable threshold flag: the same endpoint
+    the default-threshold step classifies as healthy is degraded here
+    because the operator lowered the bar.
+    """
+    _run_cli(_probe_state, extra_argv=["--degraded-p95-ms", "25"])
 
 
 @when(parsers.parse('the operator runs "kairix probe-config --compare baseline.json"'))
