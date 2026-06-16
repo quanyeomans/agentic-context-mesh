@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
+from http.cookies import SimpleCookie
 
 import pytest
 
@@ -22,6 +23,15 @@ from starlette.testclient import TestClient  # noqa: E402
 
 from kairix.agents.mcp.transport import build_mcp_app  # noqa: E402
 from kairix.platform.setup.service import IndexStatus, SetupService  # noqa: E402
+
+# Public guard surface (in routes.__all__). Importing the module's public
+# names also keeps this file in the mutation-parity impacted set for
+# kairix.platform.setup.web.routes — the guard's branches are pinned here,
+# so a mutant on them must be caught by an assertion in this file.
+from kairix.platform.setup.web.routes import (  # noqa: E402
+    OPERATOR_TOKEN_HEADER,
+    SETUP_PATH_PREFIX,
+)
 from tests.fakes import (  # noqa: E402
     FakeMcpTransportServer,
     FakeSecretsLoader,
@@ -39,7 +49,8 @@ _SAVE_KEY_PAYLOAD = {
     "model": "model-alpha",
 }
 _OPERATOR_TOKEN_IDENTITY = ("infra", "operator", None, "token")
-_TOKEN_HEADER = "X-Kairix-Operator-Token"
+_TOKEN_HEADER = OPERATOR_TOKEN_HEADER
+_SETUP_PREFIX = SETUP_PATH_PREFIX
 
 
 def _build_client(
@@ -1053,6 +1064,195 @@ def test_default_secrets_seam_serves_loopback_without_config() -> None:
     response = client.get("/setup/provider")
     assert response.status_code == 200
     assert "Choose an AI provider" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Tokened-URL → signed-cookie grant (#500)
+# ---------------------------------------------------------------------------
+#
+# On stock Docker every published-port peer is the bridge gateway IP
+# (never loopback) and browsers cannot send custom headers, so the
+# header path is unusable for the wizard's own UI. The grant path lets a
+# browser open /setup/?operator_token=<v> once, receive a signed cookie,
+# and reach every later screen on that cookie. These tests drive the
+# composed mount from a NON-loopback client address (the unit-level
+# stand-in for the Docker bridge IP; the real bridge-source-IP proof
+# lives in the Linux-only fresh-install-smoke browser stage).
+
+_REMOTE = ("203.0.113.7", 4242)
+_GRANT_COOKIE = "kairix_operator_grant"
+# Fixture operator token — not a real credential.
+_FAKE_TOKEN = "fake-operator-token"  # pragma: allowlist secret — fake fixture
+
+
+def _grant_secrets() -> FakeSecretsLoader:
+    return FakeSecretsLoader(values={_OPERATOR_TOKEN_IDENTITY: _FAKE_TOKEN})
+
+
+def test_tokened_url_grants_a_signed_cookie_and_redirects() -> None:
+    """GET /setup/?operator_token=<good> from a non-loopback browser
+    returns 303 to the bare /setup/ with a Set-Cookie carrying the signed
+    grant — and the token never appears in the redirect Location."""
+    client = _build_client(secrets=_grant_secrets(), client_addr=_REMOTE)
+    response = client.get(
+        f"/setup/?operator_token={_FAKE_TOKEN}",
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == f"{_SETUP_PREFIX}/"
+    set_cookie = response.headers["set-cookie"]
+    assert _GRANT_COOKIE in set_cookie
+    # The raw operator token never rides the cookie (F15).
+    assert _FAKE_TOKEN not in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert "SameSite=Lax" in set_cookie
+    assert f"Path={_SETUP_PREFIX}" in set_cookie
+
+
+def test_granted_cookie_reaches_the_wizard() -> None:
+    """Following the grant redirect, the cookie the client now holds
+    admits a later non-loopback GET to a wizard screen."""
+    client = _build_client(secrets=_grant_secrets(), client_addr=_REMOTE)
+    # The TestClient persists Set-Cookie across requests, so following the
+    # grant redirect leaves the signed cookie in its jar.
+    client.get(f"/setup/?operator_token={_FAKE_TOKEN}", follow_redirects=True)
+    allowed = client.get("/setup/provider")
+    assert allowed.status_code == 200
+    assert "Choose an AI provider" in allowed.text
+
+
+def test_absent_cookie_from_non_loopback_is_refused() -> None:
+    """A non-loopback request with neither header nor cookie still 403s."""
+    client = _build_client(secrets=_grant_secrets(), client_addr=_REMOTE)
+    response = client.get("/setup/provider")
+    assert response.status_code == 403
+    assert "requires a valid operator token" in response.text
+
+
+def test_tampered_grant_cookie_is_refused() -> None:
+    """Flipping one character of the signed cookie's MAC invalidates it —
+    the request falls through to the same 403 as no cookie."""
+    secrets = _grant_secrets()
+    grant_client = _build_client(secrets=secrets, client_addr=_REMOTE)
+    redirect = grant_client.get(
+        f"/setup/?operator_token={_FAKE_TOKEN}",
+        follow_redirects=False,
+    )
+    good_cookie = SimpleCookie(redirect.headers["set-cookie"])[_GRANT_COOKIE].value
+    # Tamper the last MAC character (keep length + base64 alphabet valid).
+    tampered = good_cookie[:-1] + ("A" if good_cookie[-1] != "A" else "B")
+    assert tampered != good_cookie
+
+    fresh = _build_client(secrets=secrets, client_addr=_REMOTE)
+    fresh.cookies.set(_GRANT_COOKIE, tampered)
+    refused = fresh.get("/setup/provider")
+    assert refused.status_code == 403
+
+
+def test_garbage_cookie_value_is_refused() -> None:
+    """A non-base64 / structurally-broken cookie value never raises — it
+    is refused like an absent cookie."""
+    client = _build_client(secrets=_grant_secrets(), client_addr=_REMOTE)
+    client.cookies.set(_GRANT_COOKIE, "not-a-valid-grant")
+    refused = client.get("/setup/provider")
+    assert refused.status_code == 403
+
+
+def test_wrong_grant_token_sets_no_cookie_and_is_refused() -> None:
+    """A wrong ?operator_token value never sets a cookie and is refused
+    (it must not silently grant access)."""
+    client = _build_client(secrets=_grant_secrets(), client_addr=_REMOTE)
+    response = client.get(
+        "/setup/?operator_token=attacker-guess",
+        follow_redirects=False,
+    )
+    assert response.status_code == 403
+    assert "set-cookie" not in response.headers
+
+
+def test_grant_only_fires_on_the_mount_root_not_inner_paths() -> None:
+    """The tokened-URL grant is accepted ONLY on the mount root. A token on
+    an inner path (e.g. /setup/provider?operator_token=...) must NOT mint a
+    cookie — it falls through to the normal check and is refused."""
+    client = _build_client(secrets=_grant_secrets(), client_addr=_REMOTE)
+    response = client.get(
+        f"/setup/provider?operator_token={_FAKE_TOKEN}",
+        follow_redirects=False,
+    )
+    assert response.status_code == 403
+    assert "set-cookie" not in response.headers
+
+
+def test_loopback_grant_is_unaffected_and_stays_cookie_free() -> None:
+    """Loopback still reaches the wizard with neither header nor cookie —
+    the grant path is purely additive for non-loopback browsers."""
+    client = _build_client(secrets=_grant_secrets(), client_addr=_LOOPBACK)
+    response = client.get("/setup/provider")
+    assert response.status_code == 200
+    assert "Choose an AI provider" in response.text
+
+
+def test_grant_redirect_carries_security_headers() -> None:
+    """F91 Limb A on the 303 grant redirect: a RedirectResponse bypasses
+    the _render chokepoint, so the guard must apply the nosniff /
+    frame-denial / CSP triple to it explicitly."""
+    client = _build_client(secrets=_grant_secrets(), client_addr=_REMOTE)
+    response = client.get(
+        f"/setup/?operator_token={_FAKE_TOKEN}",
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["X-Frame-Options"] == "DENY"
+    csp = response.headers["Content-Security-Policy"]
+    assert "default-src 'self'" in csp
+    assert "frame-ancestors 'none'" in csp
+
+
+def test_grant_over_https_marks_the_cookie_secure() -> None:
+    """When the request itself arrived over https the cookie is Secure;
+    plain-http (the default tunnel case) leaves Secure off so the cookie
+    survives http://."""
+    secrets = _grant_secrets()
+    https_client = _build_client(
+        secrets=secrets,
+        client_addr=_REMOTE,
+        base_url="https://testserver",
+    )
+    secure = https_client.get(
+        f"/setup/?operator_token={_FAKE_TOKEN}",
+        follow_redirects=False,
+    )
+    assert "Secure" in secure.headers["set-cookie"]
+
+    http_client = _build_client(secrets=secrets, client_addr=_REMOTE)
+    plain = http_client.get(
+        f"/setup/?operator_token={_FAKE_TOKEN}",
+        follow_redirects=False,
+    )
+    assert "Secure" not in plain.headers["set-cookie"]
+
+
+def test_grant_behind_tls_terminating_proxy_marks_the_cookie_secure() -> None:
+    """A TLS-terminating reverse proxy forwards plain http to the app but
+    signals the real scheme via X-Forwarded-Proto — the cookie must be
+    Secure when that header says https, and plain otherwise."""
+    secrets = _grant_secrets()
+    forwarded_https = _build_client(secrets=secrets, client_addr=_REMOTE)
+    secure = forwarded_https.get(
+        f"/setup/?operator_token={_FAKE_TOKEN}",
+        headers={"X-Forwarded-Proto": "https"},
+        follow_redirects=False,
+    )
+    assert "Secure" in secure.headers["set-cookie"]
+
+    forwarded_http = _build_client(secrets=secrets, client_addr=_REMOTE)
+    plain = forwarded_http.get(
+        f"/setup/?operator_token={_FAKE_TOKEN}",
+        headers={"X-Forwarded-Proto": "http"},
+        follow_redirects=False,
+    )
+    assert "Secure" not in plain.headers["set-cookie"]
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,12 @@ from __future__ import annotations
 
 import pytest
 
-from kairix.paths import config_overlay_path_override, container_source_prefill
+from kairix.paths import (
+    config_overlay_path_override,
+    container_source_prefill,
+    mcp_bind_host,
+    wizard_tokened_url,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -41,3 +46,38 @@ def test_container_prefill_honours_the_configured_document_root() -> None:
 def test_container_prefill_is_none_outside_a_container() -> None:
     assert container_source_prefill({}) is None
     assert container_source_prefill({"KAIRIX_DOCUMENT_ROOT": "/srv/knowledge"}) is None
+
+
+# ---------------------------------------------------------------------------
+# Tokened-URL bind-host accessor (#500)
+# ---------------------------------------------------------------------------
+
+
+def test_bind_host_defaults_to_localhost_when_unset() -> None:
+    assert mcp_bind_host(environ={}) == "localhost"
+    assert mcp_bind_host(environ={"KAIRIX_MCP_BIND_HOST": ""}) == "localhost"
+
+
+def test_bind_host_returns_the_configured_host() -> None:
+    assert mcp_bind_host(environ={"KAIRIX_MCP_BIND_HOST": "kairix.example.internal"}) == "kairix.example.internal"
+
+
+def test_bind_host_normalises_bind_any_to_localhost() -> None:
+    """``0.0.0.0`` / ``::`` are bind directives, not reachable hosts — the
+    printed URL must use a host an operator can actually open."""
+    assert mcp_bind_host(environ={"KAIRIX_MCP_BIND_HOST": "0.0.0.0"}) == "localhost"
+    assert mcp_bind_host(environ={"KAIRIX_MCP_BIND_HOST": "::"}) == "localhost"
+
+
+def test_tokened_url_interpolates_host_port_and_token() -> None:
+    url = wizard_tokened_url(token="grant-abc", host="example.internal", port=8443)
+    assert url == "http://example.internal:8443/setup/?operator_token=grant-abc"
+
+
+def test_tokened_url_resolves_host_from_the_environ_seam() -> None:
+    url = wizard_tokened_url(
+        token="grant-xyz",
+        port=8080,
+        environ={"KAIRIX_MCP_BIND_HOST": "kairix.example.internal"},
+    )
+    assert url == "http://kairix.example.internal:8080/setup/?operator_token=grant-xyz"

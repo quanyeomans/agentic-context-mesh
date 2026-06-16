@@ -63,6 +63,15 @@ services:
       KAIRIX_WORKER_WRITES_VEC_INDEX: "1"
       # KAIRIX_SECRETS_FILE is left at the image default — secrets arrive
       # through env_file: .env on this path.
+      #
+      # Setup-wizard remote access (#500): browsers can't send custom
+      # headers and stock Docker presents every published-port peer as the
+      # bridge gateway IP (never loopback), so the wizard grants access via
+      # a tokened URL. If you DON'T set KAIRIX_INFRA_OPERATOR_TOKEN in your
+      # .env, the container mints one on first boot and prints the
+      # ready-to-open URL to the log — grab it with:
+      #   docker compose logs kairix | grep operator_token
+      # Set it yourself in .env to pin a stable token across rebuilds.
     volumes:
       - kairix-data:/var/lib/kairix
       - kairix-cache:/var/cache/kairix

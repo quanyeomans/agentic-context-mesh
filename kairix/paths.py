@@ -1201,6 +1201,60 @@ def mcp_routing_enabled(*, environ: Mapping[str, str] | None = None) -> bool:
     return raw.strip().lower() not in _FALSY_FLAG_VALUES
 
 
+def mcp_bind_host(default: str = "localhost", *, environ: Mapping[str, str] | None = None) -> str:
+    """Resolve the externally-reachable host for the MCP / wizard URL (#500).
+
+    Operators expose the container's published port on a chosen host via
+    ``KAIRIX_MCP_BIND_HOST`` in their compose ``.env`` (e.g.
+    ``0.0.0.0`` to bind every interface). That env value is the
+    host the published port maps onto, so it is the right base for the
+    printed tokened wizard URL — except ``0.0.0.0`` is a bind directive,
+    not a reachable address, so it normalises to ``localhost`` for the
+    URL an operator pastes into a browser (they reach it through the
+    tunnel / mapped host, then the cookie carries them the rest of the
+    way). ``None`` / empty falls back to ``default``.
+
+    ``environ`` is the test seam — mirrors :func:`mcp_endpoint`: production
+    leaves it None and the function reads ``os.environ`` once (the env
+    read still lives inside paths.py per F4); tests pass an explicit dict
+    so F2 (no ``monkeypatch.setenv``) stays clean.
+    """
+    env = environ if environ is not None else os.environ
+    raw = env.get("KAIRIX_MCP_BIND_HOST")
+    if not raw:
+        return default
+    host = raw.strip()
+    if host in {"0.0.0.0", "::", "[::]"}:  # noqa: S104 — matching a bind-any directive, not binding to it
+        return default
+    return host
+
+
+def wizard_tokened_url(
+    *,
+    token: str,
+    host: str | None = None,
+    port: int | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Build the one-time tokened wizard URL an operator opens once (#500).
+
+    Shape: ``http://<host>:<port>/setup/?operator_token=<token>``. Opening
+    it sets the signed grant cookie (see
+    ``kairix.platform.setup.web.routes.OperatorTokenGuard``); the token
+    then never needs to appear again. The token is interpolated verbatim
+    and the whole URL is the sanctioned onboarding surface — callers that
+    print it own the F15 boundary (it carries a live credential, so it
+    belongs only in the first-boot operator log, never an app log).
+
+    ``host`` / ``port`` default to :func:`mcp_bind_host` / :func:`mcp_port`
+    so the printed URL matches the deployment; ``environ`` is forwarded
+    as the test seam.
+    """
+    resolved_host = host if host is not None else mcp_bind_host(environ=environ)
+    resolved_port = port if port is not None else mcp_port()
+    return f"http://{resolved_host}:{resolved_port}/setup/?operator_token={token}"
+
+
 def reflib_root_override() -> str | None:
     """Operator override for the reference-library root via
     ``KAIRIX_REFLIB_ROOT``. ``None`` when unset so callers can demand
