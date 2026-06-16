@@ -19,6 +19,22 @@ import pytest
 from kairix.agents.mcp.cli import McpCliDeps
 from kairix.agents.mcp.cli import main as mcp_main
 
+# F5 keeps tests off internal ``_x`` imports; these are the PUBLIC env-var
+# names (the operator-facing contract). Production single-sources them from
+# onboard.check's ``_CANONICAL_SECRETS`` (F85).
+_LLM_API_KEY_VAR = "KAIRIX_PROVIDER_LLM_API_KEY"  # pragma: allowlist secret — env-var NAME, not a credential
+_LLM_ENDPOINT_VAR = "KAIRIX_PROVIDER_LLM_ENDPOINT"
+
+# #449 — a deterministic all-good env for the serve runtime-path tests:
+# real-looking LLM creds (so the preflight doesn't warn) and a non-empty
+# neo4j password with a URI set (so the preflight doesn't hard-exit).
+_GOOD_SERVE_ENV = {
+    _LLM_API_KEY_VAR: "sk-live-cli-unit-real-key",  # pragma: allowlist secret — fake fixture
+    _LLM_ENDPOINT_VAR: "https://prod.openai.azure.com",
+    "KAIRIX_NEO4J_URI": "bolt://neo4j:7687",
+    "KAIRIX_NEO4J_PASSWORD": "kairix-local-dev",  # pragma: allowlist secret — fake fixture
+}
+
 
 class _FakeMcpServer:
     """FakeMcp server records run() calls + minimal app-builder surface.
@@ -104,6 +120,11 @@ def _build_deps(
         # pins the production thread-spawn order explicitly via its
         # own warm_runner override.
         warm_runner=lambda fn: fn(),
+        # #449 — give the serve preflight a deterministic all-good env so
+        # the runtime-path tests below aren't perturbed by the host's
+        # ambient KAIRIX_* creds. The placeholder / fatal preflight paths
+        # have their own dedicated tests that inject their own env.
+        serve_env=_GOOD_SERVE_ENV,
     )
     return deps, build_calls, fake_runner
 
@@ -230,12 +251,93 @@ def test_serve_raises_import_error_when_build_server_unavailable() -> None:
     deps = McpCliDeps(
         build_server_factory=_raises_import,
         uvicorn_runner_factory=lambda: _RunRecorder(),
+        serve_env=_GOOD_SERVE_ENV,
     )
 
     _stdout, stderr, code = _drive(["serve"], deps)
     assert code == 1
     assert "MCP dependencies not installed" in stderr
     assert "pip install 'kairix[agents]'" in stderr
+
+
+# ---------------------------------------------------------------------------
+# #449 — boot-time credential preflight (warn-and-degrade vs fatal)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_serve_warns_but_starts_when_llm_key_is_placeholder(caplog) -> None:
+    """A placeholder LLM key warns (naming the var) and does NOT exit — BM25 still works.
+
+    Sabotage-proof: reverting the placeholder branch in
+    ``preflight_startup_credentials`` (treat placeholder as valid) drops
+    the warning so the ``KAIRIX_PROVIDER_LLM_API_KEY``/`fix:` assertions
+    go RED. The value never appears in the log.
+    """
+    import logging as _logging
+
+    placeholder = "your-api-key-here"
+    env = {
+        _LLM_API_KEY_VAR: placeholder,
+        _LLM_ENDPOINT_VAR: "https://prod.openai.azure.com",
+        "KAIRIX_NEO4J_URI": "bolt://neo4j:7687",
+        "KAIRIX_NEO4J_PASSWORD": "kairix-local-dev",  # pragma: allowlist secret — fake fixture
+    }
+    deps, build_calls, _runner = _build_deps()
+    deps.serve_env = env
+
+    with caplog.at_level(_logging.WARNING, logger="kairix.mcp.startup"):
+        _stdout, _stderr, code = _drive(["serve", "--transport", "stdio"], deps)
+
+    # Did NOT exit — degrade to search-only, container boots.
+    assert code == 0
+    assert build_calls, "server must still be built (warn-and-degrade, not exit)"
+    warning_text = "\n".join(rec.getMessage() for rec in caplog.records)
+    assert _LLM_API_KEY_VAR in warning_text
+    assert any(marker in warning_text for marker in ("fix:", "next:", "run:"))
+    # F15 — the placeholder/credential VALUE never appears in the warning.
+    assert placeholder not in warning_text
+
+
+@pytest.mark.unit
+def test_serve_exits_when_neo4j_password_empty_and_uri_set() -> None:
+    """Empty neo4j password + URI configured → exit 1 with the F21 affordance block.
+
+    Sabotage-proof: reverting the neo4j-fatal branch drops the failure so
+    the exit-1 assertion goes RED.
+    """
+    env = {
+        _LLM_API_KEY_VAR: "sk-live-real-key",  # pragma: allowlist secret — fake fixture
+        _LLM_ENDPOINT_VAR: "https://prod.openai.azure.com",
+        "KAIRIX_NEO4J_URI": "bolt://neo4j:7687",
+        "KAIRIX_NEO4J_PASSWORD": "",
+    }
+    deps, build_calls, _runner = _build_deps()
+    deps.serve_env = env
+
+    _stdout, stderr, code = _drive(["serve", "--transport", "http", "--port", "18094"], deps)
+
+    assert code == 1, f"expected exit 1 on empty neo4j password; stderr={stderr!r}"
+    assert "KAIRIX_NEO4J_PASSWORD" in stderr
+    assert any(marker in stderr for marker in ("fix:", "next:", "run:"))
+    # Server construction must NOT have proceeded past the fatal preflight.
+    assert build_calls == []
+
+
+@pytest.mark.unit
+def test_serve_with_real_creds_does_not_warn_or_exit(caplog) -> None:
+    """Real-looking creds → no warning, no exit; serve proceeds normally."""
+    import logging as _logging
+
+    deps, build_calls, _runner = _build_deps()  # _build_deps already injects _GOOD_SERVE_ENV
+
+    with caplog.at_level(_logging.WARNING, logger="kairix.mcp.startup"):
+        _stdout, _stderr, code = _drive(["serve", "--transport", "stdio"], deps)
+
+    assert code == 0
+    assert build_calls
+    credential_warnings = [r for r in caplog.records if "vector" in r.getMessage().lower()]
+    assert credential_warnings == [], "real creds must not produce a credential warning"
 
 
 @pytest.mark.unit

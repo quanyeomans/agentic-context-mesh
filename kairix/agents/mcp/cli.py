@@ -23,10 +23,13 @@ import os
 import platform
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from kairix.platform.onboard.startup_preflight import StartupCredentialFailure
 
 from kairix.agents.mcp.cold_start import warm_retrieval_stack
 from kairix.platform.onboard.ports import find_available_port, is_port_available
@@ -161,6 +164,19 @@ def _emit_warm_outcome(warm_result: dict[str, Any]) -> None:
     )
 
 
+def _default_credential_preflight(env: Mapping[str, str]) -> list[StartupCredentialFailure]:
+    """Production seam — lazy-import the startup credential preflight (#449).
+
+    Returns the severity-tagged credential problems found in *env* (warn
+    for a missing/placeholder LLM key, fatal for an empty neo4j password
+    when a URI is configured). Lazy-imported so the onboard module's
+    transitive deps aren't loaded at CLI module import.
+    """
+    from kairix.platform.onboard.startup_preflight import preflight_startup_credentials
+
+    return preflight_startup_credentials(env)
+
+
 def _default_build_server() -> Callable[..., Any]:
     """Default factory: lazy-import build_server so it isn't loaded at module import."""
     from kairix.agents.mcp.server import build_server
@@ -223,6 +239,18 @@ class McpCliDeps:
     # want deterministic stderr / readiness ordering (e.g. existing
     # warm-up-complete assertions).
     warm_runner: Callable[[Callable[[], None]], None] = field(default_factory=lambda: _default_warm_runner)
+    # #449 — boot-time credential preflight + exit + env seams. The
+    # preflight warns (degrade to search-only) on a missing/placeholder
+    # LLM key and hard-exits on an empty neo4j password when a URI is set.
+    # ``serve_env`` defaults to the resolved process env (after
+    # bootstrap_secrets ran in main()); tests inject an explicit mapping so
+    # no os.environ mutation is needed (F2-clean). ``exit_fn`` defaults to
+    # sys.exit so the fatal branch is testable without killing the process.
+    credential_preflight_fn: Callable[[Mapping[str, str]], list[StartupCredentialFailure]] = field(
+        default_factory=lambda: _default_credential_preflight
+    )
+    serve_env: Mapping[str, str] = field(default_factory=lambda: os.environ)
+    exit_fn: Callable[[int], None] = field(default_factory=lambda: cast("Callable[[int], None]", sys.exit))
 
 
 def main(argv: list[str] | None = None, *, deps: McpCliDeps | None = None) -> None:
@@ -310,7 +338,53 @@ def _resolve_port(args: argparse.Namespace, *, deps: McpCliDeps) -> int:
     return suggested
 
 
+def _preflight_or_warn(*, deps: McpCliDeps) -> bool:
+    """Run the boot-time credential preflight (#449): warn, or exit on fatal.
+
+    For every ``warn`` failure (missing/placeholder LLM key) log a WARNING
+    naming the VAR (never the value — F15) with the F21-style affordance,
+    then keep going — BM25 keyword search works without an LLM key, so a
+    search-only operator must still be able to boot.
+
+    For any ``fatal`` failure (empty neo4j password when a URI is set)
+    print the affordance block to stderr and call ``deps.exit_fn(1)`` —
+    the graph layer genuinely can't run.
+
+    Returns ``True`` when a fatal failure was seen (so the caller stops
+    before constructing the server). The production ``exit_fn`` (``sys.exit``)
+    raises ``SystemExit`` and never returns; a test's fake ``exit_fn`` may
+    return, so the boolean lets ``_cmd_serve`` stop deterministically in
+    both cases.
+
+    The env is read from ``deps.serve_env`` (the resolved process env after
+    ``bootstrap_secrets`` ran in ``main()``); tests inject an explicit
+    mapping so the placeholder / fatal branches are exercised without
+    mutating ``os.environ``.
+    """
+    failures = deps.credential_preflight_fn(deps.serve_env)
+    fatal_seen = False
+    for failure in failures:
+        if failure.severity == "fatal":
+            fatal_seen = True
+            print(
+                f"ERROR: {failure.reason}\n  {failure.fix}",
+                file=sys.stderr,
+            )
+        else:
+            startup_logger.warning("%s %s", failure.reason, failure.fix)
+    if fatal_seen:
+        deps.exit_fn(1)
+    return fatal_seen
+
+
 def _cmd_serve(args: argparse.Namespace, *, deps: McpCliDeps) -> None:
+    # #449 — boot-time credential preflight. Warn-and-degrade to search-only
+    # on a missing/placeholder LLM key (BM25 still works); hard-exit on an
+    # empty neo4j password when a URI is configured. Runs first so the
+    # operator sees the actionable message before any server construction.
+    if _preflight_or_warn(deps=deps):
+        return
+
     # Capture the previous warm-flag age BEFORE reset_warm_state unlinks
     # it — Part 3 of KFEAT-020 needs this for the mcp_process_started log
     # event so operators can tell whether the just-killed previous process

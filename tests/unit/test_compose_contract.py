@@ -139,3 +139,63 @@ def test_api_run_script_binds_all_container_interfaces() -> None:
     """
     run_script = (_REPO_ROOT / "docker" / "s6" / "services" / "kairix-api" / "run").read_text()
     assert "--host 0.0.0.0" in run_script
+
+
+# ---------------------------------------------------------------------------
+# #449 — .env.example credential placeholders + warn-and-degrade messaging
+# ---------------------------------------------------------------------------
+
+_LLM_KEY_SENTINEL = "PASTE-YOUR-LLM-KEY-HERE"
+_LLM_ENDPOINT_SENTINEL = "PASTE-YOUR-LLM-ENDPOINT-HERE"
+
+
+def _env_example_lines(rel_path: str) -> dict[str, str]:
+    """Parse a .env.example into a {KEY: VALUE} dict (comments ignored)."""
+    text = (_REPO_ROOT / rel_path).read_text()
+    entries: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        entries[key.strip()] = value.strip()
+    return entries
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("rel_path", [".env.example", "docker/.env.example"])
+def test_env_example_carries_paste_llm_sentinels(rel_path: str) -> None:
+    """#449: both .env.example files ship obvious-broken PASTE-... LLM sentinels.
+
+    A literal ``your-api-key-here`` reads truthy and silently degrades vector
+    search; the ``PASTE-...`` sentinels are unmistakably placeholders so an
+    operator (and the startup preflight) can detect "you forgot to set this".
+    """
+    env = _env_example_lines(rel_path)
+    assert env.get("KAIRIX_PROVIDER_LLM_API_KEY") == _LLM_KEY_SENTINEL, rel_path
+    assert env.get("KAIRIX_PROVIDER_LLM_ENDPOINT") == _LLM_ENDPOINT_SENTINEL, rel_path
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("rel_path", [".env.example", "docker/.env.example"])
+def test_env_example_has_top_of_file_placeholder_warning(rel_path: str) -> None:
+    """#449: a top-of-file WARNING explains the PASTE-... values are placeholders.
+
+    The message must say the container still boots (no crash-loop) and that
+    vector search stays disabled until the values are replaced — the
+    warn-and-degrade contract in plain operator English.
+    """
+    header = "\n".join((_REPO_ROOT / rel_path).read_text().splitlines()[:14])
+    assert "WARNING" in header, rel_path
+    assert "PASTE-" in header, rel_path
+    assert "boot" in header.lower(), rel_path
+    assert "vector" in header.lower(), rel_path
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("rel_path", [".env.example", "docker/.env.example"])
+def test_env_example_neo4j_password_stays_non_empty(rel_path: str) -> None:
+    """#449: the neo4j password sentinel must be non-empty — an empty value hard-fails boot."""
+    env = _env_example_lines(rel_path)
+    password = env.get("KAIRIX_NEO4J_PASSWORD", "")
+    assert password, f"{rel_path}: KAIRIX_NEO4J_PASSWORD must be a non-empty sentinel"
