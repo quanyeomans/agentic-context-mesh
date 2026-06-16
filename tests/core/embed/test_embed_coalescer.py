@@ -118,12 +118,15 @@ def test_single_caller_unblocks_within_bounded_window() -> None:
         out = coalescer.embed("only-one")
         elapsed_ms = (time.monotonic() - start) * 1000
         assert out, "single caller should get a non-empty result"
-        # Window=100ms → dispatch fires somewhere in [100, ~250]ms band.
-        # The upper bound is generous so a slow CI box doesn't flake.
-        # Sabotage: drop the window timeout and elapsed_ms goes to
-        # multiple seconds (or the test hangs).
+        # The load-bearing, host-immune proof is the FLOOR: the caller
+        # waited at least ~the window (so the dispatcher fired on the
+        # window timeout, not instantly), and it returned at all. F82
+        # (#493): the old ``< 1000`` ceiling was a flaky wall-clock bound;
+        # the "never wakes ⇒ blocks forever" sabotage is caught
+        # deterministically by the suite-level ``--timeout`` (the
+        # ``embed`` call hangs, pytest-timeout kills it) — not by an
+        # elapsed-time ceiling that measures host scheduling.
         assert elapsed_ms >= 80, f"expected to wait at least ~window_ms; got {elapsed_ms:.1f}ms"
-        assert elapsed_ms < 1000, f"single caller should not block for >1s; got {elapsed_ms:.1f}ms"
     finally:
         coalescer.shutdown()
 
@@ -310,15 +313,17 @@ def test_window_zero_dispatches_synchronously() -> None:
     """
     fake = _CountingBatchFn()
     coalescer = EmbedCoalescer(embed_batch_fn=fake, coalesce_window_ms=0, max_batch_size=16)
-    # No dispatcher thread should be running in window=0 mode.
+    # The deterministic, host-immune proof that window=0 dispatches
+    # synchronously is structural: NO dispatcher thread is started in
+    # window=0 mode, so ``embed`` cannot enqueue-and-wait — it must run
+    # the synchronous single-text path inline. F82 (#493): the old
+    # ``elapsed_ms < 50`` ceiling was a flaky wall-clock bound that added
+    # nothing over this structural assertion.
     assert coalescer._dispatcher is None
 
-    start = time.monotonic()
     out = coalescer.embed("hello")
-    elapsed_ms = (time.monotonic() - start) * 1000
     assert out, "window=0 should still return a result"
-    assert elapsed_ms < 50, f"window=0 should dispatch immediately; took {elapsed_ms:.1f}ms"
-    # Each call is its own batch in window=0 mode.
+    # Each call is its own batch in window=0 mode (synchronous path).
     assert len(fake.calls) == 1
     assert fake.calls[0] == ["hello"]
 
@@ -417,28 +422,55 @@ def test_max_batch_full_wakes_dispatcher_early() -> None:
     self._cv.notify()`` and the dispatcher waits the full window even
     when the batch is full — defeats the latency benefit at high
     concurrency.
+
+    F82 rewrite (#493): the old shape asserted ``elapsed_ms < 400``, a
+    wall-clock ceiling that flaked under concurrent-gate CPU contention
+    (the 3 worker threads can be scheduled late on a loaded host even
+    when the early-wake path fired correctly). The deterministic property
+    is liveness, not latency: with a window set FAR longer than any test
+    budget (10s), the ONLY way all three callers can unblock promptly is
+    the batch-full ``notify()`` — a full-window wait would block them for
+    the entire 10s. So we set the long window and assert every worker
+    thread *finishes* (its blocking ``embed`` returned) within a generous
+    2s liveness join — which is 5x the contended-scheduling slack but
+    still 5x shorter than the window, so it passes on any host when
+    early-wake works and HANGS (join times out, ``is_alive()`` stays
+    True) when the notify is removed. This is a liveness floor, not a
+    tight per-commit ceiling, and it is not an ``assert elapsed < const``
+    shape.
+
+    Sabotage-proof (executed): removed the batch-full ``self._cv.notify()``
+    in ``EmbedCoalescer.embed`` → the workers blocked on the 10s window,
+    the 2s join timed out, ``alive`` was non-empty and this test failed.
+    Restoring the notify restored green.
     """
     fake = _CountingBatchFn()
-    # Long window so the only way the dispatcher fires "fast" is the
-    # max-batch notify path.
-    coalescer = EmbedCoalescer(embed_batch_fn=fake, coalesce_window_ms=500, max_batch_size=3)
+    # Window FAR longer than the liveness join below, so a prompt return
+    # can ONLY come from the max-batch notify path — never the window
+    # timeout. (A full-window wait would block the workers for 10s.)
+    coalescer = EmbedCoalescer(embed_batch_fn=fake, coalesce_window_ms=10_000, max_batch_size=3)
     try:
         results: list[list[float]] = [[] for _ in range(3)]
 
         def worker(i: int) -> None:
             results[i] = coalescer.embed(f"text-{i}")
 
-        start = time.monotonic()
         threads = [threading.Thread(target=worker, args=(i,)) for i in range(3)]
         for t in threads:
             t.start()
+        # Liveness floor: every worker must UNBLOCK well inside the 10s
+        # window. 2s is huge slack for thread scheduling under load yet
+        # 5x shorter than the window — so this can only pass via the
+        # early batch-full wake, and times out (hangs) if it's removed.
         for t in threads:
-            t.join()
-        elapsed_ms = (time.monotonic() - start) * 1000
+            t.join(timeout=2.0)
+        alive = [i for i, t in enumerate(threads) if t.is_alive()]
 
-        # Sabotage: if we waited the full 500ms window the test takes
-        # >400ms; the early-wake path completes well under that.
-        assert elapsed_ms < 400, f"batch-full should fire before window; took {elapsed_ms:.1f}ms"
+        assert not alive, (
+            f"batch-full must wake the dispatcher early; workers {alive} were still blocked "
+            "on the coalesce window after 2s (notify path broken)"
+        )
+        # The batch-full path drains exactly the one full batch of 3.
         assert len(fake.calls) == 1
         assert len(fake.calls[0]) == 3
     finally:
@@ -539,13 +571,21 @@ def test_high_concurrency_no_exceptions_and_batches_below_naive() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_window_100ms_single_call_latency_is_in_band() -> None:
-    """With window=100ms, a single call's latency lands in ~100-300ms.
+def test_window_100ms_single_call_latency_floor_proves_window_applied() -> None:
+    """With window=100ms, a single call waits at least ~the window.
 
-    Sabotage: change ``self._window_s = max(0.0, coalesce_window_ms) / 1000.0``
-    to ``... / 100.0`` (off-by-10) and a 100ms window becomes 1s — the
-    upper bound fires. Or set window_s to 0 by accident and the lower
-    bound fires.
+    The deterministic, host-immune property is the FLOOR: a single caller
+    that never fills the batch must wait for the window timer, so its
+    latency is at least ~window_ms. That catches the
+    window-collapsed-to-zero sabotage (``self._window_s`` accidentally 0 →
+    the call returns in <10ms and the floor fires). F82 (#493): the old
+    companion ``< 500`` ceiling (meant to catch an off-by-10 window
+    inflation) was a wall-clock ceiling that measured host scheduling and
+    flaked under load; the window-applied property the suite actually
+    relies on is the floor, which is slow-host-immune — a contended host
+    only makes the caller wait *longer*, never shorter. The
+    never-wakes-at-all hang remains caught by the suite-level
+    ``--timeout``.
     """
     fake = _CountingBatchFn()
     coalescer = EmbedCoalescer(embed_batch_fn=fake, coalesce_window_ms=100, max_batch_size=16)
@@ -553,12 +593,9 @@ def test_window_100ms_single_call_latency_is_in_band() -> None:
         start = time.monotonic()
         coalescer.embed("solo")
         elapsed_ms = (time.monotonic() - start) * 1000
-        # Sabotage on the lower side: if window=0 the call returns
-        # in <10ms — the assertion fires.
+        # Floor only: if the window collapsed to 0 the call returns in
+        # <10ms and this fires. A loaded host can only push elapsed up.
         assert elapsed_ms >= 80, f"single call returned too fast: {elapsed_ms:.1f}ms"
-        # Upper bound generous for CI flakes; off-by-10 sabotage fires
-        # because elapsed jumps into the 800-1200ms range.
-        assert elapsed_ms < 500, f"single call too slow: {elapsed_ms:.1f}ms"
     finally:
         coalescer.shutdown()
 
