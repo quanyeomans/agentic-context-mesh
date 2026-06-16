@@ -76,24 +76,77 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
         run: |
-          # Defers to scripts/ci/check_release_gate.py which mirrors
-          # ci.yml's paths-ignore exactly. Old strict-equality check
-          # failed every time a docs-only commit landed on main between
-          # the last code change and the alpha cut. The Python gate
-          # walks LAST_SUCCESS_SHA..HEAD and accepts the gap only if
-          # every commit there is docs-only. Regression-locked by
+          set -euo pipefail
+          # "Releasable == mergeable" (#548). The merge-blocking signal is
+          # the `CI gate` fan-in CHECK-RUN conclusion on HEAD, NOT the
+          # umbrella ci.yml RUN conclusion. An informational job (SonarCloud
+          # `# fan-in: informational`, Publish to PyPI) failing flips the
+          # whole-run conclusion to `failure` even when `CI gate` is green —
+          # keying off `gh run list --status=success` then mis-blocks a
+          # perfectly releasable HEAD. So:
+          #   (1) directly resolve HEAD's own `CI gate` check-run; if green,
+          #       pass --head-gate-conclusion success and the script short-
+          #       circuits to pass (common case: ci.yml ran on HEAD, CI gate
+          #       green, an advisory job red).
+          #   (2) if HEAD has no `CI gate` check-run (a pure docs-only commit
+          #       ci.yml's paths-ignore skipped), derive LAST_SUCCESS_SHA from
+          #       the newest main SHA whose `CI gate` check-run is success and
+          #       run the docs-only-gap walk. We do NOT use the run-conclusion
+          #       filter, since a run-failure SHA can still have a green CI gate.
+          # The network `gh api` calls stay HERE so check_release_gate.py stays
+          # a pure, fakeable-via-args function (F1/F2). Regression-locked by
           # tests/scripts/test_check_release_gate.py.
-          LAST_SUCCESS_SHA="$(gh run list \
+
+          # `first(... | select(.name=="CI gate")) | .conclusion` — most recent
+          # CI gate check-run by API ordering. If re-runs ever produce multiple
+          # CI gate check-runs on one SHA, prefer sorting by completed_at desc;
+          # only one exists per HEAD today.
+          # F83: capture guarded with `|| HEAD_GATE=""` so a transient gh/api
+          # failure leaves HEAD_GATE empty (falls through to the safe walk)
+          # instead of tripping errexit at the assignment (#483 class).
+          HEAD_GATE=""
+          HEAD_GATE="$(gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
+              --jq 'first(.check_runs[] | select(.name=="CI gate")) | .conclusion // ""')" \
+              || HEAD_GATE=""
+
+          if [ "$HEAD_GATE" = "success" ]; then
+            python3 scripts/ci/check_release_gate.py \
+                --head-sha "$HEAD_SHA" \
+                --last-success-sha "" \
+                --head-gate-conclusion success
+            exit 0
+          fi
+
+          # HEAD has no green CI gate check-run — find the newest main SHA whose
+          # `CI gate` check-run IS success and hand it to the docs-only-gap walk.
+          # F83: candidate capture guarded so an empty/failed listing leaves
+          # CANDIDATES empty rather than tripping errexit.
+          CANDIDATES=""
+          CANDIDATES="$(gh run list \
               --workflow=ci.yml \
               --branch=main \
-              --status=success \
-              --limit=1 \
+              --limit=30 \
               --json headSha \
-              --jq '.[0].headSha // empty')"
+              --jq '.[].headSha')" || CANDIDATES=""
+
+          LAST_SUCCESS_SHA=""
+          for sha in $CANDIDATES; do
+            CONCLUSION=""
+            CONCLUSION="$(gh api "repos/${REPO}/commits/${sha}/check-runs" \
+                --jq 'first(.check_runs[] | select(.name=="CI gate")) | .conclusion // ""')" \
+                || CONCLUSION=""
+            if [ "$CONCLUSION" = "success" ]; then
+              LAST_SUCCESS_SHA="$sha"
+              break
+            fi
+          done
+
           python3 scripts/ci/check_release_gate.py \
               --head-sha "$HEAD_SHA" \
-              --last-success-sha "$LAST_SUCCESS_SHA"
+              --last-success-sha "$LAST_SUCCESS_SHA" \
+              --head-gate-conclusion ""
 
       - name: Tag main HEAD
         env:
