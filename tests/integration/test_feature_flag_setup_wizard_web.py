@@ -5,10 +5,14 @@ Composes the real ASGI app via
 OFF and ON through ``FakeFeatureFlagResolver`` (the canonical F54
 pattern). Asserts:
 
-* **OFF (default)** — no ``/setup`` routes exist (404); the MCP
+* **OFF (seam-injected)** — no ``/setup`` routes exist (404); the MCP
   transport + health surfaces are byte-for-byte the pre-flag shape.
 * **ON** — the wizard serves the full journey surface; the MCP
   transport + health surfaces are unchanged alongside it.
+
+The flag now defaults ON (cutover), so the OFF branch sets the flag
+off explicitly through the seam rather than leaning on the default;
+``test_registry_default_is_on_cutover_stage`` pins the cutover itself.
 
 F1/F2-clean: flag state comes from the resolver fake through the
 ``setup_wizard_enabled`` seam — no env vars, no REGISTRY mutation.
@@ -47,7 +51,27 @@ def _compose(resolver: FakeFeatureFlagResolver, service: FakeSetupService) -> Te
     return TestClient(app, client=_LOOPBACK)
 
 
+def test_registry_default_is_on_cutover_stage() -> None:
+    """Pin the cutover: the wizard ships reachable out-of-the-box.
+
+    A default install (env-unset, config-unset) resolves the registry
+    default, so default=True is what makes GET /setup=200 on a fresh
+    Docker/pip boot. stage="cutover" records that this is a deliberate,
+    validated default-flip — not the introduce-stage default-OFF the
+    wizard landed under. Sabotage-proof for the flip: reverting either
+    field turns this red.
+    """
+    from kairix.core.features.registry import REGISTRY
+
+    entry = REGISTRY["setup_wizard_web"]
+    assert entry.default is True
+    assert entry.stage == "cutover"
+
+
 def test_off_branch_mounts_no_setup_routes() -> None:
+    # default-ON now, so the OFF branch must set the flag off explicitly
+    # (don't lean on the registry default) — the seam injection keeps
+    # F54's OFF-branch (404) coverage valid post-cutover.
     resolver = FakeFeatureFlagResolver().with_flag("setup_wizard_web", False)
     client = _compose(resolver, FakeSetupService())
 

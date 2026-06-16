@@ -7,11 +7,24 @@ cut, because ci.yml's ``paths-ignore`` skips docs commits — so
 LAST_SUCCESS_SHA never advances to a docs-only HEAD, and the strict-
 equality gate fails.
 
-The fix: the gate passes when **every commit since the last green
-ci.yml run is docs-only** (i.e., would have been skipped by ci.yml
-itself). HEAD == LAST_SUCCESS_SHA stays the happy path; HEAD ahead
-by docs-only commits is also green; HEAD ahead by even one code
-commit is still a fail (that's the real "untested code" case).
+"Releasable" means "mergeable" — the signal is the ``CI gate`` fan-in
+**check-run** conclusion on main HEAD, not the umbrella ci.yml *run*
+conclusion. An informational job (SonarCloud, Publish to PyPI, ...)
+failing flips the whole-run conclusion to ``failure`` even when the
+merge-blocking ``CI gate`` aggregator is green; keying off the run
+conclusion mis-blocks a perfectly releasable HEAD (#548). The workflow
+resolves HEAD's ``CI gate`` check-run conclusion and passes it in via
+``--head-gate-conclusion``; when it is ``success`` the gate short-
+circuits to pass immediately, before any git-walking.
+
+Fallback (docs-only-gap walk): when HEAD has no ``CI gate`` check-run
+at all — a pure docs-only commit ci.yml's ``paths-ignore`` skipped —
+``--head-gate-conclusion`` is empty and the gate instead checks that
+**every commit since the last commit whose ``CI gate`` check-run was
+green is docs-only** (i.e., would have been skipped by ci.yml itself).
+HEAD == LAST_SUCCESS_SHA stays the happy path; HEAD ahead by docs-only
+commits is also green; HEAD ahead by even one code commit is still a
+fail (that's the real "untested code" case).
 
 Mirrors ci.yml's paths-ignore exactly:
   - ``docs/**``
@@ -21,11 +34,14 @@ Mirrors ci.yml's paths-ignore exactly:
 Run from the workflow:
     python3 scripts/ci/check_release_gate.py \\
         --head-sha "$HEAD_SHA" \\
-        --last-success-sha "$LAST_SUCCESS_SHA"
+        --last-success-sha "$LAST_SUCCESS_SHA" \\
+        --head-gate-conclusion "$HEAD_GATE"
 
 Exit codes:
-  0 — gate passes (HEAD == last green, or only docs-only commits past it)
-  1 — gate fails (code commits past last green ci.yml run)
+  0 — gate passes (HEAD's CI gate check-run is green, HEAD == last
+      commit whose CI gate was green, or only docs-only commits past it)
+  1 — gate fails (code commits past the last commit whose CI gate
+      check-run was green)
   2 — usage / unrecoverable error
 """
 
@@ -99,12 +115,31 @@ def main() -> int:
     parser.add_argument(
         "--last-success-sha",
         required=True,
-        help="Most recent SHA where ci.yml ran green on main",
+        help="Most recent SHA whose `CI gate` check-run was green on main",
+    )
+    parser.add_argument(
+        "--head-gate-conclusion",
+        default="",
+        help=(
+            "HEAD's own `CI gate` check-run conclusion, resolved by the workflow "
+            "(e.g. 'success'). When 'success' the gate short-circuits to pass — "
+            "the mergeable signal overrides the git-walk. Empty/missing means HEAD "
+            "had no `CI gate` check-run (a docs-only commit ci.yml skipped), so the "
+            "docs-only-gap walk against --last-success-sha runs instead."
+        ),
     )
     args = parser.parse_args()
 
     head_sha = args.head_sha
     last_success_sha = args.last_success_sha
+
+    # #548: "releasable == mergeable". When the workflow has already resolved
+    # HEAD's own `CI gate` check-run to success, that IS the gate — short-
+    # circuit before any git-walking so an informational job (SonarCloud,
+    # Publish to PyPI) failing the umbrella run can't mis-block the release.
+    if args.head_gate_conclusion == "success":
+        print(f"CI gate check-run on HEAD ({head_sha}) is green — releasable")
+        return 0
 
     if not last_success_sha:
         print("::error::no successful CI gate run found on main", file=sys.stderr)

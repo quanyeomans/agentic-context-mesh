@@ -54,9 +54,23 @@ def _commit(repo: Path, files: dict[str, str], message: str) -> str:
     return _git(repo, "rev-parse", "HEAD")
 
 
-def _run_gate(repo: Path, head_sha: str, last_success_sha: str) -> subprocess.CompletedProcess[str]:
+def _run_gate(
+    repo: Path,
+    head_sha: str,
+    last_success_sha: str,
+    head_gate_conclusion: str = "",
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(SCRIPT), "--head-sha", head_sha, "--last-success-sha", last_success_sha],
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--head-sha",
+            head_sha,
+            "--last-success-sha",
+            last_success_sha,
+            "--head-gate-conclusion",
+            head_gate_conclusion,
+        ],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -96,6 +110,43 @@ def test_gate_fails_when_code_commit_is_past_last_success(tmp_path: Path) -> Non
     bad = _commit(repo, {"src/y.py": "print(2)\n"}, "code: untested change")
 
     result = _run_gate(repo, bad, last_green)
+    assert result.returncode == 1
+    assert "untested code commits" in result.stderr
+    assert bad[:8] in result.stderr
+
+
+def test_gate_passes_when_head_gate_conclusion_is_success(tmp_path: Path) -> None:
+    """#548 regression lock: when HEAD's own `CI gate` check-run is green
+    (the workflow passes --head-gate-conclusion success), the gate must
+    short-circuit to pass EVEN IF a code commit sits past last_success.
+
+    This is the exact defect #548 fixes: keying off the umbrella ci.yml
+    RUN conclusion mis-blocked a HEAD whose `CI gate` was green but whose
+    run was red because of an informational job (SonarCloud, Publish to
+    PyPI). The check-run signal must override the git-walk."""
+    repo = _init_repo(tmp_path)
+    last_green = _commit(repo, {"src/x.py": "print()\n"}, "initial code")
+    # A CODE commit past last_success — the fallback git-walk would REJECT
+    # this. The green check-run signal must override that.
+    bad = _commit(repo, {"src/y.py": "print(2)\n"}, "code: real change with green CI gate")
+
+    result = _run_gate(repo, bad, last_green, head_gate_conclusion="success")
+    assert result.returncode == 0, f"stdout={result.stdout} stderr={result.stderr}"
+    assert "CI gate check-run on HEAD" in result.stdout
+    assert "releasable" in result.stdout
+
+
+def test_gate_falls_through_to_docs_walk_when_head_gate_empty(tmp_path: Path) -> None:
+    """When HEAD has no `CI gate` check-run (empty --head-gate-conclusion,
+    e.g. a docs-only commit ci.yml skipped), the gate must fall through to
+    the existing docs-only-gap walk — a code commit past last_success
+    still fails. Proves the #548 short-circuit did not regress the
+    fallback semantics."""
+    repo = _init_repo(tmp_path)
+    last_green = _commit(repo, {"src/x.py": "print()\n"}, "initial code")
+    bad = _commit(repo, {"src/y.py": "print(2)\n"}, "code: untested change")
+
+    result = _run_gate(repo, bad, last_green, head_gate_conclusion="")
     assert result.returncode == 1
     assert "untested code commits" in result.stderr
     assert bad[:8] in result.stderr

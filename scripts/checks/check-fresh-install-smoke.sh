@@ -9,8 +9,8 @@
 #   stage 1  container-healthy   /healthz/ready returns 200 (bounded wait)
 #   stage 2  mcp-handshake       POST initialize + tools/list to /mcp
 #                                returns more than zero tools
-#   stage 3  setup-wizard        with KAIRIX_FEATURE_SETUP_WIZARD_WEB=1,
-#                                GET /setup/ returns 200 (in-container
+#   stage 3  setup-wizard        out-of-the-box (setup_wizard_web defaults
+#                                ON), GET /setup/ returns 200 (in-container
 #                                loopback curl — the wizard's operator-token
 #                                guard intentionally skips loopback peers)
 #   stage 3b wizard-choreography POST /setup/folder/scan returns the HTMX
@@ -142,7 +142,9 @@ cp "${REPO_ROOT}/kairix.config.example.yaml" "${WORKDIR}/kairix.config.yaml"
     echo "# fresh-install smoke overrides"
     echo "KAIRIX_IMAGE_TAG=${IMAGE_TAG}"
     echo "KAIRIX_HOST_PORT=${HOST_PORT}"
-    echo "KAIRIX_FEATURE_SETUP_WIZARD_WEB=1"
+    # setup_wizard_web defaults ON (cutover) — no env override here, so the
+    # wizard stages below prove the OOTB default reaches /setup, not an
+    # env-forced enable. This guards against an accidental future default-revert.
     # #500 — pin a deterministic operator token so the browser-shaped stage
     # below can open the tokened URL without scraping the first-boot log.
     # (Unset, the container mints + prints one; pinning keeps the smoke
@@ -231,7 +233,7 @@ if [[ "$TOOL_COUNT" -lt 1 ]]; then
 fi
 echo "stage 2 mcp-handshake: OK (${TOOL_COUNT} tools)"
 
-# ── stage 3: setup wizard answers with the flag ON ───────────────────────────
+# ── stage 3: setup wizard answers out-of-the-box (default-ON) ─────────────────
 # In-container loopback curl: the wizard's operator-token guard skips
 # loopback peers by design (host-side requests arrive from the docker
 # bridge gateway and would need the kairix-infra-operator-token secret).
@@ -239,7 +241,7 @@ WIZARD_CODE=$(compose exec -T kairix curl -s -o /dev/null -w '%{http_code}' \
     "http://127.0.0.1:8080/setup/" || true)
 if [[ "$WIZARD_CODE" != "200" ]]; then
     fail_stage "setup-wizard" \
-        "GET /setup/ returned ${WIZARD_CODE} (expected 200) with KAIRIX_FEATURE_SETUP_WIZARD_WEB=1 — the in-box wizard is not reachable on a fresh install." \
+        "GET /setup/ returned ${WIZARD_CODE} (expected 200) on a default install (setup_wizard_web defaults ON) — the in-box wizard is not reachable out-of-the-box." \
         "reproduce: docker compose exec kairix curl -v http://127.0.0.1:8080/setup/"
 fi
 echo "stage 3 setup-wizard: OK (200)"

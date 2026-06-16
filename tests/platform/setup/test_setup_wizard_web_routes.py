@@ -93,11 +93,17 @@ def test_flag_off_means_no_setup_routes() -> None:
     assert client.get("/mcp").status_code == 200
 
 
-def test_flag_default_reader_keeps_wizard_off() -> None:
-    """No ``setup_wizard_enabled`` seam → the registry default (OFF) wins."""
+def test_flag_default_reader_mounts_wizard_out_of_box() -> None:
+    """No ``setup_wizard_enabled`` seam, no env/overlay → the production
+    default reader resolves the registry default (now ON, cutover) and
+    mounts ``/setup``, so a fresh install reaches the wizard out of the box.
+
+    Sabotage-proof for the cutover: reverting the registry default back to
+    False turns this 200 into a 404.
+    """
     app = build_mcp_app(FakeMcpTransportServer())
     client = TestClient(app, client=_LOOPBACK)
-    assert client.get("/setup", follow_redirects=True).status_code == 404
+    assert client.get("/setup", follow_redirects=True).status_code == 200
 
 
 # ---------------------------------------------------------------------------
