@@ -211,62 +211,39 @@ def test_tool_entity_summary_includes_category_when_present() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
-def guide_file(tmp_path: Path) -> Path:
-    """Create a temporary agent-usage-guide.md."""
-    guide = tmp_path / "agent-usage-guide.md"
-    guide.write_text(
-        "# Kairix Agent Usage Guide\n\n"
-        "## Search\nHow to search the document store.\n\n"
-        "## Budget\nToken budget controls cost.\nDefault budget is 3000 tokens.\n\n"
-        "## Troubleshooting\nDebug tips for common issues.\n",
-        encoding="utf-8",
+@pytest.mark.unit
+def test_tool_usage_guide_empty_topic_returns_bundled_content() -> None:
+    """Empty topic returns the bundled guide content with NO operator action.
+
+    #466 regression: the guide ships as package data under
+    ``kairix/agents/usage_guide/data/``, so ``tool_usage_guide()`` with no
+    ``guide_path`` resolves it directly from the installed package — no
+    ``docs/`` copy, no write, no ``onboard guide`` step. This is the
+    production default an agent hits over MCP.
+
+    Sabotage proof (executed locally): point ``_GUIDE_RESOURCE`` in
+    ``kairix/use_cases/usage_guide.py`` at a non-existent ``data/`` file —
+    the resolver no longer finds the bundled copy and the tool returns the
+    ``UsageGuideNotFound`` envelope, so ``error == ""`` fails. Restored.
+    """
+    result = tool_usage_guide(topic="")
+    assert result["error"] == "", f"bundled default returned an error: {result['error']!r}"
+    assert result["content"].strip(), "bundled guide content was empty"
+
+
+@pytest.mark.unit
+def test_tool_usage_guide_topic_filter_against_bundled_guide() -> None:
+    """A topic filter against the bundled guide returns a focused slice.
+
+    Exercises the real bundled guide (no fixture, no operator action) so a
+    structural change to the shipped guide that drops the budget topic is
+    caught. ``budget`` is a stable heading/keyword in the canonical guide.
+    """
+    result = tool_usage_guide(topic="budget")
+    assert result["error"] == "", f"bundled default returned an error: {result['error']!r}"
+    assert "budget" in result["content"].lower(), (
+        f"topic filter returned no budget content: {result['content'][:200]!r}"
     )
-    return guide
-
-
-@pytest.mark.unit
-def test_tool_usage_guide_empty_topic(guide_file: Path) -> None:
-    """Empty topic returns full guide content."""
-    import kairix.agents.mcp.server as _mod
-
-    server_file = Path(_mod.__file__)
-    expected = server_file.parent.parent.parent / "docs" / "user-guide" / "agent-usage-guide.md"
-    if expected.exists():
-        result = tool_usage_guide(topic="")
-        assert result["error"] == ""
-        assert len(result["content"]) > 0
-    else:
-        expected.parent.mkdir(parents=True, exist_ok=True)
-        expected.write_text(guide_file.read_text(), encoding="utf-8")
-        try:
-            result = tool_usage_guide(topic="")
-            assert result["error"] == ""
-            assert "Kairix Agent Usage Guide" in result["content"]
-        finally:
-            expected.unlink(missing_ok=True)
-
-
-@pytest.mark.unit
-def test_tool_usage_guide_topic_filter(guide_file: Path) -> None:
-    """Specific topic filters to relevant sections."""
-    import kairix.agents.mcp.server as _mod
-
-    server_file = Path(_mod.__file__)
-    expected = server_file.parent.parent.parent / "docs" / "user-guide" / "agent-usage-guide.md"
-    if expected.exists():
-        result = tool_usage_guide(topic="budget")
-        assert result["error"] == ""
-        assert "budget" in result["content"].lower()
-    else:
-        expected.parent.mkdir(parents=True, exist_ok=True)
-        expected.write_text(guide_file.read_text(), encoding="utf-8")
-        try:
-            result = tool_usage_guide(topic="budget")
-            assert result["error"] == ""
-            assert "budget" in result["content"].lower()
-        finally:
-            expected.unlink(missing_ok=True)
 
 
 @pytest.mark.unit

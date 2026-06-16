@@ -114,6 +114,43 @@ def test_usage_guide_cli_subprocess_topic_envelope_outcome(tmp_path: Path) -> No
     assert elapsed_ms < 5000.0, f"usage-guide subprocess took {elapsed_ms:.1f}ms (baseline ~200ms, threshold 5000ms)"
 
 
+def test_usage_guide_cli_subprocess_bundled_default_returns_content() -> None:
+    """Drive ``kairix usage-guide`` with NO ``--guide-path`` — the bundled
+    package-data guide (#466) must resolve out-of-box and return content.
+
+    This is the production default: no operator action, no ``onboard
+    guide`` step, no ``docs/`` copy. The subprocess runs the real
+    installed package, so it proves the bundled guide ships and resolves
+    end-to-end through the binary surface.
+
+    Sabotage proof (executed locally): point ``_GUIDE_RESOURCE`` in
+    ``kairix/use_cases/usage_guide.py`` at a non-existent ``data/`` file —
+    the resolver no longer finds the bundled copy, the CLI prints the
+    ``UsageGuideNotFound`` error and exits 1, so the ``returncode == 0`` +
+    error-empty assertions fail. Restored.
+    """
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "kairix.cli",
+            "usage-guide",
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, (
+        f"usage-guide (bundled default) exited {proc.returncode}\n"
+        f"--- stderr ---\n{proc.stderr}\n--- stdout ---\n{proc.stdout}"
+    )
+    envelope = json.loads(proc.stdout)
+    assert envelope["error"] == "", f"bundled default returned an error: {envelope.get('error')!r}"
+    assert envelope["content"].strip(), f"bundled guide content was empty: {envelope!r}"
+
+
 def test_usage_guide_cli_subprocess_missing_guide_emits_error(tmp_path: Path) -> None:
     """Pointing ``--guide-path`` at a non-existent file must surface a
     non-zero exit + a parseable error message on stdout (the use case

@@ -142,3 +142,32 @@ def test_composed_production_path(tmp_path: Path) -> None:
     assert elapsed_ms < 500.0, (
         f"E2E search took {elapsed_ms:.1f}ms — composed pipeline regressed (baseline ~54ms, threshold 500ms)"
     )
+
+
+@pytest.mark.e2e
+def test_composed_usage_guide_resolves_on_clean_install() -> None:
+    """#466 — the usage_guide MCP tool returns content on a clean install.
+
+    A clean install is exactly the absence of any operator action: no
+    ``onboard guide`` run, no ``docs/`` copy, no ``--guide-path`` override.
+    The bundled guide ships as package data under
+    ``kairix/agents/usage_guide/data/``, so the production MCP tool path
+    resolves it from the installed package and an agent gets guidance
+    instead of the ``UsageGuideNotFound`` error envelope.
+
+    This drives the real MCP handler (``tool_usage_guide``), which composes
+    ``kairix.use_cases.usage_guide.run_usage_guide`` with its production
+    default resolver — no fakes on the guide-resolution path.
+
+    Sabotage-proof: point ``_GUIDE_RESOURCE`` in
+    ``kairix/use_cases/usage_guide.py`` at a non-existent ``data/`` file —
+    the resolver no longer finds the bundled copy, the tool returns the
+    ``UsageGuideNotFound`` envelope and both assertions below fail.
+    """
+    from kairix.agents.mcp.server import tool_usage_guide
+
+    result = tool_usage_guide(topic="")
+    assert result["error"] == "", (
+        f"usage_guide returned an error on a clean install (#466 regression): {result['error']!r}"
+    )
+    assert result["content"].strip(), f"usage_guide returned empty content on a clean install: {result!r}"

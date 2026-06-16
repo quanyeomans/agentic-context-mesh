@@ -190,3 +190,44 @@ def _then_fallback_lists_topics(_usage_guide_state: dict[str, Any]) -> None:
     valid_topics = ["Search", "Budget", "Capabilities", "Troubleshooting"]
     found = [t for t in valid_topics if t in out.content]
     assert found, f"expected ≥1 valid topic heading in fallback content; got content={out.content!r}"
+
+
+# ---------------------------------------------------------------------------
+# Default-install regression (#466): the bundled guide ships in the package
+# so an agent gets content on the production default path with no operator
+# action. These steps use NO deps override and NO fixture — they exercise
+# the real ``_default_resolve_guide`` against the bundled package-data copy.
+# ---------------------------------------------------------------------------
+
+
+@given("a default kairix install with no operator setup")
+def _given_default_install(_usage_guide_state: dict[str, Any]) -> None:
+    # Nothing to seed: a default install is exactly the absence of any
+    # operator-written guide / deps override. The bundled package-data
+    # copy is the only source the production resolver should need.
+    _usage_guide_state["topic"] = ""
+
+
+@when("the agent requests the usage guide on the production default path")
+def _when_request_production_default(_usage_guide_state: dict[str, Any]) -> None:
+    # deps=None and guide_path=None → the production default resolver
+    # (``_default_resolve_guide``) resolves the bundled package-data guide.
+    _usage_guide_state["result"] = run_usage_guide()
+
+
+@then("the response contains guide content")
+def _then_has_guide_content(_usage_guide_state: dict[str, Any]) -> None:
+    out = _result(_usage_guide_state)
+    # Sabotage: point ``_GUIDE_RESOURCE`` in
+    # ``kairix/use_cases/usage_guide.py`` at a non-existent ``data/`` file —
+    # the resolver no longer finds the bundled copy and content is empty.
+    assert out.content.strip(), f"expected bundled guide content; got {out.content!r}"
+
+
+@then("the response has no UsageGuideNotFound error")
+def _then_no_not_found_error(_usage_guide_state: dict[str, Any]) -> None:
+    out = _result(_usage_guide_state)
+    # Sabotage: the same resolver mutation makes ``resolved.exists()``
+    # False, so the use case returns the ``UsageGuideNotFound`` envelope —
+    # this assertion catches the #466 regression at the BDD layer.
+    assert out.error == "", f"expected no error on the default path; got {out.error!r}"

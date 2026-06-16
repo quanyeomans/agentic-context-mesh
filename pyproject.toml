@@ -482,6 +482,17 @@ include = ["kairix*"]
     "templates/partials/*.html",
     "static/*",
 ]
+# The agent usage guide (#466) ships as package data so it lands in BOTH
+# the wheel and the Docker image (which pip-installs ``.``) and is immune
+# to the ``/var/lib/kairix`` named-volume shadow. Before this, the only
+# copy lived at the repo root under ``docs/`` — present in every source
+# checkout but absent from the built image — so the ``usage_guide`` MCP
+# tool returned ``UsageGuideNotFound`` on stock production deploys.
+# ``kairix.use_cases.usage_guide`` reads these via ``importlib.resources``
+# from both source checkouts and installed wheels.
+"kairix.agents.usage_guide" = [
+    "data/*.md",
+]
 
 # Benchmark gates — kairix benchmark run exits non-zero if any gate fails.
 # E2E test gate: set KAIRIX_E2E=1 to enable live Azure API tests.
