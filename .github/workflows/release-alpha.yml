@@ -101,6 +101,27 @@ jobs:
           git tag -a "$TAG" -m "kairix alpha $TAG"
           git push origin "$TAG"
 
+      - name: Build reference-library corpus tarball (#450)
+        # The reference-library corpus is NOT bundled in the wheel
+        # (mixed-license, ~50 MB). `kairix benchmark install-corpus` fetches
+        # it from this per-release asset, sha256-verified fail-closed. The
+        # asset name matches the URL template in
+        # kairix/quality/benchmark/corpus.py (reference-library-v{version}.tar.gz,
+        # where the alpha tag is v{version}). Mirrors release.yml so an alpha is
+        # benchmark-provable, not just the stable release.
+        env:
+          DATE_VERSION: ${{ inputs.date_version }}
+          ALPHA_N: ${{ inputs.alpha_n }}
+        run: |
+          TAG="v${DATE_VERSION}a${ALPHA_N}"
+          tarball="reference-library-${TAG}.tar.gz"
+          tar czf "$tarball" reference-library/
+          sha256sum "$tarball" | awk '{print $1}' > "${tarball}.sha256"
+          echo "::group::Corpus asset"
+          ls -lh "$tarball" "${tarball}.sha256"
+          cat "${tarball}.sha256"
+          echo "::endgroup::"
+
       - name: Create GitHub pre-release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -108,11 +129,15 @@ jobs:
           ALPHA_N: ${{ inputs.alpha_n }}
         run: |
           TAG="v${DATE_VERSION}a${ALPHA_N}"
+          # Attach the corpus tarball + sha256 sidecar (#450) so
+          # `kairix benchmark install-corpus` can fetch + verify them on the alpha.
           gh release create "$TAG" \
               --title "kairix $TAG (alpha)" \
               --notes "Alpha pre-release for validation. Do not use in production." \
               --prerelease \
-              --verify-tag
+              --verify-tag \
+              "reference-library-${TAG}.tar.gz" \
+              "reference-library-${TAG}.tar.gz.sha256"
 
       - name: Fan out to docker-publish + publish-pypi + vm-deploy (alpha mode)
         # All three downstream workflows are triggered explicitly because
