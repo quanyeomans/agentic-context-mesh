@@ -8,14 +8,14 @@
 <div class="kx-provider-grid">
   {% for option in options %}
   {% if option.oauth %}
-  <a class="kx-provider-card" href="/setup/source/connect?provider={{ option.key }}">
+  <a class="kx-provider-card" aria-label="Connect {{ option.label }}" href="/setup/source/connect?provider={{ option.key }}">
     <div class="kx-provider-body">
       <strong>{{ option.label }}</strong>
       <div class="kx-provider-meta"><span>{{ option.description }}</span></div>
     </div>
   </a>
   {% else %}
-  <a class="kx-provider-card" href="/setup/folder">
+  <a class="kx-provider-card" aria-label="Use a local folder for {{ option.label }}" href="/setup/folder">
     <div class="kx-provider-body">
       <strong>{{ option.label }}</strong>
       <div class="kx-provider-meta"><span>{{ option.description }}</span></div>

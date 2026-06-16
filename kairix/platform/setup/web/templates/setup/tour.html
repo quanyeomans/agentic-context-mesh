@@ -21,7 +21,7 @@
   <form hx-post="/setup/search" hx-target="#tour-search-result" hx-swap="innerHTML"
         hx-indicator="#tour-search-indicator">
     <div class="kx-search-row">
-      <input type="text" name="query" value="What are the main topics in my documents?" class="kx-search-input">
+      <input type="text" aria-label="Search query" name="query" value="What are the main topics in my documents?" class="kx-search-input">
       <button type="submit" class="kx-btn-outline">Run it</button>
     </div>
   </form>
@@ -39,7 +39,7 @@
   <form hx-post="/setup/tour/prep" hx-target="#tour-prep-result" hx-swap="innerHTML"
         hx-indicator="#tour-prep-indicator">
     <div class="kx-search-row">
-      <input type="text" name="query" value="What do my documents say about current projects?" class="kx-search-input">
+      <input type="text" aria-label="Context-pack topic" name="query" value="What do my documents say about current projects?" class="kx-search-input">
       <button type="submit" class="kx-btn-outline">Run it</button>
     </div>
   </form>
@@ -58,7 +58,7 @@
   <form hx-post="/setup/tour/remember" hx-target="#tour-remember-result" hx-swap="innerHTML"
         hx-indicator="#tour-remember-indicator">
     <div class="kx-search-row">
-      <input type="text" name="content" class="kx-search-input"
+      <input type="text" aria-label="Memory to save" name="content" class="kx-search-input"
              value="Setup finished today — this knowledge store is live and agents can connect.">
       <button type="submit" class="kx-btn-outline">Run it</button>
     </div>
@@ -95,7 +95,7 @@
   <form hx-post="/setup/tour/timeline" hx-target="#tour-timeline-result" hx-swap="innerHTML"
         hx-indicator="#tour-timeline-indicator">
     <div class="kx-search-row">
-      <input type="text" name="query" value="What changed in the last week?" class="kx-search-input">
+      <input type="text" aria-label="Timeline query" name="query" value="What changed in the last week?" class="kx-search-input">
       <button type="submit" class="kx-btn-outline">Run it</button>
     </div>
   </form>
