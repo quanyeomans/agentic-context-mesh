@@ -96,7 +96,11 @@ def test_container_runs_both_api_and_worker_as_uid_995() -> None:
     created_stubs: list[Path] = []
     env_file = _REPO_ROOT / ".env"
     if not env_file.exists():
-        env_file.write_text("# test stub — supervisor probe needs no secrets\n")
+        # #449 — the api reads KAIRIX_NEO4J_PASSWORD from this env_file and hard-
+        # exits at boot when KAIRIX_NEO4J_URI is set but the password is empty, so
+        # the stub carries the same value the neo4j sidecar starts with (see the
+        # env below). An absent LLM key only warns (degrade to search-only).
+        env_file.write_text("KAIRIX_NEO4J_PASSWORD=kairix-supervisor-test\n")  # pragma: allowlist secret — fixture
         created_stubs.append(env_file)
     config_file = _REPO_ROOT / "kairix.config.yaml"
     if not config_file.exists():
