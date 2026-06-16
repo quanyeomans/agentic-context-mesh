@@ -19,6 +19,22 @@ import pytest
 from kairix.agents.mcp.cli import McpCliDeps
 from kairix.agents.mcp.cli import main as mcp_main
 
+# F5 keeps tests off internal ``_x`` imports; these are the PUBLIC env-var
+# names (the operator-facing contract). Production single-sources them from
+# onboard.check's ``_CANONICAL_SECRETS`` (F85).
+_LLM_API_KEY_VAR = "KAIRIX_PROVIDER_LLM_API_KEY"  # pragma: allowlist secret — env-var NAME, not a credential
+_LLM_ENDPOINT_VAR = "KAIRIX_PROVIDER_LLM_ENDPOINT"
+
+# #449 — a deterministic all-good env for the serve runtime-path tests:
+# real-looking LLM creds (so the preflight doesn't warn) and a non-empty
+# neo4j password with a URI set (so the preflight doesn't hard-exit).
+_GOOD_SERVE_ENV = {
+    _LLM_API_KEY_VAR: "sk-live-cli-unit-real-key",  # pragma: allowlist secret — fake fixture
+    _LLM_ENDPOINT_VAR: "https://prod.openai.azure.com",
+    "KAIRIX_NEO4J_URI": "bolt://neo4j:7687",
+    "KAIRIX_NEO4J_PASSWORD": "kairix-local-dev",  # pragma: allowlist secret — fake fixture
+}
+
 
 class _FakeMcpServer:
     """FakeMcp server records run() calls + minimal app-builder surface.
@@ -84,6 +100,8 @@ def _build_deps(
     fake_server: _FakeMcpServer | None = None,
     fake_runner: _RunRecorder | None = None,
     warm_result: dict[str, Any] | None = None,
+    wizard_enabled: bool = False,
+    operator_token: str | None = None,
 ) -> tuple[McpCliDeps, list[dict], _RunRecorder]:
     fake_server = fake_server or _FakeMcpServer()
     fake_runner = fake_runner or _RunRecorder()
@@ -104,6 +122,17 @@ def _build_deps(
         # pins the production thread-spawn order explicitly via its
         # own warm_runner override.
         warm_runner=lambda fn: fn(),
+        # #449 — give the serve preflight a deterministic all-good env so
+        # the runtime-path tests below aren't perturbed by the host's
+        # ambient KAIRIX_* creds. The placeholder / fatal preflight paths
+        # have their own dedicated tests that inject their own env.
+        serve_env=_GOOD_SERVE_ENV,
+        # #500 — pin the wizard-URL boot-print seams through the DI so the
+        # default tests don't reach the real flag resolver / SecretsLoader
+        # (F2-clean — no KAIRIX_INFRA_OPERATOR_TOKEN setenv). Default OFF so
+        # the pre-existing serve assertions are unaffected.
+        wizard_enabled_fn=lambda: wizard_enabled,
+        operator_token_fn=lambda: operator_token,
     )
     return deps, build_calls, fake_runner
 
@@ -195,6 +224,52 @@ def test_serve_http_transport_with_no_sse_flag(monkeypatch) -> None:
 
 
 @pytest.mark.unit
+def test_serve_prints_tokened_wizard_url_when_wizard_on_and_token_set(monkeypatch) -> None:
+    """#500 — when the setup_wizard_web flag is ON and an operator token is
+    configured, serve prints the one-time tokened URL to stderr so
+    `docker compose logs` surfaces the browser onboarding step."""
+    monkeypatch.setattr(sys, "argv", ["kairix", "mcp", "serve", "--port", "18093"])
+    # Fixture token, injected through the DI seam — not a real credential.
+    token = "boot-print-fake-token"  # pragma: allowlist secret — fake fixture
+    deps, _calls, _runner = _build_deps(wizard_enabled=True, operator_token=token)
+
+    _stdout, stderr, code = _drive(["serve", "--transport", "http", "--port", "18093"], deps)
+
+    assert code == 0
+    assert "/setup/?operator_token=" in stderr
+    assert token in stderr
+
+
+@pytest.mark.unit
+def test_serve_omits_tokened_url_when_wizard_off(monkeypatch) -> None:
+    """Loopback / pip-install default: the wizard flag is OFF, so no
+    tokened URL (and no token) is printed."""
+    monkeypatch.setattr(sys, "argv", ["kairix", "mcp", "serve", "--port", "18092"])
+    token = "must-not-appear-token"  # pragma: allowlist secret — fake fixture
+    deps, _calls, _runner = _build_deps(wizard_enabled=False, operator_token=token)
+
+    _stdout, stderr, code = _drive(["serve", "--transport", "http", "--port", "18092"], deps)
+
+    assert code == 0
+    assert "operator_token=" not in stderr
+    assert token not in stderr
+
+
+@pytest.mark.unit
+def test_serve_omits_tokened_url_when_no_token_configured(monkeypatch) -> None:
+    """Wizard ON but no operator token configured (loopback-only): nothing
+    to print — the URL only matters when a non-loopback browser needs the
+    grant cookie."""
+    monkeypatch.setattr(sys, "argv", ["kairix", "mcp", "serve", "--port", "18091"])
+    deps, _calls, _runner = _build_deps(wizard_enabled=True, operator_token=None)
+
+    _stdout, stderr, code = _drive(["serve", "--transport", "http", "--port", "18091"], deps)
+
+    assert code == 0
+    assert "operator_token=" not in stderr
+
+
+@pytest.mark.unit
 def test_serve_http_keeps_readiness_closed_when_warmup_fails(monkeypatch) -> None:
     monkeypatch.setattr(sys, "argv", ["kairix", "mcp", "serve", "--port", "18096"])
     deps, build_calls, runner = _build_deps(warm_result={"ready": False, "status": "error"})
@@ -230,12 +305,93 @@ def test_serve_raises_import_error_when_build_server_unavailable() -> None:
     deps = McpCliDeps(
         build_server_factory=_raises_import,
         uvicorn_runner_factory=lambda: _RunRecorder(),
+        serve_env=_GOOD_SERVE_ENV,
     )
 
     _stdout, stderr, code = _drive(["serve"], deps)
     assert code == 1
     assert "MCP dependencies not installed" in stderr
     assert "pip install 'kairix[agents]'" in stderr
+
+
+# ---------------------------------------------------------------------------
+# #449 — boot-time credential preflight (warn-and-degrade vs fatal)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_serve_warns_but_starts_when_llm_key_is_placeholder(caplog) -> None:
+    """A placeholder LLM key warns (naming the var) and does NOT exit — BM25 still works.
+
+    Sabotage-proof: reverting the placeholder branch in
+    ``preflight_startup_credentials`` (treat placeholder as valid) drops
+    the warning so the ``KAIRIX_PROVIDER_LLM_API_KEY``/`fix:` assertions
+    go RED. The value never appears in the log.
+    """
+    import logging as _logging
+
+    placeholder = "your-api-key-here"
+    env = {
+        _LLM_API_KEY_VAR: placeholder,
+        _LLM_ENDPOINT_VAR: "https://prod.openai.azure.com",
+        "KAIRIX_NEO4J_URI": "bolt://neo4j:7687",
+        "KAIRIX_NEO4J_PASSWORD": "kairix-local-dev",  # pragma: allowlist secret — fake fixture
+    }
+    deps, build_calls, _runner = _build_deps()
+    deps.serve_env = env
+
+    with caplog.at_level(_logging.WARNING, logger="kairix.mcp.startup"):
+        _stdout, _stderr, code = _drive(["serve", "--transport", "stdio"], deps)
+
+    # Did NOT exit — degrade to search-only, container boots.
+    assert code == 0
+    assert build_calls, "server must still be built (warn-and-degrade, not exit)"
+    warning_text = "\n".join(rec.getMessage() for rec in caplog.records)
+    assert _LLM_API_KEY_VAR in warning_text
+    assert any(marker in warning_text for marker in ("fix:", "next:", "run:"))
+    # F15 — the placeholder/credential VALUE never appears in the warning.
+    assert placeholder not in warning_text
+
+
+@pytest.mark.unit
+def test_serve_exits_when_neo4j_password_empty_and_uri_set() -> None:
+    """Empty neo4j password + URI configured → exit 1 with the F21 affordance block.
+
+    Sabotage-proof: reverting the neo4j-fatal branch drops the failure so
+    the exit-1 assertion goes RED.
+    """
+    env = {
+        _LLM_API_KEY_VAR: "sk-live-real-key",  # pragma: allowlist secret — fake fixture
+        _LLM_ENDPOINT_VAR: "https://prod.openai.azure.com",
+        "KAIRIX_NEO4J_URI": "bolt://neo4j:7687",
+        "KAIRIX_NEO4J_PASSWORD": "",
+    }
+    deps, build_calls, _runner = _build_deps()
+    deps.serve_env = env
+
+    _stdout, stderr, code = _drive(["serve", "--transport", "http", "--port", "18094"], deps)
+
+    assert code == 1, f"expected exit 1 on empty neo4j password; stderr={stderr!r}"
+    assert "KAIRIX_NEO4J_PASSWORD" in stderr
+    assert any(marker in stderr for marker in ("fix:", "next:", "run:"))
+    # Server construction must NOT have proceeded past the fatal preflight.
+    assert build_calls == []
+
+
+@pytest.mark.unit
+def test_serve_with_real_creds_does_not_warn_or_exit(caplog) -> None:
+    """Real-looking creds → no warning, no exit; serve proceeds normally."""
+    import logging as _logging
+
+    deps, build_calls, _runner = _build_deps()  # _build_deps already injects _GOOD_SERVE_ENV
+
+    with caplog.at_level(_logging.WARNING, logger="kairix.mcp.startup"):
+        _stdout, _stderr, code = _drive(["serve", "--transport", "stdio"], deps)
+
+    assert code == 0
+    assert build_calls
+    credential_warnings = [r for r in caplog.records if "vector" in r.getMessage().lower()]
+    assert credential_warnings == [], "real creds must not produce a credential warning"
 
 
 @pytest.mark.unit

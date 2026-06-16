@@ -15,19 +15,27 @@ Composition idioms mirror the transport composer:
   boundary. Tests inject ``FakeSetupService`` from ``tests/fakes.py``
   through the ``service_factory`` seam.
 
-Security posture: requests from non-loopback clients must carry the
-``X-Kairix-Operator-Token`` header matching the canonical
-``kairix-infra-operator-token`` secret (resolved through
-:class:`kairix.secrets.loader.SecretsLoader`). Loopback requests —
-the laptop-first install this wizard exists for — skip the token.
+Security posture: requests from non-loopback clients must prove
+knowledge of the canonical ``kairix-infra-operator-token`` secret
+(resolved through :class:`kairix.secrets.loader.SecretsLoader`) by ONE
+of: the ``X-Kairix-Operator-Token`` header (API / CLI), a signed grant
+cookie (browser), or a one-time ``?operator_token=<value>`` query on
+the mount root that the guard exchanges for that cookie (#500 — the
+Jupyter tokened-URL pattern, because browsers cannot send custom
+headers and stock Docker presents every published-port peer as the
+bridge gateway IP, not loopback). Loopback requests — the laptop-first
+install this wizard exists for — skip the token entirely.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import hmac
 from collections.abc import Callable, Mapping
+from http.cookies import CookieError, SimpleCookie
 from typing import TYPE_CHECKING, Any, Literal
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
@@ -120,6 +128,24 @@ OPERATOR_TOKEN_HEADER = "X-Kairix-Operator-Token"  # noqa: S105 — HTTP header 
 _TOKEN_SCOPE: Literal["infra"] = "infra"  # noqa: S105 — canonical secret-identity segment, not a credential value
 _TOKEN_AREA = "operator"  # noqa: S105 — canonical secret-identity segment, not a credential value
 _TOKEN_LEAF = "token"  # noqa: S105 — canonical secret-identity segment, not a credential value
+
+# Tokened-URL grant (#500). On stock Docker every published-port
+# connection arrives as the bridge gateway IP — never loopback — and
+# browsers cannot send the X-Kairix-Operator-Token header, so no browser
+# could reach the wizard. The Jupyter pattern fixes it: an operator opens
+# ``/setup/?operator_token=<value>`` once; the guard verifies the token,
+# drops a SIGNED session cookie, and redirects to the bare ``/setup/`` so
+# the token never lingers in the address bar / history. Every later
+# request rides the cookie. Signing is stdlib hmac+base64 (itsdangerous
+# is not installed and Starlette's SessionMiddleware needs it).
+_GRANT_QUERY_PARAM = "operator_token"
+_COOKIE_NAME = "kairix_operator_grant"
+# Fixed payload signed under the operator-token secret. Rotating the
+# secret invalidates every issued cookie (no clock seam, no TTL — the
+# wizard is a short-lived onboarding surface). The cookie value carries
+# only this marker + its MAC; it NEVER carries the raw operator token
+# (F15) — the marker is public, the MAC is what binds it to the secret.
+_COOKIE_PAYLOAD = "kairix-operator-grant-v1"
 
 # Client hosts that count as loopback (token check skipped).
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1"})
@@ -501,10 +527,20 @@ def _mount_relative_path(scope: Scope) -> str:
 class OperatorTokenGuard:
     """ASGI guard wrapping the wizard mount.
 
-    Loopback requests pass through. Non-loopback requests must carry
-    ``X-Kairix-Operator-Token`` matching the canonical
-    ``kairix-infra-operator-token`` secret. The provided header value
-    is never logged or echoed (F15).
+    Loopback requests pass through header-free and cookie-free.
+    Non-loopback requests are admitted by ANY of three credentials, all
+    proving knowledge of the canonical ``kairix-infra-operator-token``
+    secret:
+
+    1. the ``X-Kairix-Operator-Token`` header (API / CLI callers), or
+    2. a valid signed grant cookie (browser callers, #500), or
+    3. a ``?operator_token=<value>`` query on the mount root, which the
+       guard verifies, then 303-redirects to the bare ``/setup/`` with a
+       ``Set-Cookie`` of the signed grant (the Jupyter tokened-URL
+       pattern — browsers cannot send custom headers).
+
+    No credential value is ever logged or echoed (F15): the grant cookie
+    carries only a fixed marker plus its MAC, never the raw token.
 
     ``exempt_paths`` (security-critical, #489): the OAuth provider's
     consent redirect is a plain browser GET — it CANNOT carry the
@@ -536,26 +572,71 @@ class OperatorTokenGuard:
             return
         expected = self._secrets.get(_TOKEN_SCOPE, _TOKEN_AREA, None, _TOKEN_LEAF)
         if expected is None:
-            response: Response = PlainTextResponse(
-                "Setup wizard remote access is disabled: no operator token is configured. "
-                "fix: set the kairix-infra-operator-token secret (env "
-                "KAIRIX_INFRA_OPERATOR_TOKEN or the KV mount), or open the wizard "
-                f"from the host itself (loopback). next: retry with the {OPERATOR_TOKEN_HEADER} header.",
-                status_code=403,
-            )
-            await response(scope, receive, send)
+            await self._no_token_configured()(scope, receive, send)
             return
-        provided = _header_value(scope, OPERATOR_TOKEN_HEADER)
-        if provided is not None and hmac.compare_digest(provided, expected):
+        grant = self._maybe_grant_response(scope, expected)
+        if grant is not None:
+            await grant(scope, receive, send)
+            return
+        if self._credential_admits(scope, expected):
             await self._app(scope, receive, send)
             return
-        response = PlainTextResponse(
+        await self._refused()(scope, receive, send)
+
+    def _credential_admits(self, scope: Scope, expected: str) -> bool:
+        """True iff the request carries the header token OR a valid cookie."""
+        header = _header_value(scope, OPERATOR_TOKEN_HEADER)
+        if header is not None and hmac.compare_digest(header, expected):
+            return True
+        cookie = _grant_cookie_from_scope(scope)
+        return cookie is not None and _grant_cookie_is_valid(cookie, expected)
+
+    def _maybe_grant_response(self, scope: Scope, expected: str) -> Response | None:
+        """A 303 + Set-Cookie redirect when the mount-root grant token matches.
+
+        Returns ``None`` when this is not a grant request (wrong path, no
+        query token, or a wrong token) so the caller falls through to the
+        normal header/cookie check — a wrong ``?operator_token`` never
+        sets a cookie and is refused like any other unauthenticated
+        request.
+        """
+        if scope.get("method") != "GET" or _mount_relative_path(scope) != "/":
+            return None
+        provided = _grant_query_token(scope)
+        if provided is None or not hmac.compare_digest(provided, expected):
+            return None
+        response = RedirectResponse(f"{SETUP_PATH_PREFIX}/", status_code=303)
+        response.headers["Set-Cookie"] = _set_cookie_value(
+            cookie=_sign_grant_cookie(expected),
+            secure=_request_is_https(scope),
+        )
+        # F91 Limb A: a RedirectResponse does NOT flow through the wizard's
+        # _render chokepoint, so the security-header triple must be applied
+        # here explicitly — the grant redirect is browser-served HTML-tier
+        # surface like every wizard screen.
+        _apply_security_headers(response)
+        return response
+
+    @staticmethod
+    def _no_token_configured() -> Response:
+        return PlainTextResponse(
+            "Setup wizard remote access is disabled: no operator token is configured. "
+            "fix: set the kairix-infra-operator-token secret (env "
+            "KAIRIX_INFRA_OPERATOR_TOKEN or the KV mount), or open the wizard "
+            f"from the host itself (loopback). next: retry with the {OPERATOR_TOKEN_HEADER} header.",
+            status_code=403,
+        )
+
+    @staticmethod
+    def _refused() -> Response:
+        return PlainTextResponse(
             "Setup wizard remote access requires a valid operator token. "
-            f"fix: send the {OPERATOR_TOKEN_HEADER} header matching the "
+            f"fix: open the tokened URL printed in the container logs "
+            f"(http://<host>:<port>{SETUP_PATH_PREFIX}/?{_GRANT_QUERY_PARAM}=<token>) to set the "
+            f"grant cookie, or send the {OPERATOR_TOKEN_HEADER} header matching the "
             "kairix-infra-operator-token secret. next: retry the request.",
             status_code=403,
         )
-        await response(scope, receive, send)
 
 
 def _apply_security_headers(response: Response) -> None:
@@ -578,6 +659,93 @@ def _header_value(scope: Scope, name: str) -> str | None:
         if key.lower() == wanted:
             return value.decode("latin-1")
     return None
+
+
+def _b64(raw: bytes) -> str:
+    """URL-safe, unpadded base64 — cookie-value safe (no ``=`` / ``+`` / ``/``)."""
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def _sign_grant_cookie(secret: str) -> str:
+    """Sign the fixed grant marker under the operator-token ``secret``.
+
+    Returns ``<b64(marker)>.<b64(hmac_sha256(secret, marker))>`` — the
+    marker is public; the MAC binds the cookie to the live secret. The
+    raw operator token is NEVER embedded (F15): the cookie proves the
+    bearer once held the token, it does not carry it.
+    """
+    payload = _COOKIE_PAYLOAD.encode("utf-8")
+    mac = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).digest()
+    return f"{_b64(payload)}.{_b64(mac)}"
+
+
+def _grant_cookie_is_valid(cookie_value: str, secret: str) -> bool:
+    """True iff ``cookie_value`` is a marker signed under ``secret``.
+
+    Constant-time MAC comparison (``hmac.compare_digest``). A malformed
+    value (missing separator, non-base64, wrong marker, tampered MAC)
+    returns False — never raises — so a garbage cookie falls through to
+    the same 403 as no cookie at all.
+    """
+    expected = _sign_grant_cookie(secret)
+    return hmac.compare_digest(cookie_value, expected)
+
+
+def _grant_cookie_from_scope(scope: Scope) -> str | None:
+    """Extract the grant cookie value from the raw ASGI ``Cookie`` header."""
+    raw = _header_value(scope, "cookie")
+    if raw is None:
+        return None
+    jar: SimpleCookie = SimpleCookie()
+    try:
+        jar.load(raw)
+    except (CookieError, ValueError):
+        return None
+    morsel = jar.get(_COOKIE_NAME)
+    return morsel.value if morsel is not None else None
+
+
+def _grant_query_token(scope: Scope) -> str | None:
+    """The ``operator_token`` query value from the raw ASGI query string."""
+    query = scope.get("query_string", b"")
+    if isinstance(query, (bytes, bytearray)):
+        query = bytes(query).decode("latin-1")
+    params = parse_qs(str(query))
+    values = params.get(_GRANT_QUERY_PARAM)
+    return values[0] if values else None
+
+
+def _set_cookie_value(*, cookie: str, secure: bool) -> str:
+    """Build the Set-Cookie header value for the signed grant.
+
+    ``HttpOnly`` (JS can't read it), ``SameSite=Lax`` (the post-redirect
+    GET still carries it), ``Path=/setup`` (scoped to the wizard, never
+    leaked to ``/mcp``). ``Secure`` is conditional: the wizard is plain
+    HTTP over an SSH tunnel by design, so a hard ``Secure`` would drop
+    the cookie over ``http://`` and re-lock the wizard — it is set only
+    when the request itself arrived over https.
+    """
+    attrs = [
+        f"{_COOKIE_NAME}={cookie}",
+        f"Path={SETUP_PATH_PREFIX}",
+        "HttpOnly",
+        "SameSite=Lax",
+    ]
+    if secure:
+        attrs.append("Secure")
+    return "; ".join(attrs)
+
+
+def _request_is_https(scope: Scope) -> bool:
+    """True when the request reached the app over https.
+
+    Honours ``scope['scheme']`` and the ``X-Forwarded-Proto`` header so a
+    TLS-terminating reverse proxy still gets the ``Secure`` cookie.
+    """
+    if str(scope.get("scheme", "")).lower() == "https":
+        return True
+    forwarded = _header_value(scope, "x-forwarded-proto")
+    return forwarded is not None and forwarded.split(",")[0].strip().lower() == "https"
 
 
 def _static_directory() -> str:

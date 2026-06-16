@@ -38,6 +38,7 @@ pytest_plugins = [
     "tests.bdd.steps.eval_auto_gold_steps",
     "tests.bdd.steps.recall_steps",
     "tests.bdd.steps.benchmark_steps",
+    "tests.bdd.steps.benchmark_install_corpus_steps",
     "tests.bdd.steps.mcp_search_steps",
     "tests.bdd.steps.mcp_prep_steps",
     "tests.bdd.steps.timeline_absolute_steps",
@@ -311,6 +312,9 @@ pytest_plugins = [
     # Wizard OAuth source connect (#489) — same composition shape; the
     # source sign-in outcomes are scripted on FakeSetupService.
     "tests.bdd.steps.setup_wizard_source_steps",
+    # Wizard browser-reachable remote access (#500) — tokened-URL → signed
+    # cookie grant; non-loopback browser stand-in via TestClient client addr.
+    "tests.bdd.steps.setup_wizard_remote_access_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

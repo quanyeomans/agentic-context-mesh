@@ -88,7 +88,10 @@ RUN ln -s /usr/local/lib/python3.12/site-packages/kairix/plugins/openclaw \
 # docs/operations/MCP-DEPLOYMENT.md stay stable across releases).
 COPY kairix.example.config.yaml /etc/kairix/kairix.config.yaml
 COPY reference-library/ /opt/kairix/reference-library/
-COPY suites/ /opt/kairix/suites/
+# #450 relocated the suites under kairix/data/suites/ (package-data). Keep
+# staging at /opt so KAIRIX_PERF_BUDGETS=/opt/kairix/suites/perf/budgets.json
+# and the /opt suites candidate keep resolving in a bare `docker exec`.
+COPY kairix/data/suites/ /opt/kairix/suites/
 
 # Copy s6 service definitions + cont-init scripts. /etc/services.d/<name>/
 # is the long-running supervised service shape; /etc/cont-init.d/<n>-name

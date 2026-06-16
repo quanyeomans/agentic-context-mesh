@@ -1,0 +1,24 @@
+#!/command/with-contenv sh
+# First-boot operator-token provisioning for the web setup wizard (#500).
+#
+# On stock Docker the wizard's OperatorTokenGuard sees every published-port
+# peer as the bridge gateway IP (never loopback), and a browser cannot send
+# the X-Kairix-Operator-Token header — so a browser reaches the wizard only
+# via the tokened-URL → signed-cookie grant, which needs an operator token
+# to exist. Operators who set KAIRIX_INFRA_OPERATOR_TOKEN keep control; for
+# everyone else this mints one at first boot (the Jupyter pattern) and
+# prints the tokened URL to the container log (`docker compose logs kairix`).
+#
+# All logic lives in the kairix entrypoint — token generation
+# (secrets.token_urlsafe), the leak-safe 0600 bundle write (set_secret),
+# idempotency (a token already in env OR the bundle is reused, so a restart
+# never rotates it), and the URL print. This keeps the shell trivial: a
+# single command, no command substitution under set -e (F83), so there is
+# nothing to mis-handle here.
+#
+# Failure is non-fatal: the wizard is opt-in (KAIRIX_FEATURE_SETUP_WIZARD_WEB)
+# and loopback/host-shell access never needs the token, so a provisioning
+# hiccup must not block the container from coming up. The `|| true` is the
+# sanctioned soft-fail — the entrypoint already logs its own outcome.
+python -m kairix.platform.setup.operator_token || true  # non-fatal: wizard is opt-in; loopback access never needs the token
+exit 0

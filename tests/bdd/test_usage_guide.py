@@ -23,3 +23,8 @@ def test_known_topic_returns_focused_slice():
 @scenario(FEATURE, "Unknown topic returns the fallback orientation slice")
 def test_unknown_topic_returns_fallback_orientation_slice():
     """Body populated by @scenario from the .feature file."""
+
+
+@scenario(FEATURE, "A default install returns the guide with no operator action")
+def test_default_install_returns_guide_no_operator_action():
+    """Body populated by @scenario from the .feature file (#466)."""

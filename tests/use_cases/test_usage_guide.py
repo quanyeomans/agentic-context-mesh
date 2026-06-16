@@ -164,19 +164,44 @@ def test_default_deps_resolve_passthrough_for_explicit_path(tmp_path: Path) -> N
     assert deps.resolve_guide_fn(explicit) == explicit
 
 
-def test_default_deps_resolve_falls_back_to_package_when_no_path(tmp_path: Path) -> None:
-    """When ``guide_path`` is None and no server-relative candidate exists,
-    the resolver falls through to the package-relative location.
+def test_default_deps_resolve_returns_bundled_guide_when_no_path() -> None:
+    """When ``guide_path`` is None, the resolver returns the BUNDLED
+    package-data copy under ``kairix/agents/usage_guide/data/`` (#466).
 
-    Drives the second branch of the production fallback chain; the
-    returned path may or may not exist on this machine — what we pin is
-    that the resolver names a deterministic file under the package tree.
+    This is the production default the MCP tool and CLI hit when no
+    operator override is given. The bundled copy ships in the wheel and
+    the Docker image, so this path is what makes ``usage_guide`` work
+    out-of-box.
+
+    Sabotage proof (executed locally): change ``_GUIDE_RESOURCE`` in
+    ``kairix/use_cases/usage_guide.py`` to ``"data/does-not-exist.md"`` —
+    ``_bundled_guide_path`` returns None, the resolver falls through to a
+    non-existent ``docs/`` stub-or-missing path, and the
+    ``.is_file()`` + bundled-dir assertions below fail. Restored.
     """
     deps = UsageGuideDeps()
     resolved = deps.resolve_guide_fn(None)
-    # The resolver always returns a path ending in agent-usage-guide.md,
-    # whether it picked the server-relative or package-relative candidate.
     assert resolved.name == "agent-usage-guide.md"
+    assert resolved.is_file(), f"bundled guide not on disk at {resolved}"
+    assert "agents/usage_guide/data" in resolved.as_posix(), (
+        f"resolver did not return the bundled package-data copy: {resolved}"
+    )
+
+
+def test_run_usage_guide_no_args_resolves_bundled_guide_content() -> None:
+    """``run_usage_guide()`` with NO guide_path and NO deps override returns
+    the real bundled guide content — proving the production default path
+    works without any operator action (the #466 regression).
+
+    Sabotage proof (executed locally): point ``_GUIDE_RESOURCE`` at a
+    non-existent ``data/`` file — the resolver no longer finds the bundled
+    copy, ``resolved.exists()`` is False and the use case returns the
+    ``UsageGuideNotFound`` envelope, so this content assertion fails.
+    Restored.
+    """
+    out = run_usage_guide()
+    assert out.error == "", f"bundled default returned an error: {out.error!r}"
+    assert out.content.strip(), "bundled guide content was empty"
 
 
 # ---------------------------------------------------------------------------

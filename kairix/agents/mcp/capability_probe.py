@@ -31,7 +31,8 @@ probe can be exercised without booting the full check stack.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
@@ -58,11 +59,56 @@ class _CheckResult(Protocol):
 CheckFn = Callable[[], _CheckResult]
 
 
-def _default_secrets_check() -> _CheckResult:
-    """Production secrets check — lazy-imports onboard.check on first call."""
-    from kairix.platform.onboard.check import check_secrets_loaded
+class _PlaceholderSecretsResult:
+    """A ``_CheckResult`` reporting that the LLM key is the placeholder value.
 
-    return check_secrets_loaded()
+    #449 — ``check_secrets_loaded`` only tests truthiness, so a placeholder
+    string (``your-api-key-here`` / ``PASTE-YOUR-LLM-KEY-HERE``) reads as
+    "loaded" even though the real embed call 401s. This shape lets the
+    probe report ``secrets_loaded=false`` honestly with a detail that
+    names the VAR (never the value — F15).
+    """
+
+    def __init__(self, detail: str) -> None:
+        self.ok = False
+        self.detail = detail
+
+
+def secrets_check_with_placeholder_detection(env: Mapping[str, str] | None = None) -> _CheckResult:
+    """Public secrets check that honours placeholder credentials (#449).
+
+    Before delegating to ``check_secrets_loaded`` (which only tests
+    truthiness), this runs ``preflight_startup_credentials`` over the
+    process env. A placeholder/unset LLM key yields a ``warn`` failure, so
+    we report ``secrets_loaded=false`` with the var-named reason rather than
+    letting the truthy placeholder masquerade as a real credential. The
+    placeholder vocabulary is single-sourced in ``startup_preflight`` so
+    the boot warning and this probe agree.
+
+    ``env`` is a DI seam (defaults to ``os.environ``) so tests drive the
+    placeholder / real-key branches with an explicit mapping (F2-clean).
+    This is the public surface tests exercise — ``_default_secrets_check``
+    is the thin ``_default_*`` production seam that delegates here.
+    """
+    from kairix.platform.onboard.check import check_secrets_loaded
+    from kairix.platform.onboard.startup_preflight import preflight_startup_credentials
+
+    resolved_env = env if env is not None else os.environ
+    for failure in preflight_startup_credentials(resolved_env):
+        if failure.severity == "warn":
+            return _PlaceholderSecretsResult(detail=failure.reason)
+
+    return check_secrets_loaded(resolved_env)
+
+
+def _default_secrets_check() -> _CheckResult:
+    """Production secrets-check seam — delegates to the placeholder-aware check.
+
+    Thin ``_default_*`` DI seam (F86-tracked) so the capability probe's
+    default reads the real process env through the public
+    :func:`secrets_check_with_placeholder_detection`.
+    """
+    return secrets_check_with_placeholder_detection()
 
 
 def _default_vector_check() -> _CheckResult:

@@ -4,7 +4,7 @@ build-reflib-queries.py -- Generate benchmark queries for the reference library.
 
 Samples documents from the reference library, generates queries using the
 GPL pipeline, retrieves candidates, and grades them with the LLM judge.
-Outputs suites/reference-library.yaml.
+Outputs kairix/data/suites/reference-library.yaml.
 
 Requires:
 - Reference library indexed in a kairix DB (run kairix embed first)
@@ -13,7 +13,7 @@ Requires:
 Usage:
     python3 scripts/build-reflib-queries.py \
         --db-path /path/to/reflib.db \
-        --output suites/reference-library.yaml \
+        --output kairix/data/suites/reference-library.yaml \
         --n-cases 160
 
     # On VM:
@@ -244,7 +244,7 @@ def write_yaml_suite(suite: dict, output_path: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build reference library benchmark queries")
     parser.add_argument("--db-path", required=True, help="Path to reference library kairix DB")
-    parser.add_argument("--output", default="suites/reference-library.yaml", help="Output YAML path")
+    parser.add_argument("--output", default="kairix/data/suites/reference-library.yaml", help="Output YAML path")
     parser.add_argument("--n-cases", type=int, default=160, help="Number of test cases")
     parser.add_argument("--n-samples", type=int, default=200, help="Documents to sample")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")

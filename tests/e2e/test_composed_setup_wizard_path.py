@@ -96,6 +96,12 @@ pytestmark = pytest.mark.e2e
 
 _FLAG = "setup_wizard_web"
 _LOOPBACK = ("127.0.0.1", 9999)
+# The docker bridge gateway a stock-Docker browser peer presents — never
+# loopback (#500). Composed non-loopback journeys ride this client addr.
+_BRIDGE = ("172.18.0.1", 4242)
+_OPERATOR_TOKEN_IDENTITY = ("infra", "operator", None, "token")
+# Fixture operator token for the grant journey, not a real credential.
+_GRANT_TOKEN = "fake-operator-token"  # pragma: allowlist secret — fake fixture
 # Fixture credential for the fake provider seam, not a real key.
 _FAKE_KEY = "fake-key-for-tests"  # pragma: allowlist secret
 _HX_REDIRECT = "HX-Redirect"
@@ -583,3 +589,61 @@ def test_composed_setup_wizard_journey(tmp_path: Path) -> None:
     _drive_oauth_source_leg(client, world)
     _drive_tour(client, world)
     _drive_done_screen(client)
+
+
+def test_composed_remote_browser_grant_journey(tmp_path: Path) -> None:
+    """#500 — a non-loopback browser (the docker-bridge stand-in) reaches
+    the wizard through the composed production guard via the tokened-URL →
+    signed-cookie grant, then drives a real wizard leg (provider validate +
+    folder scan) on that cookie alone — no header, no loopback.
+
+    Everything is composed production code: the real transport composer,
+    the real OperatorTokenGuard resolving the operator token through the
+    secrets resolver, the real wizard routes + ``build_setup_service``
+    backend. Only the provider HTTP / env reads are faked at their seams,
+    exactly as the loopback journey above.
+    """
+    world = _build_world(tmp_path)
+    paths = FakePaths(
+        document_root=world.docs,
+        db_path=world.db_path,
+        log_dir=world.run_log.parent,
+        workspace_root=world.db_path.parent / "workspaces",
+    )
+    service = build_setup_service(paths=paths, deps=_wizard_service_deps(world))
+    resolver = FakeFeatureFlagResolver().with_flag(_FLAG, True)
+    app = build_mcp_app(
+        FakeMcpTransportServer(),
+        setup_service_factory=lambda: service,
+        setup_secrets=FakeSecretsLoader(values={_OPERATOR_TOKEN_IDENTITY: _GRANT_TOKEN}),
+        setup_wizard_enabled=lambda: resolver.get(_FLAG),
+    )
+    bridge = TestClient(app, client=_BRIDGE)
+
+    # Without the grant a bridge browser is locked out.
+    assert bridge.get("/setup/provider").status_code == 403
+
+    # The tokened URL grants a signed cookie and bounces to the start; the
+    # token never lingers in the redirect Location (F15).
+    grant = bridge.get(f"/setup/?operator_token={_GRANT_TOKEN}", follow_redirects=False)
+    assert grant.status_code == 303
+    assert grant.headers["location"] == "/setup/"
+    assert _GRANT_TOKEN not in grant.headers["set-cookie"]
+
+    # On the cookie alone (the TestClient jar retains it), the bridge
+    # browser now drives real wizard legs.
+    provider = bridge.get("/setup/provider")
+    assert provider.status_code == 200
+    assert "Choose an AI provider" in provider.text
+
+    validated = bridge.post(
+        "/setup/key/validate",
+        data={"provider": "openai", "api_key": _FAKE_KEY, "endpoint": ""},
+    )
+    assert validated.status_code == 200
+    assert "Key validated successfully" in validated.text
+    assert _FAKE_KEY not in validated.text  # F15 — the key is never echoed
+
+    scan = bridge.post("/setup/folder/scan", data={"folder_path": str(world.docs)})
+    assert scan.status_code == 200
+    assert "<dd>3</dd>" in scan.text  # the 3 seeded markdown files

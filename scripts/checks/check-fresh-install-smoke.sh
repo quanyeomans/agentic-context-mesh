@@ -19,6 +19,13 @@
 #                                choreography (303 Location: /setup/folder).
 #                                Proves the wizard's POST/partial/redirect
 #                                interaction works, not just the GET screen.
+#   stage 3c wizard-remote-access  (#500) host-side curl through the
+#                                published port arrives as the docker bridge
+#                                gateway IP (never loopback): 403 without a
+#                                token → tokened URL 303 + Set-Cookie → 200
+#                                with the cookie. The REAL Docker-bridge
+#                                proof the macOS unit tests can only stand in
+#                                for.
 #   stage 4  bm25-search         `kairix embed` ingests the sample doc into
 #                                the BM25 index, `kairix search` finds it
 #
@@ -50,6 +57,9 @@ HOST_PORT="${KAIRIX_HOST_PORT:-8080}"
 BASE_URL="http://127.0.0.1:${HOST_PORT}"
 PROBE_TERM="quokka-lighthouse-cadence"
 SAMPLE_DOC="fresh-install-sample.md"
+# #500 — fixed operator token for the browser-shaped wizard stage. A fresh-
+# install test fixture, not a real credential.
+WIZARD_OPERATOR_TOKEN="fresh-smoke-operator-token-0500"  # pragma: allowlist secret — fresh-install test fixture
 HEALTHY_WAIT_SECONDS=420
 COMPOSE_PROJECT="kairix-fresh-smoke"
 
@@ -133,6 +143,11 @@ cp "${REPO_ROOT}/kairix.config.example.yaml" "${WORKDIR}/kairix.config.yaml"
     echo "KAIRIX_IMAGE_TAG=${IMAGE_TAG}"
     echo "KAIRIX_HOST_PORT=${HOST_PORT}"
     echo "KAIRIX_FEATURE_SETUP_WIZARD_WEB=1"
+    # #500 — pin a deterministic operator token so the browser-shaped stage
+    # below can open the tokened URL without scraping the first-boot log.
+    # (Unset, the container mints + prints one; pinning keeps the smoke
+    # deterministic.) Not a real credential — a fresh-install test fixture.
+    echo "KAIRIX_INFRA_OPERATOR_TOKEN=${WIZARD_OPERATOR_TOKEN}"  # pragma: allowlist secret — fresh-install test fixture
 } >> "${WORKDIR}/.env"
 mkdir -p "${WORKDIR}/documents/04-Agent-Knowledge"
 cat > "${WORKDIR}/documents/${SAMPLE_DOC}" <<EOF
@@ -284,6 +299,50 @@ case "$KEY_CODE" in
         ;;
 esac
 echo "stage 3b wizard-choreography: OK"
+
+# ── stage 3c: browser-shaped remote access (#500) ────────────────────────────
+# The REAL Docker/Linux proof the unit tests can only stand in for: a
+# HOST-side curl through the published port arrives at the guard as the
+# docker bridge gateway IP (e.g. 172.18.0.1) — NEVER loopback — exactly
+# like a tunnelled browser. Stages 3/3b used in-container loopback curls
+# precisely because no browser-shaped path existed; this stage exercises
+# the tokened-URL → signed-cookie grant a browser actually uses.
+#
+# Leg 1 — a bridge-IP request with NO token must be refused (proves the
+# guard is actually gating, not open to the bridge).
+NOTOKEN_CODE=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/setup/provider" || true)
+if [[ "$NOTOKEN_CODE" != "403" ]]; then
+    fail_stage "wizard-remote-access" \
+        "GET ${BASE_URL}/setup/provider from a non-loopback (bridge-IP) origin returned ${NOTOKEN_CODE} (expected 403) — the operator-token guard is not gating bridge traffic." \
+        "reproduce: curl -i ${BASE_URL}/setup/provider"
+fi
+
+# Leg 2 — opening the tokened URL must 303 and hand back a Set-Cookie.
+COOKIE_JAR="${WORKDIR}/wizard-cookies.txt"
+GRANT_CODE=$(curl -s -o /dev/null -w '%{http_code}' -c "$COOKIE_JAR" \
+    "${BASE_URL}/setup/?operator_token=${WIZARD_OPERATOR_TOKEN}" || true)
+if [[ "$GRANT_CODE" != "303" ]]; then
+    fail_stage "wizard-remote-access" \
+        "GET the tokened URL (/setup/?operator_token=...) from a bridge-IP origin returned ${GRANT_CODE} (expected 303 + Set-Cookie) — the cookie grant is broken on real Docker bridge networking." \
+        "reproduce: curl -i -c cookies.txt '${BASE_URL}/setup/?operator_token=${WIZARD_OPERATOR_TOKEN}'"
+fi
+if ! grep -q 'kairix_operator_grant' "$COOKIE_JAR"; then
+    echo "cookie jar contents:"
+    cat "$COOKIE_JAR" || true
+    fail_stage "wizard-remote-access" \
+        "the tokened-URL grant set no kairix_operator_grant cookie — a browser would have nothing to carry to the next screen." \
+        "reproduce: curl -i -c cookies.txt '${BASE_URL}/setup/?operator_token=${WIZARD_OPERATOR_TOKEN}'"
+fi
+
+# Leg 3 — the granted cookie must admit a later bridge-IP GET to a screen.
+WITHCOOKIE_CODE=$(curl -s -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" \
+    "${BASE_URL}/setup/provider" || true)
+if [[ "$WITHCOOKIE_CODE" != "200" ]]; then
+    fail_stage "wizard-remote-access" \
+        "GET ${BASE_URL}/setup/provider with the grant cookie from a bridge-IP origin returned ${WITHCOOKIE_CODE} (expected 200) — the signed cookie did not admit the browser to the wizard." \
+        "reproduce: curl -i -b cookies.txt ${BASE_URL}/setup/provider"
+fi
+echo "stage 3c wizard-remote-access: OK (403 without token → 303 grant + cookie → 200 with cookie)"
 
 # ── stage 4: BM25 search path ────────────────────────────────────────────────
 # `kairix embed` scans the document root and (re)builds the FTS index

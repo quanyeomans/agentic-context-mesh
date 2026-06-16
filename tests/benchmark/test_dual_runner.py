@@ -9,13 +9,16 @@ import os
 
 import pytest
 
+from kairix.paths import bundled_suites_root
 from kairix.quality.benchmark.dual_runner import DualBenchmarkResult, run_dual_benchmark
 
-# Path to the reflib contract suite (relative to repo root)
-_SUITE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "suites", "reflib-contract-suite.yaml")
+# #450 — the suites moved under kairix/data/suites/ (package-data). Resolve
+# through bundled_suites_root() so the path tracks the relocation instead of
+# a brittle ``../../suites`` literal.
+_SUITE_PATH = os.fspath(bundled_suites_root() / "reflib-contract-suite.yaml")
 
 # Path to the original contract suite
-_CONTRACT_SUITE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "suites", "contract-suite.yaml")
+_CONTRACT_SUITE_PATH = os.fspath(bundled_suites_root() / "contract-suite.yaml")
 
 
 @pytest.mark.unit

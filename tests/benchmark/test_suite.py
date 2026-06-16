@@ -937,12 +937,13 @@ def test_all_bundled_suites_load_without_errors() -> None:
     structural issues at load-time so first-run quick-start can never break
     on a shipped suite.
     """
-    from pathlib import Path
-
+    from kairix.paths import bundled_suites_root
     from kairix.quality.benchmark.suite import load_suite
 
-    repo_root = Path(__file__).resolve().parents[2]
-    suites_dir = repo_root / "suites"
+    # #450 — suites relocated under kairix/data/suites/ (package-data).
+    # Resolve via bundled_suites_root() so this load-time gate tracks the
+    # in-wheel copy instead of a brittle repo-root literal.
+    suites_dir = bundled_suites_root()
     assert suites_dir.is_dir(), f"expected bundled suites dir at {suites_dir}"
 
     yaml_files = sorted(suites_dir.glob("*.yaml")) + sorted(suites_dir.glob("*.yml"))

@@ -123,6 +123,11 @@ _KAIRIX_CONFIG_PATH_ENV = "KAIRIX_CONFIG_PATH"
 _KAIRIX_DOCUMENT_ROOT_ENV = "KAIRIX_DOCUMENT_ROOT"
 _CONTAINER_DOCUMENTS_MOUNT = "/data/documents"
 
+# Directory name for the reference-library corpus (#450). Centralised (F17)
+# — the cache candidate, the /opt install path, the repo-root candidate, the
+# CWD fallback, and reference_corpus_install_dir all compose this segment.
+_REFERENCE_LIBRARY_DIR = "reference-library"
+
 
 def is_docker_runtime_check() -> bool:
     """Detect if running inside a Docker container."""
@@ -364,8 +369,43 @@ def document_root(mode: Mode | None = None) -> Path:
 
 
 def reference_library_root() -> Path:
-    """Reference library root — ships inside the container at /opt/kairix/reference-library."""
-    return Path(os.environ.get("KAIRIX_REFLIB_ROOT", "reference-library"))
+    """Resolve the reference-library corpus root (NOT bundled in the wheel; #450).
+
+    The corpus is ~50 MB of mixed-license documents, so unlike the
+    benchmark suites it does not ship inside the wheel. ``kairix
+    benchmark install-corpus`` fetches it into the cache candidate
+    below; the resolution chain then finds it there on subsequent runs.
+
+    Resolution order (first existing dir wins; the env override wins
+    even when its target is missing, so a misconfigured override
+    surfaces as an explicit downstream error rather than a silent
+    fallback):
+
+      1. ``$KAIRIX_REFLIB_ROOT`` — operator override.
+      2. ``<cache-dir>/reference-library`` — where ``install-corpus``
+         lands the fetched corpus (= :func:`reference_corpus_install_dir`).
+      3. ``/opt/kairix/reference-library`` — the canonical Docker path.
+      4. ``<repo-root>/reference-library`` — source-checkout dev UX.
+      5. ``reference-library`` — final CWD fallback (legacy behaviour).
+    """
+    cache_corpus = default_cache_dir() / _REFERENCE_LIBRARY_DIR
+    installed_corpus = Path("/opt/kairix") / _REFERENCE_LIBRARY_DIR
+    repo_root_corpus = Path(__file__).resolve().parent.parent / _REFERENCE_LIBRARY_DIR
+    return resolve_first_existing_dir(
+        override=os.environ.get("KAIRIX_REFLIB_ROOT"),
+        candidates=[cache_corpus, installed_corpus, repo_root_corpus],
+        fallback=Path(_REFERENCE_LIBRARY_DIR),
+    )
+
+
+def reference_corpus_install_dir() -> Path:
+    """Target dir for ``kairix benchmark install-corpus`` (#450).
+
+    Equals the cache-dir candidate :func:`reference_library_root`
+    resolves to after a successful install, so a fetch lands exactly
+    where the next ``--suite reflib`` run will look for it.
+    """
+    return default_cache_dir() / _REFERENCE_LIBRARY_DIR
 
 
 def resolve_first_existing_dir(
@@ -412,21 +452,28 @@ def bundled_suites_root() -> Path:
     using a fallback):
 
       1. ``$KAIRIX_SUITES_ROOT`` — operator override.
-      2. ``<repo-root>/suites/`` — when running from a kairix source
+      2. ``<package>/data/suites/`` — the in-wheel package-data copy
+         (#450). Makes a plain ``pip install`` resolve the suites with
+         no source checkout and no Docker image present. Derived from
+         the kairix package location (``Path(__file__).parent`` = the
+         ``kairix`` package root).
+      3. ``<repo-root>/suites/`` — when running from a kairix source
          checkout; preserves the dev UX where ``cd`` to the repo finds
          ``./suites/``. Derived from the kairix package location
          (``Path(__file__).parent.parent`` = repo root).
-      3. ``/opt/kairix/suites/`` — canonical install path the Docker
+      4. ``/opt/kairix/suites/`` — canonical install path the Docker
          image ships suites at. Closes #268: the host wrapper does
          ``docker exec`` into the container, where the CWD is unrelated
-         to where suites live.
-      4. ``./suites/`` — final CWD fallback (legacy behaviour).
+         to where suites live, and the Dockerfile stages suites at
+         ``/opt`` so a bare ``docker exec`` still resolves them.
+      5. ``./suites/`` — final CWD fallback (legacy behaviour).
     """
+    in_package_suites = Path(__file__).resolve().parent / "data" / "suites"
     repo_root_suites = Path(__file__).resolve().parent.parent / "suites"
     installed_suites = Path("/opt/kairix/suites")
     return resolve_first_existing_dir(
         override=os.environ.get("KAIRIX_SUITES_ROOT"),
-        candidates=[repo_root_suites, installed_suites],
+        candidates=[in_package_suites, repo_root_suites, installed_suites],
         fallback=Path("suites"),
     )
 
@@ -1152,6 +1199,60 @@ def mcp_routing_enabled(*, environ: Mapping[str, str] | None = None) -> bool:
     if raw is None:
         return True
     return raw.strip().lower() not in _FALSY_FLAG_VALUES
+
+
+def mcp_bind_host(default: str = "localhost", *, environ: Mapping[str, str] | None = None) -> str:
+    """Resolve the externally-reachable host for the MCP / wizard URL (#500).
+
+    Operators expose the container's published port on a chosen host via
+    ``KAIRIX_MCP_BIND_HOST`` in their compose ``.env`` (e.g.
+    ``0.0.0.0`` to bind every interface). That env value is the
+    host the published port maps onto, so it is the right base for the
+    printed tokened wizard URL — except ``0.0.0.0`` is a bind directive,
+    not a reachable address, so it normalises to ``localhost`` for the
+    URL an operator pastes into a browser (they reach it through the
+    tunnel / mapped host, then the cookie carries them the rest of the
+    way). ``None`` / empty falls back to ``default``.
+
+    ``environ`` is the test seam — mirrors :func:`mcp_endpoint`: production
+    leaves it None and the function reads ``os.environ`` once (the env
+    read still lives inside paths.py per F4); tests pass an explicit dict
+    so F2 (no ``monkeypatch.setenv``) stays clean.
+    """
+    env = environ if environ is not None else os.environ
+    raw = env.get("KAIRIX_MCP_BIND_HOST")
+    if not raw:
+        return default
+    host = raw.strip()
+    if host in {"0.0.0.0", "::", "[::]"}:  # noqa: S104 — matching a bind-any directive, not binding to it
+        return default
+    return host
+
+
+def wizard_tokened_url(
+    *,
+    token: str,
+    host: str | None = None,
+    port: int | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Build the one-time tokened wizard URL an operator opens once (#500).
+
+    Shape: ``http://<host>:<port>/setup/?operator_token=<token>``. Opening
+    it sets the signed grant cookie (see
+    ``kairix.platform.setup.web.routes.OperatorTokenGuard``); the token
+    then never needs to appear again. The token is interpolated verbatim
+    and the whole URL is the sanctioned onboarding surface — callers that
+    print it own the F15 boundary (it carries a live credential, so it
+    belongs only in the first-boot operator log, never an app log).
+
+    ``host`` / ``port`` default to :func:`mcp_bind_host` / :func:`mcp_port`
+    so the printed URL matches the deployment; ``environ`` is forwarded
+    as the test seam.
+    """
+    resolved_host = host if host is not None else mcp_bind_host(environ=environ)
+    resolved_port = port if port is not None else mcp_port()
+    return f"http://{resolved_host}:{resolved_port}/setup/?operator_token={token}"
 
 
 def reflib_root_override() -> str | None:

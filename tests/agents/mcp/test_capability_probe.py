@@ -14,9 +14,20 @@ from dataclasses import dataclass
 
 import pytest
 
-from kairix.agents.mcp.capability_probe import build_capability_probe
+from kairix.agents.mcp.capability_probe import (
+    build_capability_probe,
+    secrets_check_with_placeholder_detection,
+)
 
 pytestmark = pytest.mark.unit
+
+# F5 keeps tests off internal ``_x`` imports; these are the PUBLIC env-var
+# names (the operator-facing contract). Production single-sources them from
+# onboard.check's ``_CANONICAL_SECRETS`` (F85).
+_CANON_KEY = "KAIRIX_PROVIDER_LLM_API_KEY"  # pragma: allowlist secret — env-var NAME, not a credential
+_CANON_ENDPOINT = "KAIRIX_PROVIDER_LLM_ENDPOINT"
+_REAL_KEY = "sk-live-abcdef0123456789-REAL"  # pragma: allowlist secret — fake fixture
+_REAL_ENDPOINT = "https://prod.openai.azure.com"
 
 
 @dataclass
@@ -127,6 +138,57 @@ def test_probe_passes_default_when_no_callables_injected() -> None:
     """
     probe = build_capability_probe()
     assert callable(probe)
+
+
+@pytest.mark.parametrize("placeholder", ["your-api-key-here", "PASTE-YOUR-LLM-KEY-HERE", ""])
+def test_default_secrets_check_reports_false_for_placeholder_key(placeholder: str) -> None:
+    """#449: a placeholder LLM key → secrets_loaded=false with a var-named detail.
+
+    Drives ``secrets_check_with_placeholder_detection`` with an explicit env
+    mapping (F2-clean) so a placeholder string can't masquerade as a loaded
+    credential. Sabotage-proof: reverting the placeholder branch flips this
+    to ok=True (RED).
+    """
+    env = {
+        _CANON_KEY: placeholder,
+        _CANON_ENDPOINT: _REAL_ENDPOINT,
+    }
+    result = secrets_check_with_placeholder_detection(env)
+
+    assert result.ok is False
+    # The detail names the VAR, never the value (F15).
+    assert _CANON_KEY in result.detail
+    assert "placeholder" in result.detail.lower()
+
+
+def test_default_secrets_check_reports_true_for_real_key() -> None:
+    """A real-looking key + endpoint → secrets_loaded=true (no placeholder match)."""
+    env = {
+        _CANON_KEY: _REAL_KEY,
+        _CANON_ENDPOINT: _REAL_ENDPOINT,
+    }
+    result = secrets_check_with_placeholder_detection(env)
+
+    assert result.ok is True
+    # F15: the real key value never appears in the detail.
+    assert _REAL_KEY not in result.detail
+
+
+def test_probe_reports_placeholder_through_default_secrets_check() -> None:
+    """End-to-end: the production probe surfaces secrets_loaded=false for a placeholder.
+
+    Injects the placeholder-env-bound secrets check (a closure over an
+    explicit env mapping) so no os.environ mutation is needed.
+    """
+    env = {_CANON_KEY: "your-api-key-here", _CANON_ENDPOINT: _REAL_ENDPOINT}
+    probe = build_capability_probe(
+        secrets_check=lambda: secrets_check_with_placeholder_detection(env),
+        vector_check=lambda: _ok(),
+    )
+    result = probe()
+
+    assert result["secrets_loaded"] is False
+    assert _CANON_KEY in result["detail"]["secrets_loaded"]
 
 
 def test_default_check_helpers_return_check_result_shape() -> None:

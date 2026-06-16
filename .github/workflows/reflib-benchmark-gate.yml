@@ -9,7 +9,7 @@ on:
       - "kairix/quality/eval/**"
       - "kairix/knowledge/reflib/**"
       - "kairix/use_cases/eval_suite.py"
-      - "suites/reflib-contract-suite.yaml"
+      - "kairix/data/suites/reflib-contract-suite.yaml"
       - "benchmark-results/reflib-contract-baseline.json"
       - "reference-library/**"
 

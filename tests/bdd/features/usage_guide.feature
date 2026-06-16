@@ -22,3 +22,9 @@ Feature: Usage guide — agent-facing capability documentation
     When the agent requests the usage guide with that topic
     Then the response contains the fallback orientation slice
     And the fallback slice references at least one valid topic
+
+  Scenario: A default install returns the guide with no operator action
+    Given a default kairix install with no operator setup
+    When the agent requests the usage guide on the production default path
+    Then the response contains guide content
+    And the response has no UsageGuideNotFound error

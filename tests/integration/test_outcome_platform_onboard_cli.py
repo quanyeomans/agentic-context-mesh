@@ -104,6 +104,54 @@ def test_onboard_guide_subprocess_dry_run_emits_source_and_dest(tmp_path: Path) 
     assert elapsed_ms < 5000.0, f"onboard guide subprocess took {elapsed_ms:.1f}ms (threshold 5000ms)"
 
 
+def test_onboard_guide_subprocess_resolves_bundled_source_without_guide_src(tmp_path: Path) -> None:
+    """Drive ``kairix onboard guide`` with NO ``--guide-src`` — the bundled
+    package-data guide (#466) must resolve as the source out-of-box.
+
+    Before #466 the source resolution fell through ``docs/`` lookups that
+    the image never carried, so ``onboard guide`` could not find a source
+    inside the container. The bundled copy under
+    ``kairix/agents/usage_guide/data/`` now resolves from the installed
+    package, so this dry-run succeeds with no operator-supplied source.
+
+    Sabotage proof (executed locally): point ``_GUIDE_RESOURCE`` in
+    ``kairix/use_cases/usage_guide.py`` at a non-existent ``data/`` file —
+    ``_bundled_guide_path`` returns None, ``_resolve_guide_src`` falls
+    through to the ``docs/`` stub/missing path and (in the installed
+    layout) prints the not-found error + exits 1, so ``returncode == 0``
+    fails. Restored.
+    """
+    doc_root = tmp_path / "vault"
+    doc_root.mkdir()
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "kairix.cli",
+            "onboard",
+            "guide",
+            "--document-root",
+            str(doc_root),
+            "--dry-run",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, (
+        f"onboard guide (bundled source) exited {proc.returncode}\n"
+        f"--- stderr ---\n{proc.stderr}\n--- stdout ---\n{proc.stdout}"
+    )
+    stdout = proc.stdout
+    assert "Would install agent usage guide" in stdout, f"banner missing: {stdout!r}"
+    # The resolved source must be the bundled package-data copy.
+    assert "agents/usage_guide/data/agent-usage-guide.md" in stdout, (
+        f"source line did not resolve to the bundled guide: {stdout!r}"
+    )
+
+
 def test_onboard_guide_subprocess_exits_non_zero_on_missing_document_root(tmp_path: Path) -> None:
     """Pointing ``--document-root`` at a non-existent directory must
     surface a non-zero exit + an operator-actionable error message on

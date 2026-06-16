@@ -170,6 +170,24 @@ jobs:
           git tag -a "$VERSION" -m "kairix $VERSION"
           git push origin "$VERSION"
 
+      - name: Build reference-library corpus tarball (#450)
+        # The reference-library corpus is NOT bundled in the wheel
+        # (mixed-license, ~50 MB). `kairix benchmark install-corpus`
+        # fetches it from this per-release asset, sha256-verified
+        # fail-closed. Asset name matches the URL template in
+        # kairix/quality/benchmark/corpus.py
+        # (reference-library-${VERSION}.tar.gz + a .sha256 sidecar).
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          tarball="reference-library-${VERSION}.tar.gz"
+          tar czf "$tarball" reference-library/
+          sha256sum "$tarball" | awk '{print $1}' > "${tarball}.sha256"
+          echo "::group::Corpus asset"
+          ls -lh "$tarball" "${tarball}.sha256"
+          cat "${tarball}.sha256"
+          echo "::endgroup::"
+
       - name: Create GitHub Release (draft for human review)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -181,11 +199,17 @@ jobs:
           # ship deterministically from the tag SHA regardless of the
           # release draft/published state, so this gate is on the
           # operator-facing release notes only.
+          #
+          # The reference-library corpus tarball + sha256 sidecar are
+          # attached as release assets (#450) so
+          # `kairix benchmark install-corpus` can fetch + verify them.
           gh release create "$VERSION" \
               --title "kairix $VERSION" \
               --notes-file /tmp/release-notes.md \
               --draft \
-              --verify-tag
+              --verify-tag \
+              "reference-library-${VERSION}.tar.gz" \
+              "reference-library-${VERSION}.tar.gz.sha256"
 
       - name: Fan out to docker-publish + publish-pypi
         # Releases created via GITHUB_TOKEN don't fan out to other

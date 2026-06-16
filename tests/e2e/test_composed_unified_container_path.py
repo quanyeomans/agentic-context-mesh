@@ -121,7 +121,12 @@ def _ensure_quickstart_files() -> list[Path]:
     created: list[Path] = []
     env_file = _REPO_ROOT / ".env"
     if not env_file.exists():
-        env_file.write_text("# e2e stub — readiness asserts need no secrets\n")
+        # #449 — the api reads KAIRIX_NEO4J_PASSWORD from this env_file and hard-
+        # exits at boot when KAIRIX_NEO4J_URI is set (compose hardcodes it) but the
+        # password is empty, so the stub must carry the same value the neo4j sidecar
+        # starts with (see _compose). An absent LLM key only warns (degrade to
+        # search-only), so the readiness probe still comes up.
+        env_file.write_text("KAIRIX_NEO4J_PASSWORD=kairix-e2e-test\n")  # pragma: allowlist secret — fixture
         created.append(env_file)
     config_file = _REPO_ROOT / "kairix.config.yaml"
     if not config_file.exists():

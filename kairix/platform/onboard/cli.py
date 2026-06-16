@@ -343,8 +343,9 @@ def _resolve_guide_src(args: argparse.Namespace) -> Path | None:
     Resolution order:
       1. ``--guide-src PATH`` (explicit CLI override, F30 subprocess seam)
       2. ``--pkg-root`` (in-process DI seam, set via ``main()``'s kwarg)
-      3. in-tree layout (``<repo>/docs/agent-usage-guide.md``)
-      4. installed-package layout (``<site-packages>/docs/...``)
+      3. the bundled package-data copy (shadow-immune, ships in the image)
+      4. in-tree layout (``<repo>/docs/agent-usage-guide.md``)
+      5. installed-package layout (``<site-packages>/docs/...``)
 
     Returns ``None`` and prints an error when no candidate exists.
 
@@ -363,13 +364,19 @@ def _resolve_guide_src(args: argparse.Namespace) -> Path | None:
         print("Check the --guide-src argument points at a readable markdown file.", file=sys.stderr)
         return None
 
-    # The in-tree source layout (``<repo>/docs/agent-usage-guide.md``)
-    # and the installed-package layout (``<site-packages>/docs/...``)
-    # both terminate at ``Path(kairix.__file__).parent.parent``. Threading
-    # ``pkg_root`` through ``args`` (set by ``main()``'s public DI seam)
-    # lets tests pin a tmp-path layout without monkey-patching kairix.__file__.
+    # The bundled package-data copy (#466) is the canonical source inside
+    # the image — it ships under ``kairix/agents/usage_guide/data/`` so
+    # ``kairix onboard guide`` finds a real source even where ``docs/`` was
+    # never copied. The ``_pkg_root`` DI seam still wins for tests that pin
+    # a tmp-path layout, so the bundled lookup is skipped when set.
     pkg_root = getattr(args, "_pkg_root", None)
     if pkg_root is None:
+        from kairix.use_cases.usage_guide import _bundled_guide_path
+
+        bundled = _bundled_guide_path("data/agent-usage-guide.md")
+        if bundled.exists():
+            return bundled
+
         in_tree = Path(__file__).parent.parent.parent / "docs" / "user-guide" / "agent-usage-guide.md"
         if in_tree.exists():
             return in_tree

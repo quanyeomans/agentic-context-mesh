@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
+from kairix.paths import bundled_suites_root
 from kairix.quality.benchmark.baseline import (
     CATEGORY_FLOOR,
     compare,
@@ -226,7 +226,7 @@ class TestMockContractSuite:
         from kairix.quality.benchmark.runner import run_benchmark
         from kairix.quality.benchmark.suite import load_suite
 
-        suite_path = Path(__file__).parent.parent.parent / "suites" / "contract-suite.yaml"
+        suite_path = bundled_suites_root() / "contract-suite.yaml"  # #450 relocation
         if not suite_path.exists():
             pytest.skip("contract-suite.yaml not found")
 
@@ -243,7 +243,7 @@ class TestMockContractSuite:
         from kairix.quality.benchmark.runner import run_benchmark
         from kairix.quality.benchmark.suite import load_suite
 
-        suite_path = Path(__file__).parent.parent.parent / "suites" / "contract-suite.yaml"
+        suite_path = bundled_suites_root() / "contract-suite.yaml"  # #450 relocation
         if not suite_path.exists():
             pytest.skip("contract-suite.yaml not found")
 

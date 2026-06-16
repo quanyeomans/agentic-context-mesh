@@ -19,6 +19,7 @@ Usage:
   kairix benchmark compare  RESULT_A RESULT_B
   kairix benchmark init    --agent AGENT [--collections COL,COL]
   kairix benchmark list
+  kairix benchmark install-corpus [--force] [--version V] [--url URL]
 
 Flag groups on ``run``:
 
@@ -198,6 +199,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # list
     sub.add_parser("list", help="List bundled suites (resolved from kairix.paths.bundled_suites_root)")
 
+    # install-corpus
+    corpus_p = sub.add_parser(
+        "install-corpus",
+        help=(
+            "Download + verify the reference-library corpus (NOT bundled in the wheel; "
+            "needed for 'kairix benchmark run --suite reflib')."
+        ),
+    )
+    corpus_p.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download even when the corpus is already installed.",
+    )
+    corpus_p.add_argument(
+        "--version",
+        default=None,
+        help="Corpus release version to fetch (default: the installed kairix version).",
+    )
+    corpus_p.add_argument(
+        "--url",
+        default=None,
+        help="Explicit asset URL override (default: the GitHub release asset for --version).",
+    )
+
     # init
     init_p = sub.add_parser("init", help="Scaffold a new suite YAML file")
     init_p.add_argument("--agent", required=True, help="Agent name")
@@ -238,6 +263,30 @@ def default_list_suites() -> list[dict]:
     return list_bundled_suites()
 
 
+def default_download_corpus(**kwargs: Any) -> Any:
+    """Production corpus installer — lazy import so tests that inject a fake
+    never load the network/tarfile stack (#450).
+
+    Delegates to ``kairix.quality.benchmark.corpus.default_download_corpus``
+    (the real fetch → verify → extract seam). Symmetric with
+    ``default_run_benchmark`` / ``default_list_suites``."""
+    from kairix.quality.benchmark.corpus import default_download_corpus as _impl
+
+    return _impl(**kwargs)
+
+
+def default_corpus_root() -> Path:
+    """Production reference-corpus root resolver — lazy import (#450).
+
+    Delegates to ``kairix.paths.reference_library_root`` so the
+    corpus-presence affordance can be exercised through an injected seam
+    (tests pass a callable returning a missing path) rather than mutating
+    ``KAIRIX_REFLIB_ROOT`` (F2-clean)."""
+    from kairix.paths import reference_library_root
+
+    return reference_library_root()
+
+
 @dataclass(frozen=True)
 class BenchmarkCLIDeps:
     """Injectable dependencies for the benchmark CLI subcommands.
@@ -256,10 +305,22 @@ class BenchmarkCLIDeps:
                        ``kairix.paths.bundled_suites_root()``); tests pass a
                        fake to avoid env-var monkeypatching for the suites
                        root (F2-clean).
+        download_corpus: Callable matching ``corpus.default_download_corpus``'s
+                       keyword args (``install_dir``, ``version``, ``url``,
+                       ``force``). Defaults to the real fetch → verify →
+                       extract seam; tests pass ``FakeCorpusDownloader`` so
+                       ``install-corpus`` runs offline (#450).
+        corpus_root:   Callable returning the resolved reference-corpus root.
+                       Defaults to ``kairix.paths.reference_library_root``;
+                       tests pass a callable returning a missing path so the
+                       reflib corpus-missing affordance is exercised without
+                       mutating ``KAIRIX_REFLIB_ROOT`` (F2-clean).
     """
 
     run_benchmark: Callable[..., Any] = field(default_factory=lambda: default_run_benchmark)
     list_suites: Callable[[], list[dict]] = field(default_factory=lambda: default_list_suites)
+    download_corpus: Callable[..., Any] = field(default_factory=lambda: default_download_corpus)
+    corpus_root: Callable[[], Path] = field(default_factory=lambda: default_corpus_root)
 
 
 # ---------------------------------------------------------------------------
@@ -349,6 +410,43 @@ def _emit_baseline_compare(result: Any, baseline_path: str) -> None:
     else:
         marker = "="
     print(f"  baseline compare: {a:.3f} → {b:.3f}  {marker} {abs(delta):.3f}  (baseline: {baseline_path})")
+
+
+_REFERENCE_LIBRARY_COLLECTION = "reference-library"
+
+
+def _emit_corpus_missing_affordance(collection: str) -> int:
+    """Emit the F21 affordance for a reflib run when the corpus isn't installed.
+
+    The reference-library corpus is fetched on demand (it's not bundled in
+    the wheel; #450), so a pip-installed operator who runs
+    ``kairix benchmark run --suite reflib`` before installing the corpus
+    gets this actionable message instead of a bare ``FileNotFoundError``.
+    Returns exit 1.
+    """
+    print(
+        f"❌ reference corpus not installed — '{collection}' has no documents to score against.\n"
+        f"   fix: install the corpus first (it is not bundled in the wheel; ~50 MB).\n"
+        f"   next: kairix benchmark run --suite reflib  (re-run after install).\n"
+        f"   run: kairix benchmark install-corpus",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def _corpus_required_but_missing(collection: str | None, corpus_root: Path) -> bool:
+    """True when the run targets the reference-library collection but the
+    corpus isn't resolvable on disk.
+
+    Pure helper: takes the already-resolved ``corpus_root`` (from the
+    injected ``corpus_root`` seam, which honours the candidate chain incl.
+    the cache dir ``install-corpus`` populates) and checks the directory
+    exists. Only fires for the reference-library collection so vault /
+    per-agent runs are unaffected.
+    """
+    if collection != _REFERENCE_LIBRARY_COLLECTION:
+        return False
+    return not corpus_root.is_dir()
 
 
 def _emit_mode_stub(mode: str) -> int:
@@ -489,6 +587,10 @@ def cmd_run(args: argparse.Namespace, deps: BenchmarkCLIDeps | None = None) -> i
     explicit_collection = getattr(args, "collection", None)
     default_collection = suite.meta.get("default_collection")
     collection, auto_scoped = resolve_collection(explicit_collection, default_collection)
+
+    if _corpus_required_but_missing(collection, d.corpus_root()):
+        return _emit_corpus_missing_affordance(collection)
+
     _emit_run_header(args, suite, collection, auto_scoped)
     _emit_validation_warnings(suite)
 
@@ -535,6 +637,68 @@ def cmd_list(_args: argparse.Namespace, deps: BenchmarkCLIDeps | None = None) ->
     print()
     print("Run with: kairix benchmark run --suite <name>")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: install-corpus
+# ---------------------------------------------------------------------------
+
+
+def cmd_install_corpus(args: argparse.Namespace, deps: BenchmarkCLIDeps | None = None) -> int:
+    """Download + verify + extract the reference-library corpus (#450).
+
+    The corpus is NOT bundled in the wheel (mixed-license, ~50 MB), so a
+    pip-installed kairix fetches it on demand here before
+    ``kairix benchmark run --suite reflib`` can score against it.
+
+    Resolves the target dir via ``kairix.paths.reference_corpus_install_dir``
+    (the same cache candidate ``reference_library_root`` finds the corpus
+    at afterwards), then calls the injected ``download_corpus`` seam to
+    fetch → sha256-verify (fail-closed) → extract. Returns 0 on success,
+    1 on a verification/fetch failure (with an F21 affordance), so the CLI
+    fails closed on a corrupt or truncated download rather than leaving a
+    half-extracted corpus.
+    """
+    from kairix.paths import reference_corpus_install_dir
+    from kairix.quality.benchmark.corpus import CorpusInstallError
+
+    d = deps or BenchmarkCLIDeps()
+
+    install_dir = reference_corpus_install_dir()
+    version = getattr(args, "version", None) or _installed_kairix_version()
+    url = getattr(args, "url", None)
+    force = getattr(args, "force", False)
+
+    try:
+        result_dir = d.download_corpus(install_dir=install_dir, version=version, url=url, force=force)
+    except (CorpusInstallError, OSError) as exc:
+        print(
+            f"❌ corpus install failed: {exc}\n"
+            f"   fix: confirm the reference-library asset exists on the GitHub release for v{version}.\n"
+            f"   next: re-run with --force, or pass --url <asset-url> / --version <v> to override.\n"
+            f"   run: kairix benchmark install-corpus --force",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(
+        f"✅ reference corpus installed at {result_dir}\n"
+        f"   next: kairix benchmark run --suite reflib\n"
+        f"   run: kairix benchmark list  (confirm 'reflib' is resolvable)"
+    )
+    return 0
+
+
+def _installed_kairix_version() -> str:
+    """Return the installed kairix version for the default corpus asset.
+
+    Lazy import of ``kairix.__version__`` keeps the module-load surface
+    minimal. Operators override with ``--version`` when the corpus asset
+    version diverges from the package version.
+    """
+    from kairix import __version__
+
+    return __version__
 
 
 # ---------------------------------------------------------------------------
@@ -744,9 +908,10 @@ def main(
     ``__main__`` shim still calls ``sys.exit(main())`` for the production
     entry point.
 
-    ``deps`` is threaded through to ``cmd_run`` and ``cmd_list`` — the two
-    subcommands that talk to retrieval/suite-discovery. ``validate``,
-    ``compare``, and ``init`` operate purely on filesystem inputs.
+    ``deps`` is threaded through to ``cmd_run``, ``cmd_list``, and
+    ``cmd_install_corpus`` — the subcommands that talk to retrieval /
+    suite-discovery / corpus-download. ``validate``, ``compare``, and
+    ``init`` operate purely on filesystem inputs.
 
     ``parse_args`` is the public DI seam for tests that want to drive a
     namespace argparse wouldn't normally produce (e.g. the unknown-subcommand
@@ -758,6 +923,8 @@ def main(
         return cmd_run(args, deps=deps)
     if args.subcommand == "list":
         return cmd_list(args, deps=deps)
+    if args.subcommand == "install-corpus":
+        return cmd_install_corpus(args, deps=deps)
 
     handlers = {
         "validate": cmd_validate,
