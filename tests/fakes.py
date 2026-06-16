@@ -12,11 +12,14 @@ These fakes are the canonical test doubles for contract and unit tests.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from kairix.core.search.intent import QueryIntent
 from kairix.core.search.intent import classify as _real_classify
 from kairix.paths import KairixPaths
+
+if TYPE_CHECKING:
+    from kairix.quality.benchmark.corpus import FetchedCorpus
 
 
 def FakePaths(  # noqa: N802 — factory function returning KairixPaths; named like a class for call-site clarity
@@ -5350,3 +5353,107 @@ class FakeMcpTransportServer:
             return PlainTextResponse("fake-sse-ok")
 
         return Starlette(routes=[Route(mount_path, handler, methods=["GET"])])
+
+
+class FakeCorpusSource:
+    """In-memory ``CorpusSource`` — returns crafted tarball bytes + a sha256.
+
+    Builds a real gzip tarball containing a small fake corpus tree so the
+    production extract path runs unchanged. The advertised sha256 is the
+    honest hash of those bytes, unless ``corrupt`` is set — then it's a
+    deliberately-wrong hash so the production fail-closed verify raises.
+    No network. Records the requested ``version``/``url`` for assertions.
+
+    ``raise_on_fetch`` injects a network-layer failure (the F68
+    failure-mode for ``CorpusSource.fetch``): when set, ``fetch`` raises
+    that exception instead of returning a corpus — mirrors a
+    ``urllib``/``URLError`` when the release asset is unreachable.
+    """
+
+    def __init__(
+        self,
+        *,
+        corrupt: bool = False,
+        files: dict[str, str] | None = None,
+        raise_on_fetch: BaseException | None = None,
+    ) -> None:
+        self.corrupt = corrupt
+        self.files = files or {
+            "reference-library/CATALOGUE.md": "# fake catalogue\n",
+            "reference-library/reflib/agentic-ai/agent-loop-patterns.md": "fake doc body\n",
+        }
+        self.raise_on_fetch = raise_on_fetch
+        self.requested_version: str | None = None
+        self.requested_url: str | None = None
+
+    def fetch(self, *, version: str, url: str | None) -> FetchedCorpus:
+        import hashlib
+        import io
+        import tarfile
+
+        from kairix.quality.benchmark.corpus import FetchedCorpus
+
+        self.requested_version = version
+        self.requested_url = url
+        if self.raise_on_fetch is not None:
+            raise self.raise_on_fetch
+
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            for name, body in self.files.items():
+                raw = body.encode("utf-8")
+                info = tarfile.TarInfo(name=name)
+                info.size = len(raw)
+                tar.addfile(info, io.BytesIO(raw))
+        data = buf.getvalue()
+
+        honest = hashlib.sha256(data).hexdigest()
+        advertised = ("0" * 64) if self.corrupt else honest
+        return FetchedCorpus(data=data, sha256=advertised, version=version, url=url or "fake://release")
+
+
+class FakeCorpusDownloader:
+    """Canonical fake for ``BenchmarkCLIDeps.download_corpus`` (#450).
+
+    Drop-in replacement for ``corpus.default_download_corpus`` that runs
+    the REAL fetch → verify → extract pipeline
+    (``corpus.install_corpus``) over an in-memory ``CorpusSource`` — so
+    the production sha256 fail-closed check is exercised, not stubbed.
+
+    ``corrupt=True`` makes the source advertise a wrong sha256; the
+    production verify then raises ``CorpusInstallError`` (the fail-closed
+    path the install-corpus outcome test asserts). The downloader records
+    the version/url it was asked for so tests can assert the CLI wired the
+    installed kairix version through.
+    """
+
+    def __init__(self, *, corrupt: bool = False, files: dict[str, str] | None = None) -> None:
+        self._source = FakeCorpusSource(corrupt=corrupt, files=files)
+        self.calls: list[dict[str, Any]] = []
+
+    @property
+    def requested_version(self) -> str | None:
+        return self._source.requested_version
+
+    @property
+    def requested_url(self) -> str | None:
+        return self._source.requested_url
+
+    def __call__(
+        self,
+        *,
+        install_dir: Path,
+        version: str,
+        url: str | None = None,
+        force: bool = False,
+    ) -> Path:
+        from kairix.quality.benchmark.corpus import install_corpus
+
+        self.calls.append({"install_dir": install_dir, "version": version, "url": url, "force": force})
+        return install_corpus(
+            self._source,
+            install_dir=install_dir,
+            version=version,
+            url=url,
+            force=force,
+        )

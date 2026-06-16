@@ -20,17 +20,17 @@ Sabotage proofs:
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
+from kairix.paths import bundled_suites_root
 from kairix.quality.benchmark.per_type_slicing import aggregate_canary
 from kairix.quality.benchmark.suite import load_suite
 
 pytestmark = pytest.mark.unit
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_CANARY_SUITE = _REPO_ROOT / "suites" / "per-type-canary-suite.yaml"
+# #450 — suites relocated under kairix/data/suites/ (package-data); resolve
+# the canary suite via bundled_suites_root() instead of a repo-root literal.
+_CANARY_SUITE = bundled_suites_root() / "per-type-canary-suite.yaml"
 
 
 def test_canary_suite_loads_and_every_case_is_flagged() -> None:

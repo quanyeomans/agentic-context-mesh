@@ -11,13 +11,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from kairix.quality.benchmark.runner import run_benchmark
-from kairix.quality.benchmark.suite import load_suite
+from kairix.quality.benchmark.suite import load_suite, resolve_suite_path
 
 FLOOR = 0.50  # Minimum weighted_total to pass
 
 
 def main() -> int:
-    suite = load_suite("suites/reflib-contract-suite.yaml")
+    # #450 — the suites moved under kairix/data/suites/ (package-data), so a
+    # literal "suites/..." path no longer resolves. Resolve through the
+    # bundled root by name: resolve_suite_path globs <name>-gold-v*.yaml then
+    # <name>.yaml in kairix.paths.bundled_suites_root().
+    suite = load_suite(str(resolve_suite_path("reflib-contract-suite")))
     result = run_benchmark(suite, system="mock-reflib", agent="shared")
 
     wt = result.summary.get("weighted_total", 0)

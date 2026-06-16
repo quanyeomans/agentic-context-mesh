@@ -38,6 +38,7 @@ pytest_plugins = [
     "tests.bdd.steps.eval_auto_gold_steps",
     "tests.bdd.steps.recall_steps",
     "tests.bdd.steps.benchmark_steps",
+    "tests.bdd.steps.benchmark_install_corpus_steps",
     "tests.bdd.steps.mcp_search_steps",
     "tests.bdd.steps.mcp_prep_steps",
     "tests.bdd.steps.timeline_absolute_steps",

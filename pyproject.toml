@@ -493,6 +493,19 @@ include = ["kairix*"]
 "kairix.agents.usage_guide" = [
     "data/*.md",
 ]
+# #450 — the benchmark suite YAMLs (≈86 KB) ship as package-data so a
+# plain ``pip install`` resolves them via importlib.resources /
+# ``kairix.paths.bundled_suites_root`` with no source checkout present.
+# Before the relocation they lived at the repo root (outside ``kairix/``)
+# and the ``packages.find`` include (``kairix*``) excluded them from the
+# wheel. The heavy reference-library corpus is deliberately NOT bundled
+# (mixed-license, ~50 MB) — it is fetched on demand by
+# ``kairix benchmark install-corpus``.
+"kairix.data" = [
+    "suites/*.yaml",
+    "suites/perf/*.json",
+    "suites/README.md",
+]
 
 # Benchmark gates — kairix benchmark run exits non-zero if any gate fails.
 # E2E test gate: set KAIRIX_E2E=1 to enable live Azure API tests.

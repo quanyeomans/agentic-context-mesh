@@ -10,10 +10,10 @@ name: "1a · Benchmark gate (retrieval loop)"
 #
 # To update the baseline after an intentional change:
 #   python3 -c "
-#     from kairix.quality.benchmark.suite import load_suite
+#     from kairix.quality.benchmark.suite import load_suite, resolve_suite_path
 #     from kairix.quality.benchmark.runner import run_benchmark
 #     import json
-#     suite = load_suite('suites/contract-suite.yaml')
+#     suite = load_suite(str(resolve_suite_path('contract-suite')))
 #     result = run_benchmark(suite, system='mock', agent='shared')
 #     data = {'meta': result.meta, 'summary': result.summary, 'diagnostics': result.diagnostics, 'cases': result.cases}
 #     json.dump(data, open('benchmark-results/contract-baseline.json', 'w'), indent=2)
@@ -28,7 +28,7 @@ on:
       - "kairix/core/temporal/**"
       - "kairix/core/embed/**"
       - "kairix/knowledge/graph/**"
-      - "suites/contract-suite.yaml"
+      - "kairix/data/suites/contract-suite.yaml"
       - "benchmark-results/contract-baseline.json"
 
 env:
@@ -57,11 +57,11 @@ jobs:
       - name: Run contract suite (mock backend)
         run: |
           python3 -c "
-          from kairix.quality.benchmark.suite import load_suite
+          from kairix.quality.benchmark.suite import load_suite, resolve_suite_path
           from kairix.quality.benchmark.runner import run_benchmark
           import json
 
-          suite = load_suite('suites/contract-suite.yaml')
+          suite = load_suite(str(resolve_suite_path('contract-suite')))
           result = run_benchmark(suite, system='mock', agent='shared', output_dir=None)
           data = {
               'meta': result.meta,

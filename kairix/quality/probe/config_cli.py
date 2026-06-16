@@ -66,9 +66,11 @@ from kairix.quality.probe.perf_runner import (
     run_perf_probe,
 )
 
-# Default location of the pinned perf budgets file shipped in-repo.
-# Tests point at a smaller/regression-shaped JSON via ``--perf-budgets``.
-_DEFAULT_PERF_BUDGETS = Path(__file__).resolve().parents[3] / "suites" / "perf" / "budgets.json"
+# Default location of the pinned perf budgets file shipped as package-data
+# under ``kairix/data/suites/perf/`` (#450 relocation). ``parents[2]`` is the
+# ``kairix`` package root from ``kairix/quality/probe/``. Tests point at a
+# smaller/regression-shaped JSON via ``--perf-budgets``.
+_DEFAULT_PERF_BUDGETS = Path(__file__).resolve().parents[2] / "data" / "suites" / "perf" / "budgets.json"
 
 _HELP_DESCRIPTION = """\
 kairix probe-config — probe the configured provider for health and tuning advice.
