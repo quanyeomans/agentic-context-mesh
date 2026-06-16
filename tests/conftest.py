@@ -418,6 +418,36 @@ def _reset_client_pool():
 
 
 @pytest.fixture(autouse=True)
+def _reset_vector_index_singleton():
+    """Drop the process-shared usearch vector-index singleton between tests (#506 / #504-sibling).
+
+    ``kairix.core.search.vec_index._VECTOR_INDEX`` is a process-global
+    handle built lazily by :func:`get_vector_index`. The first call wins
+    the cache and **every later call returns that same instance,
+    regardless of the ``db_path`` argument** — so once any test populates
+    it (e.g. a vec-index lifecycle/contract test loading a real on-disk
+    index in its ``tmp_path``), a later test that builds a default
+    ``build_search_pipeline`` inherits the *foreign* index instead of one
+    scoped to its own ``FakePaths`` db. The stale index then queries the
+    polluter's now-deleted metadata SQLite, the vector leg silently
+    returns ``[]`` (``no such table: documents``), and the test is only
+    green by luck of its BM25 leg — or flips outright when the stale rows
+    contaminate the result set. Resetting on teardown (closing the
+    metadata connection first, via ``reset_vector_index_singleton``)
+    makes every test's vector-search state isolated, mirroring the
+    pattern established by ``_reset_embed_coalescer`` /
+    ``_reset_client_pool``. This is the missing sibling of those resets:
+    ``_VECTOR_INDEX`` was the one process-shared search singleton with no
+    autouse reset, so a populator with a missing/interrupted module-local
+    reset could leak its index into an unrelated later test.
+    """
+    yield
+    from kairix.core.search.vec_index import reset_vector_index_singleton
+
+    reset_vector_index_singleton()
+
+
+@pytest.fixture(autouse=True)
 def _reset_workstream_b_caches():
     """Drop the process-shared brief + prep + source caches between tests (#396 W-B).
 

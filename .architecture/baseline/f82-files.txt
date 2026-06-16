@@ -5,8 +5,6 @@
 # then delete the line.
 tests/agents/mcp/test_async_tool_handler_dispatch_pool.py
 tests/briefing/test_pipeline_async.py
-tests/cli/test_route_via_mcp.py
-tests/core/embed/test_embed_coalescer.py
 tests/core/test_health.py
 tests/e2e/test_composed_production_path.py
 tests/integration/test_outcome_bootstrap_cli.py

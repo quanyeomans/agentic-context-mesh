@@ -26,7 +26,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-import time
 from typing import Any
 
 import pytest
@@ -114,35 +113,38 @@ def test_falls_back_to_in_process_when_mcp_down() -> None:
 
 
 @pytest.mark.unit
-def test_detection_budget_under_100ms_when_mcp_down() -> None:
-    """The detection probe must complete in <100ms when MCP is unreachable.
+def test_detection_probe_falls_through_when_mcp_unreachable() -> None:
+    """The real probe returns False (fall-through) when MCP is unreachable.
 
-    Uses the real :class:`HttpMcpDispatchClient` so the assertion
-    catches a regression in the underlying ``requests.head`` timeout
-    wiring. The endpoint points at a port we expect to be unbound;
-    on a system where that port IS bound, the test still passes as
-    long as the probe returns within budget — the wall-clock check is
-    the contract, not the specific is_responsive return value.
+    F82 rewrite (#493): the old shape asserted ``elapsed_ms < 150.0``
+    against a real ``requests.head`` probe — a wall-clock ceiling that
+    measures host scheduling, not kairix behaviour, and tripped under
+    concurrent-gate load. The *outcome* the budget exists to guarantee is
+    "MCP-down ⇒ fall through to in-process without blocking the CLI", and
+    that is deterministic: a ``HEAD`` to an unbound port is refused
+    immediately, so the real :class:`HttpMcpDispatchClient` returns
+    ``False`` every time. We assert that outcome instead of the elapsed
+    time. The companion deterministic proofs cover the rest of the budget
+    contract without a clock:
 
-    Sabotage-proof: changed ``_DETECTION_TIMEOUT_S`` from 0.1 to 2.0,
-    re-ran with KAIRIX_MCP_ENDPOINT pointing at an unbound port, and
-    confirmed the elapsed_ms reading went to ~2000ms — the assertion
-    fired with ``assert 2003.4 < 100.0`` as expected. Reverting the
-    timeout back to 0.1 restored green.
+    * the dispatcher passing the bounded ``detection_timeout_s`` through
+      to ``is_responsive`` — ``test_detection_probe_respects_timeout_budget``
+      (the real ``requests.head`` ``timeout=`` wiring regression that the
+      old wall-clock test claimed to catch);
+    * ``measure_detection_budget_ms`` returning a non-negative reading —
+      ``test_measure_detection_budget_ms_returns_non_negative``.
+
+    Sabotage-proof (executed): made ``HttpMcpDispatchClient.is_responsive``
+    ``return True`` unconditionally → this test failed (``assert False``
+    on the returned value). Restoring the real refused-connection branch
+    restored green. Deterministic on any host — no elapsed-time ceiling.
     """
-    deps = DispatcherDeps(
-        endpoint_fn=lambda: "http://127.0.0.1:1/mcp",  # port 1 is privileged + always unbound for user
-        routing_enabled_fn=lambda: True,
-        detection_timeout_s=0.1,
-        client=HttpMcpDispatchClient(),
-    )
+    client = HttpMcpDispatchClient()
+    # port 1 is privileged + always unbound for an unprivileged user, so
+    # the HEAD is refused immediately on every platform.
+    responsive = client.is_responsive("http://127.0.0.1:1/mcp", timeout_s=0.1)
 
-    elapsed_ms = measure_detection_budget_ms(deps=deps)
-
-    # 100ms ceiling per issue acceptance. Add a small slack (50ms) for
-    # CI variance — the contract is "doesn't block CLI startup", not
-    # "completes in exactly 100ms".
-    assert elapsed_ms < 150.0, f"detection budget breached: {elapsed_ms:.1f}ms (ceiling 150ms)"
+    assert responsive is False, "an unreachable MCP endpoint must probe as not-responsive (CLI falls through)"
 
 
 # ---------------------------------------------------------------------------
@@ -1033,28 +1035,37 @@ def test_http_client_call_tool_drives_async_mcp_session(monkeypatch) -> None:
 
 
 @pytest.mark.unit
-def test_dispatcher_does_not_block_caller_beyond_probe_budget() -> None:
-    """The dispatcher does not block beyond the probe's wall-clock budget.
+def test_dispatcher_falls_through_on_unresponsive_probe_without_extra_call() -> None:
+    """A non-responsive probe ⇒ fall-through with exactly one probe, no tool call.
 
-    Uses a fake that ``time.sleep(0.05)``-s on the probe to confirm
-    the dispatcher does not add its own sleep on top. Catches a
-    regression where someone introduces ``time.sleep`` for some
-    "give it a moment to reconnect" rationale.
+    F82 rewrite (#493): the old shape slept 50ms in the fake probe and
+    asserted ``elapsed < 0.150`` to prove "the dispatcher adds no sleep of
+    its own". That ceiling measures host scheduling and flakes under load.
+    The deterministic outcome the test actually protects is: when the
+    probe reports not-responsive, the dispatcher returns ``None``
+    (in-process fall-through) after exactly ONE ``is_responsive`` call and
+    makes ZERO ``call_tool`` calls — it does no extra round-trip / retry /
+    reconnect work. That is what a "give it a moment to reconnect"
+    regression (a ``time.sleep`` + re-probe, or a speculative
+    ``call_tool``) would break, and it is provable without a clock: such a
+    regression would add a second ``responsive_calls`` entry or a
+    ``calls`` entry.
 
-    Sabotage-proof: added ``time.sleep(0.2)`` after the probe in the
-    dispatcher; this test failed with elapsed > 0.15s. Removing the
-    sleep restored green.
+    Sabotage-proof (executed): added a re-probe (``client.is_responsive``
+    called twice) after the first not-responsive return in
+    ``try_dispatch_via_mcp`` → this test failed (``len(responsive_calls)
+    == 2``). Restoring the single-probe fall-through restored green.
+    Deterministic on any host — no elapsed-time ceiling.
     """
-    client = FakeMcpDispatchClient(responsive=False, responsiveness_delay_s=0.05)
+    client = FakeMcpDispatchClient(responsive=False)
     deps = DispatcherDeps(
         client=client,
         endpoint_fn=lambda: "http://localhost:8080/mcp",
         routing_enabled_fn=lambda: True,
     )
 
-    start = time.monotonic()
-    try_dispatch_via_mcp("search", ["q", "--json"], deps=deps)
-    elapsed = time.monotonic() - start
+    exit_code = try_dispatch_via_mcp("search", ["q", "--json"], deps=deps)
 
-    # Probe sleeps 50ms; budget for dispatcher overhead is generous (100ms)
-    assert elapsed < 0.150, f"dispatcher added overhead beyond probe budget: {elapsed * 1000:.1f}ms"
+    assert exit_code is None, "an unresponsive probe must fall through to in-process (return None)"
+    assert len(client.responsive_calls) == 1, "the dispatcher must probe exactly once (no retry/reconnect loop)"
+    assert client.calls == [], "no tool call may run after a not-responsive probe"

@@ -254,24 +254,45 @@ def test_file_local_f26_forbidden_import_caught() -> None:
 
     This is the ONE retained end-to-end full ``_dispatch_staged`` smoke — it
     proves the real staged-dispatch wiring (selection → narrowing → in-process
-    ledger → exit code) is intact end-to-end on the per-commit path, AND it
-    carries the cluster's only clean-arm control through the full gate (the
-    sabotage arm below stages a clean probe and asserts the whole dispatch goes
-    green). The other file-local proofs (F8) use the cheaper single-rule
-    :func:`_run_one_narrowed`; only this one pays the whole-gate cost, by
-    design."""
+    ledger) is intact end-to-end on the per-commit path, AND it carries the
+    cluster's only clean-arm control through the full gate (the sabotage arm
+    below stages a clean probe and asserts F26 clears). The other file-local
+    proofs (F8) use the cheaper single-rule :func:`_run_one_narrowed`; only this
+    one pays the whole-gate cost, by design.
+
+    Robustness (#506): the assertions are scoped to **F26's own verdict in the
+    ledger**, never the aggregate exit code. ``_run_staged`` drives the FULL
+    ~40-rule staged gate, several of whose rules (F50 net-new-file vs baseline,
+    F92 catalogue-currency, F22 path-naming, the token scanners) read
+    whole-tree / git state — so a stray probe or ``__pycache__`` another test
+    left in the tree could flip the aggregate ``exit_code`` to 1 even when this
+    probe's own change is clean, failing a ``code2 == 0`` assertion for reasons
+    that have nothing to do with F26 (the flake this test hit 3x on a pin bump).
+    Asserting F26 specifically RAN and FAILED (violation arm) / RAN and did NOT
+    fail (clean arm) keeps the full e2e dispatch as the subject while making the
+    verdict immune to unrelated whole-tree rule state. The
+    ``_sweep_staged_probes`` session fixture above scrubs the most common
+    debris; this scoping is the structural complement that removes the
+    dependency on a globally-clean tree entirely."""
     with _probe_file(
         "kairix/core/zzz_staged_probe_f26.py",
         "from kairix.providers import something  # forbidden core→providers import\n",
     ) as rel:
-        code, out = _run_staged([rel])
-    assert code == 1, f"F26 violation must fail staged mode; ledger:\n{out}"
-    assert "F26" in _failed_rule_ids(out), f"F26 must be the failing rule; ledger:\n{out}"
+        _code, out = _run_staged([rel])
+    # Violation arm: F26 must have RUN (dispatch wiring intact) and FAILED on
+    # the forbidden import. Scoped to F26 — independent of any other rule's
+    # whole-tree verdict, so unrelated tree debris cannot make this flake.
+    assert "F26" in _ran_rule_ids(out), f"F26 must run end-to-end through the real dispatch; ledger:\n{out}"
+    assert "F26" in _failed_rule_ids(out), f"F26 must FAIL on the forbidden core→providers import; ledger:\n{out}"
     # Sabotage + clean-arm control (inline): the SAME probe without the import
-    # passes the FULL staged gate — the dispatch goes green on a clean change.
+    # still RUNS F26 but F26 must NOT fail — the verdict flips on the one-line
+    # edit. Again scoped to F26, not the aggregate exit code.
     with _probe_file("kairix/core/zzz_staged_probe_f26.py", "x = 1\n") as rel:
-        code2, out2 = _run_staged([rel])
-    assert code2 == 0, f"removing the forbidden import must clear F26 (sabotage + clean-arm); ledger:\n{out2}"
+        _code2, out2 = _run_staged([rel])
+    assert "F26" in _ran_rule_ids(out2), f"F26 must still run on the clean probe; ledger:\n{out2}"
+    assert "F26" not in _failed_rule_ids(out2), (
+        f"removing the forbidden import must clear F26 (sabotage + clean-arm); ledger:\n{out2}"
+    )
 
 
 # ── file-local marker: missing test category marker (F8) ────────────────
