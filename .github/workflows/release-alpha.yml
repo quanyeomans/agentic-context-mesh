@@ -23,6 +23,11 @@ on:
         required: false
         default: '1'
         type: string
+      skip_vm_deploy:
+        description: 'Skip the Customer-Zero VM auto-deploy (for fresh-VM / manual verification of the alpha)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write   # required to create tags + pre-releases
@@ -152,11 +157,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           DATE_VERSION: ${{ inputs.date_version }}
           ALPHA_N: ${{ inputs.alpha_n }}
+          SKIP_VM_DEPLOY: ${{ inputs.skip_vm_deploy }}
         run: |
           TAG="v${DATE_VERSION}a${ALPHA_N}"
           gh workflow run docker-publish.yml --ref main -f ref="$TAG" -f is_alpha=true
           gh workflow run publish-pypi.yml   --ref main -f ref="$TAG" -f is_alpha=true
-          gh workflow run release-vm-deploy.yml --ref main -f tag="$TAG"
+          if [ "$SKIP_VM_DEPLOY" = "true" ]; then
+            echo "skip_vm_deploy=true — NOT dispatching release-vm-deploy.yml (the Customer-Zero webhook); deploy the alpha manually for verification."
+          else
+            gh workflow run release-vm-deploy.yml --ref main -f tag="$TAG"
+          fi
 
       - name: Summary
         env:
