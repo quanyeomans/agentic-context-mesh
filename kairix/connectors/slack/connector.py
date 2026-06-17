@@ -362,14 +362,25 @@ class SlackConnector:
         """
         web = self._web()
         events: list[ChangeEvent] = []
+        # High-water-mark across all channels — the cursor token Slack uses is
+        # a ``ts`` string (epoch, lexicographically comparable for a fixed
+        # width). It is re-fed to ``conversations.history?oldest=`` next tick,
+        # which REQUIRES an epoch ``ts``. Using the ISO ``modified_at`` here
+        # (the pre-#555 bug) made Slack return zero messages on every
+        # subsequent tick, silently freezing the connector after the first
+        # backfill. ``_drain_channel`` records the per-channel epoch high-water
+        # in ``_next_cursor_by_container``; we take the max across the channels
+        # drained this tick.
+        channel_high_waters: list[str] = []
         for channel in self._enumerate_member_channels(web):
             events.extend(self._drain_channel(web, channel, oldest=cursor))
-        # High-water-mark across all channels — the cursor token Slack
-        # uses is a ``ts`` string (lexicographically comparable). On a
-        # zero-event drain we preserve the prior cursor so the
+            channel_hw = self._next_cursor_by_container.get(channel.channel_id)
+            if channel_hw is not None:
+                channel_high_waters.append(channel_hw)
+        # On a zero-event drain we preserve the prior cursor so the
         # orchestrator doesn't clobber a real position with None.
-        if events:
-            self._last_legacy_cursor = max(ev.modified_at for ev in events)
+        if channel_high_waters:
+            self._last_legacy_cursor = max(channel_high_waters)
         elif cursor:
             self._last_legacy_cursor = cursor
         return iter(events)

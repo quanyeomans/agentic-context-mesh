@@ -262,6 +262,30 @@ def test_sensitivity_for_private_mpim_channel_maps_to_client_confidential() -> N
     assert connector.sensitivity_for("M1:1715000000.000100") == "client-confidential"
 
 
+def test_legacy_cursor_is_max_epoch_ts_not_iso() -> None:
+    """Regression for #555 — the legacy ``list_changes`` cursor must be the
+    MAX Slack epoch ``ts`` across drained channels (re-fed verbatim to
+    ``conversations.history?oldest=``), NOT the ISO ``modified_at`` and NOT the
+    last channel's ``ts``. An ISO ``oldest`` makes Slack return zero messages,
+    silently freezing the connector after the first backfill.
+    """
+    web = _InMemoryWeb(
+        channels=[_ch("C1"), _ch("C2")],
+        messages_by_channel={
+            "C1": [_msg("C1", ts="1715000200.000000")],  # the max — drained first
+            "C2": [_msg("C2", ts="1715000100.000000")],  # lower — drained last
+        },
+    )
+    connector = _build_connector(web=web)
+    list(connector.list_changes(cursor=None))
+
+    cursor = connector.next_cursor()
+    # MAX epoch ``ts`` across channels — not C2's (drained last), not ISO.
+    assert cursor == "1715000200.000000"
+    # Slack ``oldest`` is a Unix-epoch float; an ISO ``modified_at`` would raise.
+    assert float(cursor) == pytest.approx(1715000200.0)
+
+
 # ---------------------------------------------------------------------------
 # Wave E ON-branch — iter_containers / list_changes_for_container / load_hierarchy
 # ---------------------------------------------------------------------------
