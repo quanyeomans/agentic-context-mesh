@@ -118,7 +118,7 @@ feature_flags:
 Restart the kairix service so the new config takes effect:
 
 ```bash
-cd /opt/kairix/app && docker compose restart kairix
+cd /etc/kairix && docker compose restart kairix
 ```
 
 The worker tick will start projecting entities into the
@@ -240,7 +240,7 @@ If the gate fails or production behaviour regresses unexpectedly:
    ```
    Restart kairix:
    ```bash
-   cd /opt/kairix/app && docker compose restart kairix
+   cd /etc/kairix && docker compose restart kairix
    ```
    The worker projector stops on the next tick. Already-projected
    chunks remain in the `entity-summaries` collection (idempotent —

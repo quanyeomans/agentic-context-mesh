@@ -242,7 +242,7 @@ services:
     volumes:
       - <HOST_PATH>:/data/kairix    # e.g. /var/lib/kairix-runtime OR /data/kairix
       - <DOCS_PATH>:/data/documents # docs tree is usually small; either disk works
-  kairix-worker:
+  kairix:
     volumes:
       - <HOST_PATH>:/data/kairix
       - <DOCS_PATH>:/data/documents

@@ -15,7 +15,7 @@ For dedicated-host deployments you can stay on the default `docker-compose.yml` 
 
 ## Recommended headroom
 
-Kairix is two workloads stacked. The serving path (`kairix` container, `/mcp` endpoint, search) is latency-sensitive and lightly loaded between requests. The background worker (`kairix-worker`) does scans, embeds, and entity maintenance — it bursts hard during work, and should sit at ~0 CPU when idle (after #224 phase 1's idle backoff lands).
+Kairix is two workloads stacked. The serving path (`kairix` container, `/mcp` endpoint, search) is latency-sensitive and lightly loaded between requests. The background worker (`kairix`) does scans, embeds, and entity maintenance — it bursts hard during work, and should sit at ~0 CPU when idle (after #224 phase 1's idle backoff lands).
 
 For a single shared host running kairix + neo4j + one or two co-located agents, plan for:
 
@@ -61,13 +61,13 @@ The serving path stays healthy when the worker is stopped — this was confirmed
 Today, stop the worker container directly:
 
 ```bash
-docker compose stop kairix-worker
+docker compose stop kairix
 ```
 
 Search, `/mcp` calls, and the graph database keep working. The index is read-only from the serving path's perspective — you just stop getting new content indexed until you start the worker again:
 
 ```bash
-docker compose start kairix-worker
+docker compose start kairix
 ```
 
 A first-class `kairix worker pause` / `kairix worker resume` interface lands with #224 phase 4. Once it's available it will pause the loop in-process without restarting the container, which avoids the index reload cost on resume. Until then, `docker compose stop` is the recommended pause.
@@ -82,7 +82,7 @@ If you have ever seen "the worker is always busy but the index never moves", thi
 
 Mitigations, in order of preference:
 
-1. **Use `restart: on-failure` with a max-attempts cap.** The example file ships with `restart: on-failure:5`. After five failed restarts the container stays down and the failure becomes visible instead of being papered over. Exec into the host and read `docker logs kairix-worker --tail 200` to see why it's failing.
+1. **Use `restart: on-failure` with a max-attempts cap.** The example file ships with `restart: on-failure:5`. After five failed restarts the container stays down and the failure becomes visible instead of being papered over. Exec into the host and read `docker compose logs kairix --tail 200` to see why it's failing.
 2. **Surface restart count via `kairix worker status`** (lands with #224 phase 5). The status command will report restart count and last-failure reason, so a health probe or monitoring loop can detect churn even when `docker ps` shows the container as "running".
 3. **For Compose Spec deployments (Swarm), use `restart_policy` with `max_attempts` and a sensible `window`.** Same intent, native to Compose Spec.
 
@@ -96,7 +96,7 @@ If the worker is failing repeatedly, do not raise its memory limit blindly. Read
 2. Copy `docker-compose.example.yml` from the repo root as your starting compose file (or layer it over `docker-compose.yml`).
 3. Watch `docker stats` for a week. Tighten or loosen `deploy.resources` to match what you actually see.
 4. Set `restart: on-failure:5` on the worker (the example file does this for you).
-5. When you co-locate something latency-sensitive, run `docker compose stop kairix-worker` before any benchmark or load test. Confirm the latency issue tracks the worker; if it does, plan the worker's runtime around the latency-sensitive workload's quiet hours, or split it onto its own host.
+5. When you co-locate something latency-sensitive, run `docker compose stop kairix` before any benchmark or load test. Confirm the latency issue tracks the worker; if it does, plan the worker's runtime around the latency-sensitive workload's quiet hours, or split it onto its own host.
 
 See also:
 

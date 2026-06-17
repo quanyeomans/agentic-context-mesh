@@ -148,7 +148,7 @@ after a reboot because the vault name was only exported in the operator's
 
 The fetch-secrets script reads `az keyvault secret list --query "[?starts_with(name,'kairix-')]"` and writes each one to both `/run/secrets/<name>` (per-file) and `/run/secrets/kairix.env` (bundle). No per-secret list to maintain — adding `kairix-connector-newthing-api-key` to your KV makes it available on the next service restart, with no code change.
 
-To rotate a secret: run `az keyvault secret set` with `--vault-name "$KAIRIX_KV_NAME"`, `--name "<canonical-name>"`, and the new value, then `sudo systemctl restart kairix-fetch-secrets && docker compose restart kairix kairix-worker`.
+To rotate a secret: run `az keyvault secret set` with `--vault-name "$KAIRIX_KV_NAME"`, `--name "<canonical-name>"`, and the new value, then `sudo systemctl restart kairix-fetch-secrets && docker compose restart kairix`.
 
 ### Docker on a VM with AWS Secrets Manager
 
@@ -361,8 +361,8 @@ The mechanics depend on your source:
 
 | Source | Rotate |
 |---|---|
-| `.env` file | Edit the file; `docker compose restart kairix kairix-worker` |
-| Azure KV (with fetch-secrets sidecar) | `az keyvault secret set …`; `sudo systemctl restart kairix-fetch-secrets && docker compose restart kairix kairix-worker` |
+| `.env` file | Edit the file; `docker compose restart kairix` |
+| Azure KV (with fetch-secrets sidecar) | `az keyvault secret set …`; `sudo systemctl restart kairix-fetch-secrets && docker compose restart kairix` |
 | AWS Secrets Manager | `aws secretsmanager update-secret …`; restart kairix services |
 | GCP Secret Manager | `gcloud secrets versions add …`; restart kairix services |
 | ECS / Cloud Run (native) | Update the secret; the platform redeploys the task automatically |

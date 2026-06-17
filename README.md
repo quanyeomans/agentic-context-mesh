@@ -120,92 +120,37 @@ No GPU. No per-seat licensing. One VM serves your entire team of agents and huma
 
 ## Quick start
 
-Kairix is the memory + context layer your agent uses to stay oriented across sessions and stay aligned with its human / agent team. The flow below is written for an agent (or its admin) reading this cold: install, point at credentials, point at documents, verify, wire into your agent runtime.
+Install it, set it up in your browser, and point your agent at it.
 
-**Prereqs:** Python 3.10+ or Docker, an LLM API key for embeddings (Azure OpenAI or any OpenAI-compatible API), a folder of documents.
+**Prereqs:** Docker (or Python 3.10+) and a folder of documents. An AI provider key turns on the smarter search — but you can add it later; keyword search works straight away.
 
 ### 1. Install
 
 ```bash
-# pipx — user-mode install (no root; works on PEP 668 distros like Ubuntu 24.04 / Homebrew,
-# where a bare `pip install` fails with externally-managed-environment)
-pipx install kairix-agentic-knowledge-mgt && kairix init --user
-
-# venv — system-mode install (production servers); pip works inside a venv
-sudo python3 -m venv /opt/kairix/.venv \
-  && sudo /opt/kairix/.venv/bin/pip install kairix-agentic-knowledge-mgt \
-  && sudo /opt/kairix/.venv/bin/kairix init --system
-
-# Docker
+# Docker (recommended)
 curl -O https://raw.githubusercontent.com/three-cubes/kairix/main/docker-compose.yml \
   && curl -O https://raw.githubusercontent.com/three-cubes/kairix/main/.env.example \
   && cp .env.example .env && docker compose up -d
+
+# Or install on the host — no root needed
+pipx install kairix-agentic-knowledge-mgt && kairix init --user
 ```
 
-Full track-by-track install guide (system / user / Docker / macOS / Windows) lives in [`docs/getting-started/install.md`](docs/getting-started/install.md).
+Production servers and the other install tracks (system-wide, macOS, Windows) are in [`docs/getting-started/install.md`](docs/getting-started/install.md).
 
-### 2. Configure secrets
+### 2. Set it up in your browser
 
-Pick the recipe that matches where you're running:
+Start kairix and open the setup page it prints (or run `kairix setup`). It walks you through everything — no config files to hand-edit:
 
-| Where you run kairix | What to do |
-|---|---|
-| Laptop / local dev | Edit `.env` (Docker) or `~/.config/kairix/secrets/kairix.env` (pip) — set `KAIRIX_PROVIDER_LLM_ENDPOINT` + `KAIRIX_PROVIDER_LLM_API_KEY` |
-| Single-machine prod (any cloud) | Same as local dev with `chmod 600` on the file; store a backup out-of-band |
-| VM with cloud secrets manager (Azure KV / AWS / GCP / 1Password) | Run a small sidecar that materialises every `kairix-*` secret to `/run/secrets/kairix.env` at boot — no per-secret list to maintain |
-| Managed container platform (ECS / Cloud Run / AKS) | Reference the secrets directly in your task definition / service spec — the platform injects them as env vars |
-| Claude Desktop / Cursor / Aider | Wrapper script that sources the secrets file before exec'ing `kairix mcp serve`, or systemd-run `kairix mcp serve --transport http` and let clients connect to `localhost:8080/mcp` |
+- **Choose your AI provider** and add your key. Skip it for now if you like — keyword search works right away, and kairix shows you exactly what to add to switch on the smarter features.
+- **Connect your content** — sign in to Slack, GitHub, or Google, or point kairix at a folder of documents.
+- **Run your first search** and take the quick tour of what kairix can do.
 
-Every recipe is in [**docs/operations/secrets-configuration.md**](docs/operations/secrets-configuration.md) — the cross-provider matrix, the canonical naming convention, the resolution order, and rotation / verification commands. Run `kairix secrets verify` to see which secrets are loaded vs missing; `kairix onboard check --json` rolls every signal into one exit code.
+Prefer the command line? Every step has an equivalent — `kairix secrets set`, `kairix connect`, `kairix onboard scan`. The full walkthrough, including the cross-provider secrets matrix and per-collection settings, is in the [quick-start guide](docs/getting-started/quick-start.md) and the [secrets reference](docs/operations/secrets-configuration.md).
 
-### 3. Configure document collections
+To check everything's healthy at any point, run `kairix onboard check` — it runs the full set of subsystem checks and prints the exact fix for anything that's wrong. Add `--json` for a single machine-readable exit code you can wire into a healthcheck or monitor.
 
-Kairix organises your documents into named **collections** declared in `kairix.config.yaml`. Each collection has an `in_default: true|false` flag that controls whether your agent sees it in default searches:
-
-- **`in_default: true`** — collection joins the default search mix every time your agent calls `tool_search` without an explicit scope. Good for your **user library** (the team's working knowledge — projects, decisions, runbooks).
-- **`in_default: false`** — collection is still indexed and reachable via `--collection <name>` (CLI) or the `agent` parameter on `tool_search`, but it does not auto-join default scopes. Good for your **reference library** (large external corpora that would otherwise dominate result mix).
-
-Concrete example — a personal knowledge base alongside a shared reference library:
-
-```yaml
-collections:
-  shared:
-    - name: projects             # team's working knowledge
-      path: "01-Projects"
-      glob: "**/*.md"
-      # in_default defaults to true
-    - name: reference-library    # 5,000+ external docs
-      path: "reference-library"
-      glob: "**/*.md"
-      in_default: false          # opt-in scope only
-```
-
-See [`kairix.example.config.yaml`](kairix.example.config.yaml) for the full schema (per-agent paths, retrieval overrides per collection, fusion strategy).
-
-### 4. Verify
-
-```bash
-kairix onboard check          # human-readable: runs 18 checks (PATH → wrapper → secrets → docs → vector → Neo4j → agent memory → chunk dates → MCP → caches → topology → extractors)
-kairix onboard check --json   # structured: same checks, machine-readable, exits 0 only when every check passes — wire into your docker-compose healthcheck or external monitor
-```
-
-Green output looks like `All 18 checks passed`. The `--json` shape is `{passed, total, fully_passed, failures: [{check, detail, remediation}]}` — each failure carries an operator-actionable `remediation` string verbatim. Common failures and the canonical fix for each:
-
-| Check | Means | Canonical fix |
-|-------|-------|---------------|
-| `kairix_on_path` | `kairix` binary not on `$PATH` | `kairix init verify` reports the missing install element; add the pipx/venv bin dir to `PATH` |
-| `wrapper_installed` | Symlink points at raw Python binary, not the shell wrapper | `kairix init verify` reports the missing install element with a remediation |
-| `secrets_loaded` | The LLM key + endpoint are not in env or the secrets file | Set them in your env or a secrets file pointed at by `KAIRIX_SECRETS_FILE`; confirm with `kairix secrets verify` |
-| `document_root_configured` | `KAIRIX_DOCUMENT_ROOT` unset or directory missing | `export KAIRIX_DOCUMENT_ROOT=/data/documents` (or your path) |
-| `vector_search_working` | Vector search returned 0 results or failed | Run `kairix embed`; if credentials are missing fix `secrets_loaded` first |
-| `neo4j_reachable` | Neo4j unreachable or empty | Run the bundled `docker-compose.yml` (Neo4j is included) or `bash scripts/install-neo4j.sh`; then `kairix store crawl --document-root $KAIRIX_DOCUMENT_ROOT` |
-| `agent_knowledge_populated` | No agent memory logs found | Create `<doc-root>/04-Agent-Knowledge/<agent>/memory/`; agents write daily logs there |
-| `chunk_date_populated` | `chunk_date` column unpopulated (temporal boost inert) | Run `kairix embed` (migration is automatic) |
-| `mcp_service` | No MCP consumer registered | See step 5 below |
-
-Each failed check prints its own remediation string verbatim — agents should surface those strings to their admin without paraphrasing. The full diagnostic lives in [`kairix/platform/onboard/check.py`](kairix/platform/onboard/check.py).
-
-### 5. Wire into your agent
+### 3. Wire kairix into your agent
 
 **OpenClaw** — register the kairix MCP server and load the kairix-memory-prompt plugin so the agent gets bootstrap context at session start:
 

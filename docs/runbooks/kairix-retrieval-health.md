@@ -57,7 +57,7 @@ Failure envelope:
     {
       "check": "vector_search_working",
       "detail": "Vector search failed (vec_failed=True). Results: 12 (BM25 only). bm25=12, vec=0",
-      "remediation": "Run `docker logs kairix-worker-1` for embed-pipeline errors; confirm `kairix onboard check secrets_loaded` passes; then run `kairix embed --limit 20` to test the embed pipeline."
+      "remediation": "Run `docker logs app-kairix-1` for embed-pipeline errors; confirm `kairix onboard check secrets_loaded` passes; then run `kairix embed --limit 20` to test the embed pipeline."
     }
   ],
   "env_source": "/run/secrets/kairix.env"
@@ -431,8 +431,8 @@ Attach to the issue:
 kairix onboard check --json
 
 # Last 50 lines of worker logs — wherever your deployment ships them.
-# Docker: docker logs kairix-worker-1 --tail 50
-# Systemd: sudo journalctl -u kairix-worker --no-pager -n 50
+# Docker: docker logs app-kairix-1 --tail 50
+# Systemd: sudo journalctl -u kairix --no-pager -n 50
 # Bare metal: tail -50 ${KAIRIX_DATA_DIR}/logs/embed.log
 
 # Worker phase and counters.
