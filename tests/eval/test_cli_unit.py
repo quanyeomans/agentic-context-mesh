@@ -124,6 +124,32 @@ def test_generate_no_calibrate_flag_bypasses_calibration_check(monkeypatch, tmp_
     assert code == 0
 
 
+def test_generate_db_path_defaults_to_deployment_index(monkeypatch, tmp_path: Path) -> None:
+    """No --db -> generate_suite gets the deployment's index, not ~/.cache (#552).
+
+    Pre-fix the CLI defaulted --db to ~/.cache/kairix/index.sqlite, so on a
+    standard docker/system install (index at /var/lib/kairix/index.sqlite) every
+    invocation needed a manual --db override. The handler now resolves via
+    kairix.paths.index_path() — the same mode-aware path the worker writes.
+
+    Sabotage-proven: reverting the db-path resolver to the hardcoded ~/.cache
+    string makes the captured db_path != str(index_path()) and fails the first assert.
+    """
+    import kairix.quality.eval.generate as gen_mod
+    from kairix.paths import index_path
+
+    fake_gen = _FakeSuiteGenerator(generate_result=_gen_result())
+    monkeypatch.setattr(gen_mod, "SuiteGenerator", lambda: fake_gen)
+
+    # No --db -> the deployment's canonical index for the current mode.
+    _drive(["generate", "--output", str(tmp_path / "o.yaml")])
+    assert fake_gen.generate_calls[-1]["db_path"] == str(index_path())
+
+    # An explicit --db is respected verbatim.
+    _drive(["generate", "--output", str(tmp_path / "o2.yaml"), "--db", "/custom/index.sqlite"])
+    assert fake_gen.generate_calls[-1]["db_path"] == "/custom/index.sqlite"
+
+
 # ---------------------------------------------------------------------------
 # enrich
 # ---------------------------------------------------------------------------
