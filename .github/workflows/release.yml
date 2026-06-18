@@ -129,6 +129,19 @@ jobs:
             exit 1
           fi
 
+      # The F49 baseline check imports the shared three-cubes-fitness
+      # package (tc_fitness, [dev] group) via _rule_catalogue.py. Since
+      # EPIC #499 (2026-06-16) moved the catalogue schema into tc_fitness,
+      # running these scripts under the bare system interpreter crashes
+      # with ModuleNotFoundError (the bash wrapper masks it as a false
+      # "baselines did not shrink"). Sync the venv via the org-shared
+      # composite, then run the checks under it — mirrors the Stage 0
+      # arch-fitness job in ci.yml.
+      - uses: three-cubes/ci-workflows/actions/setup-uv-cached@main
+        with:
+          python-version: "3.12"
+          sync-args: "--all-extras --all-groups"
+
       - name: F49 — baselines shrink per release
         # Each release must reduce the F30/F46/F47 test-discipline
         # baselines by at least one entry vs the previous release
@@ -136,7 +149,7 @@ jobs:
         # docs/architecture/test-discipline-hardening.md §3 (F49).
         # Runs only here, not per-commit — baselines don't change
         # between commits within a release window.
-        run: bash scripts/checks/check-baseline-shrinking.sh
+        run: uv run bash scripts/checks/check-baseline-shrinking.sh
 
       - name: KFEAT-018 — paydown doc snapshot currency
         # The State table in docs/architecture/grandfathering-paydown.md
@@ -145,7 +158,7 @@ jobs:
         # extension comment with rationale). Mirrors the F49 invocation
         # above: release-time only, not per-commit.
         # See docs/features/KFEAT-018-paydown-doc-refresh/BRIEF.md.
-        run: python3 scripts/checks/check_paydown_doc_currency.py
+        run: uv run python3 scripts/checks/check_paydown_doc_currency.py
 
       - name: Extract release notes from CHANGELOG
 
