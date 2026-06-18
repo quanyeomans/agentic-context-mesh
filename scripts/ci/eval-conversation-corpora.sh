@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # eval-conversation-corpora.sh — Plan B-parity Week 4 Stream A.
 #
-# Discovers every reference-library/conversations/engagement-* corpus and
+# Discovers every reference-library/conversations/team-* corpus and
 # runs `kairix eval <suite> --json` against it. Compares the result against
 # the pinned baseline at reference-library/conversations/expected/<name>.json:
 #
@@ -45,11 +45,11 @@ PY
 }
 
 shopt -s nullglob
-suites=("$CORPUS_DIR"/engagement-*)
+suites=("$CORPUS_DIR"/team-*)
 shopt -u nullglob
 
 if [ "${#suites[@]}" -eq 0 ]; then
-    echo "::error::no engagement-* corpora found under $CORPUS_DIR"
+    echo "::error::no team-* corpora found under $CORPUS_DIR"
     echo "fix: seed at least one suite under $CORPUS_DIR/engagement-<name>/"
     echo "next: re-run after seeding (see $CORPUS_DIR/README.md for the layout)"
     exit 1

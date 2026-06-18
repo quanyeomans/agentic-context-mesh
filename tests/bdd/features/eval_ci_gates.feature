@@ -1,7 +1,7 @@
 Feature: CI eval gates wire the conversation evaluation harness into PR + nightly flows
   As a platform engineer
   I want the conversation-eval gate and the LoCoMo nightly to be configured correctly
-  So that regressions surface in the right loop (PR review for engagement-*, nightly trend for LoCoMo)
+  So that regressions surface in the right loop (PR review for team-*, nightly trend for LoCoMo)
 
   Scenario: Conversation-eval gate parses as valid GitHub Actions
     Given the reflib benchmark gate workflow file exists
@@ -17,8 +17,8 @@ Feature: CI eval gates wire the conversation evaluation harness into PR + nightl
     And it runs the locomo-nightly-run helper script
     And it runs the locomo-nightly-compare helper script
 
-  Scenario: Every engagement-* corpus has a pinned baseline file
-    Given every engagement-* corpus under reference-library/conversations
+  Scenario: Every team-* corpus has a pinned baseline file
+    Given every team-* corpus under reference-library/conversations
     When I look for a baseline file under reference-library/conversations/expected
     Then a baseline file exists for every corpus
     And the baseline file is either a SuiteResult shape or the sentinel shape

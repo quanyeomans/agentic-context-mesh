@@ -56,8 +56,6 @@ Operational procedures and incident runbooks for kairix deployments.
 | [MCP-DEPLOYMENT](../MCP-DEPLOYMENT.md) | Choose a transport (stdio/http/sse), wire `/mcp` and `/sse` mounts, configure agent registry, verify with `/healthz` |
 | [cold-start-envelope-reference](cold-start-envelope-reference.md) | Byte-exact reference of the `KAIRIX_COLD_START` 503 envelope captured from the 2026-06-06 production drill; what each field means, what to do when a client surfaces it, how to reproduce the drill locally, and the nightly soak that pins the contract |
 | [MCP-CLIENT-MIGRATION](../MCP-CLIENT-MIGRATION.md) | Migrate Claude Desktop / Claude Code / OpenClaw / custom Python or Node clients from `/sse` to `/mcp` |
-| [plan-b-parity-runbook](../plan-b-parity-runbook.md) | Consolidated single-page operator workflow — pre-flight → hydrate → ingest → query → validate → cost model → teardown, with cross-links into the deep docs below |
-| [consultancy-in-a-box](../consultancy-in-a-box.md) | Per-engagement workflow — spin up container, ingest knowledge store + transcripts, query, validate, teardown |
 | [fact-extractor](../fact-extractor.md) | How the LLM fact extractor works, when to enable, cost model, prompt customisation |
 | [eval-suite](../eval-suite.md) | Running `kairix eval`, picking metrics + backends, the regression-gate CI pattern |
 | [MCP-ingest-tools](../MCP-ingest-tools.md) | Agent-callable `ingest_chat` and `facts_about` — namespace fence, safety boundaries, calling patterns |

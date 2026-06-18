@@ -236,9 +236,9 @@ a change in the SAME PR that satisfies the job's path filter (e.g. a
 trivial source-touching edit) so the caller actually executes before
 merge. CI confirming green on the PR is only meaningful if the changed job
 ran. See
-[`docs/operations/runbooks/how-to-consume-a-shared-reusable-workflow.md`](../operations/runbooks/how-to-consume-a-shared-reusable-workflow.md)
+[`docs/development/how-to-consume-a-shared-reusable-workflow.md`](../development/how-to-consume-a-shared-reusable-workflow.md)
 and
-[`docs/operations/runbooks/runbook-ci-startup-failure.md`](../operations/runbooks/runbook-ci-startup-failure.md).
+[`docs/development/runbook-ci-startup-failure.md`](../development/runbook-ci-startup-failure.md).
 
 ## Related
 

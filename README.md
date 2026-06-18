@@ -212,14 +212,13 @@ Kairix also ingests chat-shaped data (meeting transcripts, agent coordination ch
 
 ```bash
 # Ingest a JSONL transcript; one window of turns at a time goes through the LLM fact extractor
-kairix ingest-chat ./session-001.jsonl --namespace engagement-alpha
+kairix ingest-chat ./session-001.jsonl --namespace team-alpha
 ```
 
-The fact extractor surfaces claims like `(agent-alpha, current-engagement, engagement-alpha)` with citations back to the source turns; the consolidation pass flags contradictions when a new conversation overrides a prior decision; and `kairix eval` scores retrieval + extraction quality against a ground-truth corpus so you can spot regressions before they reach a live agent.
+The fact extractor surfaces claims like `(agent-alpha, current-project, project-atlas)` with citations back to the source turns; the consolidation pass flags contradictions when a new conversation overrides a prior decision; and `kairix eval` scores retrieval + extraction quality against a ground-truth corpus so you can spot regressions before they reach a live agent.
 
 | Topic | Where to look |
 |-------|---------------|
-| End-to-end engagement workflow | [docs/operations/consultancy-in-a-box.md](docs/operations/consultancy-in-a-box.md) |
 | How the fact extractor works (cost, prompt, when to enable) | [docs/operations/fact-extractor.md](docs/operations/fact-extractor.md) |
 | `kairix eval` suite + regression-gate | [docs/operations/eval-suite.md](docs/operations/eval-suite.md) |
 | Agent-callable MCP tools (`ingest_chat`, `facts_about`) | [docs/operations/MCP-ingest-tools.md](docs/operations/MCP-ingest-tools.md) |

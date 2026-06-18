@@ -24,7 +24,7 @@ it against the document corpus would miss the point.
 ```
 reference-library/conversations/
   README.md                              this file
-  <engagement-name>/
+  <namespace-name>/
     session-001.jsonl                    one session = one jsonl file
     session-002.jsonl
     ...
@@ -32,9 +32,9 @@ reference-library/conversations/
     ground-truth-queries.json            queries + expected answers for eval scoring
 ```
 
-Each engagement-named directory is a synthetic multi-session
+Each namespace-named directory is a synthetic multi-session
 conversation between agent personas. Names are generic
-(`engagement-alpha`, `engagement-beta`, …) — no real client, vendor,
+(`team-alpha`, `team-beta`, …) — no real client, vendor,
 or person ever appears. New corpora go in their own subdirectory;
 the eval harness discovers them automatically.
 
@@ -61,8 +61,8 @@ the full conversation:
 [
   {
     "entity": "agent-alpha",
-    "attribute": "current-engagement",
-    "value": "engagement-alpha",
+    "attribute": "current-namespace",
+    "value": "team-alpha",
     "evidence_turn_ids": ["s001-t003", "s001-t005"]
   }
 ]
@@ -79,8 +79,8 @@ Queries + expected answers for the RAG-style scoring:
 ```json
 [
   {
-    "question": "What is agent-alpha's current engagement?",
-    "answer": "engagement-alpha",
+    "question": "What is agent-alpha's current namespace?",
+    "answer": "team-alpha",
     "category": "single-hop",
     "evidence_turn_ids": ["s001-t003"]
   }
@@ -95,11 +95,11 @@ category subscores are comparable across corpora.
 
 ```bash
 # Score the fact extractor against ground truth
-kairix eval --suite reference-library/conversations/engagement-alpha \
+kairix eval --suite reference-library/conversations/team-alpha \
     --metric extractor-f1
 
 # Score end-to-end retrieval against ground truth queries
-kairix eval --suite reference-library/conversations/engagement-alpha \
+kairix eval --suite reference-library/conversations/team-alpha \
     --metric query-pass-rate
 
 # Per-PR CI gate
@@ -116,7 +116,7 @@ Per the public-repo norms (no real client, vendor, person, or
 organisation in any artefact):
 
 - Personas use generic names: `agent-alpha`, `agent-beta`, `growth-coach`, …
-- Engagements use generic names: `engagement-alpha`, `engagement-beta`, …
+- Engagements use generic names: `team-alpha`, `team-beta`, …
 - Topics are plausible consultancy/agent-coordination shape but
   fully invented — no real product name, real deal name, real PII
 - Dates are real-looking ISO timestamps but tied to fictional events
@@ -129,10 +129,10 @@ this tree.
 
 Five synthetic corpora seeded for Plan B-parity Week 2 Stream B:
 
-- `engagement-alpha/` — onboarding-shape, single-hop heavy
-- `engagement-beta/` — architecture-decision, multi-hop heavy
-- `engagement-gamma/` — multi-session strategy planning, mixed
-- `engagement-delta/` — contradiction / supersession-rich
-- `engagement-epsilon/` — temporal-reasoning heavy
+- `team-alpha/` — onboarding-shape, single-hop heavy
+- `team-beta/` — architecture-decision, multi-hop heavy
+- `team-gamma/` — multi-session strategy planning, mixed
+- `team-delta/` — contradiction / supersession-rich
+- `team-epsilon/` — temporal-reasoning heavy
 
 Capability #2 (the LLM fact extractor) iterates against these.

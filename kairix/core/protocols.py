@@ -685,8 +685,8 @@ class FactStore(Protocol):
         ...
 
     # search(query, *, top_k, namespace): up to top_k facts matching query,
-    # best first. namespace=non-None restricts to that namespace (engagement-
-    # scoped recall for consultancy-in-a-box); None means "all namespaces".
+    # best first. namespace=non-None restricts to that namespace (namespace-
+    # scoped recall); None means "all namespaces".
     # Empty list is a valid "no facts" signal; by default excludes superseded.
     def search(self, query: str, *, top_k: int = 10, namespace: str | None = None) -> list[FactHit]:
         """Return up to ``top_k`` non-superseded facts matching ``query`` in ``namespace``."""

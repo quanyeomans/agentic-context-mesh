@@ -45,14 +45,14 @@ jobs:
 
   # Plan B-parity Week 4 Stream A — conversation eval gate.
   #
-  # Discovers every reference-library/conversations/engagement-*/ corpus
+  # Discovers every reference-library/conversations/team-*/ corpus
   # and runs `kairix eval <suite> --json` against it. When a pinned baseline
   # exists under reference-library/conversations/expected/<suite>.json,
   # asserts the run does not regress by more than 2pp (gate fails the PR).
   # When the baseline is a sentinel ({"baseline": "not-yet-measured"}),
   # the run is recorded but not gated — "establishing baseline" mode.
   conversation-eval-gate:
-    name: Conversation eval suites (engagement-*)
+    name: Conversation eval suites (team-*)
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

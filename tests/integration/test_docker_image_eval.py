@@ -36,7 +36,7 @@ import pytest
 # If the Dockerfile stops copying ``conversations/`` this test fails
 # at the ``docker run`` step (no such path inside the container) which
 # is the failure signal we want.
-_IMAGE_CORPUS_PATH = "/opt/kairix/reference-library/conversations/engagement-alpha"
+_IMAGE_CORPUS_PATH = "/opt/kairix/reference-library/conversations/team-alpha"
 
 
 def _docker_available() -> bool:
@@ -78,7 +78,7 @@ def test_docker_run_kairix_eval_emits_valid_json() -> None:
     """``docker run <image> eval <corpus> --json`` round-trips valid JSON.
 
     Sabotage-proof: mutated ``_IMAGE_CORPUS_PATH`` to
-    ``/opt/kairix/reference-library/conversations/engagement-missing``
+    ``/opt/kairix/reference-library/conversations/team-missing``
     locally and re-ran the test — ``docker run`` exits non-zero (path
     not found inside the image), the JSON parse never happens, and the
     test fails as expected. Restored the constant.

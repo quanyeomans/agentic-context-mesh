@@ -1,216 +1,86 @@
-# How To: Upgrade the Kairix Binary
+# How To: Upgrade Kairix
 
-**Purpose:** Install a new tagged release of kairix safely, with benchmark gate to confirm NDCG has not regressed before committing the upgrade.
+**Purpose:** Move a running deployment to a new tagged release safely. Pull the new image, run the health gate, and confirm retrieval quality has not regressed before you keep the upgrade.
 
----
-
-## Migration from v2026.5.18 to the current release
-
-The next production release rolls up a large body of work since v2026.5.18. Operator-visible changes:
-
-**Storage model — streaming bronze (no on-disk blobs).**
-Fetched bytes are extracted in-memory and discarded; `bronze_records` carries only metadata + content hash. Disk usage drops dramatically vs the v2026.5.18 on-disk model. Recovery uses `connector.fetch(item_id)` to re-pull on demand rather than reading a persisted blob.
-
-- Remove any `bronze_mode:` line from `kairix.config.yaml` if you set one experimentally — the field is no longer accepted and the runtime raises a fix-pointer error if it sees one.
-- Existing on-disk bronze blobs from a v2026.5.18 deploy become unused. After upgrade, run any outstanding dead-letter recovery (`kairix worker reextract`), then `rm -rf $bronze_root` reclaims the disk.
-
-**Scratch directory off tmpfs.**
-The image ships `TMPDIR=/data/kairix/tmp` so Python's `tempfile` lands on the bind-mounted runtime volume instead of the 2GB `/tmp` tmpfs. No operator action needed unless you override `TMPDIR` in your compose env — in which case point it at a disk-backed mount with tens of GB free.
-
-**New connectors + maintenance loop (all default-off).**
-SharePoint, Slack, GitHub, and Notion connectors plus a background maintenance loop ship in the release. Each is gated by a default-off feature flag — pulling the new image is a no-op for operators until you flip a flag. Wire credentials via your existing secrets provider (Key Vault / Secrets Manager) and enable per the connector's runbook.
-
-**Topology v2 operator-config surface.**
-Connector / collection / scope-profile topology is now configurable via `kairix.config.yaml`. The v2026.5.18 single-connector single-collection shape continues to work unchanged; topology v2 is opt-in via feature flag.
-
-**Dead-letter recovery: `kairix worker reextract`.**
-Operator path to recover items that hit the dead-letter table after an extractor fix lands. Walks each dead-lettered row, re-runs extraction, and clears the row when it succeeds. `--dry-run` sizes the recovery before committing. See `docs/operations/runbooks/` for the recovery procedure.
-
-**Onboard check additions.**
-The onboard check now imports every library each registered extractor declares and verifies the configurable `agent_knowledge_populated` glob. If your knowledge directory uses a non-default layout, pin via `kairix.config.yaml`:
-
-```yaml
-paths:
-  agent_knowledge_dir: "team-memory"           # if your vault uses a different dir name
-  agent_memory_glob: "*/memory/*.md"           # if you want the strict <agent>/memory/<file>.md layout
-```
-
-The check's failure detail names the directory and glob that were searched, so a mismatch is visible at a glance.
+Docker Compose is the recommended deployment. For systemd/host installs, see the short section at the end.
 
 ---
 
-## Migration to v2026.5.17: pick your provider plugin
+## Docker Compose upgrade (recommended)
 
-v2026.5.17 retires the `KAIRIX_PROVIDER` env-var seam — the LLM/embed plugin is now selected by a top-level `provider:` field in `kairix.config.yaml`. The plugin is the only embed/chat path; each plugin owns its own credential-retrieval pattern (Azure → Key Vault; AWS → Secrets Manager; etc.), so secrets stay where the plugin's runbook puts them.
+The app runs as the `kairix` service alongside `neo4j`. The image tag is set by the `KAIRIX_IMAGE_TAG` environment variable (`ghcr.io/three-cubes/kairix:${KAIRIX_IMAGE_TAG:-main}`), so an upgrade is: change the tag, pull, restart, gate.
 
-**Before pulling the new image / running pip install**, edit your `kairix.config.yaml` and add the field at the top:
+1. **Set the new image tag.** Edit the `KAIRIX_IMAGE_TAG` value in your `.env` (or your compose environment) to the release you want, for example:
 
-```yaml
-# kairix.config.yaml
-provider: azure_foundry   # or: openai
-```
+   ```bash
+   # .env
+   KAIRIX_IMAGE_TAG=v2026.6.18
+   ```
 
-If you previously set `KAIRIX_PROVIDER` in your shell / docker-compose env, remove it — it is no longer read. If you don't have a `kairix.config.yaml`, copy `kairix.example.config.yaml` from the source checkout, set `provider:`, and place it at the path `KAIRIX_CONFIG_PATH` points to (or `./kairix.config.yaml` in your run cwd).
+2. **Pull and restart.** From the directory holding your `docker-compose.yml`:
 
-After upgrading, verify the plugin resolves:
+   ```bash
+   docker compose pull
+   docker compose up -d
+   ```
 
-```bash
-kairix probe-config --output /tmp/probe.json
-cat /tmp/probe.json | jq .provider.name
-# expect: "azure_foundry"  (or your configured plugin)
-```
+3. **Run the health gate.** This is the upgrade gate — it must pass before you treat the upgrade as done:
 
-If the probe reports `no provider configured`, your yaml file isn't being found by the runtime — re-check `KAIRIX_CONFIG_PATH` and the file's location. If it reports a typed `ProviderNotRegistered` error, the configured name doesn't match an installed plugin; the error's `available` field lists what's currently registered.
+   ```bash
+   docker compose exec kairix kairix onboard check
+   ```
 
----
+   `onboard check` verifies the service is healthy: config resolves, the provider plugin loads, each extractor's libraries import, secrets are reachable, and search returns vector hits. If anything fails, the output names what was checked so the fix is obvious. Roll back (step 5) if it does not pass.
 
-## Docker Compose Upgrade (recommended)
+4. **Confirm retrieval quality (recommended).** Run the benchmark suite and compare against the score you captured before the upgrade, to catch a silent recall regression that a health check won't:
 
-```bash
-cd /path/to/kairix/docker
-docker compose pull
-docker compose up -d
-kairix onboard check   # verify after upgrade
-```
+   ```bash
+   docker compose exec kairix kairix benchmark run \
+     --suite suites/your-suite.yaml \
+     --output /var/lib/kairix/logs/benchmark-results/
 
-Gate: overall >= 0.80 (current baseline: 0.8385 NDCG@10).
+   docker compose exec kairix kairix benchmark compare \
+     /var/lib/kairix/logs/benchmark-results/<before>.json \
+     /var/lib/kairix/logs/benchmark-results/<after>.json
+   ```
 
----
+   Gate: overall NDCG@10 stays at or above your baseline (don't accept a meaningful drop). If it regressed, roll back and see [runbook-benchmark-regression](runbook-benchmark-regression.md).
 
-## Before You Start (pip install path)
+5. **Roll back if a gate fails.** Pin the previous tag and restart:
 
-```bash
-# Record current version and baseline benchmark score
-kairix --version
+   ```bash
+   # .env — set KAIRIX_IMAGE_TAG back to the prior release
+   KAIRIX_IMAGE_TAG=v<PREVIOUS_TAG>
 
-kairix benchmark run \
-  --suite suites/your-suite.yaml \
-  --output ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/benchmark-results/
-# Note the output filename — compare against this after upgrade
+   docker compose pull
+   docker compose up -d
+   docker compose exec kairix kairix onboard check
+   ```
 
-# Verify current search is healthy
-kairix search "test"
-# Confirm vec > 0, no vec_failed
-```
-
----
-
-## Step 1 — Install New Version (Alternative: pip install, legacy)
-
-Kairix is installed into a virtualenv at `/opt/kairix/.venv`.
-
-```bash
-# Install new version
-sudo /opt/kairix/.venv/bin/pip install kairix-agentic-knowledge-mgt==<NEW_VERSION>
-
-kairix --version
-# Should show new version
-```
+> Tip: capture the baseline benchmark score *before* you change the tag, so step 4 has something to compare against. Run the same `benchmark run` command on the running deployment first and keep the output filename.
 
 ---
 
-## Step 2 — Verify All Symlinks Still Intact
+## systemd / host upgrade
 
-Pip install can overwrite or reset the bin directory. Re-check all symlinks immediately.
+For a host install, the layout follows the filesystem standard: config under `/etc/kairix`, data under `/var/lib/kairix`, with a systemd unit running the service.
 
-```bash
-# Confirm /usr/local/bin/kairix still points to wrapper (not raw binary)
-ls -la /usr/local/bin/kairix
-# Must be: /usr/local/bin/kairix -> /opt/kairix/bin/kairix-wrapper.sh
+- **Fresh bootstrap.** `kairix init --system` lays down the directory tree, config template, and systemd unit (run as root). Use `--user` for a per-user install under `~/.config/kairix` and `~/.local/share/kairix`.
+- **In-place upgrade.** Follow [kairix-systemd-update](../../runbooks/kairix-systemd-update.md) for the host upgrade procedure.
 
-# If your integration tool adds a second kairix symlink, check that too
-ls -la /opt/<tool>/bin/kairix 2>/dev/null || echo "no integration symlink"
-
-# If any symlink was overwritten — fix immediately
-sudo ln -sf /opt/kairix/bin/kairix-wrapper.sh /usr/local/bin/kairix
-# Repeat for any integration symlinks
-
-# Verify wrapper exists and is executable
-ls -la /opt/kairix/bin/kairix-wrapper.sh
-```
-
-If wrapper is missing → the new version may not have installed it:
-```bash
-find /opt/kairix -name "kairix-wrapper*" 2>/dev/null
-# Restore from repo if missing
-sudo cp scripts/kairix-wrapper.sh /opt/kairix/bin/
-sudo chmod +x /opt/kairix/bin/kairix-wrapper.sh
-```
-
----
-
-## Step 3 — Run Onboard Check
+The health gate is the same either way — after the unit is back up, run:
 
 ```bash
 kairix onboard check
-# All tests must pass before running benchmark
-# If secrets tests fail → check that your secrets file is populated and KAIRIX_KV_NAME is set
-# If vector test fails → verify the kairix wrapper script is on PATH (not the raw Python binary)
 ```
 
----
-
-## Step 4 — Run Benchmark (Upgrade Gate)
-
-```bash
-kairix benchmark run \
-  --suite suites/your-suite.yaml \
-  --output ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/benchmark-results/
-
-# Compare against pre-upgrade baseline
-kairix benchmark compare \
-  ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/benchmark-results/<before>.json \
-  ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/benchmark-results/<after>.json
-
-# If any metric regressed significantly → rollback (Step 6), investigate regression
-# See runbook-benchmark-regression for diagnosis
-```
-
----
-
-## Step 5 — Commit Upgrade (If Benchmark Passes)
-
-```bash
-# Update the version pin in your operator config/install script
-git add <install-script-or-version-file>
-git commit -m "chore: pin kairix to v<NEW_VERSION> (benchmark passed)"
-```
-
----
-
-## Step 6 — Rollback (If Benchmark Fails)
-
-```bash
-# Rollback to previous tagged release
-pip install git+https://github.com/three-cubes/kairix@<PREVIOUS_TAG>
-
-# Re-run onboard check and benchmark to confirm baseline restored
-kairix onboard check
-kairix benchmark run --suite suites/your-suite.yaml
-```
-
----
-
-## Verify Upgrade Complete
-
-```bash
-kairix --version
-# Shows new version
-
-kairix search "platform architecture"
-# vec > 0, no vec_failed
-
-kairix onboard check
-# All green
-
-kairix benchmark run --suite suites/your-suite.yaml
-# Scores not regressed vs pre-upgrade baseline
-```
+and, to confirm retrieval quality, `kairix benchmark run` plus a `kairix benchmark compare` against your pre-upgrade baseline.
 
 ---
 
 ## Related
 
 - [how-to-run-benchmark](how-to-run-benchmark.md) — detailed benchmark procedure
-- [runbook-benchmark-regression](runbook-benchmark-regression.md) — if benchmark fails post-upgrade
+- [runbook-benchmark-regression](runbook-benchmark-regression.md) — if the benchmark gate fails post-upgrade
+- [kairix-systemd-update](../../runbooks/kairix-systemd-update.md) — in-place systemd/host upgrade
 - [INDEX](INDEX.md) — full runbook registry
