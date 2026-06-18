@@ -27,7 +27,7 @@ def test_locomo_nightly_parses() -> None:
     """Body populated by @scenario from the .feature file."""
 
 
-@scenario(FEATURE, "Every engagement-* corpus has a pinned baseline file")
+@scenario(FEATURE, "Every team-* corpus has a pinned baseline file")
 def test_every_corpus_has_baseline() -> None:
     """Body populated by @scenario from the .feature file."""
 

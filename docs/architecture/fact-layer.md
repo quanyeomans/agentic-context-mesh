@@ -2,7 +2,7 @@
 
 ## What this is for
 
-This ADR captures the design of kairix's structured fact layer — the protocols, components, and contracts that let kairix turn chat-shaped data into evidence-backed claims, persist them through engagement lifecycles, and surface them alongside chunk-based retrieval. It exists so a reader can answer four questions in one read:
+This ADR captures the design of kairix's structured fact layer — the protocols, components, and contracts that let kairix turn chat-shaped data into evidence-backed claims, persist them for the life of a knowledge store, and surface them alongside chunk-based retrieval. It exists so a reader can answer four questions in one read:
 
 1. Why did kairix add a fact layer when it already had document chunks and entities?
 2. What are the layer's components and how do they compose?
@@ -11,7 +11,7 @@ This ADR captures the design of kairix's structured fact layer — the protocols
 
 ## Why the fact layer exists
 
-Chunk retrieval is great for "give me the relevant paragraph"; it's poor for "what is agent-alpha's current engagement?" The agent has to read 1,500 tokens of chunks and infer the answer, which burns context tokens and is brittle when the answer is scattered across many turns.
+Chunk retrieval is great for "give me the relevant paragraph"; it's poor for "what is agent-alpha's current project?" The agent has to read 1,500 tokens of chunks and infer the answer, which burns context tokens and is brittle when the answer is scattered across many turns.
 
 Plan B-parity adds a fact layer so:
 
@@ -57,7 +57,7 @@ From the agent's perspective the tool call is the same as before. From the opera
 
 **Protocols first.** Every component on every surface targets a Protocol in `kairix/core/protocols.py` — `FactRecord`, `FactStore`, `FactExtractor`, `FactRetriever`. Production wires the concrete implementations; tests inject `FakeFactStore` / `FakeFactExtractor` from `tests/fakes.py`. F1 is enforced — no monkeypatching, no internal-attribute reassignment. The cost is a small extra constructor surface in `ingest_chat` and `eval_suite`; the benefit is that swapping any layer for an alternate implementation (SQLite → Postgres, LLM extractor → rule-based extractor) is a Protocol substitution with no test rewrite.
 
-**SQLite for persistence.** Same reasoning as the existing kairix chunk + entity stores — one file per engagement, zero ops, atomic teardown via `docker compose down -v`. The fact volume per engagement is small (thousands to tens of thousands of facts, not millions); SQLite is comfortable in that range.
+**SQLite for persistence.** Same reasoning as the existing kairix chunk + entity stores — one file per knowledge store, zero ops, atomic teardown via `docker compose down -v`. The fact volume per store is small (thousands to tens of thousands of facts, not millions); SQLite is comfortable in that range.
 
 **Supersession over deletion.** Contradicted facts are marked `superseded_by` rather than deleted. Default search excludes them; audit queries can include them with a future `include_superseded=True` kwarg. This preserves the evidence chain — an agent revisiting "why did we change our minds about pricing?" can see both the old and new claim and the turn that triggered the change.
 
@@ -66,16 +66,15 @@ From the agent's perspective the tool call is the same as before. From the opera
 ## Open questions for next iterations
 
 - **Confidence calibration.** The extractor returns `confidence` per fact but the consolidation rule doesn't yet use it. A future pass should weight confidence into the supersession decision.
-- **Cross-namespace federation.** Facts are namespace-scoped today. A controlled-disclosure flow for "show me facts from this engagement plus everything tagged `shared`" exists; finer-grained cross-namespace queries (e.g. "facts about agent-alpha across all engagements they appeared in") need a separate design.
+- **Cross-namespace federation.** Facts are namespace-scoped today. A controlled-disclosure flow for "show me facts from this namespace plus everything tagged `shared`" exists; finer-grained cross-namespace queries (e.g. "facts about agent-alpha across all namespaces they appeared in") need a separate design.
 - **Streaming ingest.** `kairix ingest-chat` is batch (one JSONL → one ingest pass). A streaming ingest endpoint (one turn arrives → one extraction call → one consolidation pass) is in scope but not yet on the roadmap.
 
 ## Vault decision docs
 
-The full design discussion — including alternatives considered, the decision log, and the per-week execution plan — lives in the project's internal knowledge store under `02-Areas/02-Three-Cubes-Ventures/Kairix-Platform/Delivery/Sprints/`. The public repo carries the ADR (this file) and the operator-facing docs only.
+The full design discussion — alternatives considered, the decision log, and the execution plan — lives in the project's internal knowledge store. The public repo carries the ADR (this file) and the operator-facing docs only.
 
 ## See also
 
-- [`docs/operations/consultancy-in-a-box.md`](../operations/consultancy-in-a-box.md) — operator workflow that exercises every surface
 - [`docs/operations/fact-extractor.md`](../operations/fact-extractor.md) — Surface A operator guide
 - [`docs/operations/eval-suite.md`](../operations/eval-suite.md) — Capability #4 eval gate
 - [`docs/operations/MCP-ingest-tools.md`](../operations/MCP-ingest-tools.md) — agent-callable MCP surface

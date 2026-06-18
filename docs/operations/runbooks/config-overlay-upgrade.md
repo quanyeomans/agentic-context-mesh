@@ -43,7 +43,7 @@ services:
     environment:
       - KAIRIX_CONFIG_OVERLAY_PATH=/opt/kairix/kairix.config.local.yaml
 
-  kairix-worker:
+  kairix:
     # same two changes
 ```
 
@@ -52,7 +52,7 @@ The `docker-compose.example.yml` in the repo carries the canonical shape.
 ### 4. Restart with `--force-recreate`
 
 ```bash
-docker compose up -d --force-recreate --wait kairix kairix-worker
+docker compose up -d --force-recreate --wait kairix
 ```
 
 `--force-recreate` is important: without it, compose treats a running unhealthy container as "running" and skips the restart, so your config change doesn't take effect. The `alpha-deploy-webhook` does this automatically from `v2026.5.18` onward.

@@ -15,7 +15,7 @@ Reach for this runbook when you are about to:
 - Bump the installed kairix package version (`pip install --upgrade kairix==<version>`, or your operator-owned `kairix-deploy.sh` from a sibling infrastructure repo).
 - Change the `kairix-mcp.service` unit file (ports, environment, `ExecStart`, `Restart=` policy).
 - Change the `kairix-fetch-secrets.service` unit file or its rendered `/run/secrets/kairix.env` writer (the docker-compose `vault-agent` analogue for the VM).
-- Land a `kairix-worker.service` unit file once #243 ships — the SRE worker is planned but not yet on the VM; use the worker-CLI procedure here in the interim.
+- Land a `kairix.service` unit file once #243 ships — the SRE worker is planned but not yet on the VM; use the worker-CLI procedure here in the interim.
 
 Do NOT use this runbook for:
 
@@ -68,7 +68,7 @@ kairix worker status
 # Expected: phase=paused (or phase=idle if it was already idle).
 ```
 
-**Next action:** confirm `phase=paused` or `phase=idle`. If `phase=embedding` persists for more than 30 seconds, the worker is stuck in a batch — wait one more cycle, then `systemctl stop kairix-worker.service` once #243 lands; today the worker is in-process and exits when MCP restarts.
+**Next action:** confirm `phase=paused` or `phase=idle`. If `phase=embedding` persists for more than 30 seconds, the worker is stuck in a batch — wait one more cycle, then `systemctl stop kairix.service` once #243 lands; today the worker is in-process and exits when MCP restarts.
 
 ### Step 2 — Apply the update
 
@@ -161,7 +161,7 @@ These are the failure modes seen in the field; reach for the matching section wh
 
 **Symptom:** post-reboot, `/run/secrets/kairix.env` does not exist and `systemctl is-enabled kairix-fetch-secrets.service` returns `disabled`. MCP boots without credentials; onboard check fails `secrets_loaded`.
 
-**Root cause:** the systemd unit was installed without `WantedBy=multi-user.target` (or the enable step was skipped) and got dropped on the first reboot. The durable fix is the SRE worker design in [#243](https://github.com/three-cubes/kairix/issues/243), which makes the secrets fetch a managed step inside `kairix-worker.service` rather than a separate oneshot.
+**Root cause:** the systemd unit was installed without `WantedBy=multi-user.target` (or the enable step was skipped) and got dropped on the first reboot. The durable fix is the SRE worker design in [#243](https://github.com/three-cubes/kairix/issues/243), which makes the secrets fetch a managed step inside `kairix.service` rather than a separate oneshot.
 
 **Manual remediation today:**
 
@@ -337,5 +337,5 @@ If rollback restores the package but onboard check still cannot return 9/9, the 
 - [`how-to-upgrade-kairix.md`](../operations/runbooks/how-to-upgrade-kairix.md) — Docker-compose upgrade procedure; this runbook is the systemd-on-VM counterpart.
 - [`runbook-benchmark-regression.md`](../operations/runbooks/runbook-benchmark-regression.md) — bisect workflow when §3 step 6 or §5 step 6 shows a regression.
 - Your infrastructure repo's `kairix-deploy.sh` resilience tracker — rollback flag, onboard-check exit-code gating.
-- [kairix#243](https://github.com/three-cubes/kairix/issues/243) — SRE worker design: collapses `kairix-fetch-secrets.service` into a managed step inside `kairix-worker.service`, eliminating the disabled-after-reboot failure mode in §4.
+- [kairix#243](https://github.com/three-cubes/kairix/issues/243) — SRE worker design: collapses `kairix-fetch-secrets.service` into a managed step inside `kairix.service`, eliminating the disabled-after-reboot failure mode in §4.
 - `kairix-secrets-rotation.md` — the next runbook the operator owes; covers `KAIRIX_LLM_API_KEY` / `KAIRIX_LLM_ENDPOINT` rotation without a package change. Will live in this same directory.

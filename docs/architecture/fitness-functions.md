@@ -3390,7 +3390,7 @@ enforcement mechanism (review, runtime check, or human judgement):
   reusable-workflow caller or its inputs, force a triggering change in the
   SAME PR (e.g. a no-op source touch matching the job's path filter) so
   the caller actually runs before merge. See
-  [`docs/operations/runbooks/how-to-consume-a-shared-reusable-workflow.md`](../operations/runbooks/how-to-consume-a-shared-reusable-workflow.md).
+  [`docs/development/how-to-consume-a-shared-reusable-workflow.md`](../development/how-to-consume-a-shared-reusable-workflow.md).
 
 - **Probe/scratch files written outside `tmp_path`.** A test that writes
   scratch or probe files into the live source tree (instead of pytest's

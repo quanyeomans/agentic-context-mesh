@@ -168,8 +168,8 @@ def test_search_excludes_superseded_facts_by_default() -> None:
 def test_search_respects_namespace_filter() -> None:
     """``namespace=`` restricts results to facts in that namespace.
 
-    Critical for the consultancy-in-a-box pattern — each engagement
-    queries its own namespace; cross-engagement leak would defeat the
+    Critical for namespace-scoped recall — each namespace queries
+    only its own facts; a cross-namespace leak would defeat the
     isolation guarantee.
     """
     store = FakeFactStore()

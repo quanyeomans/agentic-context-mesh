@@ -5,6 +5,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning: [Calendar Versioning (CalVer)](https://calver.org/) — `YYYY.MM.DD`, with `.N` suffix for same-day releases.
 Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.04.18`.
 
+## [2026.6.18] - 2026-06-18 — Set up kairix in your browser
+
+> **Upgrading?** Pull the new image and restart — your knowledge store, sources, and agents all carry over. New installs now open into a browser setup page; existing installs keep working exactly as they are.
+
+### For humans
+
+- **Set kairix up in your browser.** Open it and a setup page appears. Choose your AI provider, add your key, connect your sources, and run your first search — no config files, no command line.
+- **Connect your accounts by signing in.** Add Slack, GitHub, or Google right from the setup page — one sign-in and you're connected.
+- **Try it before you finish.** Setup ends with a quick tour — a handful of one-click examples that run real searches and briefings on your own content.
+- **Start before you've added an AI key.** kairix works the moment it's installed: keyword search is ready right away, and it shows you what to add to turn on the smarter features.
+
+### For agents
+
+- **Agents can save what they learn.** A new `remember` command and `memory_write` tool let an agent write to its own memory — ready on a fresh install, nothing to wire up.
+- **Agents get a built-in guide.** Ask kairix how to use it and you get a real answer — the usage guide now ships inside the product.
+- **An agent can set itself up.** The browser setup, or `kairix setup`, lets an agent install kairix and connect its own sources.
+- **Results keep coming during setup.** Agents get keyword search before the AI key is in place, instead of an error.
+
+### For operators
+
+- **Fresh installs just work.** kairix starts cleanly before everything's filled in and tells you plainly what's still needed.
+- **Works out of the box on a standard Docker setup** — nothing extra to configure.
+- **Slack stays up to date.** Your Slack messages keep flowing into kairix as they're posted.
+- **Connecting accounts is simpler.** Signing in captures and stores what each source needs, so there's less to set by hand.
+- **Your first import is faster.** kairix indexes your own documents first, so your most useful results show up sooner.
+
 ## [2026.6.9] - 2026-06-09 — Better search quality, cleaner output, smarter agents
 
 > **Upgrading?** Nothing breaks. Your search, briefings, and agents keep working exactly as they did. Five new things are available when you want them — turn each on when it's useful, leave the rest alone.

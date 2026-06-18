@@ -388,7 +388,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "suite_path",
-        help="Path to the suite directory (e.g. reference-library/conversations/engagement-alpha).",
+        help="Path to the suite directory (e.g. reference-library/conversations/team-alpha).",
     )
     parser.add_argument(
         "--metric",

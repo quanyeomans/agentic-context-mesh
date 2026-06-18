@@ -94,14 +94,14 @@ The lines under each "Script:" heading are written for you to say verbatim to yo
 > If the weighted score is below 0.85, something has regressed in the search pipeline. Ask them to check the docker logs for embed worker errors and the most recent eval results:
 >
 > ```
-> docker compose logs --tail=200 kairix-worker
+> docker compose logs --tail=200 kairix
 > ```
 
 **Files / commands the admin needs:**
 
 - `kairix benchmark list` — lists bundled suites (lands in #222)
 - `kairix benchmark run reflib` — canonical search-quality benchmark (lands in #222)
-- `docker compose logs kairix-worker` — embed worker logs
+- `docker compose logs kairix` — embed worker logs
 
 ---
 
@@ -115,7 +115,7 @@ The lines under each "Script:" heading are written for you to say verbatim to yo
 >
 > ```
 > docker compose ps                # if Docker
-> systemctl status kairix-worker   # if VM systemd
+> systemctl status kairix   # if VM systemd
 > kairix worker status
 > ```
 >
@@ -124,7 +124,7 @@ The lines under each "Script:" heading are written for you to say verbatim to yo
 **Files / commands the admin needs:**
 
 - `kairix worker status` — prints last embed time, items embedded, failed chunks, pause state
-- `docker compose logs kairix-worker` (Docker) or `journalctl -u kairix-worker` (systemd) — recent worker logs
+- `docker compose logs kairix` (Docker) or `journalctl -u kairix` (systemd) — recent worker logs
 
 ---
 
