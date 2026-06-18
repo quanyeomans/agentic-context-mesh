@@ -25,8 +25,6 @@ Operational procedures and incident runbooks for kairix deployments.
 | Worker container restart-loops with `vec_index: converting immutable index to mutable (...)`; vector index drifting behind `content_vectors` | [worker-memory-and-swap](worker-memory-and-swap.md) — raise mem ceiling + allow host swap; #335 |
 | `app-kairix-1` container fails to start with `failed to bind host port 127.0.0.1:8080/tcp: address already in use` (reverse proxy already owns 8080) | Set `KAIRIX_HOST_PORT=8090` (or any unused port) in `.env` and `docker compose up -d --force-recreate kairix`; see [OPERATIONS §"Deploying behind a reverse proxy"](../OPERATIONS.md#deploying-behind-a-reverse-proxy-caddy--nginx--cloudflared); #331 |
 | `secrets_loaded` onboard check fails, or you need to add / rotate a secret | [secrets-configuration](../secrets-configuration.md) — install × secrets-manager matrix (Docker / pip × Azure KV / AWS / GCP / 1Password / ECS / Cloud Run / AKS / .env), canonical names, resolution order, rotation commands |
-| A CI job that `uses:` a shared reusable workflow is gated behind change-detection and you're about to merge a workflow-only PR | [how-to-consume-a-shared-reusable-workflow](how-to-consume-a-shared-reusable-workflow.md) — force the caller to run before merge so a broken `workflow_call` contract can't reach main |
-| A CI run fails immediately with `startup_failure` / "Invalid workflow file" before any step executes | [runbook-ci-startup-failure](runbook-ci-startup-failure.md) — diagnose broken `workflow_call` inputs/secrets, bad `@<ref>` pin, and YAML/expression errors |
 
 ---
 
@@ -39,7 +37,6 @@ Operational procedures and incident runbooks for kairix deployments.
 | [runbook-vector-search-failure](runbook-vector-search-failure.md) | `vec=0, vec_failed=True` — embed credentials, vector index integrity, no-vectors-yet |
 | [runbook-embedding-lag](runbook-embedding-lag.md) | New content not searchable — sync, embed pipeline failures, scheduled-run issues |
 | [runbook-benchmark-regression](runbook-benchmark-regression.md) | NDCG degraded — before/after comparison workflow and rollback |
-| [runbook-ci-startup-failure](runbook-ci-startup-failure.md) | CI run fails with `startup_failure` before any step runs — broken `workflow_call` contract, bad `@<ref>` pin, invalid YAML/expression |
 
 ---
 
@@ -56,18 +53,14 @@ Operational procedures and incident runbooks for kairix deployments.
 | [integrity-and-preflight](integrity-and-preflight.md) | Run `kairix worker preflight` to audit persistence invariants (documents vs FTS vs vectors); interpret gaps; auto-heal `documents-without-fts` |
 | [kairix-entity-audit](kairix-entity-audit.md) | Audit the entity graph — junk detection, path repair, enrichment, safe purge |
 | [how-to-configure-pypi-trusted-publisher](how-to-configure-pypi-trusted-publisher.md) | One-time PyPI Trusted Publisher setup so GitHub Releases auto-publish without long-lived tokens |
-| [how-to-consume-a-shared-reusable-workflow](how-to-consume-a-shared-reusable-workflow.md) | Safely call a shared reusable workflow — the change-detection-gating trap, forcing the caller to run in the same PR, keeping callers secret-free (callers pass secrets, never literals) |
 | [MCP-DEPLOYMENT](../MCP-DEPLOYMENT.md) | Choose a transport (stdio/http/sse), wire `/mcp` and `/sse` mounts, configure agent registry, verify with `/healthz` |
 | [cold-start-envelope-reference](cold-start-envelope-reference.md) | Byte-exact reference of the `KAIRIX_COLD_START` 503 envelope captured from the 2026-06-06 production drill; what each field means, what to do when a client surfaces it, how to reproduce the drill locally, and the nightly soak that pins the contract |
 | [MCP-CLIENT-MIGRATION](../MCP-CLIENT-MIGRATION.md) | Migrate Claude Desktop / Claude Code / OpenClaw / custom Python or Node clients from `/sse` to `/mcp` |
-| [plan-b-parity-runbook](../plan-b-parity-runbook.md) | Consolidated single-page operator workflow — pre-flight → hydrate → ingest → query → validate → cost model → teardown, with cross-links into the deep docs below |
-| [consultancy-in-a-box](../consultancy-in-a-box.md) | Per-engagement workflow — spin up container, ingest knowledge store + transcripts, query, validate, teardown |
 | [fact-extractor](../fact-extractor.md) | How the LLM fact extractor works, when to enable, cost model, prompt customisation |
 | [eval-suite](../eval-suite.md) | Running `kairix eval`, picking metrics + backends, the regression-gate CI pattern |
 | [MCP-ingest-tools](../MCP-ingest-tools.md) | Agent-callable `ingest_chat` and `facts_about` — namespace fence, safety boundaries, calling patterns |
 | [worker-memory-and-swap](worker-memory-and-swap.md) | Tune worker `mem_limit` + `memswap_limit` on 1M+ vector corpora so the embed cycle's mutable-index step doesn't OOM (#335) |
 | [entity-summary-cutover](entity-summary-cutover.md) | Cutover protocol for ADR-036 `entity_summary_indexing_enabled` — pre-flip baseline capture, tier-mapping YAML, 24h soak, gate criteria, rollback |
-| [agent-query-queue](agent-query-queue.md) | ADR-029 G.1 spike — flip `agent_query_queue` ON for tool_search, watch pending_queries via SQL until the G.3 CLI/MCP surface + 24h GC ship |
 | Run the production-scale soak suite on demand | `gh workflow run soak-suite.yml` — nightly cadence on `main`; see [ADR-024 §"Soak tier"](../../architecture/ADR-024-test-pyramid-redesign.md) for what each test asserts |
 
 ---

@@ -43,7 +43,7 @@ kairix benchmark run \
   --output ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/benchmark-results/
 
 # 2. Edit config
-sudo nano /opt/kairix/config/kairix.yaml
+sudo nano /etc/kairix/kairix.config.yaml
 
 # 3. Embed with new config (incremental — only picks up new/changed chunks)
 kairix embed
@@ -57,7 +57,7 @@ kairix benchmark compare \
   ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/benchmark-results/<after>.json
 
 # 5. If worse: revert
-git checkout -- /opt/kairix/config/kairix.yaml
+git checkout -- /etc/kairix/kairix.config.yaml
 kairix embed
 ```
 

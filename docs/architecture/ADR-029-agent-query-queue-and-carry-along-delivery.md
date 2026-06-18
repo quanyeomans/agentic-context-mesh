@@ -165,7 +165,7 @@ When MCP streamable-HTTP transport is enabled and the client advertises `experim
 | 7 | `agent_query_queue` feature flag with both-branch tests (F54) | OFF: legacy `ColdStart` envelope; ON: new queue path |
 | 8 | `kairix queue status` CLI + `tool_queue_status` MCP tool | F30/F45/F53 tests pass |
 | 9 | Cleanup: `delivered` rows older than 24h get GC'd by a maintenance tick | F66-bounded; sabotage-proof test for the GC predicate |
-| 10 | `docs/operations/runbooks/agent-query-queue.md` operator-facing runbook | Doc exists; links from `docs/operations/OPERATIONS.md` and `docs/architecture/ENGINEERING.md` |
+| 10 | `docs/architecture/agent-query-queue.md` operator-facing runbook | Doc exists; links from `docs/operations/OPERATIONS.md` and `docs/architecture/ENGINEERING.md` |
 | 11 | `ColdStart` envelope code path retired (or kept behind the OFF branch of the flag for one release, then removed) | Grep for `cold_start_envelope` returns zero call sites in MCP tools |
 
 ## Open decisions

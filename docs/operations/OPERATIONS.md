@@ -9,13 +9,12 @@ For benchmark methodology and current scores see [EVALUATION.md](EVALUATION.md).
 | Topic | Where |
 |-------|-------|
 | Base config, secrets, install, upgrade | this document |
-| End-to-end per-engagement workflow (spin up → ingest → query → validate → teardown) | [consultancy-in-a-box.md](consultancy-in-a-box.md) |
 | Fact extractor — how it works, cost model, prompt customisation | [fact-extractor.md](fact-extractor.md) |
 | `kairix eval` suite + regression-gate CI pattern | [eval-suite.md](eval-suite.md) |
 | Agent-callable MCP fact tools (`ingest_chat`, `facts_about`) | [MCP-ingest-tools.md](MCP-ingest-tools.md) |
 | MCP server deployment | [MCP-DEPLOYMENT.md](MCP-DEPLOYMENT.md) |
 | MCP client migration (`/sse` → `/mcp`) | [MCP-CLIENT-MIGRATION.md](MCP-CLIENT-MIGRATION.md) |
-| Running multiple engagements on one host | [SHARED-HOSTS.md](SHARED-HOSTS.md) |
+| Running multiple knowledge stores on one host | [SHARED-HOSTS.md](SHARED-HOSTS.md) |
 | Incident runbooks + how-to procedures | [runbooks/INDEX.md](runbooks/INDEX.md) |
 | Fact-layer architecture ADR | [`../architecture/fact-layer.md`](../architecture/fact-layer.md) |
 
@@ -23,11 +22,11 @@ For benchmark methodology and current scores see [EVALUATION.md](EVALUATION.md).
 
 ## Configuration vs Secrets
 
-Not all environment variables are secrets. Configuration values belong in `service.env` or `docker-compose.override.yml`. Secrets belong in Key Vault or `/run/secrets/` (tmpfs).
+Not all environment variables are secrets. Configuration values belong in the operator `.env` (at `/etc/kairix/.env` for a system install) or `docker-compose.override.yml`. Secrets belong in your secret store (Key Vault) or `/run/secrets/` (tmpfs).
 
-> **Cross-provider recipes:** the table below covers the Azure KV path on a VM. For the same setup on AWS Secrets Manager / GCP Secret Manager / 1Password / ECS / Cloud Run / AKS CSI / plain Docker .env, and for pip-install variants, see [`secrets-configuration.md`](secrets-configuration.md). The canonical naming convention + resolution order live there too.
+> **Cross-provider recipes:** the table below covers the Azure Key Vault path on a VM. For the same setup on AWS Secrets Manager / GCP Secret Manager / 1Password / ECS / Cloud Run / AKS CSI / plain Docker `.env`, see [`secrets-configuration.md`](secrets-configuration.md). The canonical naming convention + resolution order live there too.
 
-**Configuration (service.env / compose environment):**
+**Configuration (operator `.env` / compose environment):**
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
@@ -38,7 +37,7 @@ Not all environment variables are secrets. Configuration values belong in `servi
 | `KAIRIX_DOCUMENT_ROOT` | Path to document store | `/data/documents` (Docker), `/var/lib/kairix/documents` (system install), `~/Documents` (user install) |
 | `KAIRIX_DB_PATH` | SQLite database path | `~/.cache/kairix/index.sqlite` |
 | `KAIRIX_KV_NAME` | Azure Key Vault name (for secret resolution) | — |
-| `KAIRIX_MAINTENANCE_SKIP_NOOP_THRESHOLD` | Consecutive worker embed no-ops before maintenance (entity_seed/health_check/wikilinks) is skipped | `10` |
+| `KAIRIX_MAINTENANCE_SKIP_NOOP_THRESHOLD` | How many quiet indexing cycles (nothing new to index) the app waits before it pauses background upkeep (entity seeding, health checks, wikilinks) | `10` |
 
 **Secrets (Key Vault / /run/secrets/ / env var override):**
 
@@ -57,7 +56,7 @@ Not all environment variables are secrets. Configuration values belong in `servi
 
 The full canonical-name schema (`kairix-<scope>-<area>[-<instance>]-<leaf>`) plus per-connector names live in [`secrets-configuration.md`](secrets-configuration.md). Run `kairix secrets verify` to see every registered credential and whether it resolves.
 
-Resolution order: env var > per-file secret (`/run/secrets/<name>`) > bundle file (`/run/secrets/kairix.env`) > Azure Key Vault CLI (`KAIRIX_KV_NAME`).
+Resolution order: environment variable > per-file secret (`/run/secrets/<name>`) > bundle file (`/run/secrets/kairix.env`) > Azure Key Vault (`KAIRIX_KV_NAME`).
 
 ---
 
@@ -68,15 +67,14 @@ All infrastructure-specific values (Key Vault name, paths, credentials) are pass
 **Setting up your environment file:**
 
 ```bash
-# On your deployment VM
-cp .env.example /opt/kairix/service.env
-chmod 600 /opt/kairix/service.env
+# On your deployment server (system install): config lives under /etc/kairix
+cp .env.example /etc/kairix/.env
+chmod 600 /etc/kairix/.env
 # Edit with your values (Key Vault name, document root, data dir, etc.)
-nano /opt/kairix/service.env
-
-# Source it in each cron job (see Cron Scheduling below)
-source /opt/kairix/service.env
+nano /etc/kairix/.env
 ```
+
+With Docker compose, put the same values in a `.env` next to `docker-compose.yml` — compose reads it automatically.
 
 **For local dev/testing:**
 
@@ -191,7 +189,7 @@ docker run -d --name neo4j -p 7687:7687 \
   neo4j:5-community
 ```
 
-After installing, set in `service.env` or `/opt/kairix/service.env`:
+After installing, set in the operator `.env` (`/etc/kairix/.env` for a system install, or the `.env` next to `docker-compose.yml`):
 ```
 KAIRIX_NEO4J_URI=bolt://localhost:7687
 KAIRIX_NEO4J_USER=neo4j
@@ -242,7 +240,7 @@ services:
     volumes:
       - <HOST_PATH>:/data/kairix    # e.g. /var/lib/kairix-runtime OR /data/kairix
       - <DOCS_PATH>:/data/documents # docs tree is usually small; either disk works
-  kairix-worker:
+  kairix:
     volumes:
       - <HOST_PATH>:/data/kairix
       - <DOCS_PATH>:/data/documents
@@ -276,19 +274,24 @@ df -h /data     # data disk (if attached)
 | Document tree | depends on your source corpus | small disk fine |
 | Extractor scratch (`/data/kairix/tmp`) | bounded by per-extraction file size; cleaned on every call | small disk fine |
 
-Bronze is **streaming-only** — fetched bytes are extracted in-memory and discarded; `bronze_records` carries only metadata (`source_uri`, `content_hash`, `fetched_at`) at ~kB per item. There are no on-disk bronze blobs. A 50,000-item corpus that would have needed ~650 GB of bronze under the v2026.5.18 model now needs ~50 MB.
+Fetched source data is **not** kept on disk. When kairix pulls a file from a source, it reads the bytes, extracts the text in memory, and discards the original — only small metadata (source location, content hash, fetch time) is stored, at a few kB per item. So a large corpus needs far less disk than the raw source bytes would suggest.
 
-Extractor scratch (the per-call tmpfile that markitdown/pdfplumber etc. use) lands on the disk-backed `/data/kairix/tmp` mount via `TMPDIR=/data/kairix/tmp` in the image, not the 2 GB `/tmp` tmpfs. The entrypoint mkdir's it at boot so bind-mount masking can't defeat the relocation. Cleanup-on-failure is hardened; sustained extraction loads do not leak placeholder tmpfiles.
-
-**Operators upgrading from v2026.5.18**: existing on-disk bronze blobs under `<bronze_root>` become unused once you've run any final `kairix worker reextract` to recover pre-upgrade dead-letter items. After recovery, `rm -rf $bronze_root` reclaims that disk. See [`how-to-upgrade-kairix`](runbooks/how-to-upgrade-kairix.md) for the full migration steps.
+Temporary scratch files (used while extracting text from PDFs, Office files, etc.) go to the `/data/kairix/tmp` mount, not the small in-memory `/tmp`. They are cleaned up on every call, including on failure, so sustained ingestion does not leak scratch files.
 
 ---
 
 ## Installation
 
+There are two supported ways to run kairix:
+
+- **Docker compose** (recommended) — one `kairix` app container plus a `neo4j` container.
+- **Host / systemd install** — `kairix init --system` lays down the file-system layout (config under `/etc/kairix/`, data under `/var/lib/kairix/`) and a systemd unit.
+
+Either way, first-time setup is driven by a **browser setup wizard**: once the app is up, open it in a browser and it walks you through credentials, document location, and a first search. `kairix onboard check` is the health gate you run afterward to confirm everything is wired.
+
 ### Docker Compose (recommended)
 
-Docker Compose is the primary deployment method. The base stack (repo root `docker-compose.yml`) bundles kairix and Neo4j and reads a plain `.env`.
+Docker compose is the primary deployment method. The base stack (repo root `docker-compose.yml`) starts the `kairix` app container and Neo4j and reads a plain `.env`.
 
 ```bash
 # Clone and start
@@ -301,7 +304,7 @@ ln -s /path/to/your/documents ./documents
 docker compose up -d
 ```
 
-See the repo-root [`docker-compose.yml`](../../docker-compose.yml) for the full service definition; `kairix onboard check` runs inside the container on startup. VM deployments that feed secrets through a `/run/secrets/kairix.env` sidecar use the stack in [`docker/`](../../docker/README.md) instead.
+Then open the setup wizard in a browser to finish configuration. See the repo-root [`docker-compose.yml`](../../docker-compose.yml) for the full service definition; `kairix onboard check` runs inside the container on startup. VM deployments that feed secrets through a `/run/secrets/kairix.env` sidecar use the stack in [`docker/`](../../docker/README.md) instead.
 
 #### Deploying behind a reverse proxy (caddy / nginx / Cloudflared)
 
@@ -333,7 +336,7 @@ sudo install -d -m 0750 -o kairix -g kairix /var/lib/kairix
 
 sudo install -m 0644 scripts/install/kairix.service.example /etc/systemd/system/kairix.service
 sudo install -m 0644 scripts/install/kairix-fetch-secrets.service.example /etc/systemd/system/kairix-fetch-secrets.service
-sudo install -m 0750 -o kairix -g kairix scripts/install/permissions-preflight.sh /opt/kairix/bin/permissions-preflight.sh
+sudo install -m 0750 -o kairix -g kairix scripts/install/permissions-preflight.sh /etc/kairix/bin/permissions-preflight.sh
 sudo systemctl daemon-reload
 sudo systemctl enable --now kairix-fetch-secrets.service kairix.service
 ```
@@ -357,146 +360,74 @@ Kairix exposes two health endpoints from the MCP HTTP transport:
 
 `/healthz/ready` is the actionable signal: `ready=true` means the deployment is fully operational (secrets loaded AND vector search capable). A degraded deployment that has lost vector search will report `ready=false` with `vector_search_capable=false` and a `detail` message — far better than the pre-v2026.5.10 behaviour where `/healthz` returned `ready=true` while semantic search was silently broken (#167).
 
-### Alternative: pip install
+### Host / systemd install (no Docker)
 
-For environments where Docker is unavailable, kairix can be installed as a pip package.
-
-```bash
-# One-line deploy (downloads and runs install.sh from the public repo)
-bash <(curl -fsSL https://raw.githubusercontent.com/three-cubes/kairix/main/scripts/install.sh)
-```
-
-This creates `/opt/kairix/.venv/` (legacy pip path), installs kairix into it, installs the wrapper script, and creates the `/usr/local/bin/kairix` symlink. After this, `kairix --help` works from any shell.
-
-**Manual pip install:**
+For hosts without Docker, install kairix directly and let it lay down its own file-system layout:
 
 ```bash
-# Create venv and install (core)
-python3 -m venv /opt/kairix/.venv
-/opt/kairix/.venv/bin/pip install kairix-agentic-knowledge-mgt
+# Install the kairix package (with Neo4j + MCP support)
+pip install "kairix-agentic-knowledge-mgt[neo4j,agents]"
 
-# With Neo4j entity graph support (recommended for full feature set)
-/opt/kairix/.venv/bin/pip install "kairix-agentic-knowledge-mgt[neo4j]"
+# Lay down the system layout + systemd unit (requires root)
+sudo kairix init --system
 
-# With MCP server for agent integration
-/opt/kairix/.venv/bin/pip install "kairix-agentic-knowledge-mgt[agents]"
-
-# Verify
-/opt/kairix/.venv/bin/kairix --help
+# Confirm the layout and unit are in place
+kairix init verify
+kairix --help
 ```
 
-### Operator configuration
+`kairix init --system` creates:
 
-Kairix itself is the retrieval engine. Operator-specific configuration (vault paths, Azure credentials, agent names, private benchmark suites) is kept separately — **not inside the kairix source tree**.
+- `/etc/kairix/` — config (owned `root:root`); put your `.env` and `kairix.config.yaml` here.
+- `/var/lib/kairix/` — state: index database, vector index, logs (owned `kairix:kairix`).
+- A systemd unit so the service starts on boot.
 
-The expected layout on the VM:
-```
-/opt/kairix/
-  .venv/              ← kairix package installed here (legacy pip path)
-  bin/
-    kairix-wrapper.sh ← env loader; /usr/local/bin/kairix symlinks here
-  service.env         ← operator config (KAIRIX_KV_NAME, KAIRIX_DOCUMENT_ROOT, etc.)
-  secrets/            ← optional: pre-fetched secrets for non-Docker deployments
-```
-
-For production deployments: operator config (service.env, private benchmark suites) should live in a separate private configuration repo, not in the kairix package.
+Secrets come from the operator `.env` (`/etc/kairix/.env`) or `/run/secrets/`. Keep operator-specific values (Key Vault name, document location, agent names, private benchmark suites) in `/etc/kairix/` — **not** inside the kairix source tree. To remove the layout later, run `sudo kairix uninstall --system`.
 
 ### Upgrading
 
 ```bash
-/opt/kairix/.venv/bin/pip install --upgrade git+https://github.com/three-cubes/kairix
+pip install --upgrade "kairix-agentic-knowledge-mgt[neo4j,agents]"
 kairix onboard check   # verify after upgrade
 ```
 
----
-
-## Wrapper Script and PATH Setup
-
-**This is required for agents.** If you skip this, agents calling `kairix` will get either "command not found" or vector search failures (BM25-only fallback) because the raw Python binary has no environment loaded.
-
-The kairix wrapper (`scripts/kairix-wrapper.sh`) loads `service.env` and `/run/secrets/kairix.env` before exec'ing the real binary. The system symlink must point to the wrapper, not the Python binary.
-
-### Automated (recommended)
+For Docker compose deployments, pull the new image and recreate the stack:
 
 ```bash
-bash scripts/install.sh
-```
-
-This installs the wrapper, creates/updates the symlink, and sets up `/etc/profile.d/kairix.sh` so every shell and agent exec context has kairix on PATH.
-
-### Manual
-
-```bash
-# Install wrapper
-sudo mkdir -p /opt/kairix/bin
-sudo cp scripts/kairix-wrapper.sh /opt/kairix/bin/kairix-wrapper.sh
-sudo chmod 755 /opt/kairix/bin/kairix-wrapper.sh
-
-# Create or update the symlink (replace existing if it points to raw Python binary)
-sudo ln -sf /opt/kairix/bin/kairix-wrapper.sh /usr/local/bin/kairix
-
-# Add to PATH for all sessions
-sudo bash -c 'echo "export PATH=/usr/local/bin:\$PATH" > /etc/profile.d/kairix.sh'
-sudo chmod 644 /etc/profile.d/kairix.sh
-
-# Verify the symlink points to the wrapper (not the Python binary)
-ls -la /usr/local/bin/kairix
-readlink /usr/local/bin/kairix
-# Should show: /opt/kairix/bin/kairix-wrapper.sh
-```
-
-### Verify wrapper is working
-
-```bash
+docker compose pull && docker compose up -d
 kairix onboard check
 ```
-
-All checks should pass. Specifically look for `wrapper_installed: ✓` and `secrets_loaded: ✓`. If `vec_failed: true` appears in the vector search check, the wrapper isn't loading secrets — check that `service.env` has `KAIRIX_KV_NAME` set.
 
 ---
 
 ## First-Run Sequence
 
-Run these in order on a fresh deployment. Each step must succeed before the next.
+After the app is up (Docker compose or `kairix init --system`), run these in order on a fresh deployment. Each step must succeed before the next.
 
-### Step 1: Deploy wrapper and PATH
+### Step 1: Finish setup in the browser wizard
+
+Open the setup wizard in a browser. It walks you through:
+
+- Provider credentials (LLM + embedding API key and endpoint).
+- The document location kairix should index.
+- A first scan and a first search to confirm everything works.
+
+The wizard writes your configuration to `kairix.config.yaml` and saves secrets to the configured secret store. You don't hand-edit a config file unless you want to.
+
+### Step 2: Confirm the deployment is healthy
 
 ```bash
-bash scripts/install.sh
+kairix onboard check
 ```
 
-Or follow the manual steps in [Wrapper Script and PATH Setup](#wrapper-script-and-path-setup).
+All checks should pass. In particular look for `secrets_loaded: ✓` and a passing vector-search check. If `vec_failed: true` appears, credentials aren't loaded — re-check the provider key and endpoint you entered in the wizard.
 
-### Step 2: Populate service.env
+### Step 3: Index your documents
 
-```bash
-# If service.env doesn't exist yet
-cp .env.example /opt/kairix/service.env
-nano /opt/kairix/service.env
-# Set: KAIRIX_KV_NAME, KAIRIX_DOCUMENT_ROOT, KAIRIX_DATA_DIR, KAIRIX_WORKSPACE_ROOT
-```
-
-### Step 3: Verify Azure credentials
+The wizard kicks off a first scan, but you can run indexing yourself at any time:
 
 ```bash
-source /opt/kairix/service.env
-
-ENDPOINT=$(az keyvault secret show --vault-name ${KAIRIX_KV_NAME} \
-  --name kairix-provider-llm-endpoint --query value -o tsv)
-APIKEY=$(az keyvault secret show --vault-name ${KAIRIX_KV_NAME} \
-  --name kairix-provider-llm-api-key --query value -o tsv)
-
-echo "Endpoint: ${ENDPOINT:0:40}..."
-echo "Key: ${APIKEY:0:8}..."
-```
-
-Both must return values. If either is empty, check Azure CLI auth and Key Vault access policy.
-
-### Step 4: Run a test embed (first 20 chunks)
-
-```bash
-KAIRIX_PROVIDER_LLM_ENDPOINT="$ENDPOINT" \
-KAIRIX_PROVIDER_LLM_API_KEY="$APIKEY" \
+# Index a small sample first to confirm the provider responds
 kairix embed --limit 20
 ```
 
@@ -511,31 +442,29 @@ INFO  Done — embedded=20 failed=0 duration=12s cost=$0.0005
 
 If you see `SchemaVersionError` or `usearch index load failed`, see [Troubleshooting](#troubleshooting).
 
-### Step 5: Full vault embed
+### Step 4: Index the full document store
 
 ```bash
-KAIRIX_PROVIDER_LLM_ENDPOINT="$ENDPOINT" \
-KAIRIX_PROVIDER_LLM_API_KEY="$APIKEY" \
 nohup kairix embed >> ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/embed.log 2>&1 &
 echo "PID: $!"
 ```
 
-For a typical vault this takes 10–30 minutes and costs ~$0.30–0.50 at 1536-dim, depending on size. Monitor with:
+For a typical knowledge store this takes 10–30 minutes and costs roughly $0.30–0.50 at 1536-dim, depending on size. Monitor with:
 ```bash
 tail -f ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/embed.log
 ```
 
 Done when you see: `Done — embedded=N failed=0`
 
-### Step 6: Verify search works
+### Step 5: Verify search works
 
 ```bash
 kairix search "what are our engineering standards" --agent builder --json
 ```
 
-Expected: `vec_count > 0` and 3–5 results with file paths. If `vec_failed: true`, the wrapper isn't loading credentials — run `kairix onboard check`.
+Expected: `vec_count > 0` and 3–5 results with file paths. If `vec_failed: true`, credentials aren't loaded — run `kairix onboard check`.
 
-### Step 7: Populate the entity graph
+### Step 6: Populate the entity graph
 
 ```bash
 kairix store crawl --document-root /path/to/documents
@@ -544,31 +473,29 @@ kairix curator health   # should report entity counts
 
 Expected: entity count ≥ 50 for a typical knowledge store.
 
-**Entity-graph management (#262, #263).** Routine maintenance commands:
+**Entity-graph management.** Routine maintenance commands:
 
 - **Drop-and-rebuild from the document store** — `kairix store crawl --reset --confirm` runs `MATCH (n) DETACH DELETE n` against the live graph and immediately re-crawls. Pair `--reset` with `--confirm` interactively, or set `KAIRIX_NONINTERACTIVE=1` in scripted pipelines (cron, CI). `--dry-run` previews without writing. The summary prints `Reset: deleted N entities, M relationships before crawl` before the usual crawl counts. Full sequence in [how-to-rebuild-entity-graph](runbooks/how-to-rebuild-entity-graph.md).
 - **Override-coverage report** — every `kairix store crawl` (with or without `--reset`) reads `${KAIRIX_DOCUMENT_ROOT}/04-Agent-Knowledge/_entity-overrides.md`, records which allowlist entries fired against the crawled text, and writes a sidecar to `${KAIRIX_DATA_DIR}/entity-override-coverage.json`. Curators inspect this to find dead allowlist entries (`never_matched`) without an O(N) shell loop over `kairix entity get`. Audit details in [kairix-entity-audit Step 4](runbooks/kairix-entity-audit.md#step-4--override-coverage-allowlisted-but-never-matched).
 
-### Step 8: Test briefing
+### Step 7: Test briefing
 
 ```bash
-KAIRIX_PROVIDER_LLM_ENDPOINT="$ENDPOINT" \
-KAIRIX_PROVIDER_LLM_API_KEY="$APIKEY" \
 kairix brief builder
 ```
 
 Output written to `$KAIRIX_DATA_DIR/briefing/builder-latest.md`. Verify it's non-empty and coherent.
 
-### Step 9: Install agent usage guide
+### Step 8: Install agent usage guide
 
 ```bash
-kairix onboard guide --vault-root /path/to/vault
+kairix onboard guide --document-root /path/to/documents
 kairix embed --changed   # make the guide searchable
 ```
 
-This installs `docs/user-guide/agent-usage-guide.md` into the document store's shared knowledge base so agents can search for kairix usage instructions.
+This installs the agent usage guide into the document store's shared knowledge base so agents can search for kairix usage instructions.
 
-### Step 10: Register cron jobs
+### Step 9: Register cron jobs
 
 See [Cron Scheduling](#cron-scheduling) below.
 
@@ -576,7 +503,7 @@ See [Cron Scheduling](#cron-scheduling) below.
 
 ## Operating the worker
 
-The kairix worker (introduced in #224) is the background process that runs `kairix embed` on a loop and performs maintenance (`entity_seed`, `health_check`, `wikilinks`) between cycles. It persists state to `${KAIRIX_DATA_DIR}/worker-state.json` via atomic temp+rename writes.
+The kairix worker is the background process that runs `kairix embed` on a loop and performs upkeep (entity seeding, health checks, wikilinks) between cycles. It saves its state to `${KAIRIX_DATA_DIR}/worker-state.json`.
 
 ### Pause / resume
 
@@ -598,7 +525,7 @@ kairix worker status
 
 ### Skip-on-idle maintenance
 
-After `KAIRIX_MAINTENANCE_SKIP_NOOP_THRESHOLD` consecutive embed no-op cycles (default `10`), the worker stops running `entity_seed` / `health_check` / `wikilinks` until an embed cycle does work again. Lowers CPU/IO on shared hosts during quiet periods. Tune the env var down for noisier vaults, up for quieter ones; set to `0` to disable.
+After `KAIRIX_MAINTENANCE_SKIP_NOOP_THRESHOLD` quiet indexing cycles in a row (default `10`, where nothing new was found to index), the worker pauses background upkeep (entity seeding, health checks, wikilinks) until an indexing cycle does real work again. This lowers CPU and disk use on shared hosts during quiet periods. Tune the value down for busier document stores, up for quieter ones; set to `0` to disable.
 
 ### Shared hosts
 
@@ -625,7 +552,7 @@ export KAIRIX_PROVIDER_LLM_API_KEY=$(az keyvault secret show ...)
 
 For production VM deployments, `kairix-fetch-secrets.service` writes Azure credentials to `/run/secrets/kairix.env` (tmpfs) at boot using the VM's managed identity. See [SECURITY.md](../SECURITY.md) for setup detail.
 
-### Incremental embed (new vault files)
+### Incremental embed (new or changed files)
 
 Runs kairix embed incrementally — only embeds files modified since the last run. Exits quickly (embedded=0) when nothing has changed. Schedule to run frequently (e.g. hourly).
 
@@ -640,7 +567,7 @@ See [`scripts/cron/kairix-embed.sh`](scripts/cron/kairix-embed.sh) for the refer
 
 ### Nightly entity + relationship seed
 
-Runs vault crawler and relationship seeding. Uses GPT-4o-mini for relationship classification. Schedule nightly during low-usage hours.
+Runs the document-store crawler and relationship seeding. Uses GPT-4o-mini for relationship classification. Schedule nightly during low-usage hours.
 
 ```bash
 # The two commands to run, in order:
@@ -779,8 +706,8 @@ kairix curator health
 
 ### Key metrics to track
 
-- **Vector count:** Should grow as vault grows. Sudden drop indicates index rebuild issue.
-- **Entity count:** Grows as new entity stubs are added and vault crawler runs. Check with `kairix curator health`.
+- **Vector count:** Should grow as the document store grows. Sudden drop indicates an index rebuild issue.
+- **Entity count:** Grows as new entity stubs are added and the document-store crawler runs. Check with `kairix curator health`.
 - **Entity graph density:** Growing node/relationship counts improve entity-aware retrieval.
 - **Recall gate:** Post-embed recall check in embed log — should be ≥ 4/5. If < 4/5, run `kairix embed --force`.
 
@@ -790,7 +717,7 @@ kairix curator health
 export KAIRIX_LOG_QUERIES=1
 # Queries logged to ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/queries.jsonl
 # Analyse with:
-.venv/bin/python scripts/analyze_queries.py
+python scripts/analyze_queries.py
 ```
 
 ---
@@ -804,38 +731,28 @@ export KAIRIX_LOG_QUERIES=1
 kairix is not on PATH for the current session.
 
 ```bash
-# Quick fix for current session
-export PATH=/usr/local/bin:$PATH
-kairix --help
+# Docker compose: run the CLI inside the app container
+docker compose exec kairix kairix --help
 
-# Permanent fix: run the deploy script
-bash scripts/install.sh
-
-# Or manually check where the symlink is
-ls -la /usr/local/bin/kairix
+# Host install: a system install puts kairix on PATH; confirm the install
+kairix init verify
 ```
 
-For agent exec contexts specifically (agents running commands via shell), ensure `/etc/profile.d/kairix.sh` exists and contains the PATH export. Non-login shells don't source `/etc/profile.d/` automatically — the cron wrapper or agent exec script must `source /etc/profile.d/kairix.sh` or set PATH explicitly.
+If you installed with `kairix init --system` and the command still isn't found, your shell's PATH may not include the install's bin directory — open a fresh login shell or run `kairix init verify` for the exact location.
 
 ### `vec_failed: true` — Vector search broken, BM25 only
 
-Azure credentials aren't loaded for the kairix process.
+Provider credentials aren't loaded for the kairix process, so it falls back to keyword (BM25) search only.
 
 ```bash
 # Diagnose
 kairix onboard check
 
-# Most common cause: symlink points to raw Python binary
-ls -la /usr/local/bin/kairix
-readlink /usr/local/bin/kairix
-# If this shows .venv/bin/kairix, the wrapper isn't installed:
-bash scripts/install.sh
-
-# Alternative: verify manually
-which kairix
-head -1 $(which kairix)
-# Should show: #!/usr/bin/env bash  (not #!/path/to/python)
+# Confirm the provider key/endpoint resolve
+kairix secrets verify
 ```
+
+Set the LLM/embed key and endpoint in the operator `.env` (or your secret store) and re-run. If you set up via the wizard, re-open it and re-enter the provider credentials.
 
 ### `Required secret not available: kairix-provider-llm-api-key`
 
@@ -873,11 +790,11 @@ The database schema has changed between versions.
 # Check kairix version
 kairix --version
 
-# Run schema compatibility tests
-.venv/bin/pytest tests/ -k "schema" -v
-
-# If tests pass, bump the version in schema.py and pyproject.toml
+# Run onboard check to confirm the schema is current
+kairix onboard check
 ```
+
+If the schema is out of date after an upgrade, re-run `kairix onboard check` — it reports the mismatch and the migration step to take.
 
 ### Vector search returns 0 results
 
@@ -968,36 +885,22 @@ For deeper diagnostic procedures and less common failure modes, see [`docs/opera
 
 ## Upgrading
 
-### Upgrading Kairix
+**Docker compose:**
 
 ```bash
-# Upgrade to latest
-/opt/kairix/.venv/bin/pip install --upgrade kairix-agentic-knowledge-mgt
+docker compose pull && docker compose up -d
+kairix onboard check   # verify after upgrade
+```
 
-# Or pin to a specific version
-/opt/kairix/.venv/bin/pip install "kairix-agentic-knowledge-mgt==2026.4.27"
+**Host / systemd install:**
 
-# Verify
+```bash
+pip install --upgrade "kairix-agentic-knowledge-mgt[neo4j,agents]"
+sudo systemctl restart kairix     # if running under systemd
 kairix onboard check
 ```
 
-If the wrapper script has changed in the new version, re-run:
-```bash
-bash scripts/install.sh --skip-smoke   # re-downloads and re-installs wrapper
-```
-
-### Upgrading kairix
-
-```bash
-# Install new version
-pip install --force-reinstall --no-deps "kairix-agentic-knowledge-mgt==<new-version>"
-
-# Run schema tests to verify compatibility
-pytest tests/ -k "schema" -v
-
-# Run onboard check
-kairix onboard check
-```
+`kairix onboard check` is the gate after every upgrade — it confirms the schema is current and reports any migration step still needed. For per-release upgrade notes and migration steps, see [how-to-upgrade-kairix](runbooks/how-to-upgrade-kairix.md).
 
 ---
 

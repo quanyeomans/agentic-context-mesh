@@ -238,7 +238,7 @@ Every flag in the registry must have:
 # tests/bdd/features/feature_flag_obsidian_connector_primary.feature
 Feature: Operator toggles the obsidian-connector-primary feature flag
 
-  As an operator running a kairix engagement container
+  As an operator running a kairix container
   I want to choose between the legacy DocumentScanner and the new Obsidian connector
   So that I can validate the new path before cutting over
 
@@ -439,5 +439,5 @@ Estimated wall-clock from PR-1 to PR-7 dispatch: 3–4 days with the established
 - `docs/architecture/connector-ingestion-architecture.md` — wave plan that consumes this pattern
 - `docs/architecture/test-discipline-hardening.md` — F45–F50 + the composition / real-path / new-capability principles that F54 extends
 - `docs/architecture/fitness-functions.md` — F-rule canon; F51–F54 land here in PR-3
-- Two-scope architecture: per-engagement-container scope means one flag set per container; LaunchDarkly-style multi-tenant rollout doesn't apply
+- Two-scope architecture: per-container scope means one flag set per container; LaunchDarkly-style multi-tenant rollout doesn't apply
 - `feedback_deployed_config_path` memory — config-layering pattern this resolver reuses

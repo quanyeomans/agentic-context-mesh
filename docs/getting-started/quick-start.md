@@ -87,6 +87,21 @@ This starts two services:
 
 > **Port 8080 already in use?** If you're already running caddy, nginx, or another reverse proxy on host 8080, set `KAIRIX_HOST_PORT=8090` (or any unused port) in your `.env` before `docker compose up -d`. See [OPERATIONS §"Deploying behind a reverse proxy"](../operations/OPERATIONS.md#deploying-behind-a-reverse-proxy-caddy--nginx--cloudflared).
 
+### A4b. Set up in your browser (optional)
+
+Once the container is up, open the in-box setup wizard:
+
+```
+http://localhost:8080/setup
+```
+
+It walks you through picking a provider, adding your key, choosing a documents folder, and a first search — the same steps as the rest of this guide, in a browser. The wizard ships ready to use out of the box; no flag to flip.
+
+- **On the same machine** (localhost): no token needed.
+- **From another machine** (you opened the port to the network): you need the operator token. On first boot the container prints a one-time link to its logs (`docker compose logs kairix | grep setup`); follow that link. See the operator-token note in `.env.example` to pin your own token instead.
+
+Prefer a no-browser setup? Skip the wizard and run [`kairix setup`](#no-browser-setup-kairix-setup) on the command line — it drives the same steps headless.
+
 ### A5. Index your documents
 
 ```bash
@@ -186,6 +201,8 @@ kairix mcp serve --transport http --port 8080
 
 For long-running deployments use a systemd unit — see [`docs/operations/SHARED-HOSTS.md`](../operations/SHARED-HOSTS.md) for the unit-file pointer.
 
+Once `kairix mcp serve` is running, you can set up in your browser at `http://localhost:8080/setup` (use the port you passed to `--port`) — the same in-box wizard described in the Docker path. It's ready out of the box; same-machine access needs no token, remote access needs the operator token. Prefer the command line? See [No-browser setup](#no-browser-setup-kairix-setup) below.
+
 ### B4. Index your documents
 
 ```bash
@@ -200,6 +217,28 @@ kairix onboard check --json   # structured
 ```
 
 Same shape as the Docker path. The JSON envelope is the canonical signal for any healthcheck or CI gate.
+
+---
+
+## No-browser setup (`kairix setup`)
+
+Prefer the command line, or running somewhere with no browser (a headless server, an SSH session, a CI job)? `kairix setup` drives the same onboarding steps on the terminal — pick a provider, add your key, choose a documents folder — and writes your config. It works whether or not the web wizard is on.
+
+```bash
+# Docker
+docker compose exec -it kairix kairix setup
+
+# Pip
+kairix setup
+```
+
+For scripts and CI, add `--non-interactive` to skip every prompt and take the defaults:
+
+```bash
+kairix setup --non-interactive
+```
+
+Both write the same `kairix.config.yaml` the rest of this guide edits by hand. Run `kairix config validate` afterwards to confirm the result.
 
 ---
 
@@ -260,6 +299,7 @@ Run `kairix features status` to see the live registry. The current flags:
 | Observability | `pipeline_status_emit` | off | Write per-item per-stage status rows for `kairix worker inspect` |
 | Agent queue | `agent_query_queue` | off | Queue slow searches and carry results to the agent's next call |
 | CLI routing | `cli_routes_through_warm_mcp` | **on** | Text-mode CLI subcommands route through a warm MCP when one is responsive |
+| Onboarding | `setup_wizard_web` | **on** | Serve the in-box setup wizard at `/setup` (same-machine open is unauthenticated; remote needs the operator token) |
 
 To turn a connector on:
 

@@ -10,7 +10,7 @@ This is the layer that lets you decide objectively whether a prompt edit, a retr
 
 ### 1. Build the suite directory
 
-A suite is a directory with this layout (the reference library at `reference-library/conversations/engagement-alpha/` is the canonical example):
+A suite is a directory with this layout (the reference library at `reference-library/conversations/team-alpha/` is the canonical example):
 
 ```
 my-suite/
@@ -20,18 +20,18 @@ my-suite/
   ground-truth-facts.json        (optional) canonical facts the extractor should produce
 ```
 
-The JSONL format and ground-truth file shapes are documented in [`reference-library/conversations/README.md`](../../reference-library/conversations/README.md). Use generic engagement names — no real client names in the suite.
+The JSONL format and ground-truth file shapes are documented in [`reference-library/conversations/README.md`](../../reference-library/conversations/README.md). Use generic namespace names — no real client names in the suite.
 
 ### 2. Run the suite
 
 ```bash
-kairix eval reference-library/conversations/engagement-alpha
+kairix eval reference-library/conversations/team-alpha
 ```
 
 Default output is human-readable:
 
 ```
-Suite: engagement-alpha (path=reference-library/conversations/engagement-alpha)
+Suite: team-alpha (path=reference-library/conversations/team-alpha)
   Questions  : 18/20 (90%)
   Mean score : 0.873
   By category:
@@ -76,8 +76,8 @@ Once a suite is healthy, pin a baseline:
 
 ```bash
 mkdir -p reference-library/conversations/expected
-kairix eval reference-library/conversations/engagement-alpha --json \
-  > reference-library/conversations/expected/engagement-alpha.json
+kairix eval reference-library/conversations/team-alpha --json \
+  > reference-library/conversations/expected/team-alpha.json
 ```
 
 The baseline file is a serialised `SuiteResult` keyed on the suite name. Commit it to the repo.
@@ -85,7 +85,7 @@ The baseline file is a serialised `SuiteResult` keyed on the suite name. Commit 
 From then on, every PR that touches retrieval or extraction code runs:
 
 ```bash
-kairix eval reference-library/conversations/engagement-alpha \
+kairix eval reference-library/conversations/team-alpha \
   --regression-against reference-library/conversations/expected
 ```
 
@@ -99,7 +99,7 @@ When the regression is real and intentional (e.g. you raised the extractor's con
 
 ## Integrating into CI
 
-The Plan B-parity Week 4 Stream A workflow lands `.github/workflows/conversation-eval.yml`, which runs `kairix eval --regression-against` on every PR that touches retrieval or extraction code. The LoCoMo nightly workflow (the broader multi-backend benchmark) lives at `.github/workflows/locomo-nightly.yml`.
+The eval-gate workflow lands `.github/workflows/conversation-eval.yml`, which runs `kairix eval --regression-against` on every PR that touches retrieval or extraction code. The LoCoMo nightly workflow (the broader multi-backend benchmark) lives at `.github/workflows/locomo-nightly.yml`.
 
 To add a new suite to the gate:
 
@@ -117,7 +117,7 @@ Suites use the same JSONL + ground-truth shapes as the seeded reference library.
 - `ground-truth-facts.json` — array of `{entity, attribute, value, evidence_turn_ids}` objects the extractor should produce.
 - `ground-truth-queries.json` — array of `{question, answer, category, evidence_turn_ids}` objects. `category` is one of `single-hop`, `multi-hop`, `temporal`, `open-domain`, `adversarial` (matches LoCoMo's taxonomy).
 
-Five seeded corpora ship: `engagement-alpha` (single-hop heavy), `engagement-beta` (multi-hop), `engagement-gamma` (multi-session strategy), `engagement-delta` (contradiction-rich), `engagement-epsilon` (temporal-heavy). Start with one of these as a template when you build a suite for your own engagement.
+Five seeded corpora ship: `team-alpha` (single-hop heavy), `team-beta` (multi-hop), `team-gamma` (multi-session strategy), `team-delta` (contradiction-rich), `team-epsilon` (temporal-heavy). Start with one of these as a template when you build a suite for your own namespace.
 
 ## Customisation knobs
 
@@ -153,7 +153,6 @@ The extractor and the retriever score different things — extractor F1 is "did 
 
 ## See also
 
-- [consultancy-in-a-box.md](consultancy-in-a-box.md) — operator workflow that uses eval as the validation step
 - [fact-extractor.md](fact-extractor.md) — extractor mechanics + cost model
 - [`docs/architecture/fact-layer.md`](../architecture/fact-layer.md) — ADR
 - [`reference-library/conversations/README.md`](../../reference-library/conversations/README.md) — full suite format reference

@@ -6,7 +6,7 @@ Asserts the Week 4 Stream A CI plumbing parses + is wired correctly:
   shells to ``scripts/ci/eval-conversation-corpora.sh``.
 - ``eval-locomo-nightly.yml`` triggers on the documented cron and shells
   to both nightly helper scripts.
-- Every ``reference-library/conversations/engagement-*`` corpus has a
+- Every ``reference-library/conversations/team-*`` corpus has a
   baseline file under ``reference-library/conversations/expected/``.
 - The new workflow surface introduces no F10 silencers.
 
@@ -145,11 +145,11 @@ def _then_runs_nightly_compare(gates_state: _State) -> None:
 # ---------------------------------------------------------------------------
 
 
-@given("every engagement-* corpus under reference-library/conversations")
+@given("every team-* corpus under reference-library/conversations")
 def _given_engagement_corpora(gates_state: _State) -> None:
     corpora_dir = _REPO_ROOT / "reference-library" / "conversations"
-    corpora = sorted(p for p in corpora_dir.glob("engagement-*") if p.is_dir())
-    assert corpora, f"no engagement-* corpora found under {corpora_dir}"
+    corpora = sorted(p for p in corpora_dir.glob("team-*") if p.is_dir())
+    assert corpora, f"no team-* corpora found under {corpora_dir}"
     gates_state.baselines = {p.name: {} for p in corpora}
 
 

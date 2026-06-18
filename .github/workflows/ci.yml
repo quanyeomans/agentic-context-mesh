@@ -748,6 +748,14 @@ jobs:
   # sonar-per-file*.json) deterministically — no live leak period, no skip
   # flag (the KAIRIX_SKIP_SONAR_PARITY escape hatch was retired in #499
   # Phase 2). It is not gated through this job's pass/fail.
+  #
+  # New Code definition = PREVIOUS_VERSION (#547). The server-side "New
+  # Code" window for main is set to "Previous version" (a one-time API
+  # action; tooling at scripts/sonar/reset_new_code.py via the
+  # 5b · SonarCloud new-code baseline reset workflow). This scan emits
+  # `sonar.projectVersion` (below) so each release bumps the version and
+  # rolls the leak period forward, instead of pre-existing debt drifting
+  # back into the "new code" set and failing the gate on old code.
   # TODO(#499): confirm gating intent — the job header comment below still
   # reads "branch protection should gate on this job"; reconcile that with the
   # current branch-protection contexts before promoting Sonar to a hard gate.
@@ -774,10 +782,40 @@ jobs:
           name: coverage-data
         continue-on-error: true  # artifact missing on path-filtered runs; Sonar still scans without it
 
+      - name: Derive project version for New Code boundary (#547)
+        id: ver
+        env:
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # The version boundary that drives PREVIOUS_VERSION new-code mode.
+          # setuptools-scm (the project's version source) resolves the nearest
+          # tag + dev distance; on a tagged commit it is the clean release. We
+          # fall back to `git describe` then the short SHA so the scan always
+          # has a non-empty version.
+          # F83: each capture is guarded with `|| VAR=""` so a transient
+          # resolver failure leaves the var empty (we fall through to the next
+          # source) rather than tripping errexit at the assignment (#483 class).
+          VERSION=""
+          VERSION="$(python3 -m setuptools_scm 2>/dev/null)" || VERSION=""
+          if [ -z "$VERSION" ]; then
+            VERSION="$(git describe --tags --always 2>/dev/null)" || VERSION=""
+          fi
+          if [ -z "$VERSION" ]; then
+            VERSION="${HEAD_SHA:0:12}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sonar.projectVersion = $VERSION"
+
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          # PREVIOUS_VERSION new-code boundary (#547) — bumps per release so
+          # genuinely-old code drops out of the leak period.
+          args: >
+            -Dsonar.projectVersion=${{ steps.ver.outputs.version }}
 
   # ── Docker build verification ──────────────────────────────────────────────
   docker:

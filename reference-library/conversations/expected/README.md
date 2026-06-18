@@ -5,15 +5,15 @@ This directory holds the per-corpus baselines that the
 
 ## Layout
 
-One JSON file per `reference-library/conversations/engagement-*` corpus:
+One JSON file per `reference-library/conversations/namespace-*` corpus:
 
 ```
 expected/
-  engagement-alpha.json    # full SuiteResult — gate enforces no >2pp regression
-  engagement-beta.json     # sentinel — gate runs in "establishing baseline" mode
-  engagement-gamma.json    # sentinel
-  engagement-delta.json    # sentinel
-  engagement-epsilon.json  # sentinel
+  team-alpha.json    # full SuiteResult — gate enforces no >2pp regression
+  team-beta.json     # sentinel — gate runs in "establishing baseline" mode
+  team-gamma.json    # sentinel
+  team-delta.json    # sentinel
+  team-epsilon.json  # sentinel
 ```
 
 ## File shapes
@@ -23,7 +23,7 @@ expected/
 
 ```json
 {
-  "suite_name": "engagement-alpha",
+  "suite_name": "team-alpha",
   "n_questions": 8,
   "n_passed": 1,
   "mean_score": 0.125,
@@ -47,8 +47,8 @@ applied):
 After a green run on a corpus that's currently sentinel:
 
 ```bash
-kairix eval reference-library/conversations/engagement-beta --json \
-  > reference-library/conversations/expected/engagement-beta.json
+kairix eval reference-library/conversations/team-beta --json \
+  > reference-library/conversations/expected/team-beta.json
 ```
 
 Commit the diff. The next PR run will then assert no >2pp regression
@@ -59,8 +59,8 @@ against that pinned floor.
 Only when the score *improves* and the new floor should be enforced:
 
 ```bash
-kairix eval reference-library/conversations/engagement-alpha --json \
-  > reference-library/conversations/expected/engagement-alpha.json
+kairix eval reference-library/conversations/team-alpha --json \
+  > reference-library/conversations/expected/team-alpha.json
 ```
 
 Never widen the tolerance to paper over a regression — fix the underlying

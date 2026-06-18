@@ -337,22 +337,34 @@ REGISTRY: dict[str, FeatureFlag] = {
     ),
     "setup_wizard_web": FeatureFlag(
         name="setup_wizard_web",
-        # Default-OFF: merging the wizard is structurally a no-op — no
-        # /setup routes exist until an operator flips this ON, so the
-        # MCP server's HTTP surface is byte-for-byte unchanged.
-        default=False,
+        # Default-ON cutover: the wizard is now the out-of-the-box
+        # onboarding surface, so /setup is mounted on a default install
+        # (env-unset, config-unset). After the onboarding-UX work
+        # (#469-#481) and the fresh-install smoke proving GET /setup=200 +
+        # POST choreography + the #500 remote-access token, "wizard
+        # reachable" IS the validated behaviour — so default=True is the
+        # default-safe value post-validation (feature-flag-architecture
+        # §2.1), not a violation. Loopback peers reach it unauthenticated
+        # by design (the laptop-first install); non-loopback callers still
+        # need the X-Kairix-Operator-Token / kairix-infra-operator-token
+        # secret, so default-ON does NOT widen remote exposure. Operators
+        # opt OUT via KAIRIX_FEATURE_SETUP_WIZARD_WEB=false or
+        # `features: {setup_wizard_web: false}`. Cutover endgame mirrors
+        # cli_routes_through_warm_mcp: delete the gate, keep the mount
+        # unconditional once dogfood confirms no operator overrode it OFF.
+        default=True,
         description=(
-            "When ON, the MCP server also serves the in-box web setup "
-            "wizard at /setup (same container, same port): welcome → "
+            "When ON (default), the MCP server also serves the in-box web "
+            "setup wizard at /setup (same container, same port): welcome → "
             "provider → key → folder → indexing → capability tour → "
             "connect-agent → done, rendered server-side against the "
-            "SetupService boundary. When OFF (default), no /setup routes "
-            "are mounted and requests there 404 exactly as before the "
-            "wizard landed. Non-loopback requests additionally require "
-            "the X-Kairix-Operator-Token header matching the "
+            "SetupService boundary. When OFF, no /setup routes are mounted "
+            "and requests there 404 exactly as before the wizard landed. "
+            "Non-loopback requests additionally require the "
+            "X-Kairix-Operator-Token header matching the "
             "kairix-infra-operator-token secret."
         ),
-        stage="introduce",
+        stage="cutover",
         introduced_in="v2026.6.11",
         # SCM+6mo per the F51 retire-deadline rule, anchored to the
         # v2026.6.9 release the wizard lands on top of.

@@ -271,8 +271,11 @@ class ColdStartMiddleware:
 def _default_setup_wizard_enabled() -> bool:
     """Default reader for the ``setup_wizard_web`` feature flag.
 
-    Lazy-imported so MCP transport composition doesn't pay the feature
-    flag resolver import cost when the wizard stays OFF (the default).
+    The flag defaults ON (cutover) — the wizard is the out-of-the-box
+    onboarding surface — so an env-unset / config-unset install resolves
+    to True here and mounts ``/setup``. Lazy-imported so MCP transport
+    composition only pays the feature-flag resolver import cost when the
+    mount is actually being decided.
     """
     from kairix.core.features import flag
 

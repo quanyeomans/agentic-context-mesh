@@ -133,8 +133,15 @@ def test_concurrent_calls_use_distinct_dispatch_threads_when_pool_is_large(
     assert len(results) == n_calls
     assert {r["id"] for r in results} == set(range(n_calls))
     threads_used = {tid for _, tid in started.values()}
-    assert len(threads_used) == n_calls, (
-        f"expected {n_calls} distinct dispatch threads, got {len(threads_used)} (pool exhaustion would show fewer)"
+    # Tolerate at most one benign thread reuse: a ThreadPoolExecutor worker can
+    # go briefly idle and be reused between submissions before all N tasks are
+    # dispatched (observed 7/8 on 2-CPU CI runners). ``>= n_calls - 1`` still
+    # proves near-full parallelism — the regression this guards (asyncio.to_thread's
+    # default pool of 6 on a 2-CPU runner) lands on 6 threads and still fails,
+    # and the undersized-pool case (next test) serialises to ~2.
+    assert len(threads_used) >= n_calls - 1, (
+        f"expected ~{n_calls} distinct dispatch threads, got {len(threads_used)} "
+        "(pool exhaustion / queueing would show far fewer)"
     )
 
 

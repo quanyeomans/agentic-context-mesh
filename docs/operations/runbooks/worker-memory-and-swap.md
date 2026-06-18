@@ -1,7 +1,7 @@
 # Worker memory + swap — re-enabling usearch writes after #335
 
 **Audience:** operators running the kairix worker container on a single VM with bounded RAM.
-**Symptom:** worker container restart-loops, `docker logs app-kairix-worker-1` shows `vec_index: converting immutable index to mutable (...)` followed by an immediate restart, vector index drifts further behind `content_vectors` every cycle.
+**Symptom:** worker container restart-loops, `docker logs app-kairix-1` shows `vec_index: converting immutable index to mutable (...)` followed by an immediate restart, vector index drifts further behind `content_vectors` every cycle.
 **Underlying cause:** [#335](https://github.com/three-cubes/kairix/issues/335) — usearch HNSW's incremental-add path needs the full graph resident; at 1M+ vectors that's ~6-8 GB which exceeds the worker's cgroup `mem_limit` (default 1 GB per ADR-019).
 
 This runbook gets the worker writing to usearch again without changing code or schema — by giving the cgroup enough RAM + swap to hold the mutable index.
@@ -21,7 +21,7 @@ If the corpus is under 500k vectors and you don't see the restart loop, you don'
 - `KAIRIX_WORKER_MEMSWAP_LIMIT` — raise from 1g to 16g (allows the worker to spill into host swap up to 8 GB beyond mem_limit)
 - `KAIRIX_WORKER_WRITES_VEC_INDEX` — set to `1` (re-enables the worker write path that #335's interim gate disables)
 
-Then `docker compose up -d kairix-worker` to apply.
+Then `docker compose up -d kairix` to apply.
 
 ## Step 1 — Verify host has enough RAM + swap
 
@@ -88,13 +88,13 @@ KAIRIX_WORKER_WRITES_VEC_INDEX=1
 
 ```bash
 cd /opt/kairix
-docker compose up -d kairix-worker
+docker compose up -d kairix
 ```
 
 Verify the new limits took effect:
 
 ```bash
-docker inspect app-kairix-worker-1 \
+docker inspect app-kairix-1 \
   --format '{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}'
 ```
 
@@ -105,7 +105,7 @@ Expected: `8589934592 17179869184` (bytes — 8g, 16g).
 Tail the worker log:
 
 ```bash
-docker logs -f app-kairix-worker-1
+docker logs -f app-kairix-1
 ```
 
 You should see:
@@ -125,7 +125,7 @@ The "converting immutable to mutable" step is the previous death point. With swa
 In a separate terminal, watch memory + swap usage on the host:
 
 ```bash
-watch -n 2 'free -h && echo --- && docker stats --no-stream app-kairix-worker-1'
+watch -n 2 'free -h && echo --- && docker stats --no-stream app-kairix-1'
 ```
 
 What's healthy:
@@ -145,7 +145,7 @@ What's a problem:
 After one successful embed cycle, check the preflight drift:
 
 ```bash
-docker exec app-kairix-worker-1 kairix worker preflight 2>&1 | grep vector-store
+docker exec app-kairix-1 kairix worker preflight 2>&1 | grep vector-store
 ```
 
 Expected:

@@ -2,7 +2,7 @@
 
 ## What this is for
 
-Two MCP tools let agents work with the fact layer directly: `ingest_chat` lets an agent submit a fresh transcript and have it parsed, chunked, and fact-extracted in one call; `facts_about` lets an agent ask "what do we know about this entity?" and get back a structured fact set with evidence citations. Both are namespace-scoped so an agent working on `engagement-alpha` cannot accidentally read or write facts belonging to `engagement-beta`.
+Two MCP tools let agents work with the fact layer directly: `ingest_chat` lets an agent submit a fresh transcript and have it parsed, chunked, and fact-extracted in one call; `facts_about` lets an agent ask "what do we know about this entity?" and get back a structured fact set with evidence citations. Both are namespace-scoped so an agent working on `team-alpha` cannot accidentally read or write facts belonging to `team-beta`.
 
 These tools are the agent-facing surface for the same use cases the operator runs from the CLI (`kairix ingest-chat` and the search pipeline's fact-retriever). The MCP surface adds namespace enforcement, response shaping for token efficiency, and a `health` envelope on every call so agents handle partial degradation gracefully.
 
@@ -17,7 +17,7 @@ Submit a transcript for chunking + fact extraction. Returns counts and the opera
 | Name | Type | Required | Default | Notes |
 |------|------|----------|---------|-------|
 | `transcript` | string or list of turn objects | yes | — | Either a JSONL string (one turn per line) or a list of `{role, content, ...}` dicts. The tool normalises both shapes. |
-| `namespace` | string | no | `shared` | Engagement scope stamped onto every extracted fact. |
+| `namespace` | string | no | `shared` | Namespace scope stamped onto every extracted fact. |
 | `window_turns` | int | no | `5` | Sliding-window size for fact extraction. |
 | `no_extract` | bool | no | `false` | If `true`, write chunks only — no LLM extraction, no fact persistence. |
 | `conversation_id` | string | no | `null` | Override the conversation id used in the chunk filename. Defaults to the transcript's `conversation_id` field or a synthesised stem. |
@@ -55,7 +55,7 @@ Query the fact store for everything known about an entity. Returns a small list 
 | Name | Type | Required | Default | Notes |
 |------|------|----------|---------|-------|
 | `entity` | string | yes | — | Canonical entity name (kebab-case, e.g. `agent-alpha`). Aliases resolve via the entity graph. |
-| `namespace` | string | no | `shared` | Limits facts to this engagement scope plus `shared`. |
+| `namespace` | string | no | `shared` | Limits facts to this namespace scope plus `shared`. |
 | `include_superseded` | bool | no | `false` | If `true`, returns historical facts marked superseded — useful for "how did our decision evolve?" |
 | `max_results` | int | no | `25` | Soft cap on returned rows; the tool always returns highest-confidence first. |
 
@@ -68,11 +68,11 @@ Query the fact store for everything known about an entity. Returns a small list 
     "entity": "agent-alpha",
     "facts": [
       {
-        "attribute": "current-engagement",
-        "value": "engagement-alpha",
+        "attribute": "current-project",
+        "value": "project-atlas",
         "confidence": 0.92,
         "evidence_turn_ids": ["s001-t003", "s001-t005"],
-        "namespace": "engagement-alpha",
+        "namespace": "team-alpha",
         "extracted_at": "2026-05-12T09:14:22Z"
       }
     ],
@@ -88,12 +88,12 @@ When the entity is unknown the tool returns `result.facts: []` plus `result.coun
 
 Every fact carries a namespace (default `shared`). The MCP tools enforce two rules:
 
-1. **Read fence:** `facts_about(entity, namespace=X)` returns only facts with `namespace ∈ {X, "shared"}`. An agent operating in `engagement-alpha` cannot peek into `engagement-beta` by passing the wrong namespace.
+1. **Read fence:** `facts_about(entity, namespace=X)` returns only facts with `namespace ∈ {X, "shared"}`. An agent operating in `team-alpha` cannot peek into `team-beta` by passing the wrong namespace.
 2. **Write fence:** `ingest_chat(transcript, namespace=X)` stamps every extracted fact with `namespace=X`. An agent cannot write into a namespace they aren't operating in.
 
 The namespace an agent operates in is set per-session by the MCP server's connection config (operator-controlled). Agents cannot escalate by passing arbitrary namespace strings — the server treats the connection-config namespace as authoritative and rejects calls whose argument doesn't match.
 
-For multi-engagement workflows, run one MCP server per engagement (the standard "one container per engagement" deployment from [consultancy-in-a-box.md](consultancy-in-a-box.md)). This matches the deployment fence to the data fence and prevents cross-engagement leakage by construction.
+For multi-tenant deployments, run one MCP server per namespace (the standard "one container per namespace" deployment). This matches the deployment fence to the data fence and prevents cross-namespace leakage by construction.
 
 ## Safety boundaries
 
@@ -128,13 +128,13 @@ For an agent that needs to *recall* what's known:
 | Max transcript size | Reject `ingest_chat` calls above this turn count | MCP server config |
 | `prompt_template` (server-side) | Custom extractor prompt for this MCP deployment | factory wiring at startup |
 
-For the underlying use-case knobs (window size, namespace, no-extract), see the CLI tool flags in [consultancy-in-a-box.md](consultancy-in-a-box.md) — the MCP tool maps each one through.
+The MCP tool maps each underlying use-case knob (window size, namespace, no-extract) through to the corresponding `kairix ingest-chat` CLI flag.
 
 ## Troubleshooting
 
 **`ingest_chat` returns `ok: false` with `error: "invalid namespace"`.**
 
-The agent passed a namespace argument that doesn't match its connection-config namespace. `fix:` drop the `namespace` argument — the server uses the connection default. `next:` if the agent legitimately needs to write to a different namespace, route the request through a different MCP server (one container per engagement is the supported model).
+The agent passed a namespace argument that doesn't match its connection-config namespace. `fix:` drop the `namespace` argument — the server uses the connection default. `next:` if the agent legitimately needs to write to a different namespace, route the request through a different MCP server (one container per namespace is the supported model).
 
 **`facts_about` returns an empty fact list for an entity the agent knows exists.**
 
@@ -154,7 +154,6 @@ Same diagnosis as the CLI tool: the LLM either returned no facts or returned mal
 
 ## See also
 
-- [consultancy-in-a-box.md](consultancy-in-a-box.md) — operator workflow this MCP surface implements
 - [fact-extractor.md](fact-extractor.md) — what `ingest_chat` runs under the hood
 - [eval-suite.md](eval-suite.md) — measuring whether the facts that landed are correct
 - [`docs/architecture/fact-layer.md`](../architecture/fact-layer.md) — design ADR

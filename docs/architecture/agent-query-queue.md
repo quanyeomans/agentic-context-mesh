@@ -3,7 +3,7 @@
 Status: introduce — flag-gated OFF by default
 Flag: `agent_query_queue`
 Tracking: [GH #354](https://github.com/three-cubes/kairix/issues/354)
-Spec: [`docs/architecture/ADR-029-agent-query-queue-and-carry-along-delivery.md`](../../architecture/ADR-029-agent-query-queue-and-carry-along-delivery.md)
+Spec: [`docs/architecture/ADR-029-agent-query-queue-and-carry-along-delivery.md`](ADR-029-agent-query-queue-and-carry-along-delivery.md)
 
 ## What this changes (when ON)
 

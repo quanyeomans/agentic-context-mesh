@@ -9,7 +9,7 @@ name: "1d · Eval LoCoMo nightly"
 # main-branch tip commit so the regression surfaces in dev review.
 #
 # Why nightly + cron, not per-PR: LoCoMo is multi-conversation and
-# burns LLM quota; the per-PR gate (1c) handles engagement-* corpora
+# burns LLM quota; the per-PR gate (1c) handles team-* corpora
 # fast enough to stay in the PR loop, while LoCoMo trends on a slower
 # cadence.
 

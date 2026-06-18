@@ -4,7 +4,7 @@
 
 The fact extractor turns chat-shaped data into structured facts. When `kairix ingest-chat` reads a JSONL transcript, it slices the conversation into windows of turns (default 5) and sends each window to a language model with a prompt that asks "what entity-attribute-value claims appear here?" The model returns a small JSON array; kairix parses it, deduplicates against existing facts, and persists each new fact to the fact store with the source turn ids attached for evidence.
 
-This is the layer that lets an agent ask "what's agent-alpha's current engagement?" and get a one-sentence answer with a citation, rather than getting back a 1,500-token blob of meeting transcript and having to read it themselves.
+This is the layer that lets an agent ask "what's agent-alpha working on right now?" and get a one-sentence answer with a citation, rather than getting back a 1,500-token blob of meeting transcript and having to read it themselves.
 
 ## How it works
 
@@ -17,7 +17,7 @@ The pipeline runs in `ingest_chat` (see `kairix/use_cases/ingest_chat.py`) and d
    - Calls the configured LLM backend via `LLMBackend.chat()` (whichever provider plug-in is wired in `kairix.config.yaml`).
    - Parses the response as a JSON array; tolerates malformed output (logs WARNING and skips).
    - Each emitted fact carries `entity`, `attribute`, `value`, `confidence`, `evidence_turn_ids`.
-3. **Stamp namespace** — every fact gets the `--namespace` engagement tag stamped on (defaults to `shared`).
+3. **Stamp namespace** — every fact gets the `--namespace` tag stamped on (defaults to `shared`).
 4. **Consolidate** — for each newly-extracted fact, `ConsolidationPass` queries the fact store for prior facts with the same `(entity, attribute)` and checks whether the new value contradicts. If yes, the older fact is marked `superseded_by=<new_id>`. The old fact stays retrievable for audit; default search excludes superseded rows.
 
 Facts persist to a SQLite database (`SQLiteFactStore`) — `<data_dir>/kairix/facts.sqlite` by default — keyed on a deterministic id derived from `(entity, attribute, source_turn_ids)`. Re-ingesting the same window is idempotent.
@@ -45,7 +45,7 @@ So budget roughly **(0.5–1.5K prompt + 0.2–0.5K completion) × (turn_count /
 
 **Concurrency.** The extractor calls the LLM sequentially per window, but `LLMBackend` implementations may pool / coalesce concurrent calls if the underlying provider plug-in supports it. See `docs/architecture/provider-plugin-architecture.md` for the transport-layer pooling story.
 
-**Tuning the window.** Larger `--window-turns` gives the model more context (so it can attribute "she said" to the right speaker) but costs more tokens per call. The sweet spot for most consultancy-shape conversations is 5–8 turns. Single-utterance windows (`--window-turns=1`) usually under-extract because the model can't see the context.
+**Tuning the window.** Larger `--window-turns` gives the model more context (so it can attribute "she said" to the right speaker) but costs more tokens per call. The sweet spot for most long conversations is 5–8 turns. Single-utterance windows (`--window-turns=1`) usually under-extract because the model can't see the context.
 
 ## Prompt customisation
 
@@ -67,7 +67,7 @@ Why a file rather than a yaml setting: prompts are version-controlled artefacts.
 
 ## Namespace hygiene
 
-Every extracted fact gets a namespace tag. Default is `shared`; pass `--namespace engagement-alpha` to scope facts to a specific engagement. Cross-namespace queries are explicit — by default, queries see only their own namespace plus `shared`.
+Every extracted fact gets a namespace tag. Default is `shared`; pass `--namespace team-alpha` to scope facts to a specific namespace. Cross-namespace queries are explicit — by default, queries see only their own namespace plus `shared`.
 
 If you accidentally ingest a transcript without the namespace flag and the facts end up in `shared`, you can re-scope them with:
 
@@ -101,7 +101,6 @@ Most likely `--window-turns` is small. `fix:` raise it to 8 or 10 — fewer call
 
 ## See also
 
-- [consultancy-in-a-box.md](consultancy-in-a-box.md) — end-to-end engagement workflow that uses ingest-chat
 - [eval-suite.md](eval-suite.md) — measuring extractor F1 against a ground-truth corpus
 - [MCP-ingest-tools.md](MCP-ingest-tools.md) — calling ingest from an agent over MCP
 - [`docs/architecture/fact-layer.md`](../architecture/fact-layer.md) — ADR + design
