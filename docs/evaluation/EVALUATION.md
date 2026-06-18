@@ -147,7 +147,7 @@ To add a new canary: append a case to `suites/per-type-canary-suite.yaml` with `
 ### Chunk-size distribution telemetry
 
 ```bash
-kairix eval chunk-stats --db-path ~/.cache/kairix/index.sqlite
+kairix eval chunk-stats   # resolves the deployment's index automatically
 ```
 
 Emits per-source-type chunk-size statistics:

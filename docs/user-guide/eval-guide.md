@@ -56,8 +56,8 @@ kairix eval generate \
   --output PATH           # Required. Output suite YAML path.
   [--count N]             # Target case count (default: 100)
   [--categories LIST]     # Comma-separated: recall,temporal,entity,conceptual,multi_hop,procedural
-  [--db PATH]             # Kairix database path (default: ~/.cache/kairix/index.sqlite)
-  [--deployment NAME]     # Azure deployment (default: gpt-4o-mini)
+  [--db PATH]             # Kairix index path (default: the deployment's index, e.g. /var/lib/kairix/index.sqlite)
+  [--deployment NAME]     # Azure deployment override; ignored when the provider resolves its own model
   [--no-calibrate]        # Skip calibration anchor check (faster, less safe)
   [--seed N]              # Random seed for reproducibility
   [--agent NAME]          # Agent for retrieval scoping (default: shape)
@@ -95,8 +95,8 @@ Use this when you have an existing suite (e.g. manually curated or created when 
 kairix eval enrich \
   --suite PATH            # Required. Input suite YAML.
   --output PATH           # Required. Output suite YAML (can equal --suite for in-place).
-  [--db PATH]             # Kairix database path
-  [--deployment NAME]     # Azure deployment (default: gpt-4o-mini)
+  [--db PATH]             # Kairix index path (default: the deployment's index, e.g. /var/lib/kairix/index.sqlite)
+  [--deployment NAME]     # Azure deployment override; ignored when the provider resolves its own model
   [--agent NAME]          # Agent for retrieval scoping (default: shape)
 ```
 
@@ -260,7 +260,7 @@ To increase acceptance rate: use `--count` larger than your target (the pipeline
 The LLM judge is returning unexpected grades on anchor cases. Possible causes:
 
 - API endpoint misconfigured (returns errors or empty responses)
-- Model deployment renamed (update `KAIRIX_LLM_MODEL` or use `--deployment`)
+- Judge model misconfigured — set the model in the configured provider's section of `kairix.config.yaml`
 - Temporary API degradation — retry in a few minutes
 
 Use `--no-calibrate` to bypass for development/testing. Do not bypass calibration in production generation runs.
@@ -269,7 +269,7 @@ Use `--no-calibrate` to bypass for development/testing. Do not bypass calibratio
 
 - Check `--db` path points to a populated kairix index
 - Run `kairix embed` if the index is empty
-- Verify the index has documents: `sqlite3 ~/.cache/kairix/index.sqlite "SELECT COUNT(*) FROM documents;"`
+- Verify the index has documents: `sqlite3 /var/lib/kairix/index.sqlite "SELECT COUNT(*) FROM documents;"` (or your `--db` path)
 
 ### NDCG scores look too low
 
