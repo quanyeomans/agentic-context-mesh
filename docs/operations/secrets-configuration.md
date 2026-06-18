@@ -111,7 +111,7 @@ docker compose up -d
 
 The `env_file: - .env` block in `docker-compose.yml` loads every line into each service's environment. No further wiring needed.
 
-For prod hygiene: store the `.env` file outside the repo (e.g. `/opt/kairix/.env`), reference it from a `docker-compose.override.yml`, and back it up to your password manager out-of-band.
+For prod hygiene: store the `.env` file outside the repo (e.g. `/etc/kairix/.env`), reference it from a `docker-compose.override.yml`, and back it up to your password manager out-of-band.
 
 ### Docker on a VM with Azure Key Vault
 
@@ -128,8 +128,8 @@ sudo $EDITOR /etc/default/kairix-fetch-secrets   # replace KAIRIX_KV_NAME=... wi
 
 # 2. Install the fetch-secrets systemd unit
 sudo cp scripts/deploy/kairix-fetch-secrets.service /etc/systemd/system/
-sudo cp scripts/deploy/fetch-secrets.sh /opt/kairix/bin/
-sudo chmod +x /opt/kairix/bin/fetch-secrets.sh
+sudo cp scripts/deploy/fetch-secrets.sh /etc/kairix/bin/
+sudo chmod +x /etc/kairix/bin/fetch-secrets.sh
 sudo systemctl enable --now kairix-fetch-secrets.service
 
 # 3. Verify
@@ -137,7 +137,7 @@ ls -la /run/secrets/kairix.env   # should be 0640, root:openclaw
 sudo systemctl status kairix-fetch-secrets.service
 
 # 4. Start kairix — docker-compose mounts /run/secrets into the containers
-docker compose -f /opt/kairix/docker-compose.yml up -d
+docker compose -f /etc/kairix/docker-compose.yml up -d
 ```
 
 `KAIRIX_KV_NAME` lives in `/etc/default/kairix-fetch-secrets` so the systemd
@@ -156,7 +156,7 @@ Same shape as Azure but with AWS CLI on the fetch side. The VM's instance profil
 
 ```bash
 # Install fetch-secrets-aws.sh (community-maintained alternative)
-cat > /opt/kairix/bin/fetch-secrets-aws.sh <<'EOF'
+cat > /etc/kairix/bin/fetch-secrets-aws.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 OUT_FILE="/run/secrets/kairix.env"
@@ -170,7 +170,7 @@ aws secretsmanager list-secrets --filters "Key=name,Values=kairix-" \
 done
 chmod 640 "$OUT_FILE"
 EOF
-chmod +x /opt/kairix/bin/fetch-secrets-aws.sh
+chmod +x /etc/kairix/bin/fetch-secrets-aws.sh
 
 # Wire it as a systemd one-shot, then proceed as Azure path
 ```
@@ -179,7 +179,7 @@ chmod +x /opt/kairix/bin/fetch-secrets-aws.sh
 
 ```bash
 # Same shape with gcloud
-cat > /opt/kairix/bin/fetch-secrets-gcp.sh <<'EOF'
+cat > /etc/kairix/bin/fetch-secrets-gcp.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 OUT_FILE="/run/secrets/kairix.env"
@@ -201,7 +201,7 @@ For dogfooding or small-team deployments where 1Password is already your passwor
 
 ```bash
 # Reference a vault item by path; 1Password CLI injects the values into env
-op run --env-file=/opt/kairix/.env.template -- docker compose up -d
+op run --env-file=/etc/kairix/.env.template -- docker compose up -d
 ```
 
 Where `.env.template` contains `op://kairix-vault/llm-api-key/credential` references that 1Password resolves at process start. See [1Password docs on secret references](https://developer.1password.com/docs/cli/secret-references).
@@ -289,7 +289,7 @@ User=kairix
 Group=kairix
 EnvironmentFile=/etc/kairix/kairix.env
 Environment=KAIRIX_CONFIG_PATH=/etc/kairix/kairix.config.yaml
-ExecStart=/opt/kairix/venv/bin/kairix mcp serve --transport http --host 127.0.0.1 --port 8080
+ExecStart=/usr/local/bin/kairix mcp serve --transport http --host 127.0.0.1 --port 8080
 Restart=on-failure
 RestartSec=5s
 
