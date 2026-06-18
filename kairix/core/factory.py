@@ -53,10 +53,15 @@ _PIPELINE_CACHE: dict[RetrievalConfig, SearchPipeline] = {}
 _PIPELINE_CACHE_LOCK = threading.Lock()
 
 
-# Process-shared QueryResultCache (#281). One instance per process,
-# wired into every SearchPipeline constructed by build_search_pipeline.
-# Lazy-initialised so the env-var bounds are read once at first use.
-_QUERY_CACHE: QueryResultCache | None = None
+# Per-config QueryResultCache instances, keyed by the resolved
+# RetrievalConfig's cfg_hash (#281, #554). A single shared instance
+# returned config #1's cached results for every other config evaluated
+# in the same process — the hybrid-sweep "identical scores for every
+# config" bug (#554). Keying by cfg_hash gives each config its own cache
+# (exactly one in production, N during a sweep) and matches the on-disk
+# cache schema, which is already cfg_hash-scoped. Lazy-initialised so the
+# env-var bounds are read once per cfg_hash at first use.
+_QUERY_CACHES: dict[str, QueryResultCache] = {}
 _QUERY_CACHE_LOCK = threading.Lock()
 
 
@@ -73,8 +78,8 @@ def reset_search_pipeline_cache() -> None:
     with _PIPELINE_CACHE_LOCK:
         _PIPELINE_CACHE.clear()
     with _QUERY_CACHE_LOCK:
-        if _QUERY_CACHE is not None:
-            _QUERY_CACHE.clear()
+        for cache in _QUERY_CACHES.values():
+            cache.clear()
 
 
 def _lookup_cached_pipeline(cfg: RetrievalConfig, flag_reader: Any) -> SearchPipeline | None:
@@ -147,7 +152,12 @@ def _resolve_query_cache_path() -> Any:
 
 
 def _get_or_create_query_cache(cfg_hash: str = "") -> QueryResultCache:
-    """Return the process-shared :class:`QueryResultCache`, building it lazily.
+    """Return the :class:`QueryResultCache` for ``cfg_hash``, building it lazily.
+
+    One cache instance per distinct ``cfg_hash`` (#554) — production runs
+    a single config so it has one cache; a hybrid-sweep evaluates many
+    configs in one process and each gets its own cache, so config #1's
+    cached results never collide with config #2's.
 
     Bounds are read from env vars on first construction (#281):
       - ``KAIRIX_QUERY_CACHE_MAX_ENTRIES`` (int, default 500)
@@ -155,38 +165,38 @@ def _get_or_create_query_cache(cfg_hash: str = "") -> QueryResultCache:
 
     F4-clean: env reads route through :mod:`kairix.paths`.
 
-    ``cfg_hash`` scopes the persistent cache rows to the current
-    pipeline configuration (#411 Phase 2). Passing the empty string
-    keeps the cache cfg-scope-disabled — rows persist under the empty
-    bucket. Production callers thread the resolved cfg_hash through
-    so a config change invalidates persisted entries automatically.
+    ``cfg_hash`` also scopes the persistent cache rows to the pipeline
+    configuration (#411 Phase 2) — matching the in-memory keying above.
     """
-    global _QUERY_CACHE
     with _QUERY_CACHE_LOCK:
-        if _QUERY_CACHE is None:
+        cache = _QUERY_CACHES.get(cfg_hash)
+        if cache is None:
             from kairix.paths import read_float_env, read_int_env
 
             max_entries = read_int_env("KAIRIX_QUERY_CACHE_MAX_ENTRIES", default=DEFAULT_MAX_ENTRIES)
             max_age_s = read_float_env("KAIRIX_QUERY_CACHE_MAX_AGE_S", default=DEFAULT_MAX_AGE_S)
             path = _resolve_query_cache_path()
-            _QUERY_CACHE = QueryResultCache(
+            cache = QueryResultCache(
                 max_entries=max_entries,
                 max_age_s=max_age_s,
                 path=path,
                 cfg_hash=cfg_hash,
             )
-        return _QUERY_CACHE
+            _QUERY_CACHES[cfg_hash] = cache
+        return cache
 
 
 def get_query_cache() -> QueryResultCache:
-    """Return the process-shared query cache (lazily built on first call).
+    """Return the query cache for the production retrieval config.
 
     Public accessor for the onboard check + any other diagnostic that
-    wants to read :meth:`QueryResultCache.stats`. Going through this
-    helper keeps the module-global hidden so callers can't accidentally
-    rebind ``_QUERY_CACHE``.
+    wants to read :meth:`QueryResultCache.stats`. Resolves the top-level
+    production ``RetrievalConfig`` and returns its cfg_hash-scoped cache —
+    the same instance the production pipeline uses — so the stats reflect
+    real hit rates rather than an empty default bucket (#554).
     """
-    return _get_or_create_query_cache()
+    cfg = _resolve_retrieval_config(None)
+    return _get_or_create_query_cache(_compute_cfg_hash(cfg))
 
 
 def select_boosts(

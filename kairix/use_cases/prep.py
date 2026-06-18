@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 # Process-shared PrepSummaryCache. Lazy-initialised on first prep call
 # so the env-var bounds (if any) are read once at startup. Mirrors the
-# ``_QUERY_CACHE`` pattern in ``kairix.core.factory`` so the operator
+# ``_QUERY_CACHES`` pattern in ``kairix.core.factory`` so the operator
 # surface (``probe caches``) sees both caches via the same accessor
 # pattern.
 _PREP_SUMMARY_CACHE: PrepSummaryCache | None = None
