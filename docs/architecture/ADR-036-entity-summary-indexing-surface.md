@@ -463,6 +463,77 @@ Capture-flip-soak-gate is the standard. For this flag:
    is needed: `DELETE FROM chunks WHERE collection='entity-summaries'`
    (operator-driven, documented in the cutover runbook).
 
+## Entity-first routing (#429 Phase 2b)
+
+Indexing (above) makes entity summaries *retrievable* — but the projector
+writes them into the `entity-summaries` collection at tier `reference`
+(×0.6), so they are *de-prioritised*. For an ENTITY-intent query ("tell
+me about X" / "who is X") that is backwards: the operator is asking about
+the entity, so its summary should lead. Phase 2b adds the routing that
+flips this.
+
+**Mechanism.** A new boost strategy
+`kairix.core.search.boosts.EntityFirstRoutingBoost` multiplies the
+`boosted_score` of entity-summary rows (collection `entity-summaries`, or
+the well-known `entity://` source-URI prefix) by
+`EntityFirstRoutingConfig.factor` (default 3.0) and re-sorts — the same
+"mutate then re-sort by boosted_score" shape the `rrf` boost functions
+use, so the routed summary actually leads the budget stage. It is
+registered **last** in `select_boosts` (after `SourceTierBoost`) so the
+multiplier composes on top of the reference de-boost.
+
+**Two gates, both required before any score is touched:**
+
+1. **Feature flag** — `entity_first_routing_enabled` (registry block
+   below), resolved once at build time so `select_boosts` only wires the
+   boost when the flag is ON, and read again at query time via the boost's
+   `flag_reader` DI seam so an operator can roll the cutover back instantly
+   (flag OFF ⇒ no-op) without a rebuild. Default OFF ⇒ pre-#429 ranking
+   byte-for-byte.
+2. **Intent** — `context["intent"] == QueryIntent.ENTITY` (with the #456
+   confidence gate when `intent_confidence_gated_boosts` is ON).
+
+The flag depends on `entity_summary_indexing_enabled` being ON for there
+to be summaries to route — routing without indexing is a harmless no-op
+(no `entity://` rows exist). It is orthogonal to the CLI `[Wikidata]`
+badge + MCP `entity_summary` envelope flag (ADR-036 §Q7), which mark
+entity rows regardless of ranking.
+
+**Registry.**
+
+```python
+# kairix/core/features/registry.py
+"entity_first_routing_enabled": FeatureFlag(
+    name="entity_first_routing_enabled",
+    default=False,
+    stage="introduce",
+    introduced_in="v2026.6.19",
+    target_retire_in="v2026.12.1",
+    owner="search-pipeline",
+    related_spec="docs/architecture/ADR-036-entity-summary-indexing-surface.md",
+)
+```
+
+**Measurement (#429 Phase 2c — runs against the now-fixed eval loop).**
+Phase 1 (#552/#554) repaired `kairix eval hybrid-sweep` so per-config
+scores are distinct again, which makes this measurable:
+
+1. On a corpus that has entity summaries indexed
+   (`entity_summary_indexing_enabled` ON), capture entity-category
+   NDCG@10 on the curated entity slice with `entity_first_routing_enabled`
+   **OFF** (baseline).
+2. Flip routing **ON**, re-capture.
+3. Gate on a measurable entity-category lift with no regression in other
+   categories (±2pp per the cutover protocol above).
+
+The auto-gold generator under-samples entity hard cases, so the curated
+entity slice + the run live with the corpus (the reflib / production
+index), not in the public repo — a meaningful slice needs real indexed
+entity summaries, and corpus entity names stay out of public artefacts
+(F32). The production flag-flip is **#463 / Linear PLA-173**, blocked on a
+deployment apply-script fix in the infrastructure repo; the routing code
+ships independently of that cutover.
+
 ## Fitness-function impact
 
 | Rule | Concern | Resolution |

@@ -14,6 +14,7 @@ from kairix.core.protocols import GraphRepository
 from kairix.core.search.config import (
     ContentQualityBoostConfig,
     EntityBoostConfig,
+    EntityFirstRoutingConfig,
     ProceduralBoostConfig,
     SourceTier,
     SourceTierBoostConfig,
@@ -327,6 +328,127 @@ class SourceTierBoost:
                 )
                 continue
         return results
+
+
+# ---------------------------------------------------------------------------
+# EntityFirstRoutingBoost (Issue #429) — route entity-summaries first
+# ---------------------------------------------------------------------------
+
+
+def default_entity_first_routing_flag_reader() -> bool:
+    """Production flag-reader for ``entity_first_routing_enabled`` (#429).
+
+    Thin wrapper around :func:`kairix.core.features.resolver.flag` so
+    tests inject a fake reader via the ``flag_reader`` kwarg on
+    :class:`EntityFirstRoutingBoost` without monkey-patching the resolver
+    module (F1/F2-clean).
+    """
+    from kairix.core.features.resolver import flag
+
+    return flag("entity_first_routing_enabled")
+
+
+class EntityFirstRoutingBoost:
+    """Route entity-summaries first for ENTITY-intent queries (#429 Phase 2b).
+
+    The ADR-036 projector writes each entity's Wikidata summary into the
+    synthetic ``entity-summaries`` collection (tier ``reference``, x0.6) —
+    so by default those summaries are *de*-prioritised. For an ENTITY-intent
+    query ("tell me about X" / "who is X") that is exactly backwards: the
+    operator is asking *about the entity*, so its summary should lead.
+
+    This boost multiplies the ``boosted_score`` of entity-summary rows by
+    ``config.factor``. A row is an entity-summary when its ``collection``
+    matches ``config.collection`` OR its ``path`` carries the well-known
+    ``entity://`` source-URI prefix the projector writes (the same marker
+    the CLI ``[Wikidata]`` badge + MCP ``entity_summary`` envelope flag key
+    off). Registered LAST in the chain so the multiplier composes on top of
+    :class:`SourceTierBoost`'s tier de-boost.
+
+    Two gates, both must pass before any score is touched:
+
+      1. **Feature flag** — ``entity_first_routing_enabled`` read live via
+         ``flag_reader``. OFF (the default) ⇒ structural no-op, pre-#429
+         ranking preserved byte-for-byte. This is the cutover control.
+      2. **Intent** — ``context["intent"] == QueryIntent.ENTITY`` (with the
+         #456 confidence gate when ``intent_confidence_gated_boosts`` is
+         ON), via :func:`intent_confidence_passes`.
+
+    Failure-isolated: any per-result exception logs at WARNING and leaves
+    that row's score unchanged; the strategy itself never raises.
+    """
+
+    _ENTITY_URI_PREFIX = "entity://"
+
+    def __init__(
+        self,
+        config: EntityFirstRoutingConfig | None = None,
+        *,
+        flag_reader: IntentConfidenceFlagReader = default_entity_first_routing_flag_reader,
+    ) -> None:
+        self._config = config or EntityFirstRoutingConfig()
+        self._flag_reader = flag_reader
+
+    def _is_entity_summary(self, result: object) -> bool:
+        """True when ``result`` is an entity-summary row.
+
+        Checks the well-known ``entity://`` source-URI prefix first (the
+        marker the projector writes, and the one the CLI ``[Wikidata]``
+        badge + MCP envelope key off), then falls back to the collection
+        label. Both ``getattr`` defaults are ``""``: ``==`` is None-safe
+        and ``isinstance`` guards ``startswith``, so no ``or ""`` is
+        needed.
+        """
+        path = getattr(result, "path", "")
+        if isinstance(path, str) and path.startswith(self._ENTITY_URI_PREFIX):
+            return True
+        return getattr(result, "collection", "") == self._config.collection
+
+    @staticmethod
+    def _score_key(result: object) -> float:
+        """Sort key — defensive so one unreadable score can't break the sort.
+
+        Catches broadly (matching the per-row boost guards): a row whose
+        ``boosted_score`` is missing, non-numeric, or raises on access
+        sorts to the bottom rather than aborting the whole boost.
+        """
+        try:
+            return float(getattr(result, "boosted_score", 0.0))
+        except Exception:
+            return 0.0
+
+    def boost(self, results: list, _query: str, context: dict) -> list:
+        """Multiply entity-summary scores by ``factor`` when flag ON + ENTITY intent.
+
+        Re-sorts by ``boosted_score`` descending when it fires (like the
+        ``rrf`` boost functions) so the routed entity-summary actually
+        leads the budget stage — ``apply_budget`` consumes in order without
+        re-sorting. When either gate fails the input list is returned
+        unchanged (no mutation, no re-sort) — pre-#429 ranking preserved.
+
+        ``_query`` is part of the ``BoostStrategy`` Protocol signature but
+        unused — routing is structural (collection / source-URI), not
+        query-text dependent.
+        """
+        if not self._flag_reader():
+            return results
+        if not intent_confidence_passes(context, QueryIntent.ENTITY, self._config.min_intent_confidence):
+            return results
+        factor = self._config.factor
+        for r in results:
+            try:
+                if self._is_entity_summary(r):
+                    r.boosted_score = float(r.boosted_score) * factor
+            except Exception as exc:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "EntityFirstRoutingBoost: per-result boost failed for %s — %s",
+                    getattr(r, "path", "?"),
+                    exc,
+                )
+                continue
+        return sorted(results, key=self._score_key, reverse=True)
 
 
 # ---------------------------------------------------------------------------
