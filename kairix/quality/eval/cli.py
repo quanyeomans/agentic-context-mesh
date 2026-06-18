@@ -13,7 +13,7 @@ Usage:
   kairix eval enrich --suite suites/v2-real-world.yaml --output suites/v2-enriched.yaml
   kairix eval monitor --suite suites/canary.yaml
   kairix eval report --days 30
-  kairix eval chunk-stats --db-path ~/.cache/kairix/index.sqlite
+  kairix eval chunk-stats   # resolves the deployment's index automatically
 """
 
 from __future__ import annotations
@@ -22,10 +22,28 @@ import argparse
 import sys
 from pathlib import Path
 
-_DEFAULT_DB_PATH = str(Path.home() / ".cache/kairix/index.sqlite")
 _DEFAULT_DEPLOYMENT = "gpt-4o-mini"
 _DEFAULT_AGENT = "shape"
 _AGENT_HELP = "Agent for retrieval scoping (default: shape)"
+_DB_HELP = "kairix SQLite index path (default: the deployment's index, e.g. /var/lib/kairix/index.sqlite)"
+
+
+def _resolve_db_path(explicit: str | None) -> str:
+    """Resolve the eval index path (#552).
+
+    Returns the explicit ``--db`` value when given; otherwise the
+    deployment's canonical index via :func:`kairix.paths.index_path`
+    (``/var/lib/kairix/index.sqlite`` on a system/container install, the
+    XDG data dir on a user install) — never a hardcoded ``~/.cache``
+    path that only exists on a dev laptop, so ``kairix eval`` works
+    out-of-the-box on a standard docker/system deployment.
+    """
+    if explicit:
+        return explicit
+    from kairix.paths import index_path
+
+    return str(index_path())
+
 
 # F17 — argparse action keyword repeated across boolean-flag declarations; one
 # constant keeps the well-known sentinel in a single edit site.
@@ -45,7 +63,7 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     # FakeXxx fakes.
     suite_gen = SuiteGenerator()
     result = suite_gen.generate_suite(
-        db_path=args.db,
+        db_path=_resolve_db_path(args.db),
         output_path=args.output,
         n_cases=args.count,
         categories=args.categories.split(",") if args.categories else None,
@@ -88,7 +106,7 @@ def _cmd_enrich(args: argparse.Namespace) -> int:
     result = suite_gen.enrich_suite(
         suite_path=args.suite,
         output_path=args.output,
-        db_path=args.db,
+        db_path=_resolve_db_path(args.db),
         deployment=args.deployment,
         agent=args.agent,
     )
@@ -447,7 +465,7 @@ def _cmd_chunk_stats(args: argparse.Namespace) -> int:
     """
     from kairix.quality.eval.chunk_stats import emit_chunk_stats
 
-    db_path = Path(args.db_path).expanduser()
+    db_path = Path(_resolve_db_path(args.db_path)).expanduser()
     return emit_chunk_stats(db_path, sys.stdout)
 
 
@@ -503,13 +521,13 @@ def main(argv: list[str] | None = None) -> None:
     p_gen.add_argument("--categories", help="Comma-separated categories (default: all)")
     p_gen.add_argument(
         "--db",
-        default=_DEFAULT_DB_PATH,
-        help="kairix SQLite path (default: ~/.cache/kairix/index.sqlite)",
+        default=None,
+        help=_DB_HELP,
     )
     p_gen.add_argument(
         "--deployment",
         default=_DEFAULT_DEPLOYMENT,
-        help="Azure deployment (default: gpt-4o-mini)",
+        help="Azure deployment name override; ignored when the configured provider resolves its own model",
     )
     p_gen.add_argument("--no-calibrate", action=_STORE_TRUE, help="Skip calibration anchor check")
     p_gen.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
@@ -521,13 +539,13 @@ def main(argv: list[str] | None = None) -> None:
     p_enr.add_argument("--output", required=True, help="Output suite YAML path")
     p_enr.add_argument(
         "--db",
-        default=_DEFAULT_DB_PATH,
-        help="kairix SQLite path",
+        default=None,
+        help=_DB_HELP,
     )
     p_enr.add_argument(
         "--deployment",
         default=_DEFAULT_DEPLOYMENT,
-        help="Azure deployment (default: gpt-4o-mini)",
+        help="Azure deployment name override; ignored when the configured provider resolves its own model",
     )
     p_enr.add_argument("--agent", default=_DEFAULT_AGENT, help=_AGENT_HELP)
 
@@ -618,8 +636,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_chunk.add_argument(
         "--db-path",
-        default=_DEFAULT_DB_PATH,
-        help="kairix SQLite path (default: ~/.cache/kairix/index.sqlite)",
+        default=None,
+        help=_DB_HELP,
     )
 
     # --- sweep ---
