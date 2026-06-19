@@ -837,6 +837,24 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         staged_scope=("kairix",),
     ),
     RuleEntry(
+        id="F94",
+        gate="f94",
+        check="f94_no_system_path_writes",
+        category="production-safety",
+        scope="per-file",
+        summary=(
+            "no runtime writes to system/OS paths (/etc, /opt, /usr, ...) — production code in "
+            "kairix/** persists config + state through kairix.paths (the writable data dir) and the "
+            "config overlay, never a hardcoded system path, so kairix runs least-privilege on "
+            "hardened / read-only-root VMs (the wizard-save overlay class, #485/#492)"
+        ),
+        adr_origin="ADR-017 least-privilege / hostile-environment deployment",
+        tags=("security",),
+        # Whole-tree literal scan over kairix/** (any production module could
+        # hardcode a system-path write); the trigger isn't a single staged tree.
+        staged_class="always-run",
+    ),
+    RuleEntry(
         id="F91",
         gate="f91",
         check="f91_browser_surface",
