@@ -146,7 +146,7 @@ Skip this step if you don't have per-agent subdirectories yet — kairix synthes
 ### B1. Install the package
 
 ```bash
-pipx install "kairix-agentic-knowledge-mgt[agents]"
+pipx install "Kairix-agentic-knowledge-mgt[agents]"
 ```
 
 Or, if you prefer a virtualenv you manage yourself:
@@ -154,7 +154,7 @@ Or, if you prefer a virtualenv you manage yourself:
 ```bash
 python3 -m venv ~/.venvs/kairix
 source ~/.venvs/kairix/bin/activate
-pip install "kairix-agentic-knowledge-mgt[agents]"
+pip install "Kairix-agentic-knowledge-mgt[agents]"
 ```
 
 The `[agents]` extra pulls in the MCP server dependencies. Most operators want this.
