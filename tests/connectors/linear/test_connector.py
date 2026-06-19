@@ -556,6 +556,48 @@ def test_cursor_decode_drops_non_string_watermark_value() -> None:
     assert "project:uuid-p1" not in ids, "the valid project watermark (future) still filters the project out"
 
 
+def test_budget_full_skips_graphql_query_for_later_specs() -> None:
+    """Once the per-tick budget is full, later entity specs issue ZERO GraphQL calls (review I1).
+
+    The pre-fix code called ``paginate()`` for every spec unconditionally —
+    even when an earlier spec had already filled the budget — wasting up to 4
+    GraphQL POSTs per budget-hit tick. The fix hoists the budget guard to the
+    TOP of ``_drain_spec``, before touching the paginator.
+
+    Sabotage-proof: remove the early-return hoist → ``paginate_calls`` for
+    ``projects`` goes from 0 to 1 → test fails → restore hoist → green.
+    """
+    issues = [
+        _issue_node("ENG-1", "2026-05-10T00:00:00.000Z"),
+        _issue_node("ENG-2", "2026-05-11T00:00:00.000Z"),
+    ]
+    project = _project_node("uuid-p1", "2026-05-13T00:00:00.000Z")
+
+    api = FakeLinearApiClient(
+        pages={
+            "issues": [issues],
+            "projects": [[project]],
+        }
+    )
+    connector = LinearConnector(
+        credentials=LinearCredentials(api_key="lin_fixture"),  # pragma: allowlist secret — test fixture
+        client_builder=lambda _c: api,
+        per_tick_max_items=2,
+    )
+    events = list(connector.list_changes(cursor=None))
+
+    # Issues fill the budget (2 items, budget = 2).
+    assert len(events) == 2
+    assert all(e.item_id.startswith("issue:") for e in events)
+
+    # The ``projects`` paginator must never have been called.
+    projects_calls = [c for c in api.paginate_calls if c[2] == "projects"]
+    assert projects_calls == [], (
+        f"projects paginate() must not be called when the budget is already full, "
+        f"but got {len(projects_calls)} call(s): {projects_calls}"
+    )
+
+
 def test_encode_cursor_keys_are_sorted_deterministically() -> None:
     """The encoded cursor token sorts its keys for a deterministic round-trip.
 

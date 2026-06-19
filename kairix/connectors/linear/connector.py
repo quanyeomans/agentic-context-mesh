@@ -309,6 +309,8 @@ class LinearConnector:
         Per-item isolation (spec §9): a node that raises on conversion is
         logged at WARNING and skipped — never failing the whole tick.
         """
+        if len(events) >= self.per_tick_max_items:
+            return  # budget already full this tick — skip the GraphQL query entirely
         since = watermarks.get(spec.prefix, _EPOCH_ISO)
         for node in self._api.paginate(
             _build_query(spec),
