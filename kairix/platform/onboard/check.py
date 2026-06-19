@@ -153,6 +153,44 @@ _NEO4J_FIX_DEFAULT = (
     "next: `kairix onboard check`. " + _NEO4J_REQUIRED_FRAMING
 )
 
+# GH #477 — the document_root + secrets remediations used to hard-code
+# /opt/kairix/service.env, a path from a single historical VM layout that
+# does NOT exist on a fresh Docker or pip install. README tells agents to
+# surface these remediations verbatim, so a container/pip operator was sent
+# to edit a phantom file. The strings below name the config surface that
+# actually exists per deployment mode (same Mode.detect() seam the Neo4j
+# remediation already uses, GH #476):
+#   container — the operator `.env` beside docker-compose.yml
+#   system    — /etc/kairix/.env (FHS layout laid down by `kairix init --system`)
+#   user/pip  — kairix.config.yaml (or the KAIRIX_DOCUMENT_ROOT env var)
+_CONFIG_LOCATION_BY_MODE: dict[Mode, str] = {
+    Mode.container: "the operator `.env` beside docker-compose.yml",
+    Mode.system: "/etc/kairix/.env",
+    Mode.user: "kairix.config.yaml (or set the KAIRIX_DOCUMENT_ROOT env var)",
+}
+
+
+def _config_location_for(env: Mapping[str, str] | None = None) -> str:
+    """Return the deployment-appropriate config-file location phrase.
+
+    Resolved through :meth:`kairix.paths.Mode.detect` so container, system,
+    and pip operators each see the surface that exists on their install
+    rather than a single-VM path (GH #477). ``env`` is the same DI seam
+    :func:`check_document_root_configured` already exposes; production
+    callers leave it ``None`` and the live environment is read at the F4
+    boundary in paths.py.
+    """
+    return _CONFIG_LOCATION_BY_MODE.get(Mode.detect(env), _CONFIG_LOCATION_BY_MODE[Mode.user])
+
+
+# The canonical (one-line) document_root remediation stays deployment-neutral
+# — it can't know the operator's mode at registry-build time, so it names the
+# env var + the config file without the phantom /opt path.
+_DOCUMENT_ROOT_FIX = (
+    "Set `KAIRIX_DOCUMENT_ROOT=/your/docs/path` in your kairix.config.yaml "
+    "(or as an env var) and ensure the directory exists."
+)
+
 CANONICAL_REMEDIATIONS: dict[str, str] = {
     _CHECK_QUERY_CACHE_STATS: (
         "Diagnostic check — no remediation required. Cache hit-rate is informational; "
@@ -165,13 +203,12 @@ CANONICAL_REMEDIATIONS: dict[str, str] = {
     _CHECK_KAIRIX_ON_PATH: _INSTALL_VERIFY_FIX,
     _CHECK_WRAPPER_INSTALLED: _INSTALL_VERIFY_FIX,
     _CHECK_SECRETS_LOADED: (
-        "Run `sudo systemctl enable --now kairix-fetch-secrets.service` on the host; "
-        "if that fails, confirm `/run/secrets/kairix.env` exists and contains "
-        "`KAIRIX_LLM_API_KEY=...` and `KAIRIX_LLM_ENDPOINT=...`."
+        "Set `KAIRIX_PROVIDER_LLM_API_KEY=...` and `KAIRIX_PROVIDER_LLM_ENDPOINT=...` "
+        "in your environment, or write them as KEY=VALUE lines in a secrets file and "
+        "point `KAIRIX_SECRETS_FILE` at it. Run `kairix secrets verify` to confirm "
+        "every credential resolves."
     ),
-    _CHECK_DOCUMENT_ROOT_CONFIGURED: (
-        "Set `KAIRIX_DOCUMENT_ROOT=/your/docs/path` in /opt/kairix/service.env and ensure the directory exists."
-    ),
+    _CHECK_DOCUMENT_ROOT_CONFIGURED: _DOCUMENT_ROOT_FIX,
     _CHECK_VECTOR_SEARCH_WORKING: (
         "Run `docker logs kairix-worker-1` for embed-pipeline errors; confirm "
         "`kairix onboard check secrets_loaded` passes; then run `kairix embed --limit 20` "
@@ -514,16 +551,22 @@ def check_document_root_configured(env: Mapping[str, str] | None = None) -> Chec
 
     ``env`` is a DI seam (defaults to ``os.environ``); tests pass an
     explicit mapping rather than monkeypatching the process environment.
+    The same ``env`` mapping drives :func:`_config_location_for` so the
+    failure remediation names the config surface that exists on the
+    operator's deployment mode (container `.env` / `/etc/kairix/.env` /
+    `kairix.config.yaml`) rather than the phantom `/opt/kairix/service.env`
+    VM path the old strings hard-coded (GH #477).
     """
     if env is None:
         env = os.environ
+    config_location = _config_location_for(env)
     doc_root = env.get("KAIRIX_DOCUMENT_ROOT", "")
     if not doc_root:
         return CheckResult(
             name=_CHECK_DOCUMENT_ROOT_CONFIGURED,
             ok=False,
             detail="KAIRIX_DOCUMENT_ROOT is not set",
-            fix=("Set KAIRIX_DOCUMENT_ROOT in /opt/kairix/service.env:\n  KAIRIX_DOCUMENT_ROOT=/data/documents"),
+            fix=(f"Set KAIRIX_DOCUMENT_ROOT in {config_location}:\n  KAIRIX_DOCUMENT_ROOT=/your/docs/path"),
         )
     p = Path(doc_root)
     if not p.exists():
@@ -532,7 +575,7 @@ def check_document_root_configured(env: Mapping[str, str] | None = None) -> Chec
             ok=False,
             detail=f"KAIRIX_DOCUMENT_ROOT directory does not exist: {doc_root}",
             fix=(
-                "Create the directory or update KAIRIX_DOCUMENT_ROOT in /opt/kairix/service.env.\n"
+                f"Create the directory or update KAIRIX_DOCUMENT_ROOT in {config_location}.\n"
                 "If your documents are at a different path, set: KAIRIX_DOCUMENT_ROOT=/your/docs/path"
             ),
         )
