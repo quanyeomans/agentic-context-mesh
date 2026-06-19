@@ -11,6 +11,7 @@ These fakes are the canonical test doubles for contract and unit tests.
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -3162,6 +3163,241 @@ class FakeNotionConnector:
         from kairix.core.protocols import SourceMetadata
 
         return SourceMetadata()
+
+
+class FakeLinearApiClient:
+    """Scripted ``LinearApiClient`` stand-in for tests — no network.
+
+    Implements the same ``query`` / ``paginate`` surface as
+    :class:`kairix.connectors.linear.api_client.LinearApiClient` using
+    in-memory scripted responses. Records every call so tests can assert
+    what the connector sent.
+
+    Args:
+        pages: Mapping from connection name (``issues`` / ``projects`` /
+            ``documents`` / ``initiatives`` / ``projectUpdates``) to a
+            list of pages, where each page is a list of node dicts.
+            ``paginate()`` serves pages in order and stops at the last
+            page. Example::
+
+                FakeLinearApiClient(
+                    pages={
+                        "issues": [
+                            [{"id": "i-1"}, {"id": "i-2"}],   # page 1
+                            [{"id": "i-3"}],                   # page 2 (last)
+                        ]
+                    }
+                )
+
+        raise_429_times: Make ``query()`` raise
+            :class:`httpx.HTTPStatusError` (429) this many times before
+            succeeding. Use to exercise retry logic in callers without
+            a real HTTP client.
+    """
+
+    def __init__(
+        self,
+        *,
+        pages: Mapping[str, list[list[dict[str, Any]]]] | None = None,
+        raise_429_times: int = 0,
+    ) -> None:
+        import copy
+
+        self._pages: dict[str, list[list[dict[str, Any]]]] = {k: copy.deepcopy(v) for k, v in (pages or {}).items()}
+        self._remaining_429s = raise_429_times
+        self.query_calls: list[tuple[str, dict[str, Any]]] = []
+        self.paginate_calls: list[tuple[str, dict[str, Any], str]] = []
+
+    def query(self, document: str, variables: Mapping[str, Any]) -> dict[str, Any]:
+        """Return an empty data dict after consuming any scripted 429s."""
+        self.query_calls.append((document, dict(variables)))
+        if self._remaining_429s > 0:
+            self._remaining_429s -= 1
+            import httpx
+
+            raise httpx.HTTPStatusError(
+                "429 Too Many Requests",
+                request=httpx.Request("POST", "https://api.linear.app/graphql"),
+                response=httpx.Response(429),
+            )
+        return {}
+
+    def paginate(
+        self,
+        document: str,
+        variables: Mapping[str, Any],
+        *,
+        connection: str,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield scripted nodes for ``connection`` filtered by ``updatedAt > since``.
+
+        Mirrors the real Linear API contract (``filter: { updatedAt: { gt:
+        $since } }``): nodes whose ``updatedAt`` is at or before the
+        ``since`` variable are not returned, so the connector's per-entity
+        watermark cursor is exercised faithfully across ticks. A node
+        missing ``updatedAt`` is always yielded (the connector handles it).
+        """
+        self.paginate_calls.append((document, dict(variables), connection))
+        since = variables.get("since")
+        for page in self._pages.get(connection, []):
+            for node in page:
+                updated_at = node.get("updatedAt")
+                if isinstance(since, str) and isinstance(updated_at, str) and updated_at <= since:
+                    continue
+                yield node
+
+
+class FakeLinearConnector:
+    """Scripted Linear :class:`kairix.core.protocols.SourceConnector`.
+
+    Constructor takes the per-kind node set the fake should emit; the
+    fake satisfies the full MVP capability surface (base SourceConnector
+    + PollConnector + CredentialsConnector + SlimConnector) without
+    touching the Linear GraphQL network. Canonical fake F43 pairs with
+    the real :class:`kairix.connectors.linear.LinearConnector` inside
+    ``tests/contracts/test_linear_connector_contract.py``.
+
+    Args:
+        nodes: Mapping from entity kind (``issue`` / ``project`` /
+            ``document`` / ``initiative`` / ``projectUpdate``) to a list
+            of GraphQL-shaped node dicts. Issues key their id on
+            ``identifier``; every other kind keys on ``id``.
+        sensitivity: the F39 tier ``sensitivity_for`` returns
+            (default ``internal`` to mirror the shipped connector).
+    """
+
+    name: str = "linear"
+    per_tick_max_items: int = 500
+    disk_watermark_min_free_bytes: int | None = None
+
+    def __init__(
+        self,
+        *,
+        nodes: Mapping[str, list[dict[str, Any]]] | None = None,
+        sensitivity: str = "internal",
+    ) -> None:
+        self._sensitivity = sensitivity
+        self._by_id: dict[str, tuple[str, dict[str, Any]]] = {}
+        self._order: list[str] = []
+        self._next_cursor: str | None = None
+        for kind, kind_nodes in (nodes or {}).items():
+            for node in kind_nodes:
+                key = node.get("identifier") if kind == "issue" else node.get("id")
+                if not key:
+                    continue
+                item_id = f"{kind}:{key}"
+                self._by_id[item_id] = (kind, dict(node))
+                self._order.append(item_id)
+
+    def list_changes(self, cursor: Any | None = None) -> Any:
+        """Yield one ``modified`` ChangeEvent per seeded node.
+
+        Mirrors the real connector's per-entity-type watermark cursor: each
+        kind advances its OWN ``updatedAt`` watermark, JSON-encoded into the
+        opaque token by :meth:`next_cursor` (F43 behavioural parity with
+        :class:`kairix.connectors.linear.LinearConnector`).
+        """
+        import json
+
+        del cursor
+        from kairix.core.protocols import ChangeEvent
+
+        events: list[ChangeEvent] = []
+        watermarks: dict[str, str] = {}
+        for item_id in self._order:
+            kind, node = self._by_id[item_id]
+            modified_at = str(node.get("updatedAt", "1970-01-01T00:00:00.000Z"))
+            events.append(
+                ChangeEvent(
+                    op="modified",
+                    item_id=item_id,
+                    modified_at=modified_at,
+                    metadata={
+                        "sensitivity": self._sensitivity,
+                        "kind": kind,
+                        "mime": "text/markdown",
+                    },
+                )
+            )
+            prior = watermarks.get(kind)
+            if prior is None or modified_at > prior:
+                watermarks[kind] = modified_at
+        self._next_cursor = json.dumps(watermarks, sort_keys=True) if watermarks else None
+        return iter(events)
+
+    def fetch(self, item_id: str) -> Any:
+        from datetime import datetime, timezone
+
+        from kairix.connectors.linear.render import render
+        from kairix.core.protocols import RawArtefact
+
+        kind, node = self._by_id.get(item_id, ("issue", {}))
+        markdown = render(kind, node)
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return RawArtefact(
+            raw=markdown.encode("utf-8"),
+            mime="text/markdown",
+            fetched_at=fetched_at,
+            sensitivity_hint=self._sensitivity,  # type: ignore[arg-type]  # F3-rationale: fixture passes a valid Sensitivity literal.
+        )
+
+    def source_link(self, item_id: str) -> str:
+        entry = self._by_id.get(item_id)
+        if entry is not None:
+            url = entry[1].get("url")
+            if isinstance(url, str) and url:
+                return url
+        return f"linear://{item_id}"
+
+    def sensitivity_for(self, _item_id: str) -> Any:
+        return self._sensitivity
+
+    def next_cursor(self) -> str | None:
+        return self._next_cursor
+
+    def metadata_for(self, item_id: str) -> Any:
+        """Surface author + dates + labels from the seeded node (F65)."""
+        from kairix.core.protocols import SourceMetadata
+
+        entry = self._by_id.get(item_id)
+        if entry is None:
+            return SourceMetadata()
+        node = entry[1]
+        author = None
+        author_email = None
+        for key in ("creator", "lead", "user", "assignee"):
+            person = node.get(key)
+            if isinstance(person, dict):
+                author = person.get("displayName")
+                author_email = person.get("email")
+                break
+        labels_block = node.get("labels")
+        tags: tuple[str, ...] = ()
+        if isinstance(labels_block, dict) and isinstance(labels_block.get("nodes"), list):
+            tags = tuple(n["name"] for n in labels_block["nodes"] if isinstance(n, dict) and n.get("name"))
+        return SourceMetadata(
+            modified_at=node.get("updatedAt"),
+            created_at=node.get("createdAt"),
+            author=author,
+            author_email=author_email,
+            tags=tags,
+            properties={"kind": entry[0]},
+        )
+
+    def list_changes_for_container(self, container: Any) -> Any:
+        """PollConnector — delegate to the single-cursor list_changes."""
+        return self.list_changes(getattr(container, "cursor_token", None))
+
+    def retrieve_all_slim_docs(self, _container: Any) -> Any:
+        """SlimConnector — yield every seeded item_id for the prune cycle."""
+        yield from list(self._order)
+
+    def load_credentials(self, credentials: dict[str, Any]) -> dict[str, Any] | None:
+        """CredentialsConnector — validate + normalise the raw credential."""
+        raw = credentials.get("api_key") or credentials.get("token")
+        if not isinstance(raw, str) or not raw.strip():
+            return None
+        return {"api_key": raw.strip()}
 
 
 class FakeGitHubConnector:

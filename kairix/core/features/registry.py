@@ -208,6 +208,30 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec="docs/architecture/connector-scope-topology/connector-design-specs/slack.md",
     ),
+    "connector_linear": FeatureFlag(
+        name="connector_linear",
+        default=False,
+        description=(
+            "Enable the Linear connector — polls workspace roadmap + docs "
+            "(issues / projects / documents / initiatives / project updates) "
+            "via the Linear GraphQL API filtered by updatedAt, renders each "
+            "entity to Markdown, and dispatches the markdown bytes through "
+            "the kairix extractor registry. HTTPS-only; incremental poll, "
+            "NOT webhooks (linear.md §13). When OFF the connector slot is a "
+            "no-op; when ON the cc_pair drains every 5 entity types on the "
+            "updatedAt high-water-mark cursor."
+        ),
+        stage="introduce",
+        # Linear cutover plan (per docs/architecture/feature-flag-architecture.md §7 and
+        # docs/architecture/connector-scope-topology/connector-design-specs/linear.md §8):
+        # Greenfield (no legacy slice). Twelve-month retire window matches the
+        # slower-adoption connector cohort (per-workspace API-key provisioning
+        # cadence); shares the Wave-E window constant with the slack/github pilots.
+        introduced_in=_FLAG_INTRODUCED_WAVE_E_LATER,
+        target_retire_in=_LONG_RETIRE_WINDOW_WAVE_E,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec="docs/architecture/connector-scope-topology/connector-design-specs/linear.md",
+    ),
     # bronze_ttl_gc removed in Phase 7 of streaming-bronze (#27) — streaming
     # bronze writes no on-disk blobs so there's nothing for a TTL-based GC
     # to bound. The maintenance stage that backed this flag is a no-op now.
