@@ -204,6 +204,7 @@ def select_boosts(
     graph: Any,
     *,
     tier_map: dict[str, str] | None = None,
+    entity_first_routing_on: bool = False,
 ) -> list[Any]:
     """Build the production boost chain from a RetrievalConfig.
 
@@ -224,17 +225,28 @@ def select_boosts(
                   ``cfg.source_tier_boost.default_tier`` (x1.0). The factory
                   derives this map from the operator's collections config
                   before calling this helper.
+        entity_first_routing_on: when True (Issue #429 — resolved from the
+                  ``entity_first_routing_enabled`` feature flag by
+                  :func:`build_search_pipeline`), append
+                  :class:`EntityFirstRoutingBoost` LAST so its multiplier
+                  composes on top of the tier de-boost. Default False keeps
+                  the chain byte-for-byte identical for every deployment
+                  that hasn't cut over.
 
     Returns:
         List of boost-strategy instances in registration order:
         EntityBoost → ProceduralBoost → TemporalDateBoost → ChunkDateBoost
         → SourceTierBoost (Issue #432 — runs last so tier multipliers
-        apply on top of any intent-gated boost output).
+        apply on top of any intent-gated boost output) → ContentQualityBoost
+        → EntityFirstRoutingBoost (Issue #429 — appended only when the flag
+        is on; runs last so entity-summaries are routed first on ENTITY
+        intent after every other boost has scored).
     """
     from kairix.core.search.boosts import (
         ChunkDateBoost,
         ContentQualityBoost,
         EntityBoost,
+        EntityFirstRoutingBoost,
         ProceduralBoost,
         SourceTierBoost,
         TemporalDateBoost,
@@ -262,6 +274,15 @@ def select_boosts(
     # reference-tier content with a substantive body.
     if cfg.content_quality_boost.enabled:
         boosts.append(ContentQualityBoost(config=cfg.content_quality_boost))
+    # Issue #429 — entity-first routing. Appended LAST so the multiplier
+    # composes on top of every prior boost (especially SourceTierBoost's
+    # reference x0.6 de-boost). Wired only when the
+    # ``entity_first_routing_enabled`` flag is on (resolved by
+    # build_search_pipeline); the boost ALSO self-gates on the flag at
+    # query time so an operator can roll the cutover back instantly
+    # without a rebuild.
+    if entity_first_routing_on:
+        boosts.append(EntityFirstRoutingBoost(config=cfg.entity_first_routing))
     return boosts
 
 
@@ -1065,7 +1086,18 @@ def _build_search_pipeline_uncached(
     # to apply per result. Empty dict (no tier declarations) means the
     # boost falls back to the default tier (x1.0) for every result.
     tier_map = derive_tier_map() if cfg.source_tier_boost.enabled else None
-    boosts = deps.boosts_override if deps.boosts_override is not None else select_boosts(cfg, graph, tier_map=tier_map)
+    # Issue #429 — resolve the entity-first-routing cutover flag once at
+    # build time. When ON, select_boosts appends EntityFirstRoutingBoost so
+    # ENTITY-intent queries route entity-summaries first. Default OFF keeps
+    # the production chain unchanged.
+    from kairix.core.search.boosts import default_entity_first_routing_flag_reader
+
+    entity_first_routing_on = default_entity_first_routing_flag_reader()
+    boosts = (
+        deps.boosts_override
+        if deps.boosts_override is not None
+        else select_boosts(cfg, graph, tier_map=tier_map, entity_first_routing_on=entity_first_routing_on)
+    )
 
     pipeline_logger = deps.logger_override if deps.logger_override is not None else _build_search_logger(env)
 

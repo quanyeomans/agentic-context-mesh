@@ -5,6 +5,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning: [Calendar Versioning (CalVer)](https://calver.org/) — `YYYY.MM.DD`, with `.N` suffix for same-day releases.
 Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.04.18`.
 
+## [Unreleased]
+
+### For operators
+
+- **Lead with what we know about a thing.** When someone asks "tell me about X" or "who is X", kairix can now put the short description of that person, team, or topic at the top of the results instead of buried below documents. It's off by default — turn it on once you've switched on entity descriptions, and you can switch it back off at any time.
+
 ## [2026.6.18] - 2026-06-18 — Set up kairix in your browser
 
 > **Upgrading?** Pull the new image and restart — your knowledge store, sources, and agents all carry over. New installs now open into a browser setup page; existing installs keep working exactly as they are.

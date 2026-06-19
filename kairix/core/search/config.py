@@ -297,6 +297,45 @@ class ContentQualityBoostConfig:
 
 
 @dataclass(frozen=True)
+class EntityFirstRoutingConfig:
+    """Configuration for entity-first routing (#429 Phase 2b).
+
+    When the ``entity_first_routing_enabled`` feature flag is ON and a
+    query classifies as :attr:`QueryIntent.ENTITY` ("tell me about X" /
+    "who is X"), the :class:`~kairix.core.search.boosts.EntityFirstRoutingBoost`
+    multiplies the ``boosted_score`` of ``entity-summaries`` results (the
+    ADR-036 projector's ``entity://<QID>`` chunks) by :attr:`factor`,
+    surfacing the entity's Wikidata-sourced summary at the top of the
+    candidate set instead of leaving it de-prioritised at tier
+    ``reference`` (x0.6).
+
+    The boost runs LAST in the chain (after :class:`SourceTierBoost`), so
+    ``factor`` composes on top of the tier multiplier: with source-tier
+    boost on, an entity-summary nets ``0.6 x factor`` versus a
+    ``vault_active`` row's ``x1.0``; with source-tier boost off it nets a
+    flat ``xfactor``. :attr:`factor` is the lever the
+    ``kairix eval hybrid-sweep`` loop tunes (#429 Phase 2c).
+
+    There is intentionally no ``enabled`` field — the registry
+    :class:`~kairix.core.features.registry.FeatureFlag`
+    ``entity_first_routing_enabled`` is the single, runtime-flippable
+    cutover control (default OFF ⇒ no-op).
+    """
+
+    # Multiplier applied to entity-summary ``boosted_score`` on ENTITY
+    # intent. Default 3.0 clears the reference x0.6 de-boost and routes
+    # the summary first; swept per-corpus in Phase 2c.
+    factor: float = 3.0
+    # Synthetic collection the ADR-036 projector writes into. Rows whose
+    # ``collection`` matches this — or whose ``path`` carries the
+    # well-known ``entity://`` source-URI prefix — are routed first.
+    collection: str = "entity-summaries"
+    # Issue #456 — confidence-gated minimum. Consulted only when the
+    # ``intent_confidence_gated_boosts`` flag is ON. See EntityBoostConfig.
+    min_intent_confidence: float = 0.5
+
+
+@dataclass(frozen=True)
 class RerankConfig:
     """Configuration for cross-encoder re-ranking (post-fusion semantic pass)."""
 
@@ -378,6 +417,13 @@ class RetrievalConfig:
     # operator-declared authority); composes multiplicatively at the
     # boost-chain tail.
     content_quality_boost: ContentQualityBoostConfig = field(default_factory=ContentQualityBoostConfig)
+
+    # Issue #429 — entity-first routing tunables. The boost itself is
+    # gated by the ``entity_first_routing_enabled`` feature flag (default
+    # OFF), not by a field here; this only carries the multiplier +
+    # collection name the boost applies when the flag is ON and the
+    # query is ENTITY intent.
+    entity_first_routing: EntityFirstRoutingConfig = field(default_factory=EntityFirstRoutingConfig)
 
     # Issue #455 — three-way fusion floor + cross-layer dedup.
     #

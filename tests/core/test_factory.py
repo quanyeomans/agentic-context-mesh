@@ -33,6 +33,7 @@ from kairix.core.factory import FactoryDeps, build_search_pipeline, select_boost
 from kairix.core.search.boosts import (
     ChunkDateBoost,
     EntityBoost,
+    EntityFirstRoutingBoost,
     ProceduralBoost,
     TemporalDateBoost,
 )
@@ -158,6 +159,42 @@ def test_select_boosts_all_enabled_preserves_order(fake_graph: FakeGraphReposito
         TemporalDateBoost,
         ChunkDateBoost,
     ]
+
+
+@pytest.mark.unit
+def test_select_boosts_omits_entity_first_routing_by_default(
+    fake_graph: FakeGraphRepository,
+) -> None:
+    """Default-safe (#429): the entity-first routing boost is NOT wired
+    unless ``entity_first_routing_on`` is passed True — so every existing
+    deployment's chain is byte-for-byte unchanged.
+
+    Sabotage proof: registering the boost unconditionally would put an
+    EntityFirstRoutingBoost in this chain and fail the assertion.
+    """
+    cfg = _cfg(entity=True, procedural=True, date_path=True, chunk_date=True)
+    boosts = select_boosts(cfg, fake_graph)
+    assert not any(isinstance(b, EntityFirstRoutingBoost) for b in boosts)
+
+
+@pytest.mark.unit
+def test_select_boosts_appends_entity_first_routing_when_flag_on(
+    fake_graph: FakeGraphRepository,
+) -> None:
+    """#429 Phase 2b: with the flag resolved ON at build time, the routing
+    boost is appended LAST so its multiplier composes on top of the tier
+    de-boost.
+
+    Sabotage proof: dropping the ``entity_first_routing_on`` guard, or
+    inserting the boost anywhere but last, fails this assertion.
+    """
+    cfg = _cfg(entity=True, procedural=True, date_path=True, chunk_date=True)
+    boosts = select_boosts(cfg, fake_graph, entity_first_routing_on=True)
+    assert isinstance(boosts[-1], EntityFirstRoutingBoost)
+    assert sum(isinstance(b, EntityFirstRoutingBoost) for b in boosts) == 1
+    # The boost receives the config's tunables verbatim (not a fresh default) —
+    # read via getattr so the test pins the wiring, not the attribute name.
+    assert getattr(boosts[-1], "_config", None) is cfg.entity_first_routing
 
 
 @pytest.mark.unit

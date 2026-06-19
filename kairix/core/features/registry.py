@@ -62,6 +62,10 @@ _FLAG_TARGET_RETIRE_WAVE5_2026_11_30 = "v2026.11.30"
 # Canonical spec for flags whose behaviour is the flag mechanism itself
 # (no dedicated capability ADR yet).
 _FEATURE_FLAG_ARCHITECTURE_SPEC = "docs/architecture/feature-flag-architecture.md"
+# F17 — search-pipeline owner repeated across the entity-summary,
+# intent-confidence, and entity-first-routing flags; extract so adding the
+# next search flag doesn't re-duplicate the literal.
+_SEARCH_PIPELINE_OWNER = "search-pipeline"
 
 
 # Public registry. The topology_v2_* family + ``obsidian_connector_primary``
@@ -303,7 +307,30 @@ REGISTRY: dict[str, FeatureFlag] = {
         stage="introduce",
         introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
         target_retire_in=_FLAG_TARGET_RETIRE_IN,
-        owner="search-pipeline",
+        owner=_SEARCH_PIPELINE_OWNER,
+        related_spec="docs/architecture/ADR-036-entity-summary-indexing-surface.md",
+    ),
+    "entity_first_routing_enabled": FeatureFlag(
+        name="entity_first_routing_enabled",
+        # Default-OFF: pre-#429-Phase-2b ranking preserved byte-for-byte.
+        # Operators flip ON (after entity_summary_indexing_enabled is ON,
+        # so there are summaries to route) to lift entity-summaries to the
+        # top for entity-named queries.
+        default=False,
+        description=(
+            "When ON, ENTITY-intent queries ('tell me about X', 'who is X') "
+            "route the 'entity-summaries' collection first — the ADR-036 "
+            "projector's Wikidata summaries are lifted to the top of results "
+            "via EntityFirstRoutingBoost instead of sitting de-prioritised at "
+            "tier reference (x0.6). When OFF (the default), ranking is "
+            "unchanged byte-for-byte. Needs entity_summary_indexing_enabled "
+            "ON for there to be summaries to route. #429 Phase 2b; the "
+            "production cutover is #463 (PLA-173)."
+        ),
+        stage="introduce",
+        introduced_in="v2026.6.19",
+        target_retire_in="v2026.12.1",
+        owner=_SEARCH_PIPELINE_OWNER,
         related_spec="docs/architecture/ADR-036-entity-summary-indexing-surface.md",
     ),
     "intent_confidence_gated_boosts": FeatureFlag(
@@ -332,7 +359,7 @@ REGISTRY: dict[str, FeatureFlag] = {
         stage="introduce",
         introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
         target_retire_in=_FLAG_TARGET_RETIRE_IN,
-        owner="search-pipeline",
+        owner=_SEARCH_PIPELINE_OWNER,
         related_spec=_FEATURE_FLAG_ARCHITECTURE_SPEC,
     ),
     "setup_wizard_web": FeatureFlag(
