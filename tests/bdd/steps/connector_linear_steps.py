@@ -148,9 +148,15 @@ def _connector_has_cursor(linear_ctx: _Ctx) -> None:
 
 @then("the linear next cursor matches the highest updatedAt seen")
 def _cursor_matches_high_water(linear_ctx: _Ctx) -> None:
+    import json
+
     assert linear_ctx.connector is not None
     cursor = linear_ctx.connector.next_cursor()
-    assert cursor == _UPDATED_AT, f"cursor must equal the issue's updatedAt; got {cursor!r}"
+    assert cursor is not None, "expected a next cursor after a clean drain"
+    # The opaque cursor JSON-encodes a per-entity-type watermark map; the
+    # issue type's watermark must equal the only issue's updatedAt.
+    decoded = json.loads(cursor)
+    assert decoded.get("issue") == _UPDATED_AT, f"issue watermark must equal the issue's updatedAt; got {decoded!r}"
 
 
 @then("the fetched linear artefact is Markdown")

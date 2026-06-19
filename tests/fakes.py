@@ -3229,10 +3229,22 @@ class FakeLinearApiClient:
         *,
         connection: str,
     ) -> Iterator[dict[str, Any]]:
-        """Yield nodes from the scripted pages for ``connection``."""
+        """Yield scripted nodes for ``connection`` filtered by ``updatedAt > since``.
+
+        Mirrors the real Linear API contract (``filter: { updatedAt: { gt:
+        $since } }``): nodes whose ``updatedAt`` is at or before the
+        ``since`` variable are not returned, so the connector's per-entity
+        watermark cursor is exercised faithfully across ticks. A node
+        missing ``updatedAt`` is always yielded (the connector handles it).
+        """
         self.paginate_calls.append((document, dict(variables), connection))
+        since = variables.get("since")
         for page in self._pages.get(connection, []):
-            yield from page
+            for node in page:
+                updated_at = node.get("updatedAt")
+                if isinstance(since, str) and isinstance(updated_at, str) and updated_at <= since:
+                    continue
+                yield node
 
 
 class FakeLinearConnector:
@@ -3278,12 +3290,20 @@ class FakeLinearConnector:
                 self._order.append(item_id)
 
     def list_changes(self, cursor: Any | None = None) -> Any:
-        """Yield one ``modified`` ChangeEvent per seeded node."""
+        """Yield one ``modified`` ChangeEvent per seeded node.
+
+        Mirrors the real connector's per-entity-type watermark cursor: each
+        kind advances its OWN ``updatedAt`` watermark, JSON-encoded into the
+        opaque token by :meth:`next_cursor` (F43 behavioural parity with
+        :class:`kairix.connectors.linear.LinearConnector`).
+        """
+        import json
+
         del cursor
         from kairix.core.protocols import ChangeEvent
 
         events: list[ChangeEvent] = []
-        high_water: str | None = None
+        watermarks: dict[str, str] = {}
         for item_id in self._order:
             kind, node = self._by_id[item_id]
             modified_at = str(node.get("updatedAt", "1970-01-01T00:00:00.000Z"))
@@ -3299,9 +3319,10 @@ class FakeLinearConnector:
                     },
                 )
             )
-            if high_water is None or modified_at > high_water:
-                high_water = modified_at
-        self._next_cursor = high_water
+            prior = watermarks.get(kind)
+            if prior is None or modified_at > prior:
+                watermarks[kind] = modified_at
+        self._next_cursor = json.dumps(watermarks, sort_keys=True) if watermarks else None
         return iter(events)
 
     def fetch(self, item_id: str) -> Any:

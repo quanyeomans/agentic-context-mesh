@@ -96,8 +96,16 @@ def test_list_changes_event_modified_at_is_the_node_updated_at() -> None:
     assert events[0].modified_at == "2026-05-10T00:00:00.000Z"
 
 
-def test_next_cursor_is_high_water_mark_across_types() -> None:
-    """next_cursor() returns the max updatedAt across all drained entities."""
+def test_next_cursor_encodes_per_entity_type_watermarks() -> None:
+    """next_cursor() encodes each type's own last-emitted updatedAt (spec §4).
+
+    The cursor is a JSON-encoded per-type watermark map — issues advance
+    to the latest issue updatedAt, projects to the latest project
+    updatedAt, independently. Pins that each type tracks its OWN mark
+    (a mutant collapsing to one shared watermark would lose a key).
+    """
+    import json
+
     connector = _build(
         {
             "issues": [[_issue_node("ENG-1", "2026-05-10T00:00:00.000Z")]],
@@ -105,37 +113,61 @@ def test_next_cursor_is_high_water_mark_across_types() -> None:
         }
     )
     list(connector.list_changes(cursor=None))
-    assert connector.next_cursor() == "2026-05-15T00:00:00.000Z"
+    decoded = json.loads(connector.next_cursor() or "")
+    assert decoded == {
+        "issue": "2026-05-10T00:00:00.000Z",
+        "project": "2026-05-15T00:00:00.000Z",
+    }
 
 
-def test_next_cursor_keeps_prior_cursor_when_no_events() -> None:
-    """A clean drain that produced no events preserves the prior cursor.
+def test_cursor_round_trips_to_resume_per_type() -> None:
+    """next_cursor() → list_changes(cursor) resumes each type past its mark.
 
-    Pins the ``if not events: return cursor`` branch in _high_water — the
-    high-water-mark must not be clobbered to None when nothing changed.
+    A second tick fed the first tick's cursor must NOT re-emit items at or
+    below each type's watermark, but MUST emit a newer item of any type.
     """
-    connector = _build({"issues": [[]]})
-    list(connector.list_changes(cursor="2026-05-01T00:00:00.000Z"))
-    assert connector.next_cursor() == "2026-05-01T00:00:00.000Z"
+    connector = _build(
+        {
+            "issues": [
+                [
+                    _issue_node("ENG-1", "2026-05-10T00:00:00.000Z"),
+                    _issue_node("ENG-2", "2026-05-20T00:00:00.000Z"),
+                ]
+            ],
+        }
+    )
+    list(connector.list_changes(cursor=None))
+    cursor = connector.next_cursor()
+    # Second tick with the same fixture: every issue updatedAt is <= the
+    # watermark, so nothing is re-emitted.
+    again = list(connector.list_changes(cursor=cursor))
+    assert again == [], "items at or below the per-type watermark must not re-emit"
 
 
-def test_next_cursor_keeps_higher_prior_cursor_over_older_events() -> None:
-    """When the prior cursor is newer than every event, it is preserved.
+def test_legacy_single_string_cursor_degrades_to_full_enum() -> None:
+    """A pre-upgrade single-ISO-string cursor re-syncs rather than skipping.
 
-    Pins the ``cursor > latest`` guard in _high_water — the mark must never
-    move backwards even if a re-fetched older item shows up in the drain.
+    Pins the robust-decode contract (spec §4): a malformed/legacy token is
+    treated as "no watermark for any type" → full enumeration, so existing
+    operator state degrades safely instead of silently skipping data.
     """
     connector = _build({"issues": [[_issue_node("ENG-1", "2026-05-10T00:00:00.000Z")]]})
-    list(connector.list_changes(cursor="2026-06-01T00:00:00.000Z"))
-    assert connector.next_cursor() == "2026-06-01T00:00:00.000Z"
+    # Legacy cursor: a bare ISO string newer than the only event. Under the
+    # OLD single-watermark code this would have filtered the event out; the
+    # new decode treats it as "no watermark" and re-enumerates everything.
+    events = list(connector.list_changes(cursor="2026-06-01T00:00:00.000Z"))
+    assert [e.item_id for e in events] == ["issue:ENG-1"]
 
 
-def test_per_tick_budget_stops_early_and_holds_cursor() -> None:
-    """When per_tick_max_items is hit, the drain stops and the cursor stays None.
+def test_per_tick_budget_advances_drained_type_watermark() -> None:
+    """A budget-stopped tick advances each drained type's OWN watermark (spec §4).
 
-    Spec §4: a budget-stopped tick must NOT advance the cursor past the
-    point it reached, so the next tick re-drains from the last good cursor.
+    Forward progress: when per_tick_max_items caps the drain mid-page, the
+    type's watermark moves to the max updatedAt it EMITTED — never None,
+    never past an un-emitted item. The next tick resumes from there.
     """
+    import json
+
     connector = _build(
         {
             "issues": [
@@ -150,7 +182,11 @@ def test_per_tick_budget_stops_early_and_holds_cursor() -> None:
     )
     events = list(connector.list_changes(cursor=None))
     assert len(events) == 2, "budget should cap the tick at 2 items"
-    assert connector.next_cursor() is None, "budget-stopped tick must not advance the cursor"
+    decoded = json.loads(connector.next_cursor() or "")
+    # Watermark advanced to the SECOND emitted item — not past ENG-3.
+    assert decoded == {"issue": "2026-05-11T00:00:00.000Z"}, (
+        "budget-stopped tick must advance the issue watermark to its last emitted item, not skip ENG-3"
+    )
 
 
 def test_fetch_dispatches_to_renderer_by_prefix() -> None:
@@ -349,3 +385,197 @@ def test_make_connector_accepts_budget_of_one() -> None:
 
     with pytest.raises(SecretNotFoundError):
         make_connector({"per_tick_max_items": 1, "default_sensitivity": "internal"})
+
+
+def _document_node(did: str, updated_at: str) -> dict[str, Any]:
+    return {
+        "id": did,
+        "title": f"Doc {did}",
+        "content": "doc body",
+        "url": f"https://linear.app/team/document/{did}",
+        "createdAt": "2026-05-01T00:00:00.000Z",
+        "updatedAt": updated_at,
+        "creator": {"displayName": "agent-gamma", "email": "agent-gamma@example.com"},
+    }
+
+
+def test_multi_type_budget_no_starvation_or_skip_across_ticks() -> None:
+    """Under per-tick-budget pressure, every entity type is eventually
+    emitted across ticks — no starvation, no skip, no livelock (Finding 1).
+
+    With a SINGLE shared watermark + ``any()`` short-circuit drain (the old
+    code), the first spec (issues) fills ``per_tick_max_items`` every tick,
+    the other four types are never queried, and the held single cursor lets
+    the next tick re-drain issues from scratch forever — projects/documents
+    are emitted NEVER. The per-entity-type watermark cursor fixes this: each
+    type advances its OWN watermark to its last-emitted updatedAt, so later
+    ticks resume past the drained issues and reach the other types.
+
+    Asserts: (a) all three issues + the project + the document are emitted
+    across the ticks (no type skipped), (b) every tick before completion
+    makes forward progress (no livelock), (c) no in-range item is lost.
+    """
+    issues = [
+        _issue_node("ENG-1", "2026-05-10T00:00:00.000Z"),
+        _issue_node("ENG-2", "2026-05-11T00:00:00.000Z"),
+        _issue_node("ENG-3", "2026-05-12T00:00:00.000Z"),
+    ]
+    project = _project_node("uuid-p1", "2026-05-13T00:00:00.000Z")
+    document = _document_node("uuid-d1", "2026-05-14T00:00:00.000Z")
+    expected = {
+        "issue:ENG-1",
+        "issue:ENG-2",
+        "issue:ENG-3",
+        "project:uuid-p1",
+        "document:uuid-d1",
+    }
+    connector = _build(
+        {
+            "issues": [issues],
+            "projects": [[project]],
+            "documents": [[document]],
+        },
+        per_tick_max_items=2,
+    )
+
+    seen: set[str] = set()
+    cursor = None
+    # Bound the loop well above the minimum needed (5 items / budget 2 = 3
+    # ticks) so a livelock surfaces as "never converges" rather than hanging.
+    max_ticks = 12
+    for _ in range(max_ticks):
+        before = len(seen)
+        batch = list(connector.list_changes(cursor=cursor))
+        seen.update(e.item_id for e in batch)
+        cursor = connector.next_cursor()
+        if seen == expected:
+            break
+        # Forward progress: a tick that emits nothing new while items remain
+        # is a livelock — the per-type watermark must keep advancing.
+        assert len(seen) > before, "livelock: a tick made no forward progress while items remain undrained"
+
+    assert seen == expected, (
+        f"every entity type must be emitted across ticks under budget pressure — missing: {expected - seen}"
+    )
+
+
+class _ExplodingNode(dict):  # type: ignore[type-arg]  # F3: test-only node that raises on identity access.
+    """Yields a valid ``updatedAt`` (so the fake's since-filter passes it
+    to the connector) but raises on any other key — forcing the
+    connector's per-item conversion to throw, not the fake."""
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        if key == "updatedAt":
+            return "2026-05-09T00:00:00.000Z"
+        raise ValueError("boom: malformed linear node")
+
+
+def test_drain_skips_malformed_node_and_keeps_siblings(caplog: pytest.LogCaptureFixture) -> None:
+    """A node that raises on conversion is skipped; siblings still emit (Finding 2).
+
+    Spec §9 per-item isolation: one malformed item fails just that item,
+    logged at WARNING with the traceback (``exc_info``) — never the whole
+    tick. We force the conversion to raise by handing the drain a node that
+    explodes on ``.get``, and assert the valid sibling issue is still
+    emitted, the tick succeeds, AND the skip is logged WITH the exception
+    traceback (pins ``exc_info=True`` — a mutant flipping it to ``False``
+    drops the traceback the operator needs to diagnose the bad node).
+    """
+    import logging
+
+    good = _issue_node("ENG-OK", "2026-05-10T00:00:00.000Z")
+    connector = _build({"issues": [[_ExplodingNode(), good]]})
+    with caplog.at_level(logging.WARNING, logger="kairix.connectors.linear.connector"):
+        events = list(connector.list_changes(cursor=None))
+    ids = [e.item_id for e in events]
+    assert ids == ["issue:ENG-OK"], "the malformed node is skipped, the valid sibling still emits"
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "malformed" in r.getMessage()]
+    assert warnings, "the skipped malformed node must be logged at WARNING"
+    # exc_info=True populates record.exc_info with the (type, value, tb)
+    # tuple; exc_info=False leaves it as the literal False. Assert the tuple
+    # so a True->False mutant (dropping the traceback) is killed.
+    exc = warnings[0].exc_info
+    assert isinstance(exc, tuple) and exc[0] is ValueError, (
+        f"the WARNING must carry the exception traceback (exc_info=True), got {exc!r}"
+    )
+
+
+def test_watermark_is_monotonic_even_with_out_of_order_nodes() -> None:
+    """A type's watermark never moves backward when nodes arrive out of order.
+
+    Pins the ``max(prior, modified_at)`` forward-progress advance (spec §4
+    monotonicity): even if a later-yielded node of the same type has an
+    OLDER updatedAt, the watermark stays at the newest one already emitted.
+    A mutant that drops the ``max`` (taking the last value unconditionally)
+    would regress the watermark to the older timestamp.
+    """
+    import json
+
+    connector = _build(
+        {
+            "issues": [
+                [
+                    _issue_node("ENG-NEW", "2026-05-20T00:00:00.000Z"),  # newest first
+                    _issue_node("ENG-OLD", "2026-05-10T00:00:00.000Z"),  # older, yielded after
+                ]
+            ]
+        }
+    )
+    events = list(connector.list_changes(cursor=None))
+    assert {e.item_id for e in events} == {"issue:ENG-NEW", "issue:ENG-OLD"}
+    decoded = json.loads(connector.next_cursor() or "")
+    assert decoded == {"issue": "2026-05-20T00:00:00.000Z"}, (
+        "watermark must hold the newest emitted updatedAt, never regress to the older out-of-order node"
+    )
+
+
+def test_cursor_decode_drops_non_string_watermark_value() -> None:
+    """A JSON cursor whose watermark value isn't a string is dropped to full enum.
+
+    Pins the ``isinstance(value, str) and value`` filter in _decode_cursor
+    (line 609): a corrupt per-type watermark (e.g. a number) must be
+    discarded so that type re-enumerates from epoch rather than being
+    applied as a bogus filter. A mutant swapping ``and`` for ``or`` would
+    keep the non-string value and feed it to the API as ``since``.
+    """
+    import json
+
+    # issue watermark is a NUMBER (corrupt); project watermark is a valid
+    # future ISO string that filters the project out. The issue must still
+    # emit (its corrupt watermark is dropped → epoch → full enum).
+    corrupt = json.dumps({"issue": 12345, "project": "2026-12-01T00:00:00.000Z"})
+    connector = _build(
+        {
+            "issues": [[_issue_node("ENG-1", "2026-05-10T00:00:00.000Z")]],
+            "projects": [[_project_node("uuid-p1", "2026-05-11T00:00:00.000Z")]],
+        }
+    )
+    events = list(connector.list_changes(cursor=corrupt))
+    ids = {e.item_id for e in events}
+    assert "issue:ENG-1" in ids, "a corrupt (non-string) issue watermark must drop to full enum, not skip the issue"
+    assert "project:uuid-p1" not in ids, "the valid project watermark (future) still filters the project out"
+
+
+def test_encode_cursor_keys_are_sorted_deterministically() -> None:
+    """The encoded cursor token sorts its keys for a deterministic round-trip.
+
+    Pins ``json.dumps(..., sort_keys=True)`` (line 618): the persisted token
+    must be byte-stable regardless of drain order, so the orchestrator's
+    cursor row doesn't churn. The connector drains in spec order
+    (issue, then document), so the INSERTION order is ``issue, document``;
+    SORTED order is ``document, issue`` (alphabetical). We assert the token
+    is in sorted order — a mutant flipping ``sort_keys`` to ``False`` would
+    emit the insertion order (``issue`` before ``document``) and fail.
+    """
+    connector = _build(
+        {
+            "issues": [[_issue_node("ENG-1", "2026-05-10T00:00:00.000Z")]],
+            "documents": [[_document_node("uuid-d1", "2026-05-15T00:00:00.000Z")]],
+        }
+    )
+    list(connector.list_changes(cursor=None))
+    token = connector.next_cursor()
+    assert token is not None
+    assert token.index('"document"') < token.index('"issue"'), (
+        f"encoded cursor keys must be sorted (document before issue), not drain order; got {token!r}"
+    )

@@ -168,8 +168,20 @@ def test_connector_metadata_for_surfaces_author(name: str, factory: Callable[[],
 
 @pytest.mark.parametrize("name,factory", _FACTORIES)
 def test_connector_next_cursor_advances_on_clean_drain(name: str, factory: Callable[[], SourceConnector]) -> None:
-    """Both implementations expose a high-water-mark cursor after a clean drain."""
+    """Both impls expose a per-entity-type watermark cursor after a drain.
+
+    The opaque token JSON-encodes ``{prefix: <max-updatedAt-for-that-type>}``;
+    parity (F43) requires the fake and real impl agree on the decoded map —
+    issue advances to the issue's updatedAt, project to the project's.
+    """
+    import json
+
     connector = factory()
     list(connector.list_changes(cursor=None))
     cursor = connector.next_cursor()
-    assert cursor == "2026-05-22T10:00:00.000Z", f"{name!r} cursor not the max updatedAt: {cursor!r}"
+    assert cursor is not None, f"{name!r} produced no cursor"
+    decoded = json.loads(cursor)
+    assert decoded == {
+        "issue": "2026-05-22T10:00:00.000Z",
+        "project": "2026-05-21T10:00:00.000Z",
+    }, f"{name!r} per-type watermark map mismatch: {decoded!r}"

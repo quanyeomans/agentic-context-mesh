@@ -115,20 +115,31 @@ reasonable later generalisation — noted, not built here.)
 
 `list_changes(cursor: Cursor | None) -> Iterator[ChangeEvent]`:
 
-- **Cursor** = an ISO-8601 `updatedAt` high-water-mark (the max `updatedAt` across all entity types
-  seen on the last clean drain). `Cursor = str` (opaque token; §1 protocols).
-- Each tick queries the five entity types for `updatedAt > cursor`, paginated, yielding
+- **Cursor** = an opaque `str` token (`Cursor = str`; §1 protocols) that **JSON-encodes a
+  per-entity-type `updatedAt` watermark map** — `{ "issue": "<iso>", "project": "<iso>",
+  "document": "<iso>", "initiative": "<iso>", "projectUpdate": "<iso>" }`. A single shared
+  high-water-mark would **starve / skip** types under per-tick-budget pressure: with one watermark,
+  a tick that fills the budget on issues advances the shared mark past un-drained project/doc items
+  in the window, permanently skipping them (and can livelock issues vs. the rest). Per-type
+  watermarks make each type's progress independent.
+- Each tick queries the five types for `updatedAt > <that type's watermark>`, paginated, yielding
   `ChangeEvent(op, item_id, modified_at, parent_id?, metadata)`. `op` is `modified` for
   create/update; `SlimConnector` enumeration detects `archived`/`deleted` (id present last tick,
   absent now).
 - **`item_id` is type-prefixed** — `issue:<identifier>`, `project:<uuid>`, `document:<uuid>`,
   `initiative:<uuid>`, `projectUpdate:<uuid>` — so `fetch` / `metadata_for` / `source_link`
   dispatch by type without a second lookup.
-- `cursor is None` → full enumeration (initial sync).
-- `next_cursor()` returns the new high-water-mark; it **advances only on a clean drain** (at-least-once
-  delivery + idempotent chunk upsert means a re-fetched item is harmless).
-- Honours `per_tick_max_items` (default 500) and `disk_watermark_min_free_bytes` (F66) — the tick
-  stops early and resumes next tick rather than blowing the budget.
+- `cursor is None` → full enumeration (initial sync). A **malformed / legacy single-string** token
+  decodes to "no watermark for any type" → full enumeration, so existing operator state degrades
+  safely (re-syncs) rather than skipping data.
+- `next_cursor()` returns the JSON-encoded updated map. **Each type advances its OWN watermark to
+  the max `updatedAt` it EMITTED this tick** (forward progress even on a budget-limited partial
+  drain — *not* "advance only on a fully-clean drain", which livelocks). At-least-once delivery +
+  idempotent chunk upsert makes re-fetching a boundary item harmless.
+- Honours ONE shared `per_tick_max_items` (default 500) and `disk_watermark_min_free_bytes` (F66)
+  across the types this tick — a budget-hit on an earlier type just gives later types fewer/none
+  this tick, but no type's watermark is ever moved past its own unprocessed items, so nothing is
+  skipped and every type makes progress across ticks.
 
 ---
 
@@ -215,10 +226,12 @@ both-branch coverage required (OFF = no Linear polling; ON = the cc_pair drains)
 
 - **Rate limit** — Linear's GraphQL limit is complexity-based; on `429` / `Retry-After` the client
   backs off and retries with a bounded budget (F64 test required).
-- **Per-item isolation** — one malformed issue/doc fails just that item (logged), never the tick.
-- **Cursor safety** — the high-water-mark advances only after a clean drain; a mid-tick crash
-  re-fetches from the last good cursor (idempotent upsert).
-- **Budget** — `per_tick_max_items` + disk watermark stop the tick early and resume (F66).
+- **Per-item isolation** — one malformed issue/doc fails just that item (logged WARNING, conversion
+  wrapped in `try/except`), never the tick.
+- **Cursor safety** — each type's `updatedAt` watermark advances to the max it EMITTED (§4 forward
+  progress), never past an un-emitted item; a mid-tick crash re-fetches from the last persisted
+  per-type watermark (idempotent upsert). No type is starved or skipped under budget pressure.
+- **Budget** — one shared `per_tick_max_items` + disk watermark stop the tick early and resume (F66).
 
 ---
 

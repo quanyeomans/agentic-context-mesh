@@ -8,8 +8,11 @@ workspace (one workspace API key = one workspace, per spec §1).
 Change detection rides incremental polling: each tick queries the five
 entity types (issue / project / document / initiative / projectUpdate)
 filtered + ordered by ``updatedAt > cursor`` and emits one
-:class:`ChangeEvent` per node. The cursor is an ISO-8601 high-water-mark
-across all entity types, advancing only on a clean drain (spec §4).
+:class:`ChangeEvent` per node. The cursor is an opaque ``str`` token that
+JSON-encodes a **per-entity-type** ``updatedAt`` watermark map; each type
+advances its OWN watermark to the max ``updatedAt`` it emitted this tick
+(forward progress), so no type is starved or skipped under per-tick-budget
+pressure (spec §4).
 
 Decision record — incremental poll, NOT webhooks (spec §13)
 -----------------------------------------------------------
@@ -34,6 +37,7 @@ into the extractor layer.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
@@ -254,7 +258,9 @@ class LinearConnector:
         # ``fetch`` / ``metadata_for`` / ``source_link`` resolve without a
         # second API call. Keyed by the full type-prefixed item_id.
         self._node_cache: dict[str, Mapping[str, Any]] = {}
-        # High-water-mark cursor advanced on a clean drain (spec §4).
+        # Per-entity-type ``updatedAt`` watermark map, JSON-encoded into the
+        # opaque cursor token by :meth:`next_cursor` (spec §4). ``None``
+        # before the first :meth:`list_changes` call.
         self._next_cursor: str | None = None
 
     # ------------------------------------------------------------------
@@ -264,61 +270,75 @@ class LinearConnector:
     def list_changes(self, cursor: Cursor | None) -> Iterator[ChangeEvent]:
         """Stream changes across all five entity types since ``cursor``.
 
-        ``cursor`` is the ISO-8601 ``updatedAt`` high-water-mark; ``None``
-        triggers a full enumeration (initial sync). Each tick queries the
-        five entity types filtered by ``updatedAt > cursor``, yielding one
-        ``modified`` :class:`ChangeEvent` per node with a type-prefixed
-        ``item_id``. Honours :attr:`per_tick_max_items` (F66) — the tick
-        stops early and the cursor advances only on a clean drain.
+        ``cursor`` is an opaque token JSON-encoding a per-entity-type
+        ``updatedAt`` watermark map; ``None`` (or a malformed/legacy
+        single-string token) triggers a full enumeration (initial sync) for
+        every type. Each tick queries the five types filtered by
+        ``updatedAt > <that type's watermark>``, yielding one ``modified``
+        :class:`ChangeEvent` per node with a type-prefixed ``item_id``.
+
+        ONE global :attr:`per_tick_max_items` budget (F66) is shared across
+        the types this tick — a budget-hit on an earlier type just means
+        later types get fewer/none THIS tick. Each type advances its OWN
+        watermark to the max ``updatedAt`` it EMITTED (forward progress even
+        on a budget-limited partial drain), so no type is ever skipped past
+        its unprocessed items and every type makes progress across ticks.
+        Idempotent upsert makes re-fetching a boundary item harmless.
         """
-        since = cursor if cursor is not None else _EPOCH_ISO
+        watermarks = _decode_cursor(cursor)
         events: list[ChangeEvent] = []
-        budget_hit = any(self._drain_spec(spec, since, events) for spec in _ENTITY_SPECS)
-        # Cursor advances ONLY on a clean drain (spec §4 / §9). A
-        # budget-stopped tick leaves the persisted cursor untouched so the
-        # next tick re-drains from the last good high-water-mark.
-        if not budget_hit:
-            self._next_cursor = self._high_water(events, cursor)
+        for spec in _ENTITY_SPECS:
+            self._drain_spec(spec, watermarks, events)
+        # Each type's watermark moved forward to its own last-emitted
+        # updatedAt (spec §4). A type that drained nothing this tick keeps
+        # its prior watermark — never moves backwards, never skips.
+        self._next_cursor = _encode_cursor(watermarks)
         return iter(events)
 
-    def _drain_spec(self, spec: _EntitySpec, since: str, events: list[ChangeEvent]) -> bool:
-        """Drain one entity-type query into ``events``; return ``budget_hit``.
+    def _drain_spec(self, spec: _EntitySpec, watermarks: dict[str, str], events: list[ChangeEvent]) -> None:
+        """Drain one entity-type query into ``events``, advancing its watermark.
 
+        Reads + advances ONLY this type's watermark in ``watermarks``.
         Appends ChangeEvents (and caches nodes) until the page is exhausted
-        OR :attr:`per_tick_max_items` is reached. Returns ``True`` when the
-        budget stopped the drain mid-page (the caller must NOT advance the
-        cursor past this point, spec §4); ``False`` when the page drained
-        clean.
+        OR the shared :attr:`per_tick_max_items` budget is reached. The
+        type's watermark advances to the max ``updatedAt`` of the items it
+        EMITTED this tick — forward progress even on a budget-limited
+        partial drain (spec §4), so the next tick never re-skips an
+        un-emitted item nor re-fetches an already-emitted prefix endlessly.
+
+        Per-item isolation (spec §9): a node that raises on conversion is
+        logged at WARNING and skipped — never failing the whole tick.
         """
+        since = watermarks.get(spec.prefix, _EPOCH_ISO)
         for node in self._api.paginate(
             _build_query(spec),
             {"since": since},
             connection=spec.connection,
         ):
             if len(events) >= self.per_tick_max_items:
-                return True
-            event = self._node_to_event(spec, node)
+                return
+            try:
+                event = self._node_to_event(spec, node)
+            # spec §9 per-item isolation: one malformed node fails just that
+            # item (logged), never the whole tick — the broad catch IS the
+            # intended isolation boundary, hence the rationale-tagged catch.
+            except Exception:  # NOSONAR S112 — F3: spec §9 per-item isolation boundary.
+                logger.warning(
+                    "linear: skipping a malformed %s node — conversion raised; the tick continues.",
+                    spec.prefix,
+                    exc_info=True,
+                )
+                continue
             if event is None:
                 continue
             self._node_cache[event.item_id] = node
             events.append(event)
-        return False
-
-    @staticmethod
-    def _high_water(events: list[ChangeEvent], cursor: str | None) -> str | None:
-        """Return the max ISO timestamp across ``events`` and the prior ``cursor``.
-
-        The high-water-mark is the latest ``updatedAt`` observed in this
-        clean drain, never moving backwards: when the drain produced no
-        events the prior ``cursor`` is preserved, and a prior cursor newer
-        than every event (a defensive case) wins via ``max``.
-        """
-        candidates = [ev.modified_at for ev in events]
-        if cursor is not None:
-            candidates.append(cursor)
-        if not candidates:
-            return None
-        return max(candidates)
+            # Forward progress: advance THIS type's watermark to the latest
+            # updatedAt it has emitted, never moving it backwards. ``max``
+            # over the prior watermark keeps the mark monotonic even if the
+            # source returns a type's nodes out of updatedAt order.
+            prior = watermarks.get(spec.prefix)
+            watermarks[spec.prefix] = event.modified_at if prior is None else max(prior, event.modified_at)
 
     def fetch(self, item_id: str) -> RawArtefact:
         """Render one cached Linear entity as Markdown.
@@ -358,11 +378,14 @@ class LinearConnector:
         return self._default_sensitivity
 
     def next_cursor(self) -> str | None:
-        """Return the high-water-mark cursor after the last clean drain.
+        """Return the JSON-encoded per-entity-type watermark cursor.
 
-        Spec §4: ``None`` before the first call, or when the last tick
-        stopped early on the budget (so the orchestrator does NOT clobber
-        the previously-persisted cursor).
+        Spec §4: ``None`` before the first :meth:`list_changes` call.
+        After a tick it is the opaque token encoding each type's own
+        ``updatedAt`` watermark — every type advanced to its last-emitted
+        ``updatedAt`` (forward progress), so a budget-limited tick still
+        persists progress for the types it drained without skipping any
+        type's un-emitted items.
         """
         return self._next_cursor
 
@@ -561,6 +584,39 @@ def _put(props: dict[str, str], key: str, value: Any) -> None:
     resolved = _opt_str(value)
     if resolved is not None:
         props[key] = resolved
+
+
+def _decode_cursor(cursor: Cursor | None) -> dict[str, str]:
+    """Decode the opaque cursor token into a per-entity-type watermark map.
+
+    Spec §4: the cursor JSON-encodes ``{prefix: <iso-updatedAt>, ...}``.
+    Degrades safely so existing state never skips data:
+
+      * ``None`` → ``{}`` (no watermark for any type → full enumeration).
+      * a malformed / non-JSON / legacy single-ISO-string token → ``{}``
+        (treated as "no watermark for any type" → full enumeration, so a
+        pre-upgrade single-watermark cursor re-syncs rather than skipping).
+      * a JSON object → only its ``str: str`` entries are kept; any
+        non-string value is dropped (that type falls back to full enum).
+    """
+    if cursor is None:
+        return {}
+    try:
+        decoded = json.loads(cursor)
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(decoded, dict):
+        return {}
+    return {key: value for key, value in decoded.items() if isinstance(key, str) and isinstance(value, str) and value}
+
+
+def _encode_cursor(watermarks: Mapping[str, str]) -> str:
+    """JSON-encode the per-entity-type watermark map into the opaque token.
+
+    Keys are sorted so the token is deterministic (stable round-trip +
+    stable persisted state across ticks with the same watermarks).
+    """
+    return json.dumps(dict(watermarks), sort_keys=True)
 
 
 def make_connector(config: Mapping[str, Any]) -> LinearConnector:
