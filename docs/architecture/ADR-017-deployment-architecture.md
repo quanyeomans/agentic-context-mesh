@@ -138,6 +138,42 @@ If not: skipped with note that entity search requires Neo4j.
 
 ---
 
+## Least-privilege / hostile-environment deployment
+
+kairix has different classes of users and deployment targets — including
+security-hardened / "verified-secure" VMs with **read-only root
+filesystems** and policy that forbids **privilege escalation** and writes
+to **core system / OS locations**. The runtime is designed to run at least
+privilege so these targets are first-class, not an afterthought:
+
+- **No elevation at runtime.** Nothing the running service does requires
+  `sudo` / root / `chown`. (The optional `kairix init --system` installer
+  is the one privileged, operator-invoked, install-time exception — it
+  writes the systemd unit under `/etc/systemd/system`; hardened deployments
+  use the container or pip path instead and never run it.)
+- **The base config is read-only.** The operator's `kairix.config.yaml`
+  is mounted `:ro` at `/etc/kairix/kairix.config.yaml` (the image base).
+  The runtime never writes to it.
+- **Collected state goes to a writable, non-system, app-owned location.**
+  Config the wizard/CLI collects is written to the **config overlay**
+  (`KAIRIX_CONFIG_OVERLAY_PATH`, stock value
+  `/var/lib/kairix/kairix.config.local.yaml` on the writable data volume);
+  data, vectors, caches resolve under `kairix.paths` (`/var/lib/kairix` /
+  `KAIRIX_DATA_DIR` / XDG). Readers merge base(`:ro`) + overlay(`:rw`) at
+  read time via `kairix.config_layers.load_merged_mapping`, so the
+  read-only base config is honoured without ever being mutated (#485/#492).
+- **Graceful, not fatal.** If a write target is unexpectedly read-only,
+  the surface renders an F21 affordance (e.g. the wizard-save rescue
+  banner naming `KAIRIX_CONFIG_OVERLAY_PATH`), never a raw 500.
+
+This principle is mechanically enforced by **F94** (`no_system_path_writes`):
+production code in `kairix/**` may not write to a hardcoded system/OS path
+(`/etc`, `/opt`, `/usr`, …); config + state writes resolve through
+`kairix.paths` and the overlay instead. `/var/lib/kairix` (data dir) and
+`/run` (tmpfs / secrets mount) are writable and not flagged.
+
+---
+
 ## Consequences
 
 - Docker Compose is the recommended path in all docs and the README
