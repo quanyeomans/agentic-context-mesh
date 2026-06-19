@@ -244,6 +244,110 @@ def test_document_root_configured_not_set() -> None:
 
 
 # ---------------------------------------------------------------------------
+# check_document_root_configured — deployment-aware fix (GH #477)
+# ---------------------------------------------------------------------------
+# The old fix strings hard-coded /opt/kairix/service.env — a path from a
+# single historical VM layout that does NOT exist on a fresh Docker or pip
+# install. README tells agents to surface these remediations verbatim, so a
+# container/pip user was sent to edit a phantom path. The fix must be
+# deployment-aware via the existing Mode.detect() seam (same shape as
+# check_neo4j_reachable, GH #476): no /opt/kairix/service.env in any branch.
+
+
+@pytest.mark.unit
+def test_document_root_not_set_fix_never_names_phantom_vm_path() -> None:
+    """The "not set" fix must not name /opt/kairix/service.env in any mode.
+
+    That path is a stale single-VM assumption (GH #477) — a fresh Docker
+    or pip install has no such file, so the remediation misdirected the
+    operator. Exercise all three modes through the Mode.detect() env seam.
+    """
+    for env in (
+        {"KAIRIX_CONTAINER": "1"},  # container mode
+        {},  # user / system mode (no container signal)
+    ):
+        result = check_document_root_configured(env=env)
+        assert not result.ok
+        assert result.fix is not None
+        assert "/opt/kairix/service.env" not in result.fix
+        # Still actionable — names the canonical env var the operator sets.
+        assert "KAIRIX_DOCUMENT_ROOT" in result.fix
+
+
+@pytest.mark.unit
+def test_document_root_not_set_fix_is_container_aware() -> None:
+    """In container mode the "not set" fix points at the operator .env next
+    to docker-compose.yml (the real container config surface), not a VM path."""
+    result = check_document_root_configured(env={"KAIRIX_CONTAINER": "1"})
+    assert not result.ok
+    assert result.fix is not None
+    # Container operators edit the .env beside docker-compose.yml.
+    assert ".env" in result.fix
+    assert "/opt/kairix/service.env" not in result.fix
+
+
+@pytest.mark.unit
+def test_document_root_not_set_fix_is_pip_aware() -> None:
+    """In user/pip mode the "not set" fix points at kairix.config.yaml or the
+    KAIRIX_DOCUMENT_ROOT env var — never the VM-only /opt/kairix/service.env."""
+    result = check_document_root_configured(env={})
+    assert not result.ok
+    assert result.fix is not None
+    assert "kairix.config.yaml" in result.fix
+    assert "/opt/kairix/service.env" not in result.fix
+
+
+@pytest.mark.unit
+def test_document_root_missing_dir_fix_never_names_phantom_vm_path() -> None:
+    """The "directory does not exist" fix must not name /opt/kairix/service.env
+    in any mode (GH #477)."""
+    for env_extra in ({"KAIRIX_CONTAINER": "1"}, {}):
+        env = {"KAIRIX_DOCUMENT_ROOT": "/nonexistent/path/vault", **env_extra}
+        result = check_document_root_configured(env=env)
+        assert not result.ok
+        assert result.fix is not None
+        assert "/opt/kairix/service.env" not in result.fix
+
+
+# ---------------------------------------------------------------------------
+# CANONICAL_REMEDIATIONS — VM-only path hygiene broadened (GH #477)
+# ---------------------------------------------------------------------------
+# The existing phantom-artifact guard banned /opt/kairix/secrets.env but NOT
+# /opt/kairix/service.env, so the document_root remediation slipped through.
+# These tests pin the broadened ban explicitly.
+
+
+@pytest.mark.unit
+def test_document_root_canonical_remediation_is_deployment_neutral() -> None:
+    """The canonical document_root remediation must not name /opt/kairix/
+    service.env — that single-VM path doesn't exist on Docker/pip installs.
+
+    The remediation key is derived from the public check's result name
+    (F5-clean — no private-constant import).
+    """
+    from kairix.platform.onboard.check import CANONICAL_REMEDIATIONS
+
+    # The check's own CheckResult.name is the canonical-remediation key.
+    check_name = check_document_root_configured(env={}).name
+    remediation = CANONICAL_REMEDIATIONS[check_name]
+    assert "/opt/kairix/service.env" not in remediation
+    assert "KAIRIX_DOCUMENT_ROOT" in remediation
+
+
+@pytest.mark.unit
+def test_no_canonical_remediation_references_vm_only_service_env() -> None:
+    """No canonical remediation may name /opt/kairix/service.env or
+    /opt/openclaw — both are single-VM-layout paths the README would
+    otherwise surface verbatim to a container/pip operator (GH #477).
+    """
+    from kairix.platform.onboard.check import CANONICAL_REMEDIATIONS
+
+    for name, remediation in CANONICAL_REMEDIATIONS.items():
+        for banned in ("/opt/kairix/service.env", "/opt/openclaw"):
+            assert banned not in remediation, f"{name} remediation references VM-only path {banned!r}"
+
+
+# ---------------------------------------------------------------------------
 # run_all_checks — structural
 # ---------------------------------------------------------------------------
 

@@ -189,7 +189,7 @@ All three options expose the same 35 tools with identical parameters and return 
 
 | Problem | Fix |
 |---------|-----|
-| "kairix: command not found" | Run `pipx install kairix-agentic-knowledge-mgt` (or `pip install kairix-agentic-knowledge-mgt` inside a venv) or check your PATH |
+| "kairix: command not found" | Run `pipx install Kairix-agentic-knowledge-mgt` (or `pip install Kairix-agentic-knowledge-mgt` inside a venv) or check your PATH |
 | Tools don't appear in Claude Desktop | Restart Claude Desktop after editing config |
 | Connection refused on `/mcp` (or legacy `/sse`) | Check `docker compose ps` — kairix service must be running |
 | "No results" on first search | Run `kairix embed` to index your documents first |

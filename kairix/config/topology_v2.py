@@ -40,9 +40,9 @@ F42 frozen-dataclass discipline: every public value object is
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, get_args
 
-from kairix.core.protocols import CCPairAccessType, F39Tier, ScopeProfileActorKind
+from kairix.core.protocols import CCPairAccessType, F39Tier, ScopeProfileActorKind, Sensitivity
 
 # F17 — collection-source path filter literal duplicated across two
 # nested parsers (collections.* + skills.*.task_collections.*) plus the
@@ -294,13 +294,26 @@ def _parse_one_connector(prefix: str, raw: Any) -> ConnectorConfig:
     )
 
 
+# The valid F39 tiers are DERIVED from the ``F39Tier`` Literal in
+# kairix.core.protocols — never a second hardcoded list. One source of
+# truth, so adding a tier to the Literal can't drift this validator out
+# of sync (GH #480).
+_VALID_F39_TIERS: tuple[F39Tier, ...] = get_args(F39Tier)
+
 # Chunk-tag vocabulary (kairix.core.protocols.Sensitivity) → F39 tier.
-# Connectors tag chunks with the Sensitivity literal, and the example
+# Connectors tag chunks with the ``Sensitivity`` literal, and the example
 # config uses it too; the parser normalises onto F39 tiers via the same
-# mapping the slack/m365 connectors apply (GH #480).
-_CHUNK_SENSITIVITY_TO_F39: dict[str, F39Tier] = {
+# mapping the slack/m365 connectors apply. The two vocabularies disagree
+# only on the high tiers (client-confidential / personal); the shared
+# values (public / internal) map to themselves. Aliases are the divergent
+# pairs; the table is then completed from the ``Sensitivity`` Literal so
+# every chunk-tag value the type system permits is accepted (GH #480).
+_CHUNK_SENSITIVITY_ALIASES: dict[str, F39Tier] = {
     "client-confidential": "confidential",
     "personal": "restricted",
+}
+_CHUNK_SENSITIVITY_TO_F39: dict[str, F39Tier] = {
+    value: _CHUNK_SENSITIVITY_ALIASES.get(value, value) for value in get_args(Sensitivity)
 }
 
 
@@ -309,17 +322,20 @@ def _parse_sensitivity(value: Any, *, default: F39Tier) -> F39Tier:
 
     F39 tier values pass through; chunk-tag ``Sensitivity`` values
     (``client-confidential`` / ``personal``) normalise onto their F39
-    equivalents so configs written in either vocabulary parse (GH #480).
+    equivalents so configs written in either vocabulary parse. Both the
+    accepted F39 set and the chunk-tag map are derived from the Literals
+    in kairix.core.protocols — there is no second hardcoded list (GH #480).
     """
     if value is None:
         return default
     mapped = _CHUNK_SENSITIVITY_TO_F39.get(value) if isinstance(value, str) else None
     if mapped is not None:
         return mapped
-    if value not in ("public", "internal", "confidential", "restricted"):
+    if value not in _VALID_F39_TIERS:
+        valid = "/".join(_VALID_F39_TIERS)
         raise TopologyV2ParseError(
             f"sensitivity={value!r} is not a valid F39 tier. "
-            "fix: use one of public/internal/confidential/restricted "
+            f"fix: use one of {valid} "
             "(client-confidential and personal are accepted and map to "
             "confidential/restricted). "
             "next: run kairix config validate"
