@@ -44,3 +44,5 @@ Feature: End-to-end connector sync journey
       | google_drive        | passthrough  |
       | apple_caldav        | passthrough  |
       | google_calendar     | passthrough  |
+      | linear              | passthrough  |
+      | linear              | markitdown   |
