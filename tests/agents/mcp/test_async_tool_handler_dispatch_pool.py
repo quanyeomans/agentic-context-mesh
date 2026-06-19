@@ -74,15 +74,28 @@ def _make_wrapped_slow_handler(
     obs_executor: ThreadPoolExecutor,
     db_path: Path,
     started: dict[int, tuple[float, int]],
+    barrier: threading.Barrier | None = None,
 ) -> object:
     """Construct a wrapped handler that records when + on which thread each call ran.
 
     Returns the async-wrapped callable. The handler sleeps ``sleep_s`` so a
     saturated pool's behaviour is observable in wall-clock terms.
+
+    When ``barrier`` is supplied, the handler records its thread ident and
+    then blocks on the barrier BEFORE sleeping. The barrier only releases
+    once ``barrier.parties`` calls have all reached it, so every call is
+    proven genuinely in-flight on its own worker thread at the same instant
+    — no worker can complete and be reused before the others are dispatched.
+    That removes the pool-reuse race that made the distinct-thread count
+    non-deterministic under CI load (#557).
     """
 
     def slow_handler(call_id: int = 0) -> dict[str, int]:
         started[call_id] = (time.monotonic(), threading.get_ident())
+        if barrier is not None:
+            # Hold every worker thread until ALL N calls have arrived, so the
+            # pool can't recycle a finished worker before the rest dispatch.
+            barrier.wait(timeout=10)
         time.sleep(sleep_s)
         return {"id": call_id}
 
@@ -105,16 +118,27 @@ def test_concurrent_calls_use_distinct_dispatch_threads_when_pool_is_large(
     dispatch pool is at least as large as the concurrent-agent count,
     every in-flight call runs in parallel with no queueing.
 
+    A ``threading.Barrier(n_calls)`` gates the slow handler: each call
+    records its worker thread, then blocks on the barrier. The barrier
+    only releases once all eight calls have arrived, so all eight worker
+    threads are provably occupied simultaneously — the pool cannot recycle
+    a finished worker before the rest dispatch. That makes the exact
+    ``== n_calls`` distinct-thread count deterministic and closes the
+    pool-reuse race that produced flaky ``7 == 8`` failures under CI load
+    (#557).
+
     Sabotage proof: revert ``async_tool_handler`` to use
     ``asyncio.to_thread(safe, ...)`` instead of
-    ``loop.run_in_executor(dispatch_executor, ...)`` — this test still
-    passes locally on a 10-CPU dev box (default pool=14) but fails on a
-    2-CPU CI runner (default pool=6) because the eight calls land on only
-    six threads. CONFIRMED locally by manually swapping the wrapper to
-    ``asyncio.to_thread`` and running on a constrained executor pool.
+    ``loop.run_in_executor(dispatch_executor, ...)`` — the injected
+    eight-worker pool is bypassed, the event loop's default executor
+    (``min(32, cpu_count + 4)``) is used, and the eight calls all block
+    on the barrier inside fewer worker slots → the barrier never releases
+    (deadlock/timeout) on a constrained runner. CONFIRMED locally by
+    shrinking the injected dispatch pool below ``n_calls`` (see #557 report).
     """
     n_calls = 8
     started: dict[int, tuple[float, int]] = {}
+    barrier = threading.Barrier(n_calls)
 
     with ThreadPoolExecutor(max_workers=n_calls, thread_name_prefix="test-dispatch") as dispatch:
         wrapped = _make_wrapped_slow_handler(
@@ -123,6 +147,7 @@ def test_concurrent_calls_use_distinct_dispatch_threads_when_pool_is_large(
             obs_executor=obs_executor,
             db_path=silent_db_path,
             started=started,
+            barrier=barrier,
         )
 
         async def fire_all() -> list[dict[str, int]]:
@@ -133,15 +158,11 @@ def test_concurrent_calls_use_distinct_dispatch_threads_when_pool_is_large(
     assert len(results) == n_calls
     assert {r["id"] for r in results} == set(range(n_calls))
     threads_used = {tid for _, tid in started.values()}
-    # Tolerate at most one benign thread reuse: a ThreadPoolExecutor worker can
-    # go briefly idle and be reused between submissions before all N tasks are
-    # dispatched (observed 7/8 on 2-CPU CI runners). ``>= n_calls - 1`` still
-    # proves near-full parallelism — the regression this guards (asyncio.to_thread's
-    # default pool of 6 on a 2-CPU runner) lands on 6 threads and still fails,
-    # and the undersized-pool case (next test) serialises to ~2.
-    assert len(threads_used) >= n_calls - 1, (
-        f"expected ~{n_calls} distinct dispatch threads, got {len(threads_used)} "
-        "(pool exhaustion / queueing would show far fewer)"
+    # The barrier holds every worker until all N calls have arrived, so exactly
+    # N distinct dispatch threads are occupied at once — no pool-reuse race.
+    assert len(threads_used) == n_calls, (
+        f"expected exactly {n_calls} distinct dispatch threads, got {len(threads_used)} "
+        "(pool exhaustion / queueing would show fewer; barrier guarantees full parallelism)"
     )
 
 
