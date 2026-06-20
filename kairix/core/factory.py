@@ -851,6 +851,35 @@ def _build_embedding_service(
     return ProviderEmbeddingService(provider)
 
 
+def build_embedding_service(
+    config: RetrievalConfig | None = None,
+    *,
+    registry: ProviderRegistry | None = None,
+) -> Any:
+    """Public seam: construct the production ``EmbeddingService``.
+
+    Resolves ``config`` (``None`` → the layered ``RetrievalConfig`` via
+    :func:`load_config`, falling back to ``RetrievalConfig.defaults()``) and
+    returns an object satisfying the ``EmbeddingService`` Protocol. This is the
+    public entry point for non-``core`` callers that need a bare embedding
+    service (e.g. the capability-corpus builder) — they embed through this
+    rather than reaching into the private :func:`_build_embedding_service`.
+
+    Args:
+        config:   Explicit retrieval config, or ``None`` to resolve it from
+                  ``kairix.config.yaml`` (same resolution as
+                  :func:`build_search_pipeline`).
+        registry: Optional ``ProviderRegistry`` for tests — pass a
+                  ``FakeProviderRegistry``; production resolves via the default
+                  ``EntryPointRegistry``.
+
+    Returns:
+        An object satisfying the ``EmbeddingService`` Protocol. Raises
+        ``ValueError`` when no provider is configured.
+    """
+    return _build_embedding_service(_resolve_retrieval_config(config), registry)
+
+
 def _run_bootstrap_secrets(deps: FactoryDeps, *, caller: str) -> None:
     """Run the secrets bootstrap once, swallowing any exception.
 

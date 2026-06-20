@@ -323,6 +323,33 @@ def _module_path(rel: Path) -> str:
     return str(rel.with_suffix("")).replace("/", ".")
 
 
+def _same_module_tests(paths: set[Path], found: set[str]) -> list[str]:
+    """The mutated modules' OWN test files within ``found``.
+
+    A test file named ``test_<mod>.py`` is the natural home for mutations to
+    ``kairix/**/<mod>.py``. These must always survive the impacted-test cap:
+    otherwise a co-mutated widely-imported file (e.g. ``factory.py``, imported
+    by 100+ test files) evicts a small module's own tests via the alphabetical
+    truncation, leaving the module's mutants un-covered (the recommender
+    regression that forced behaviour-pin tests into the wrong file). Returns a
+    deterministic (sorted) list."""
+    stems = {f"test_{p.stem}.py" for p in paths}
+    return sorted(tf for tf in found if Path(tf).name in stems)
+
+
+def _prioritise(found: set[str], paths: set[Path]) -> list[str]:
+    """Order impacted tests so a mutated module's own tests survive the cap.
+
+    Same-module tests (``test_<mod>.py``) come first, then the remaining
+    importers fill the budget up to ``MAX_IMPACTED_TEST_FILES``. Without this,
+    the alphabetical truncation could evict a small module's direct tests when
+    a widely-imported file is co-mutated in the same diff."""
+    same_module = _same_module_tests(paths, found)
+    rest = sorted(found - set(same_module))
+    budget = max(0, MAX_IMPACTED_TEST_FILES - len(same_module))
+    return same_module + rest[:budget]
+
+
 def impacted_tests(paths: set[Path]) -> list[str]:
     """Test files that import any mutated module — the import-graph heuristic
     ``safe-commit.sh --fast`` uses. Returns repo-relative test-file paths."""
@@ -343,7 +370,12 @@ def impacted_tests(paths: set[Path]) -> list[str]:
     # would make each mutant run a multi-minute suite. The first N (sorted,
     # deterministic) are a representative cover — a mutant that survives all
     # of them is a survivor; one killed by any of them is killed.
-    return sorted(found)[:MAX_IMPACTED_TEST_FILES]
+    #
+    # A mutated module's OWN tests (test_<mod>.py) are always included first,
+    # then the rest fill the remaining budget. This keeps a module's direct
+    # tests in-window even when a widely-imported file is co-mutated in the
+    # same diff — without it the alphabetical cap silently drops them.
+    return _prioritise(found, paths)
 
 
 def _run_impacted_tests(test_files: list[str], timeout_s: int) -> tuple[bool, str, float]:

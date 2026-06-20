@@ -29,7 +29,12 @@ from typing import Any
 
 import pytest
 
-from kairix.core.factory import FactoryDeps, build_search_pipeline, select_boosts
+from kairix.core.factory import (
+    FactoryDeps,
+    build_embedding_service,
+    build_search_pipeline,
+    select_boosts,
+)
 from kairix.core.search.boosts import (
     ChunkDateBoost,
     EntityBoost,
@@ -941,3 +946,24 @@ def test_build_pipelines_tolerate_bootstrap_secrets_raising() -> None:
         assert "synthetic bundle-missing" not in str(exc), "bootstrap exception leaked from build_neo4j_drainer"
     except Exception:
         pass
+
+
+# ── build_embedding_service — the public embedding-service seam ──────────
+
+
+@pytest.mark.unit
+def test_build_embedding_service_resolves_and_delegates() -> None:
+    """The public seam resolves the configured provider and returns a working
+    EmbeddingService — its embed_batch delegates to the resolved provider.
+
+    Sabotage proof: if build_embedding_service stopped passing the resolved
+    config/registry through to the provider, embed_batch would not return the
+    fake provider's vector and the equality assertion fails.
+    """
+    cfg = RetrievalConfig(provider="fake")
+    registry = FakeProviderRegistry({"fake": FakeProvider(name="fake", vector=[0.1, 0.2, 0.3], dim=3)})
+
+    svc = build_embedding_service(config=cfg, registry=registry)
+    vectors = svc.embed_batch(["a task description"])
+
+    assert vectors == [[0.1, 0.2, 0.3]]

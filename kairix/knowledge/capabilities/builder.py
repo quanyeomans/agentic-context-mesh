@@ -171,14 +171,13 @@ def _default_embed_batch(texts: list[str]) -> list[list[float]]:
     builder ON CALL (not at deps-construction) so a missing/misconfigured
     provider surfaces inside :func:`build_capability_corpus`'s never-raise
     guard rather than at ``CapabilityCorpusDeps()`` construction.
-    ``_build_embedding_service`` takes the resolved :class:`RetrievalConfig`
-    positionally and returns a ``ProviderEmbeddingService`` whose
+    The public ``build_embedding_service`` seam resolves the configured
+    provider and returns a ``ProviderEmbeddingService`` whose
     ``embed_batch(texts) -> vectors`` is the seam the corpus writer drives.
     """
-    from kairix.core.factory import _build_embedding_service
-    from kairix.core.search.config_loader import load_config
+    from kairix.core.factory import build_embedding_service
 
-    svc = _build_embedding_service(load_config())
+    svc = build_embedding_service()
     return cast(list[list[float]], svc.embed_batch(texts))
 
 

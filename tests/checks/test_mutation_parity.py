@@ -219,6 +219,41 @@ def test_module_path_maps_to_dotted_import() -> None:
     assert mp._module_path(Path("kairix/core/factory.py")) == "kairix.core.factory"
 
 
+def test_same_module_tests_picks_a_modules_own_test_files() -> None:
+    """Only ``test_<mod>.py`` for a mutated module counts — not look-alikes."""
+    paths = {Path("kairix/use_cases/recommend.py"), Path("kairix/core/factory.py")}
+    found = {
+        "tests/use_cases/test_recommend.py",  # recommend.py's own test
+        "tests/contracts/test_cli_mcp_parity_recommend.py",  # NOT test_recommend.py
+        "tests/core/test_factory.py",  # factory.py's own test
+        "tests/integration/test_pipeline_cache_race.py",  # incidental importer
+    }
+    assert mp._same_module_tests(paths, found) == [
+        "tests/core/test_factory.py",
+        "tests/use_cases/test_recommend.py",
+    ]
+
+
+def test_prioritise_keeps_same_module_test_even_when_cap_would_evict_it() -> None:
+    """The fix: a module's own test survives the cap even when a co-mutated,
+    widely-imported file floods ``found`` with alphabetically-earlier importers.
+
+    Sabotage proof: revert ``_prioritise`` to ``sorted(found)[:MAX]`` and the
+    own-test (which sorts after the 'aaa' crowd) drops out of the window — this
+    assertion fails. The crowd models the importers of a co-mutated factory.py.
+    """
+    own = "tests/use_cases/test_recommend.py"
+    crowd = {f"tests/aaa/test_{i:03d}.py" for i in range(mp.MAX_IMPACTED_TEST_FILES + 10)}
+    found = crowd | {own}
+    paths = {Path("kairix/use_cases/recommend.py"), Path("kairix/core/factory.py")}
+
+    result = mp._prioritise(found, paths)
+
+    assert own in result  # the mutated module's own test is never evicted
+    assert result[0] == own  # same-module tests come first
+    assert len(result) <= mp.MAX_IMPACTED_TEST_FILES  # the long tail stays capped
+
+
 def test_survivor_report_carries_f21_action_markers() -> None:
     """The F21 affordance contract: fix:/next:/run: markers present."""
     report = mp._survivor_report(_result("kairix/a.py", 7, ">", ">="))
