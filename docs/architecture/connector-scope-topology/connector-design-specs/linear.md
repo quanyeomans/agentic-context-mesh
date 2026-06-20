@@ -188,21 +188,23 @@ topology_v2:
       kind: linear
       name: "Linear workspace"
       default_sensitivity: internal        # roadmap/docs are company-internal; override per-deploy
+      refresh_freq_seconds: 900            # how often to poll, in seconds (900 = every 15 min)
   credentials:
     - id: linear-cred
-      kind: linear
-      credential_ref: connector-linear-api-key   # kairix secret store (KV / KAIRIX_SECRETS_FILE)
+      kind: bearer_token                   # credential type (the API key is a bearer token)
+      secret_name: connector-linear-api-key   # secret store name (without the kairix- prefix)
+      admin_public: true                   # every agent may search this source
   cc_pairs:
     - id: cc-linear
       connector: linear-prod
       credential: linear-cred
-      access_type: SYNC
-      refresh_freq_override_seconds: 900    # 15-min poll (see latency discussion); tune as needed
+      name: "Linear workspace pair"        # required
+      access_type: PUBLIC                  # every agent can search the workspace
   collections:
-    - id: linear
-      name: "Linear roadmap & docs"
-      default_sensitivity: internal
-      sources: [{ cc_pair_id: cc-linear }]
+    - name: linear
+      sources:
+        - cc_pair: cc-linear
+          path_filter: "*"                 # everything the connector returns
 ```
 
 One `linear` collection (operator tiers it via `source_tier_boost` — roadmap/docs are

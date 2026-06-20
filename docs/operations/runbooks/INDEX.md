@@ -49,6 +49,7 @@ Operational procedures and incident runbooks for kairix deployments.
 | [how-to-run-benchmark](how-to-run-benchmark.md) | Run benchmark suite, interpret results, compare before/after |
 | [how-to-debug-search-ranking](how-to-debug-search-ranking.md) | Query intent dispatch, RRF weights, category-specific tuning |
 | [how-to-rebuild-entity-graph](how-to-rebuild-entity-graph.md) | Drop and rebuild the Neo4j entity graph from the document store |
+| [how-to-set-up-the-linear-connector](how-to-set-up-the-linear-connector.md) | Turn on the Linear connector — store the API key, add the topology_v2 block, flip `connector_linear`, verify ingestion; troubleshooting (auth / rate-limit / nothing-ingested / flag-still-off) |
 | [how-to-read-mcp-call-log](how-to-read-mcp-call-log.md) | Investigate brief failures and MCP tool latency tails via `kairix mcp-calls` + the `mcp_call_log` SQLite table (#398) |
 | [integrity-and-preflight](integrity-and-preflight.md) | Run `kairix worker preflight` to audit persistence invariants (documents vs FTS vs vectors); interpret gaps; auto-heal `documents-without-fts` |
 | [kairix-entity-audit](kairix-entity-audit.md) | Audit the entity graph — junk detection, path repair, enrichment, safe purge |

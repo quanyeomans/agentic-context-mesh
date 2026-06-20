@@ -23,7 +23,8 @@ Plus four cross-cutting additions every spec carries:
 | Slack | [`slack.md`](slack.md) | ✅ design spec | shipped behind `connector_slack` + `topology_v2_slack` |
 | GitHub | [`github.md`](github.md) | ✅ design spec | shipped behind `connector_github` + `topology_v2_github` |
 | Notion | [`notion.md`](notion.md) | ✅ design spec | shipped behind `connector_notion` + `topology_v2_notion` |
-| Google Drive | (next) | — | backlog — spec when the four shipped connectors complete cutover soak and validate the proactive-failure-mode patterns |
+| Linear | [`linear.md`](linear.md) | ✅ design spec | shipped behind `connector_linear` (MVP: incremental poll + API-key auth; Container/per-team scoping deferred) |
+| Google Drive | (next) | — | backlog — spec when the shipped connectors complete cutover soak and validate the proactive-failure-mode patterns |
 | Jira | (last — needs `01-source-analysis` profile first) | — | backlog |
 
 ## Ordering rationale
