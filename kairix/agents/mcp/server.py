@@ -1391,6 +1391,7 @@ def _cap(
     mcp_tool: str | None,
     cli: str,
     category: str,
+    when_to_use: str = "",
     mcp_caps: dict[str, Any] | None = None,
     escalate_via: str | None = None,
 ) -> dict[str, Any]:
@@ -1398,7 +1399,11 @@ def _cap(
 
     Keeps tool_capabilities() readable and pins the entry shape — only the
     listed kwargs may appear in a catalogue entry. Optional keys are omitted
-    when None so dict equality stays clean for round-trip tests.
+    when None / empty so dict equality stays clean for round-trip tests.
+
+    ``when_to_use`` carries task-conditioned trigger text ("Call when…") so the
+    capability recommender can rank a capability against a described task. It is
+    emitted only when non-empty so existing minimal entries stay unchanged.
     """
     entry: dict[str, Any] = {
         "name": name,
@@ -1406,6 +1411,8 @@ def _cap(
         "cli": cli,
         "category": category,
     }
+    if when_to_use:
+        entry["when_to_use"] = when_to_use
     if mcp_caps is not None:
         entry["mcp_caps"] = mcp_caps
     if escalate_via is not None:
@@ -1428,19 +1435,56 @@ def tool_capabilities() -> dict[str, Any]:
     return {
         "capabilities": [
             # Retrieval
-            _cap(name="search", mcp_tool="search", cli="kairix search", category=CAP_CATEGORY_RETRIEVAL),
-            _cap(name="entity", mcp_tool="entity", cli="kairix entity", category=CAP_CATEGORY_RETRIEVAL),
-            _cap(name="timeline", mcp_tool="timeline", cli="kairix timeline", category=CAP_CATEGORY_RETRIEVAL),
+            _cap(
+                name="search",
+                mcp_tool="search",
+                cli="kairix search",
+                category=CAP_CATEGORY_RETRIEVAL,
+                when_to_use="Call before answering any factual question about prior work or decisions.",
+            ),
+            _cap(
+                name="entity",
+                mcp_tool="entity",
+                cli="kairix entity",
+                category=CAP_CATEGORY_RETRIEVAL,
+                when_to_use="Look up a named person, organisation, or project across the knowledge store.",
+            ),
+            _cap(
+                name="timeline",
+                mcp_tool="timeline",
+                cli="kairix timeline",
+                category=CAP_CATEGORY_RETRIEVAL,
+                when_to_use="Trace how a topic or project changed over time, in date order.",
+            ),
             # Synthesis
-            _cap(name="prep", mcp_tool="prep", cli="kairix prep", category=CAP_CATEGORY_SYNTHESIS),
-            _cap(name="research", mcp_tool="research", cli="kairix research", category=CAP_CATEGORY_SYNTHESIS),
+            _cap(
+                name="prep",
+                mcp_tool="prep",
+                cli="kairix prep",
+                category=CAP_CATEGORY_SYNTHESIS,
+                when_to_use="Pull a tiered context summary before a meeting or a task hand-off.",
+            ),
+            _cap(
+                name="research",
+                mcp_tool="research",
+                cli="kairix research",
+                category=CAP_CATEGORY_SYNTHESIS,
+                when_to_use="Gather and synthesise everything the store knows about a broad question.",
+            ),
             _cap(
                 name=CONTRADICT_TOOL_NAME,
                 mcp_tool=CONTRADICT_TOOL_NAME,
                 cli="kairix contradict",
                 category=CAP_CATEGORY_SYNTHESIS,
+                when_to_use="Check new content for conflicts with what the store already knows.",
             ),
-            _cap(name="brief", mcp_tool="brief", cli="kairix brief", category=CAP_CATEGORY_SYNTHESIS),
+            _cap(
+                name="brief",
+                mcp_tool="brief",
+                cli="kairix brief",
+                category=CAP_CATEGORY_SYNTHESIS,
+                when_to_use="Produce a session briefing that synthesises recent activity.",
+            ),
             # Agent infra
             _cap(
                 name="usage_guide",
@@ -1580,12 +1624,14 @@ def tool_capabilities() -> dict[str, Any]:
                 mcp_tool="ingest_chat",
                 cli="kairix ingest-chat",
                 category=CAP_CATEGORY_KNOWLEDGE_WRITE,
+                when_to_use="Save a chat transcript into the knowledge store for later recall.",
             ),
             _cap(
                 name="facts_about",
                 mcp_tool="facts_about",
                 cli="kairix facts about",
                 category=CAP_CATEGORY_RETRIEVAL,
+                when_to_use="Recall the stored facts about a person, project, or topic.",
             ),
             # #472 — agent-facing memory write (same use case as `kairix remember`)
             _cap(
@@ -1593,6 +1639,7 @@ def tool_capabilities() -> dict[str, Any]:
                 mcp_tool="memory_write",
                 cli="kairix remember",
                 category=CAP_CATEGORY_KNOWLEDGE_WRITE,
+                when_to_use="Remember a fact or decision now so it can be recalled later.",
             ),
             # Knowledge-write operator-only
             _cap(
