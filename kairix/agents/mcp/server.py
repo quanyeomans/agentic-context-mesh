@@ -550,6 +550,49 @@ def tool_usage_guide(
     return usage_guide_output_to_envelope(out)
 
 
+def tool_recommend(
+    task: str,
+    *,
+    agent: str | None = None,
+    deps: Any = None,
+    flag_reader: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    """Recommend which kairix tool or local skill fits a described task.
+
+    Thin adapter around ``kairix.use_cases.recommend.run_recommend``. Use
+    when you are unsure which kairix tool, skill, slash-command, sub-agent,
+    or workflow fits a task — describe the task and get a ranked list of
+    capabilities, each with why-it-fits and a ready-to-call invocation.
+
+    Flag-gated at THIS adapter level (not inside ``run_recommend``): when
+    the ``recommender`` flag is OFF, returns a disabled envelope WITHOUT
+    calling ``run_recommend``. ``deps`` forwards a ``RecommendDeps`` to the
+    use case; ``flag_reader`` is the flag DI seam (default reads
+    ``flag("recommender")``). Production callers leave both None.
+    """
+    from kairix.use_cases.recommend import (
+        default_recommender_flag_reader,
+        recommend_output_to_envelope,
+        recommender_disabled_output,
+        run_recommend,
+    )
+
+    read_flag = flag_reader if flag_reader is not None else default_recommender_flag_reader
+    if not read_flag():
+        return recommend_output_to_envelope(recommender_disabled_output(task))
+    out = run_recommend(task, agent=agent, deps=deps)
+    return recommend_output_to_envelope(out)
+
+
+# Canonical ``tool_<registered-tool-name>`` alias for the recommender. The
+# registered MCP tool is ``recommend_capabilities``; the F30 outcome-test
+# convention + the capability-affordance gate both key on the
+# ``tool_<name>`` shape, so this alias is the name outcome tests call. The
+# implementation lives on ``tool_recommend`` (the short adapter name the
+# CLI parity test + the registration both use).
+tool_recommend_capabilities = tool_recommend
+
+
 def tool_contradict(
     content: str,
     agent: str | None = None,
@@ -1365,6 +1408,12 @@ def tool_cc_pair(verb: str = "list") -> dict[str, Any]:
 # `mcp_tool` fields stay in sync without literal duplication.
 CAPABILITIES_TOOL_NAME = "capabilities"
 
+# RECOMMEND_CAPABILITIES_TOOL_NAME is the canonical MCP / catalogue name for
+# the capability recommender tool; pinned here so the registration, the
+# catalogue ``_cap`` row, and any cross-reference stay in sync without
+# literal duplication (F17).
+RECOMMEND_CAPABILITIES_TOOL_NAME = "recommend_capabilities"
+
 # Tool-name constants — pinned to keep the catalogue's `name` / `mcp_tool`
 # fields, the `require_ready` lookups, and any other references in sync
 # without literal duplication. Add new entries here when a tool's name is
@@ -1391,6 +1440,7 @@ def _cap(
     mcp_tool: str | None,
     cli: str,
     category: str,
+    when_to_use: str = "",
     mcp_caps: dict[str, Any] | None = None,
     escalate_via: str | None = None,
 ) -> dict[str, Any]:
@@ -1398,7 +1448,11 @@ def _cap(
 
     Keeps tool_capabilities() readable and pins the entry shape — only the
     listed kwargs may appear in a catalogue entry. Optional keys are omitted
-    when None so dict equality stays clean for round-trip tests.
+    when None / empty so dict equality stays clean for round-trip tests.
+
+    ``when_to_use`` carries task-conditioned trigger text ("Call when…") so the
+    capability recommender can rank a capability against a described task. It is
+    emitted only when non-empty so existing minimal entries stay unchanged.
     """
     entry: dict[str, Any] = {
         "name": name,
@@ -1406,6 +1460,8 @@ def _cap(
         "cli": cli,
         "category": category,
     }
+    if when_to_use:
+        entry["when_to_use"] = when_to_use
     if mcp_caps is not None:
         entry["mcp_caps"] = mcp_caps
     if escalate_via is not None:
@@ -1428,19 +1484,56 @@ def tool_capabilities() -> dict[str, Any]:
     return {
         "capabilities": [
             # Retrieval
-            _cap(name="search", mcp_tool="search", cli="kairix search", category=CAP_CATEGORY_RETRIEVAL),
-            _cap(name="entity", mcp_tool="entity", cli="kairix entity", category=CAP_CATEGORY_RETRIEVAL),
-            _cap(name="timeline", mcp_tool="timeline", cli="kairix timeline", category=CAP_CATEGORY_RETRIEVAL),
+            _cap(
+                name="search",
+                mcp_tool="search",
+                cli="kairix search",
+                category=CAP_CATEGORY_RETRIEVAL,
+                when_to_use="Call before answering any factual question about prior work or decisions.",
+            ),
+            _cap(
+                name="entity",
+                mcp_tool="entity",
+                cli="kairix entity",
+                category=CAP_CATEGORY_RETRIEVAL,
+                when_to_use="Look up a named person, organisation, or project across the knowledge store.",
+            ),
+            _cap(
+                name="timeline",
+                mcp_tool="timeline",
+                cli="kairix timeline",
+                category=CAP_CATEGORY_RETRIEVAL,
+                when_to_use="Trace how a topic or project changed over time, in date order.",
+            ),
             # Synthesis
-            _cap(name="prep", mcp_tool="prep", cli="kairix prep", category=CAP_CATEGORY_SYNTHESIS),
-            _cap(name="research", mcp_tool="research", cli="kairix research", category=CAP_CATEGORY_SYNTHESIS),
+            _cap(
+                name="prep",
+                mcp_tool="prep",
+                cli="kairix prep",
+                category=CAP_CATEGORY_SYNTHESIS,
+                when_to_use="Pull a tiered context summary before a meeting or a task hand-off.",
+            ),
+            _cap(
+                name="research",
+                mcp_tool="research",
+                cli="kairix research",
+                category=CAP_CATEGORY_SYNTHESIS,
+                when_to_use="Gather and synthesise everything the store knows about a broad question.",
+            ),
             _cap(
                 name=CONTRADICT_TOOL_NAME,
                 mcp_tool=CONTRADICT_TOOL_NAME,
                 cli="kairix contradict",
                 category=CAP_CATEGORY_SYNTHESIS,
+                when_to_use="Check new content for conflicts with what the store already knows.",
             ),
-            _cap(name="brief", mcp_tool="brief", cli="kairix brief", category=CAP_CATEGORY_SYNTHESIS),
+            _cap(
+                name="brief",
+                mcp_tool="brief",
+                cli="kairix brief",
+                category=CAP_CATEGORY_SYNTHESIS,
+                when_to_use="Produce a session briefing that synthesises recent activity.",
+            ),
             # Agent infra
             _cap(
                 name="usage_guide",
@@ -1455,6 +1548,13 @@ def tool_capabilities() -> dict[str, Any]:
                 category=CAP_CATEGORY_AGENT,
             ),
             _cap(name="bootstrap", mcp_tool="bootstrap", cli="kairix bootstrap", category=CAP_CATEGORY_AGENT),
+            _cap(
+                name="recommend",
+                mcp_tool=RECOMMEND_CAPABILITIES_TOOL_NAME,
+                cli="kairix recommend",
+                category=CAP_CATEGORY_AGENT,
+                when_to_use="Find the right tool, skill, or workflow when you are unsure which one fits a task.",
+            ),
             _cap(
                 name="entity_suggest",
                 mcp_tool="entity_suggest",
@@ -1580,12 +1680,14 @@ def tool_capabilities() -> dict[str, Any]:
                 mcp_tool="ingest_chat",
                 cli="kairix ingest-chat",
                 category=CAP_CATEGORY_KNOWLEDGE_WRITE,
+                when_to_use="Save a chat transcript into the knowledge store for later recall.",
             ),
             _cap(
                 name="facts_about",
                 mcp_tool="facts_about",
                 cli="kairix facts about",
                 category=CAP_CATEGORY_RETRIEVAL,
+                when_to_use="Recall the stored facts about a person, project, or topic.",
             ),
             # #472 — agent-facing memory write (same use case as `kairix remember`)
             _cap(
@@ -1593,6 +1695,7 @@ def tool_capabilities() -> dict[str, Any]:
                 mcp_tool="memory_write",
                 cli="kairix remember",
                 category=CAP_CATEGORY_KNOWLEDGE_WRITE,
+                when_to_use="Remember a fact or decision now so it can be recalled later.",
             ),
             # Knowledge-write operator-only
             _cap(
@@ -2055,6 +2158,24 @@ def _register_synthesis_and_diagnostic_tools(
     def capabilities() -> dict[str, Any]:
         """Full kairix capability catalogue. Read-only. Identical to tool_capabilities()."""
         return tool_capabilities()
+
+    @server.tool(
+        description=(
+            "Call when you are unsure which kairix tool, skill, slash-command, "
+            "sub-agent, or workflow fits a task. Describe the task; get a ranked "
+            "list of capabilities, each with why-it-fits and a ready-to-call "
+            "invocation. Read-only — no LLM between you and your tools. "
+            "Gated by the 'recommender' feature flag (returns a disabled "
+            "envelope when OFF). Expected p99: 1s warm. Recommended client timeout: 10s."
+        )
+    )
+    @async_tool_handler
+    def recommend_capabilities(task: str, agent: str = "") -> dict[str, Any]:
+        """Rank kairix tools + local skills for a task. Read-only."""
+        # ``agent`` (default "") is forwarded as-is; ``run_recommend`` accepts
+        # ``str | None`` and only logs it (v1 does not personalise ranking),
+        # so the empty-string default is harmless — no ``or None`` coercion.
+        return tool_recommend(task=task, agent=agent)
 
 
 def _register_operator_and_ingest_tools(server: Any) -> None:

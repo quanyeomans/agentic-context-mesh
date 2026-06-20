@@ -33,6 +33,7 @@ Subcommands:
   config      Validate kairix.config.yaml against the schema and print errors
   ingest-chat Ingest JSONL chat transcripts into the document + fact stores
   remember    Save a memory for an agent (dated markdown file + immediate BM25 index)
+  recommend   Recommend which kairix tool or local skill fits a described task (ranked)
   cc-pair     Operator surface over topology_cc_pairs (list/create/pause/resume/delete)
   dead-letter Operator triage view over the connector_deadletter table (status)
   secrets     Canonical credential naming: verify resolution + set (persist a secret into the operator bundle)
@@ -115,6 +116,8 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "ingest-chat": ("kairix.use_cases.ingest_chat", "main", True),
     # F45-feature: tests/bdd/features/cli_remember.feature
     "remember": ("kairix.use_cases.remember", "main", True),
+    # F45-feature: tests/bdd/features/cli_recommend.feature
+    "recommend": ("kairix.use_cases.recommend", "main", True),
     "features": ("kairix.core.features.cli", "main", True),
     "cc-pair": ("kairix.core.connectors.cc_pair_cli", "main", True),
     "dead-letter": ("kairix.dead_letter_cli", "main", True),

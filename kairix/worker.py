@@ -1427,6 +1427,61 @@ def dispatch_linear_sync(
     return off_branch()
 
 
+def skills_off_branch_noop() -> ConnectorSyncResult:
+    """OFF-branch default for :func:`dispatch_skills_sync` —
+    return zero counters and emit the operator-visible signal that the
+    skills connector is gated off.
+
+    F6-clean: a real callable default, no ``None``. Public so the
+    feature-flag BDD steps can reach it without an internal-name
+    import (F5).
+    """
+    logger.info("worker: skills connector gated off (flag OFF)")
+    return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
+
+
+def run_via_skills_connector() -> ConnectorSyncResult:
+    """ON-branch default for :func:`dispatch_skills_sync` — delegate
+    to the canonical :func:`run_connector_sync_pipeline` which resolves
+    the ``skills`` plugin via its entry-point factory and drives the
+    standard ConnectorPipeline into the ``skills`` collection (the
+    connector framework names a connector's collection after the
+    connector — ``resolve_chunk_writer_for_entry(db, name="skills")``).
+    The recommender reads this collection alongside ``capabilities``.
+
+    The branch log distinguishes the skills path from the sibling
+    connector paths so operators can tell which connector ran by
+    grep-ing INFO logs.
+    """
+    logger.info("worker: skills connector running (flag ON)")
+    return run_connector_sync_pipeline()
+
+
+def dispatch_skills_sync(
+    read_flag: Callable[[str], bool] = _default_flag_value,
+    on_branch: Callable[[], ConnectorSyncResult] = run_via_skills_connector,
+    off_branch: Callable[[], ConnectorSyncResult] = skills_off_branch_noop,
+) -> ConnectorSyncResult:
+    """Compose the flag-branching dispatcher for the skills connector slot.
+
+    Reads the ``connector_skills`` flag and routes to the ON branch
+    (the standard connector pipeline, which resolves the ``skills``
+    plugin and walks the host's ``~/.claude`` tree) or the OFF branch (a
+    no-op that skips the connector entirely). Mirrors
+    :func:`dispatch_linear_sync` shape — the BDD + integration tests pin
+    the flag through :class:`FakeFeatureFlagResolver` and observe the
+    branch via the per-helper INFO log.
+
+    Gating happens at the connector-selection boundary — when OFF, the
+    skills plugin never runs even if listed in ``kairix.config.yaml``.
+    The skills connector degrades gracefully where ``~/.claude`` is
+    absent, so the ON branch is safe on hosts without a skills set.
+    """
+    if read_flag("connector_skills"):
+        return on_branch()
+    return off_branch()
+
+
 def gmail_off_branch_noop() -> ConnectorSyncResult:
     """OFF-branch default for :func:`dispatch_gmail_sync` —
     return zero counters and emit the operator-visible signal that the
@@ -1702,6 +1757,58 @@ def maybe_run_entity_summary_projector_tick(
     state.last_entity_summary_failed = int(getattr(result, "failed", 0))
     write_state_fn(state, state_path)
     return now
+
+
+def maybe_build_capability_corpus_at_boot(
+    *,
+    read_flag: Callable[[str], bool] = _default_flag_value,
+    db_factory: Callable[[], sqlite3.Connection] = _open_db_default,
+    corpus_deps: Any | None = None,
+) -> Any | None:
+    """Build the capability-recommender corpus at worker boot, flag-gated.
+
+    Spec A §3.5 — when the ``recommender`` flag is ON, write kairix's own
+    capability catalogue into the ``capabilities`` collection so the corpus
+    is fresh on boot. The OUTER gate is the flag check; when OFF this is a
+    structural no-op (the DB is never opened, the builder never runs) and
+    returns ``None`` — installing the recommender code is a no-op for
+    operators.
+
+    Failure-isolated: ``build_capability_corpus`` never raises (it surfaces
+    failures via ``CapabilityCorpusResult.error``); this helper logs the
+    outcome and returns the result. A boot-time corpus build failure
+    degrades — the worker continues; the recommender simply has an empty or
+    stale corpus until the next build.
+
+    ``read_flag`` / ``db_factory`` / ``corpus_deps`` are DI seams — tests
+    pin the flag via :class:`FakeFeatureFlagResolver` and pass a tmp
+    ``db_factory`` + a BM25-only ``CapabilityCorpusDeps`` to drive both
+    branches without env vars or a provider (F1/F2-clean).
+    """
+    if not read_flag("recommender"):
+        logger.info("worker: capability corpus build skipped (recommender flag OFF)")
+        return None
+
+    from kairix.core.db.schema import create_schema
+    from kairix.knowledge.capabilities.builder import build_capability_corpus
+
+    db = db_factory()
+    try:
+        create_schema(db)
+        result = build_capability_corpus(db, deps=corpus_deps)
+        db.commit()
+    finally:
+        db.close()
+
+    if result.error:
+        logger.warning("worker: capability corpus build degraded — %s", result.error)
+    else:
+        logger.info(
+            "worker: capability corpus built — written=%d embedded=%d",
+            result.written,
+            result.embedded,
+        )
+    return result
 
 
 def maybe_run_maintenance_loop_tick(
@@ -2724,6 +2831,12 @@ def main(
     # them. Failure-isolated; worker continues even when Neo4j /
     # config is degraded.
     seed_canonical_entities_at_boot()
+
+    # Spec A — capability-recommender corpus build at boot. OUTER gate is
+    # the ``recommender`` flag (default OFF → structural no-op: the DB is
+    # never opened, the builder never runs). Failure-isolated; the worker
+    # continues with an empty/stale corpus if the build degrades.
+    maybe_build_capability_corpus_at_boot()
 
     state = _boot_state(deps)
     # Persist initial state (STARTING) so ``kairix worker status`` is

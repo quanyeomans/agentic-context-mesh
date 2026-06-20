@@ -246,6 +246,7 @@ google_drive       = "kairix.connectors.google_drive:make_connector"
 apple_caldav       = "kairix.connectors.apple_caldav:make_connector"
 google_calendar    = "kairix.connectors.google_calendar:make_connector"
 linear             = "kairix.connectors.linear:make_connector"
+skills             = "kairix.connectors.skills:make_connector"
 
 # Extractor plugin discovery — same shape as kairix.providers above.
 # Per-format-family plugins live under kairix/extractors/<name>/ and

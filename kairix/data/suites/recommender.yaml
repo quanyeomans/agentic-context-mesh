@@ -1,0 +1,132 @@
+# Gold task -> capability benchmark suite for the kairix capability recommender.
+#
+# Each case is a natural-language TASK an agent would face. The gold title is the
+# capability NAME the recommender should rank first (see tool_capabilities() in
+# kairix/agents/mcp/server.py for the canonical names). Scoring is `exact`: the
+# gold capability must resolve to a recommendation in the top-5.
+#
+# This suite is forward-looking — F75 (eval-suite parity) is PROPOSED and NOT a
+# blocking gate. It exists to seed the eval harness so recommendation precision
+# becomes measurable as the recommender corpus grows.
+#
+# Authoring rules:
+#   - `query` is a task description, free of real names / orgs (F32).
+#   - `gold_titles[].title` MUST be a real tool_capabilities() name.
+#   - `score_method: exact` for every case (top-5 retrieval correctness).
+#   - `category` is from the suite vocabulary: recall | temporal | entity |
+#     conceptual | multi_hop | procedural | classification.
+
+meta:
+  name: recommender
+  version: '1.0'
+  instrument: kairix-capability-recommender
+  description: >-
+    Gold task->capability cases for the capability recommender. Maps a described
+    task to the kairix tool that should be recommended first.
+  default_collection: capabilities
+  focus_areas:
+    - tool-routing
+    - conceptual
+    - procedural
+
+cases:
+
+  # --- Detect conflicts before writing new knowledge ---
+  - id: REC01
+    query: "check if this draft contradicts what we already decided"
+    category: conceptual
+    score_method: exact
+    gold_titles:
+      - title: contradict
+        relevance: 2
+    notes: "Conflict-check task routes to the contradiction surface"
+
+  # --- Find prior decisions / answers ---
+  - id: REC02
+    query: "find what we decided about the rollout approach"
+    category: recall
+    score_method: exact
+    gold_titles:
+      - title: search
+        relevance: 2
+    notes: "Lookup-prior-work task routes to hybrid search"
+
+  # --- Trace how something changed over time ---
+  - id: REC03
+    query: "summarise the timeline of this project in date order"
+    category: temporal
+    score_method: exact
+    gold_titles:
+      - title: timeline
+        relevance: 2
+    notes: "Date-ordered history task routes to the temporal surface"
+
+  # --- Look up a specific named entity ---
+  - id: REC04
+    query: "look up everything we know about a named person or organisation"
+    category: entity
+    score_method: exact
+    gold_titles:
+      - title: entity
+        relevance: 2
+    notes: "Named-entity lookup routes to the knowledge-graph surface"
+
+  # --- Synthesise a broad answer across many sources ---
+  - id: REC05
+    query: "research a broad open question and pull together everything the store knows"
+    category: multi_hop
+    score_method: exact
+    gold_titles:
+      - title: research
+        relevance: 2
+    notes: "Broad synthesis task routes to multi-turn research"
+
+  # --- Quick context before a meeting / hand-off ---
+  - id: REC06
+    query: "give me a quick context summary before this meeting"
+    category: conceptual
+    score_method: exact
+    gold_titles:
+      - title: prep
+        relevance: 2
+    notes: "Pre-task context-prep routes to the tiered summary surface"
+
+  # --- Generate a session briefing ---
+  - id: REC07
+    query: "prepare a session briefing of recent decisions and notes to start work"
+    category: procedural
+    score_method: exact
+    gold_titles:
+      - title: brief
+        relevance: 2
+    notes: "Session-start briefing routes to the brief surface"
+
+  # --- Persist a fact for later recall ---
+  - id: REC08
+    query: "remember this decision now so we can recall it later"
+    category: procedural
+    score_method: exact
+    gold_titles:
+      - title: memory_write
+        relevance: 2
+    notes: "Save-a-fact task routes to the memory-write surface"
+
+  # --- Recall stored facts about a topic ---
+  - id: REC09
+    query: "recall the stored facts about a particular topic"
+    category: recall
+    score_method: exact
+    gold_titles:
+      - title: facts_about
+        relevance: 2
+    notes: "Fact-recall task routes to the facts-about surface"
+
+  # --- Discover which tool fits when unsure ---
+  - id: REC10
+    query: "I'm not sure which tool or skill fits this task"
+    category: procedural
+    score_method: exact
+    gold_titles:
+      - title: recommend
+        relevance: 2
+    notes: "Self-referential routing — unsure-which-tool routes to the recommender"
