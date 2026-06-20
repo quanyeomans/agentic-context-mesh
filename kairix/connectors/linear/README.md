@@ -61,21 +61,23 @@ topology_v2:
       kind: linear
       name: "Linear workspace"
       default_sensitivity: internal        # roadmap/docs are company-internal; override per-deploy
+      refresh_freq_seconds: 900            # how often to poll, in seconds (900 = every 15 min)
   credentials:
     - id: linear-cred
-      kind: linear
-      credential_ref: connector-linear-api-key   # your secret store (KV / secrets file)
+      kind: bearer_token                   # credential type (the API key is a bearer token)
+      secret_name: connector-linear-api-key   # secret store name (without the kairix- prefix)
+      admin_public: true                   # every agent may search this source
   cc_pairs:
     - id: cc-linear
       connector: linear-prod
       credential: linear-cred
-      access_type: SYNC
-      refresh_freq_override_seconds: 900    # 15-min poll; tune as needed
+      name: "Linear workspace pair"        # required
+      access_type: PUBLIC                  # every agent can search the workspace
   collections:
-    - id: linear
-      name: "Linear roadmap & docs"
-      default_sensitivity: internal
-      sources: [{ cc_pair_id: cc-linear }]
+    - name: linear
+      sources:
+        - cc_pair: cc-linear
+          path_filter: "*"                 # everything the connector returns
 ```
 
 The feature flag defaults OFF, so adding this connector is a no-op until
@@ -85,7 +87,7 @@ you deliberately turn it on.
 
 The connector finds changes by polling, not by webhooks. That means new
 edits show up on the next poll — within your poll interval (15 minutes
-at the `refresh_freq_override_seconds: 900` shown above). Roadmap and
+at the `refresh_freq_seconds: 900` shown above). Roadmap and
 docs change on a human cadence, so this is plenty fresh for questions
 like "what's our roadmap?" or "what does this design doc say?". Polling
 also needs only outbound HTTPS, which keeps it friendly to locked-down

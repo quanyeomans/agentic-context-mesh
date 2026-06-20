@@ -7,9 +7,14 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+### For humans
+
+- **Connect your Linear workspace.** kairix can now pull your Linear roadmap and docs — initiatives, projects, issues, documents, and project updates — into your knowledge store, so you and your agents can search them alongside everything else. It's off until you turn it on: add your Linear API key, switch it on, and kairix starts indexing.
+
 ### For operators
 
 - **Lead with what we know about a thing.** When someone asks "tell me about X" or "who is X", kairix can now put the short description of that person, team, or topic at the top of the results instead of buried below documents. It's off by default — turn it on once you've switched on entity descriptions, and you can switch it back off at any time.
+- **Turn on the Linear connector when you're ready.** It's off by default, so adding it changes nothing until you act. Put a Linear API key in your secret store, add the connector to your config, and switch it on — kairix then checks Linear for changes on a schedule and pulls only what's new.
 
 ## [2026.6.18] - 2026-06-18 — Set up kairix in your browser
 

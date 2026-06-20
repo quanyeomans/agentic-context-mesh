@@ -52,6 +52,7 @@ Examples:
 | `kairix-connector-github-pat` | GitHub personal access token (PAT-mode alternative) |
 | `kairix-connector-apple-caldav-app-password` | Apple CalDAV app password |
 | `kairix-connector-obsidian-tcv-encryption-password` | Per-vault Obsidian encryption password (`tcv` is an example instance id) |
+| `kairix-connector-linear-api-key` | Linear API key (workspace or personal key) |
 
 The env var form is the canonical name uppercased with `-` → `_`: `kairix-provider-llm-api-key` → `KAIRIX_PROVIDER_LLM_API_KEY`. One rule, one function — see `kairix.secrets.naming.canonical_env_var()`.
 
