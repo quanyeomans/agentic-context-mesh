@@ -35,13 +35,23 @@ module ``tests/use_cases/test_recommend.py``
 
 from __future__ import annotations
 
+import json
 import logging
+import sys
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TextIO
 
 logger = logging.getLogger(__name__)
+
+# The feature flag gating both recommender surfaces. The gate lives at the
+# ADAPTER level (CLI ``main`` + MCP ``tool_recommend``), NOT inside
+# ``run_recommend`` — the use case stays flag-agnostic so it composes the
+# same way in tests and behind either surface. When the flag is OFF, the
+# adapter returns this disabled message WITHOUT calling ``run_recommend``.
+_RECOMMENDER_FLAG = "recommender"
+RECOMMENDER_DISABLED_ERROR = "recommender is disabled — enable the 'recommender' feature flag"
 
 # The dedicated collection the recommender retrieves over. ``agent=None``
 # makes the pipeline use this list verbatim (the collection is globally
@@ -141,6 +151,23 @@ def recommender_config(base: Any) -> Any:
     return replace(base, rerank=RerankConfig(enabled=True))
 
 
+def _pipeline_search(pipeline: Any, **kwargs: Any) -> Any:
+    """Call a real ``SearchPipeline.search`` with only the kwargs it accepts.
+
+    ``run_recommend`` calls its ``search_fn`` with ``query`` / ``collections``
+    / ``agent`` / ``limit``; the real :meth:`SearchPipeline.search` has no
+    ``limit`` parameter (top-k truncation is applied downstream in
+    ``_map_results``). Forward only the production-signature kwargs so the
+    real-pipeline seams compose without a ``TypeError``. ``FakeSearchPipeline``
+    accepts ``**kwargs`` directly, so this shim is only on the real path.
+    """
+    return pipeline.search(
+        query=kwargs["query"],
+        collections=kwargs.get("collections"),
+        agent=kwargs.get("agent"),
+    )
+
+
 def _default_search(**kwargs: Any) -> Any:
     """Lazy DI default: the production search pipeline, rerank force-on.
 
@@ -153,7 +180,7 @@ def _default_search(**kwargs: Any) -> Any:
     from kairix.core.search.config_loader import load_config
 
     cfg = recommender_config(load_config())
-    return build_search_pipeline(config=cfg).search(**kwargs)
+    return _pipeline_search(build_search_pipeline(config=cfg), **kwargs)
 
 
 def _default_catalogue() -> list[dict[str, Any]]:
@@ -360,3 +387,213 @@ def recommend_output_to_envelope(out: RecommendOutput) -> dict[str, Any]:
         "correlation_id": out.correlation_id,
         "error": out.error,
     }
+
+
+# ---------------------------------------------------------------------------
+# Adapter-level flag gate (CLI + MCP)
+# ---------------------------------------------------------------------------
+
+
+def default_recommender_flag_reader() -> bool:
+    """Production flag-reader for the ``recommender`` flag.
+
+    Thin wrapper around :func:`kairix.core.features.resolver.flag` so the
+    adapters (CLI :func:`main` + MCP ``tool_recommend``) inject a fake
+    reader without monkey-patching the resolver module (F1/F2-clean).
+    Cloned from
+    :func:`kairix.core.search.boosts.default_entity_first_routing_flag_reader`.
+    """
+    from kairix.core.features.resolver import flag
+
+    return flag(_RECOMMENDER_FLAG)
+
+
+def recommender_disabled_output(task: str) -> RecommendOutput:
+    """The disabled-state result both adapters return when the flag is OFF.
+
+    Single source for the disabled envelope so the CLI and MCP surfaces
+    stay byte-identical. Carries the empty recommendation tuple +
+    :data:`RECOMMENDER_DISABLED_ERROR`; no ``correlation_id`` is minted
+    because no recommendation call happened.
+    """
+    return RecommendOutput(task=task, error=RECOMMENDER_DISABLED_ERROR)
+
+
+# ---------------------------------------------------------------------------
+# CLI surface — kairix recommend
+# ---------------------------------------------------------------------------
+
+
+def _build_parser() -> Any:
+    """Argparse for ``kairix recommend <task...> [--json] [--limit] [--db-path]``."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="kairix recommend",
+        description=(
+            "Recommend which kairix tool or local skill fits a task. Describe "
+            "the task; get a ranked list of capabilities, each with why it fits "
+            "and a ready-to-call invocation."
+        ),
+    )
+    parser.add_argument("task", nargs="+", help="The task you want to do, in plain words.")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help="Emit the structured JSON envelope instead of the human-readable table.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=5,
+        help="Maximum number of recommendations to return (default: 5).",
+    )
+    parser.add_argument(
+        "--db-path",
+        default=None,
+        help=(
+            "Override the index database path for this invocation — points the "
+            "capability search at a pre-built tmp index. Read-only; this is the "
+            "F30 subprocess seam (no KAIRIX_* env vars needed)."
+        ),
+    )
+    return parser
+
+
+class _NullEmbeddingService:
+    """A no-op ``EmbeddingService`` for the BM25-only ``--db-path`` seam.
+
+    The F30 read-only seam runs ``skip_vector=True`` so the vector leg's
+    embed service is never invoked at query time — but the factory still
+    constructs one. This null service satisfies the
+    :class:`kairix.core.protocols.EmbeddingService` shape (``embed`` /
+    ``embed_batch``) without resolving a provider, so the read-only path is
+    provider-free on any host. It returns empty vectors, never a network
+    call.
+    """
+
+    def embed(self, _text: str) -> list[float]:
+        # _-prefixed: the EmbeddingService Protocol requires the positional
+        # ``text``, but the null service ignores it (F19).
+        return []
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [[] for _ in texts]
+
+
+def read_only_db_search_config() -> Any:
+    """Return the BM25-only retrieval config for the ``--db-path`` seam.
+
+    Rerank force-on (``recommender_config``) AND ``skip_vector=True`` — the
+    read-only F30 seam must NOT attempt the vector leg (it has no provider).
+    Public so the BM25-only contract is unit-pinnable without a provider:
+    ``skip_vector`` MUST be True or the seam tries to embed against a
+    missing provider. Mirrors :func:`recommender_config`'s testable shape.
+    """
+    from dataclasses import replace
+
+    from kairix.core.search.config import RetrievalConfig
+
+    return replace(recommender_config(RetrievalConfig.defaults()), skip_vector=True)
+
+
+def _db_path_search_fn(db_path: str) -> Callable[..., Any]:
+    """Build a read-only ``search_fn`` pointed at a pre-built tmp index.
+
+    The F30 subprocess seam: wires :func:`build_search_pipeline` against a
+    :class:`kairix.paths.KairixPaths` whose ``db_path`` is the supplied
+    path so a subprocess can drive the composed search against a seeded
+    ``capabilities`` collection without touching the environment. The
+    config is :func:`read_only_db_search_config` (BM25-only, rerank on),
+    and the embed service is overridden with
+    :class:`_NullEmbeddingService` — the seam is provider-free by
+    construction (no ``provider:`` field required), so the read-only path
+    runs on any host. Production callers leave ``deps`` None and reach the
+    full hybrid ``_default_search`` instead.
+    """
+    from pathlib import Path
+
+    def _search(**kwargs: Any) -> Any:
+        from kairix.core.factory import FactoryDeps, build_search_pipeline
+        from kairix.paths import KairixPaths
+
+        cfg = read_only_db_search_config()
+        resolved = Path(db_path)
+        paths = KairixPaths(
+            db_path=resolved,
+            document_root=resolved.parent,
+            log_dir=resolved.parent,
+            workspace_root=resolved.parent,
+        )
+        deps = FactoryDeps(embed_service_override=_NullEmbeddingService())
+        pipeline = build_search_pipeline(config=cfg, paths=paths, deps=deps)
+        return _pipeline_search(pipeline, **kwargs)
+
+    return _search
+
+
+def _deps_from_args(args: Any) -> RecommendDeps | None:
+    """Build override deps from the F30 ``--db-path`` subprocess seam, or None."""
+    if args.db_path:
+        return RecommendDeps(search_fn=_db_path_search_fn(args.db_path))
+    return None
+
+
+def _format_human(out: RecommendOutput) -> str:
+    """Human-readable table for the default (non-``--json``) output."""
+    lines = [f"Recommendations for: {out.task}"]
+    if not out.recommendations:
+        lines.append("  (no matching capabilities found)")
+        return "\n".join(lines) + "\n"
+    for rank, rec in enumerate(out.recommendations, start=1):
+        invocation = rec.mcp_tool or rec.cli or rec.name
+        lines.append(f"  {rank}. {rec.name} ({rec.kind}) — call: {invocation}")
+        if rec.when_to_use:
+            lines.append(f"     when: {rec.when_to_use}")
+    return "\n".join(lines) + "\n"
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    out: TextIO | None = None,
+    err: TextIO | None = None,
+    deps: RecommendDeps | None = None,
+    flag_reader: Callable[[], bool] = default_recommender_flag_reader,
+) -> int:
+    """CLI entry point for ``kairix recommend``. Returns 0 on success, 1 on error.
+
+    Flag-gated at THIS adapter level (not inside ``run_recommend``): when
+    the ``recommender`` flag is OFF, prints the disabled message to stderr
+    and returns 1 WITHOUT calling ``run_recommend``. ``deps`` is the
+    in-process test seam; ``--db-path`` is the F30 subprocess seam;
+    ``flag_reader`` is the flag DI seam (default reads ``flag("recommender")``).
+    """
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    out_sink = out if out is not None else sys.stdout
+    err_sink = err if err is not None else sys.stderr
+
+    task = " ".join(args.task)
+
+    if not flag_reader():
+        result = recommender_disabled_output(task)
+    else:
+        effective_deps = deps if deps is not None else _deps_from_args(args)
+        result = run_recommend(task, limit=args.limit, deps=effective_deps)
+
+    if args.as_json:
+        out_sink.write(json.dumps(recommend_output_to_envelope(result), indent=2) + "\n")
+    elif not result.error:
+        out_sink.write(_format_human(result))
+
+    if result.error:
+        err_sink.write(f"kairix recommend: {result.error}\n")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

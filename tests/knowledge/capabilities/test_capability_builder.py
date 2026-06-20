@@ -218,6 +218,62 @@ def test_build_corpus_stays_bm25_only_on_zero_dim_vectors():
     assert index.saved is False
 
 
+def test_build_corpus_vec_leg_failure_keeps_bm25_write_count():
+    # T1 deferred minor: a vec-index-unavailable failure must NOT mask the
+    # successful BM25 write count. The embed step produces non-empty vectors so
+    # the vec branch is reached, then the vec index raises — the BM25 `written`
+    # count is still reported truthfully (1), embedded stays 0, error stays "".
+    from kairix.knowledge.capabilities.builder import CapabilityCorpusDeps, build_capability_corpus
+
+    class _BoomVecIndex:
+        def add_vectors(self, hash_seqs, vectors) -> int:
+            raise RuntimeError("vec index is read-only")
+
+        def save(self) -> None:  # pragma: no cover - never reached (add raises first)
+            raise AssertionError("save must not run when add_vectors raised")
+
+    deps = CapabilityCorpusDeps(
+        builder=_one_cap_builder(),
+        chunk_writer_fn=lambda _db: _FakeWriter(),
+        embed_batch_fn=lambda texts: [[0.5, 0.5] for _ in texts],
+        vec_index_fn=lambda: _BoomVecIndex(),
+    )
+    result = build_capability_corpus(object(), deps=deps)
+    assert result.written == 1, "BM25 write count must survive a vec-leg failure"
+    assert result.embedded == 0
+    assert result.error == "", "a vec-leg failure must degrade, not surface as a build error"
+
+
+def test_build_corpus_vec_leg_failure_logs_traceback(caplog):
+    # The vec-leg isolation logs the swallowed failure WITH exc_info=True so the
+    # vec-index error's stack trace reaches the logs. Pins exc_info against a
+    # mutation that would silence it (True -> False).
+    import logging
+
+    from kairix.knowledge.capabilities.builder import CapabilityCorpusDeps, build_capability_corpus
+
+    class _BoomVecIndex:
+        def add_vectors(self, hash_seqs, vectors) -> int:
+            raise RuntimeError("vec index is read-only")
+
+        def save(self) -> None:  # pragma: no cover - never reached
+            raise AssertionError("save must not run")
+
+    deps = CapabilityCorpusDeps(
+        builder=_one_cap_builder(),
+        chunk_writer_fn=lambda _db: _FakeWriter(),
+        embed_batch_fn=lambda texts: [[0.5, 0.5] for _ in texts],
+        vec_index_fn=lambda: _BoomVecIndex(),
+    )
+    with caplog.at_level(logging.WARNING):
+        build_capability_corpus(object(), deps=deps)
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "vec leg unavailable" in r.getMessage()]
+    assert warnings, "expected a vec-leg-unavailable WARNING record"
+    assert warnings[0].exc_info is not None  # traceback captured (exc_info=True)
+    assert warnings[0].exc_info[0] is RuntimeError
+
+
 def test_build_corpus_empty_catalogue_reports_error():
     from kairix.knowledge.capabilities.builder import (
         CapabilityCatalogueBuilder,

@@ -1756,6 +1756,58 @@ def maybe_run_entity_summary_projector_tick(
     return now
 
 
+def maybe_build_capability_corpus_at_boot(
+    *,
+    read_flag: Callable[[str], bool] = _default_flag_value,
+    db_factory: Callable[[], sqlite3.Connection] = _open_db_default,
+    corpus_deps: Any | None = None,
+) -> Any | None:
+    """Build the capability-recommender corpus at worker boot, flag-gated.
+
+    Spec A §3.5 — when the ``recommender`` flag is ON, write kairix's own
+    capability catalogue into the ``capabilities`` collection so the corpus
+    is fresh on boot. The OUTER gate is the flag check; when OFF this is a
+    structural no-op (the DB is never opened, the builder never runs) and
+    returns ``None`` — installing the recommender code is a no-op for
+    operators.
+
+    Failure-isolated: ``build_capability_corpus`` never raises (it surfaces
+    failures via ``CapabilityCorpusResult.error``); this helper logs the
+    outcome and returns the result. A boot-time corpus build failure
+    degrades — the worker continues; the recommender simply has an empty or
+    stale corpus until the next build.
+
+    ``read_flag`` / ``db_factory`` / ``corpus_deps`` are DI seams — tests
+    pin the flag via :class:`FakeFeatureFlagResolver` and pass a tmp
+    ``db_factory`` + a BM25-only ``CapabilityCorpusDeps`` to drive both
+    branches without env vars or a provider (F1/F2-clean).
+    """
+    if not read_flag("recommender"):
+        logger.info("worker: capability corpus build skipped (recommender flag OFF)")
+        return None
+
+    from kairix.core.db.schema import create_schema
+    from kairix.knowledge.capabilities.builder import build_capability_corpus
+
+    db = db_factory()
+    try:
+        create_schema(db)
+        result = build_capability_corpus(db, deps=corpus_deps)
+        db.commit()
+    finally:
+        db.close()
+
+    if result.error:
+        logger.warning("worker: capability corpus build degraded — %s", result.error)
+    else:
+        logger.info(
+            "worker: capability corpus built — written=%d embedded=%d",
+            result.written,
+            result.embedded,
+        )
+    return result
+
+
 def maybe_run_maintenance_loop_tick(
     *,
     deps: MaintenanceLoopDeps | None,
@@ -2776,6 +2828,12 @@ def main(
     # them. Failure-isolated; worker continues even when Neo4j /
     # config is degraded.
     seed_canonical_entities_at_boot()
+
+    # Spec A — capability-recommender corpus build at boot. OUTER gate is
+    # the ``recommender`` flag (default OFF → structural no-op: the DB is
+    # never opened, the builder never runs). Failure-isolated; the worker
+    # continues with an empty/stale corpus if the build degrades.
+    maybe_build_capability_corpus_at_boot()
 
     state = _boot_state(deps)
     # Persist initial state (STARTING) so ``kairix worker status`` is

@@ -140,6 +140,8 @@ def test_build_server_constructs_fastmcp_with_all_tools_registered_under_unit() 
         "probe_search",
         # Programmatic introspection (affordance pattern 4)
         "capabilities",
+        # Capability recommender (Spec A) — read-only, flag-gated
+        "recommend_capabilities",
         # Operator-only escalation stubs
         "probe_burst",
         "probe_config",
@@ -207,6 +209,8 @@ def test_build_server_each_wrapper_dispatches_to_tool_function_under_unit() -> N
         ("probe_search", {"queries": 1000, "concurrency": 10}),
         # Programmatic introspection (affordance pattern 4).
         ("capabilities", {}),
+        # Capability recommender (Spec A) — flag OFF in unit env → disabled envelope.
+        ("recommend_capabilities", {"task": "find the right tool"}),
         # Operator-only escalation stubs — fixed envelope responses.
         ("probe_burst", {}),
         ("probe_config", {}),

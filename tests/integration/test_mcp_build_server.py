@@ -50,6 +50,8 @@ _EXPECTED_TOOLS = {
     "probe_config",
     # Programmatic introspection (affordance pattern 4)
     "capabilities",
+    # Capability recommender (Spec A) — read-only, flag-gated
+    "recommend_capabilities",
     # Operator-only escalation stubs
     "probe_burst",
     "soak_run",

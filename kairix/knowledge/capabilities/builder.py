@@ -227,11 +227,38 @@ def build_capability_corpus(
             return CapabilityCorpusResult(error="no capabilities to index")
         writer = d.chunk_writer_fn(db)
         written = writer.upsert(chunks)
-        embedded = _embed_capabilities(chunks, d)
-        return CapabilityCorpusResult(written=written, embedded=embedded)
     except Exception as exc:  # never raise — surface via .error
         logger.warning("build_capability_corpus failed: %s", exc, exc_info=True)
         return CapabilityCorpusResult(error=f"{type(exc).__name__}: {exc}")
+
+    # The vec leg is isolated from the BM25 write: a vec-index-unavailable
+    # failure (read-only index, missing usearch, embed-provider down) must
+    # NOT mask the successful BM25 write count (the T1 deferred minor). The
+    # corpus stays BM25-searchable; the next embed/worker tick can add the
+    # vectors. ``embedded`` stays 0 on a vec-leg failure but ``written`` is
+    # truthfully reported.
+    embedded = _embed_capabilities_safe(chunks, d)
+    return CapabilityCorpusResult(written=written, embedded=embedded)
+
+
+def _embed_capabilities_safe(chunks: list[Chunk], deps: CapabilityCorpusDeps) -> int:
+    """Add capability vectors, isolating any vec-leg failure from the BM25 write.
+
+    Returns 0 (and logs at WARNING with the traceback) when the vec step is
+    unavailable — the BM25 write already succeeded, so the corpus is
+    searchable; only the vector leg is deferred.
+    """
+    try:
+        return _embed_capabilities(chunks, deps)
+    except Exception as exc:  # vec-leg unavailable — keep the BM25 write
+        # exc_info=True so the vec-leg failure's stack trace reaches the logs;
+        # the BM25 write already landed, so this degrades, never fails.
+        logger.warning(
+            "capability corpus: vec leg unavailable; BM25 write kept — %s",
+            exc,
+            exc_info=True,
+        )
+        return 0
 
 
 def _embed_capabilities(chunks: list[Chunk], deps: CapabilityCorpusDeps) -> int:

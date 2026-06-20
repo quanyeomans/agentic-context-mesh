@@ -550,6 +550,49 @@ def tool_usage_guide(
     return usage_guide_output_to_envelope(out)
 
 
+def tool_recommend(
+    task: str,
+    *,
+    agent: str | None = None,
+    deps: Any = None,
+    flag_reader: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    """Recommend which kairix tool or local skill fits a described task.
+
+    Thin adapter around ``kairix.use_cases.recommend.run_recommend``. Use
+    when you are unsure which kairix tool, skill, slash-command, sub-agent,
+    or workflow fits a task — describe the task and get a ranked list of
+    capabilities, each with why-it-fits and a ready-to-call invocation.
+
+    Flag-gated at THIS adapter level (not inside ``run_recommend``): when
+    the ``recommender`` flag is OFF, returns a disabled envelope WITHOUT
+    calling ``run_recommend``. ``deps`` forwards a ``RecommendDeps`` to the
+    use case; ``flag_reader`` is the flag DI seam (default reads
+    ``flag("recommender")``). Production callers leave both None.
+    """
+    from kairix.use_cases.recommend import (
+        default_recommender_flag_reader,
+        recommend_output_to_envelope,
+        recommender_disabled_output,
+        run_recommend,
+    )
+
+    read_flag = flag_reader if flag_reader is not None else default_recommender_flag_reader
+    if not read_flag():
+        return recommend_output_to_envelope(recommender_disabled_output(task))
+    out = run_recommend(task, agent=agent, deps=deps)
+    return recommend_output_to_envelope(out)
+
+
+# Canonical ``tool_<registered-tool-name>`` alias for the recommender. The
+# registered MCP tool is ``recommend_capabilities``; the F30 outcome-test
+# convention + the capability-affordance gate both key on the
+# ``tool_<name>`` shape, so this alias is the name outcome tests call. The
+# implementation lives on ``tool_recommend`` (the short adapter name the
+# CLI parity test + the registration both use).
+tool_recommend_capabilities = tool_recommend
+
+
 def tool_contradict(
     content: str,
     agent: str | None = None,
@@ -1365,6 +1408,12 @@ def tool_cc_pair(verb: str = "list") -> dict[str, Any]:
 # `mcp_tool` fields stay in sync without literal duplication.
 CAPABILITIES_TOOL_NAME = "capabilities"
 
+# RECOMMEND_CAPABILITIES_TOOL_NAME is the canonical MCP / catalogue name for
+# the capability recommender tool; pinned here so the registration, the
+# catalogue ``_cap`` row, and any cross-reference stay in sync without
+# literal duplication (F17).
+RECOMMEND_CAPABILITIES_TOOL_NAME = "recommend_capabilities"
+
 # Tool-name constants — pinned to keep the catalogue's `name` / `mcp_tool`
 # fields, the `require_ready` lookups, and any other references in sync
 # without literal duplication. Add new entries here when a tool's name is
@@ -1499,6 +1548,13 @@ def tool_capabilities() -> dict[str, Any]:
                 category=CAP_CATEGORY_AGENT,
             ),
             _cap(name="bootstrap", mcp_tool="bootstrap", cli="kairix bootstrap", category=CAP_CATEGORY_AGENT),
+            _cap(
+                name="recommend",
+                mcp_tool=RECOMMEND_CAPABILITIES_TOOL_NAME,
+                cli="kairix recommend",
+                category=CAP_CATEGORY_AGENT,
+                when_to_use="Find the right tool, skill, or workflow when you are unsure which one fits a task.",
+            ),
             _cap(
                 name="entity_suggest",
                 mcp_tool="entity_suggest",
@@ -2102,6 +2158,24 @@ def _register_synthesis_and_diagnostic_tools(
     def capabilities() -> dict[str, Any]:
         """Full kairix capability catalogue. Read-only. Identical to tool_capabilities()."""
         return tool_capabilities()
+
+    @server.tool(
+        description=(
+            "Call when you are unsure which kairix tool, skill, slash-command, "
+            "sub-agent, or workflow fits a task. Describe the task; get a ranked "
+            "list of capabilities, each with why-it-fits and a ready-to-call "
+            "invocation. Read-only — no LLM between you and your tools. "
+            "Gated by the 'recommender' feature flag (returns a disabled "
+            "envelope when OFF). Expected p99: 1s warm. Recommended client timeout: 10s."
+        )
+    )
+    @async_tool_handler
+    def recommend_capabilities(task: str, agent: str = "") -> dict[str, Any]:
+        """Rank kairix tools + local skills for a task. Read-only."""
+        # ``agent`` (default "") is forwarded as-is; ``run_recommend`` accepts
+        # ``str | None`` and only logs it (v1 does not personalise ranking),
+        # so the empty-string default is harmless — no ``or None`` coercion.
+        return tool_recommend(task=task, agent=agent)
 
 
 def _register_operator_and_ingest_tools(server: Any) -> None:

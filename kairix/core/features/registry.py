@@ -372,6 +372,29 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_SEARCH_PIPELINE_OWNER,
         related_spec="docs/architecture/ADR-036-entity-summary-indexing-surface.md",
     ),
+    "recommender": FeatureFlag(
+        name="recommender",
+        # Default-OFF: installing the recommender code is a no-op for
+        # operators. The `kairix recommend` CLI + the recommend_capabilities
+        # MCP tool return a disabled envelope, and the worker skips the
+        # capability-corpus build, until an operator deliberately flips this ON.
+        default=False,
+        description=(
+            "Enable the capability recommender — 'kairix recommend' and the "
+            "recommend_capabilities MCP tool rank kairix tools and local skills "
+            "for a described task. Builds the capabilities corpus on worker start. "
+            "When OFF, both surfaces return a disabled envelope and the worker "
+            "skips the corpus build, so installing the code is a no-op."
+        ),
+        stage="introduce",
+        introduced_in="v2026.6.20",
+        # Reuses the Wave 5 6-month retire ceiling (safely under the F51
+        # current-SCM+6mo bound); the recommender is not a connector but
+        # shares the same cadence window.
+        target_retire_in=_FLAG_TARGET_RETIRE_WAVE5_2026_11_30,
+        owner=_SEARCH_PIPELINE_OWNER,
+        related_spec="docs/architecture/capability-recommender/recommender-mvp-design.md",
+    ),
     "intent_confidence_gated_boosts": FeatureFlag(
         name="intent_confidence_gated_boosts",
         # Default-OFF: today's binary-enum behaviour is preserved byte-for-byte.

@@ -634,3 +634,241 @@ def test_kairix_surface_derivation(mcp_tool: str, cli: str, expected_surface: st
     assert rec.surface == expected_surface
     assert rec.mcp_tool == mcp_tool
     assert rec.cli == cli
+
+
+# ---------------------------------------------------------------------------
+# Step 4.1 — adapter-level flag gate helpers (CLI + MCP shared)
+# ---------------------------------------------------------------------------
+
+
+def test_recommender_disabled_output_shape() -> None:
+    """The disabled-state result carries the canonical message + empty recs."""
+    from kairix.use_cases.recommend import RECOMMENDER_DISABLED_ERROR, recommender_disabled_output
+
+    out = recommender_disabled_output("some task")
+    assert out.task == "some task"
+    assert out.recommendations == ()
+    assert out.error == RECOMMENDER_DISABLED_ERROR
+    assert "recommender is disabled" in out.error
+
+
+# ---------------------------------------------------------------------------
+# Step 4.2 — CLI main() (in-process, deps + flag_reader seams)
+# ---------------------------------------------------------------------------
+
+
+def _cli_deps_one_kairix_hit() -> RecommendDeps:
+    fake = FakeSearchPipeline(
+        scripted_results=[
+            FakeSearchPipeline.make_chunk_row(
+                path="capability://kairix/contradict",
+                title="contradict",
+                content="Check for conflicts.",
+            ),
+        ]
+    )
+    return RecommendDeps(
+        search_fn=lambda **kw: fake.search(**kw),
+        catalogue_fn=lambda: [
+            {"name": "contradict", "mcp_tool": "contradict", "cli": "kairix contradict", "category": "synthesis"},
+        ],
+        correlation_id_fn=lambda: "cid",
+    )
+
+
+def test_cli_main_json_emits_envelope_flag_on() -> None:
+    import io
+    import json
+
+    from kairix.use_cases.recommend import main
+
+    out, err = io.StringIO(), io.StringIO()
+    code = main(
+        ["are there conflicts?", "--json"],
+        out=out,
+        err=err,
+        deps=_cli_deps_one_kairix_hit(),
+        flag_reader=lambda: True,
+    )
+    assert code == 0
+    envelope = json.loads(out.getvalue())
+    assert envelope["error"] == ""
+    assert [r["name"] for r in envelope["recommendations"]] == ["contradict"]
+    assert err.getvalue() == ""
+
+
+def test_cli_main_human_table_flag_on() -> None:
+    import io
+
+    from kairix.use_cases.recommend import main
+
+    out, err = io.StringIO(), io.StringIO()
+    code = main(
+        ["are there conflicts?"],
+        out=out,
+        err=err,
+        deps=_cli_deps_one_kairix_hit(),
+        flag_reader=lambda: True,
+    )
+    assert code == 0
+    text = out.getvalue()
+    assert "Recommendations for: are there conflicts?" in text
+    assert "contradict" in text
+    assert "call: contradict" in text
+
+
+def test_cli_main_human_table_no_results() -> None:
+    import io
+
+    from kairix.use_cases.recommend import RecommendDeps, main
+
+    deps = RecommendDeps(
+        search_fn=lambda **kw: FakeSearchPipeline(scripted_results=[]).search(**kw),
+        catalogue_fn=lambda: [],
+        correlation_id_fn=lambda: "cid",
+    )
+    out, err = io.StringIO(), io.StringIO()
+    code = main(["nothing here"], out=out, err=err, deps=deps, flag_reader=lambda: True)
+    assert code == 0
+    assert "(no matching capabilities found)" in out.getvalue()
+
+
+def test_cli_main_flag_off_disabled_exit_1() -> None:
+    import io
+    import json
+
+    from kairix.use_cases.recommend import main
+
+    out, err = io.StringIO(), io.StringIO()
+    code = main(
+        ["anything", "--json"],
+        out=out,
+        err=err,
+        deps=_cli_deps_one_kairix_hit(),
+        flag_reader=lambda: False,
+    )
+    assert code == 1
+    assert "recommender is disabled" in err.getvalue()
+    # JSON still emitted (disabled envelope) so machine callers can parse it.
+    envelope = json.loads(out.getvalue())
+    assert envelope["recommendations"] == []
+
+
+def test_cli_main_respects_limit() -> None:
+    import io
+    import json
+
+    from kairix.use_cases.recommend import RecommendDeps, main
+
+    fake = FakeSearchPipeline(
+        scripted_results=[
+            FakeSearchPipeline.make_chunk_row(path=f"capability://skill/s-{i}", title=f"s-{i}", content="body")
+            for i in range(8)
+        ]
+    )
+    deps = RecommendDeps(
+        search_fn=lambda **kw: fake.search(**kw),
+        catalogue_fn=lambda: [],
+        correlation_id_fn=lambda: "cid",
+    )
+    out, err = io.StringIO(), io.StringIO()
+    code = main(["task", "--json", "--limit", "2"], out=out, err=err, deps=deps, flag_reader=lambda: True)
+    assert code == 0
+    envelope = json.loads(out.getvalue())
+    assert len(envelope["recommendations"]) == 2
+
+
+def test_default_recommender_flag_reader_returns_bool() -> None:
+    """The production flag reader resolves the ``recommender`` flag to a bool.
+
+    Drives the real ``flag("recommender")`` resolution (registry default OFF,
+    no overlay/env in the test process) so the DI-default seam has executed
+    coverage (F86) — without naming the private resolver internals (F5).
+    """
+    from kairix.use_cases.recommend import default_recommender_flag_reader
+
+    value = default_recommender_flag_reader()
+    assert isinstance(value, bool)
+
+
+def test_db_path_seam_builds_a_search_fn() -> None:
+    """The ``--db-path`` seam yields a callable ``search_fn`` (deps built).
+
+    Pins ``_deps_from_args``'s db-path branch through ``main``'s parser via
+    a fake search: passing ``--db-path`` with in-process ``deps=None`` and a
+    real ``--db-path`` would try to open the path — so instead we assert the
+    parser accepts the flag and exits cleanly when the flag is OFF (gate
+    short-circuits before the seam runs).
+    """
+    import io
+
+    from kairix.use_cases.recommend import main
+
+    out, err = io.StringIO(), io.StringIO()
+    # Flag OFF short-circuits before the db-path seam touches the filesystem.
+    code = main(
+        ["task", "--db-path", "/nonexistent/index.sqlite"],
+        out=out,
+        err=err,
+        flag_reader=lambda: False,
+    )
+    assert code == 1
+    assert "recommender is disabled" in err.getvalue()
+
+
+def test_db_path_seam_searches_seeded_index_in_process(tmp_path) -> None:
+    """The ``--db-path`` seam composes the real BM25-only pipeline in-process.
+
+    Seeds a one-capability corpus into a tmp sqlite, then drives ``main``
+    with ``--db-path`` + ``deps=None`` so the production ``_deps_from_args``
+    db-path branch, ``_db_path_search_fn``, and ``_NullEmbeddingService``
+    seams all execute (F86 coverage of the F30 subprocess seam) against a
+    real index — provider-free, no env vars.
+    """
+    import io
+    import json
+    import sqlite3
+
+    from kairix.core.db.schema import create_schema
+    from kairix.core.factory import reset_search_pipeline_cache
+    from kairix.knowledge.capabilities.builder import (
+        CapabilityCatalogueBuilder,
+        CapabilityCorpusDeps,
+        build_capability_corpus,
+    )
+    from kairix.use_cases.recommend import main
+
+    db_path = tmp_path / "index.sqlite"
+    db = sqlite3.connect(db_path)
+    create_schema(db)
+    corpus_deps = CapabilityCorpusDeps(
+        builder=CapabilityCatalogueBuilder(
+            catalogue_fn=lambda: [
+                {
+                    "name": "contradict",
+                    "mcp_tool": "contradict",
+                    "cli": "kairix contradict",
+                    "category": "synthesis",
+                    "when_to_use": "Check new content against existing knowledge for conflicts.",
+                },
+            ],
+            now_fn=lambda: "2026-06-20T00:00:00+00:00",
+        ),
+        embed_batch_fn=lambda texts: [],  # BM25-only
+    )
+    assert build_capability_corpus(db, deps=corpus_deps).written == 1
+    db.commit()
+    db.close()
+
+    reset_search_pipeline_cache()
+    out, err = io.StringIO(), io.StringIO()
+    code = main(
+        ["check content for conflicts", "--json", "--db-path", str(db_path)],
+        out=out,
+        err=err,
+        flag_reader=lambda: True,  # gate ON; deps=None -> real db-path seam
+    )
+    assert code == 0, f"stderr: {err.getvalue()!r}"
+    envelope = json.loads(out.getvalue())
+    assert envelope["error"] == ""
+    assert "contradict" in [r["name"] for r in envelope["recommendations"]]
