@@ -325,6 +325,32 @@ def test_run_recommend_never_raises_on_search_failure() -> None:
     assert out.correlation_id == "cid"
 
 
+def test_run_recommend_failure_log_carries_traceback(caplog) -> None:
+    """The never-raise swallow path logs with exc_info=True so the stack trace
+    reaches the logs (``error`` only carries type+message). Pins the traceback
+    against a mutation that would silence it (exc_info True -> False)."""
+    import logging
+
+    from kairix.use_cases.recommend import RecommendDeps, run_recommend
+
+    def _boom(**_kw: object) -> object:
+        raise RuntimeError("vector backend down")
+
+    deps = RecommendDeps(
+        search_fn=_boom,
+        catalogue_fn=lambda: [],
+        correlation_id_fn=lambda: "cid",
+    )
+    with caplog.at_level(logging.WARNING):
+        out = run_recommend("trigger failure", deps=deps)
+
+    assert "RuntimeError" in out.error
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "run_recommend failed" in r.getMessage()]
+    assert warnings, "expected a never-raise WARNING record"
+    assert warnings[0].exc_info is not None  # traceback captured (exc_info=True)
+    assert warnings[0].exc_info[0] is RuntimeError
+
+
 def test_run_recommend_excludes_self_reference() -> None:
     """The recommender never recommends itself."""
     from kairix.use_cases.recommend import RecommendDeps, run_recommend

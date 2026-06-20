@@ -330,9 +330,9 @@ def run_recommend(
         recommendations = _map_results(getattr(sr, "results", []), catalogue, limit)
         return RecommendOutput(task=task, recommendations=recommendations, correlation_id=correlation_id)
     except Exception as exc:  # never raise — surface via .error
-        # No exc_info: the ``error`` field carries the type + message, which
-        # is the observable contract the tests pin.
-        logger.warning("run_recommend failed: %s: %s", type(exc).__name__, exc)
+        # exc_info=True so the stack trace reaches the logs on this swallow
+        # path; ``error`` only carries type+message. Pinned by a caplog test.
+        logger.warning("run_recommend failed: %s: %s", type(exc).__name__, exc, exc_info=True)
         return RecommendOutput(task=task, correlation_id=correlation_id, error=f"{type(exc).__name__}: {exc}")
 
 
