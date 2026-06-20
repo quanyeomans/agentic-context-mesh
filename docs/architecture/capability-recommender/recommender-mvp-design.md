@@ -23,9 +23,11 @@ corpus and ranks them against a task description.
 
 ## 2. Architecture in one paragraph
 
-The recommender is a **search over a dedicated `capabilities` collection** using
-the existing `SearchPipeline` (BM25 + vector → RRF → cross-encoder rerank). The
-retrieval/embed/fusion/rerank stack is reused verbatim. The genuinely new code
+The recommender is a **search over the capability-bearing collections**
+(`capabilities` for kairix's own caps + `skills` for the external skills
+connector's output) using the existing `SearchPipeline` (BM25 + vector → RRF →
+cross-encoder rerank). The retrieval/embed/fusion/rerank stack is reused
+verbatim. The genuinely new code
 is (a) two **feeders** that assemble the corpus into the collection, (b) a thin
 `run_recommend` **use case** with **CLI + MCP adapters**, and (c) a **gold eval
 set** that measures recommendation precision. Everything is gated behind a
@@ -131,18 +133,30 @@ F66 (per_tick_max_items + disk_watermark_min_free_bytes), F36 (BDD feature +
 Examples-table row). Sensitivity: `internal` (local dev-tooling metadata, not
 secret).
 
-### 3.5 Corpus build trigger
+### 3.5 Corpus build trigger + the capability-bearing collections
 
-`build_capability_corpus(deps)` runs both feeders into the `capabilities`
-collection. It is invoked:
+Each feeder writes to its **natural** collection, and the recommender ranks
+over **both**:
 
-- at worker startup when the `recommender` flag is ON (so the corpus is fresh on
-  boot), and
-- via the existing maintenance surface for an explicit re-index.
+- **Feeder 1** (`build_capability_corpus` → `CapabilityCatalogueBuilder`) writes
+  kairix's own caps into the **`capabilities`** collection. It is invoked at
+  worker startup when the `recommender` flag is ON (so the corpus is fresh on
+  boot), and via the existing maintenance surface for an explicit re-index.
+- **Feeder 2** (the `skills` connector) writes into the **`skills`** collection.
+  The connector framework routes a connector's output to a collection named
+  after the connector — `run_connector_sync_pipeline` →
+  `resolve_chunk_writer_for_entry(db, name="skills")` →
+  `legacy_chunk_writer(db, collection="skills")` — so the skills half lands in
+  `skills`, **not** `capabilities`. It refreshes on the connector's normal poll
+  tick.
 
-The skills half also refreshes on the connector's normal poll tick. If the
-collection is empty at query time, `run_recommend` returns a helpful
-"capability corpus not built yet — run a re-index" message in `error` (it never
+`run_recommend` therefore queries **both** collections
+(`collections=["capabilities", "skills"]`, `agent=None`) so externally-installed
+skills are reachable, not just kairix's own caps. (An earlier draft had Feeder 2
+also write to `capabilities`; reconciling with the connector-framework routing,
+each feeder keeps its natural collection and the *reader* unifies them — a
+contained change with no connector-routing blast radius.) If both collections
+are empty at query time, `run_recommend` returns an empty result (it never
 raises).
 
 ## 4. Hot path — the recommender
@@ -183,10 +197,12 @@ def recommend_output_to_envelope(out: RecommendOutput) -> dict[str, Any]: ...
 ```
 
 `run_recommend`:
-1. resolves deps (default → real search pipeline pointed at
-   `collections=["capabilities"]`),
-2. calls `search(task, collections=["capabilities"], …)` — explicit collection
-   short-circuits scope resolution (`capabilities` is globally readable),
+1. resolves deps (default → real search pipeline pointed at the
+   capability-bearing collections `["capabilities", "skills"]`),
+2. calls `search(task, collections=["capabilities", "skills"], agent=None)` —
+   the explicit collection list with `agent=None` short-circuits scope
+   resolution (both are globally readable); `capabilities` carries kairix's own
+   caps and `skills` carries the external skills connector's output,
 3. maps each `SearchResult` hit to a `CapabilityRecommendation`, reading the
    structured invocation from per-source metadata,
 4. excludes the recommender itself (self-reference guard),
@@ -243,14 +259,16 @@ no-op for operators.
 
 ## 6. Data flow
 
-**Ingest (corpus build):** `build_capability_corpus` → Feeder 1 introspects
-kairix surfaces + Feeder 2 walks `~/.claude` → each capability → doc store
-(`insert_or_update`) + `embed_batch` → `capabilities` collection (FTS rows + vec
-index, joined on hash).
+**Ingest (corpus build):** Feeder 1 (`build_capability_corpus`) introspects
+kairix surfaces → doc store (`insert_or_update`) + `embed_batch` →
+**`capabilities`** collection; Feeder 2 (the `skills` connector) walks
+`~/.claude` → the standard ConnectorPipeline → **`skills`** collection (the
+connector-named collection). Both land FTS rows + vec index entries joined on
+hash.
 
 **Query (recommend):** agent → `recommend_capabilities(task)` →
-`run_recommend` → `search(task, collections=["capabilities"])` → BM25+vector
-parallel → RRF fuse → cross-encoder rerank → top-k → map to
+`run_recommend` → `search(task, collections=["capabilities", "skills"])` →
+BM25+vector parallel → RRF fuse → cross-encoder rerank → top-k → map to
 `CapabilityRecommendation` (with invocation from metadata) → envelope → agent's
 next turn is a direct call to the top result's `mcp_tool`/`cli`.
 

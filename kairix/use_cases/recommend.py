@@ -2,18 +2,22 @@
 
 The hot path of the capability recommender (Spec A,
 ``docs/architecture/capability-recommender/recommender-mvp-design.md``).
-Given a task description, ``run_recommend`` retrieves over the dedicated
-``capabilities`` search collection (BM25 + vector RRF + force-enabled
+Given a task description, ``run_recommend`` retrieves over the
+capability-bearing search collections (BM25 + vector RRF + force-enabled
 cross-encoder rerank), maps each hit to a ranked
 :class:`CapabilityRecommendation` carrying a ready-to-call invocation, and
 returns a :class:`RecommendOutput`. No LLM sits between the agent and its
 tools.
 
-The corpus is fed by two feeders (Feeder 1: kairix's own
-``tool_capabilities()`` catalogue; Feeder 2: the local ``skills``
-connector over ``~/.claude``). This module only *reads* the collection;
-the surfaces (CLI ``kairix recommend`` + the ``recommend_capabilities``
-MCP tool) are thin adapters added later.
+The corpus is fed by two feeders, each writing to its *natural*
+collection: Feeder 1 (kairix's own ``tool_capabilities()`` catalogue) ->
+the ``capabilities`` collection; Feeder 2 (the local ``skills`` connector
+over ``~/.claude``) -> the ``skills`` collection (the connector framework
+names a connector's collection after the connector). The recommender ranks
+over BOTH (:data:`_CAPABILITY_COLLECTIONS`) so external skills are
+reachable in production, not just kairix caps. This module only *reads*
+the collections; the surfaces (CLI ``kairix recommend`` + the
+``recommend_capabilities`` MCP tool) are thin adapters added later.
 
 Two scope namespaces appear in capability ids:
 
@@ -53,10 +57,23 @@ logger = logging.getLogger(__name__)
 _RECOMMENDER_FLAG = "recommender"
 RECOMMENDER_DISABLED_ERROR = "recommender is disabled — enable the 'recommender' feature flag"
 
-# The dedicated collection the recommender retrieves over. ``agent=None``
-# makes the pipeline use this list verbatim (the collection is globally
-# readable and need not be registered in collections.yaml).
+# The capability-bearing collections the recommender retrieves over. The
+# two feeders write to their *natural* collections: kairix's own caps
+# (Feeder 1, ``CapabilityCatalogueBuilder``) land in ``capabilities``; the
+# external skills connector (Feeder 2) lands in ``skills`` — the connector
+# framework routes a connector's output to a collection named after the
+# connector (``run_connector_sync_pipeline`` ->
+# ``resolve_chunk_writer_for_entry(db, name="skills")`` ->
+# ``legacy_chunk_writer(db, collection="skills")``). The recommender ranks
+# over BOTH so external skills are reachable in production, not just kairix
+# caps. ``agent=None`` makes the pipeline use this list verbatim (both
+# collections are globally readable and need not be registered in
+# collections.yaml). ``_CAPABILITIES_COLLECTION`` stays the canonical name
+# for the kairix-native half (the corpus builder + the ``--db-path`` seam
+# write there).
 _CAPABILITIES_COLLECTION = "capabilities"
+_SKILLS_COLLECTION = "skills"
+_CAPABILITY_COLLECTIONS = [_CAPABILITIES_COLLECTION, _SKILLS_COLLECTION]
 
 # Capability-id scheme: ``capability://<scope>/<name>`` (an optional
 # ``#<seq>`` chunk suffix is stripped). The ``kairix`` scope maps to a
@@ -339,7 +356,8 @@ def run_recommend(
         agent: Accepted for parity / forward use (an agent's available
             toolset may differ); v1 does not personalise ranking. The
             *capability query* always runs with ``agent=None`` so the
-            unregistered ``capabilities`` collection is used verbatim.
+            unregistered capability-bearing collections
+            (:data:`_CAPABILITY_COLLECTIONS`) are used verbatim.
         limit: Maximum number of recommendations returned.
         deps: Injectable dependencies; production callers leave None.
     """
@@ -348,11 +366,11 @@ def run_recommend(
     # ``agent`` is accepted for surface parity + forward use (Spec B keys its
     # outcome log on the requesting agent). v1 records it but does not
     # personalise ranking — the capability query always runs with
-    # ``agent=None`` so the unregistered ``capabilities`` collection is used
-    # verbatim.
+    # ``agent=None`` so the unregistered capability-bearing collections
+    # (``_CAPABILITY_COLLECTIONS``) are used verbatim.
     logger.debug("run_recommend: agent=%s correlation_id=%s", agent, correlation_id)
     try:
-        sr = d.search_fn(query=task, collections=[_CAPABILITIES_COLLECTION], agent=None, limit=limit)
+        sr = d.search_fn(query=task, collections=_CAPABILITY_COLLECTIONS, agent=None, limit=limit)
         catalogue = {row["name"]: row for row in d.catalogue_fn()}
         recommendations = _map_results(getattr(sr, "results", []), catalogue, limit)
         return RecommendOutput(task=task, recommendations=recommendations, correlation_id=correlation_id)

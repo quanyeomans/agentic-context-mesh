@@ -1444,7 +1444,10 @@ def run_via_skills_connector() -> ConnectorSyncResult:
     """ON-branch default for :func:`dispatch_skills_sync` — delegate
     to the canonical :func:`run_connector_sync_pipeline` which resolves
     the ``skills`` plugin via its entry-point factory and drives the
-    standard ConnectorPipeline into the capabilities collection.
+    standard ConnectorPipeline into the ``skills`` collection (the
+    connector framework names a connector's collection after the
+    connector — ``resolve_chunk_writer_for_entry(db, name="skills")``).
+    The recommender reads this collection alongside ``capabilities``.
 
     The branch log distinguishes the skills path from the sibling
     connector paths so operators can tell which connector ran by

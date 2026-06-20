@@ -1,10 +1,14 @@
 # Skills connector
 
 Indexes the host's locally-installed Claude Code **skills, slash-commands,
-and sub-agents** into the `capabilities` collection. This is the external
-half of the capability recommender's corpus (Feeder 2) — it lets `kairix
-recommend "<task>"` rank the agent's installed skills alongside kairix's
-own tools.
+and sub-agents** into the `skills` collection. This is the external half of
+the capability recommender's corpus (Feeder 2). The connector framework
+routes a connector's output to a collection named after the connector, so
+the skills connector lands in `skills` (not `capabilities`). The
+recommender ranks over **both** capability-bearing collections —
+`capabilities` (kairix's own tools, Feeder 1) **and** `skills` (this
+connector's output) — so `kairix recommend "<task>"` surfaces the agent's
+installed skills alongside kairix's own tools.
 
 ## What it ingests
 
@@ -41,9 +45,13 @@ document with a stable `capability://<kind>/<name>` source URI.
 
 ## Configuration
 
+Enable it by listing `skills` under `connectors:` — the `name: skills`
+entry is what routes its output to the `skills` collection (the recommender
+reads that collection alongside `capabilities`):
+
 ```yaml
 connectors:
-  - name: skills
+  - name: skills                    # routes output to the `skills` collection
     claude_root: ~/.claude          # optional; defaults to the host's ~/.claude
     default_sensitivity: internal   # optional; one of the F39 tiers
     per_tick_max_items: 500         # optional; F66 per-tick budget

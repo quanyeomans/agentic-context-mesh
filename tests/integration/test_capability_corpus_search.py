@@ -1,9 +1,12 @@
 """Integration: the capability corpus is BM25-searchable end-to-end.
 
-Builds the corpus into a real tmp sqlite via the production schema + the
-F61-sanctioned chunk writer, then queries it through a factory-built
-``SearchPipeline`` with the recommender query contract
-(``collections=["capabilities"], agent=None``).
+Builds the kairix-native corpus into a real tmp sqlite via the production
+schema + the F61-sanctioned chunk writer, then queries it through a
+factory-built ``SearchPipeline`` over the ``capabilities`` collection
+(``agent=None``). This proves Feeder 1's half is BM25-searchable; the
+recommender at query time ranks over BOTH ``capabilities`` and ``skills``
+(see ``tests/use_cases/test_recommend.py`` for the full collection
+contract).
 
 Sabotage-proof log (executed mutate -> fail -> restore): changed
 ``written = writer.upsert(chunks)`` in ``build_capability_corpus`` to

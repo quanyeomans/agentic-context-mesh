@@ -6,7 +6,7 @@ Drives the composed production path end-to-end:
   subprocess([kairix, recommend, '<task>', --json, --db-path <seeded>])
     → kairix/use_cases/recommend.py:main
     → flag gate (recommender ON via the CWD kairix.config.yaml overlay)
-    → run_recommend(...) over collections=["capabilities"], agent=None
+    → run_recommend(...) over collections=["capabilities", "skills"], agent=None
     → JSON envelope on stdout
 
 F2-clean: no ``KAIRIX_*`` env vars. The ``recommender`` flag is flipped

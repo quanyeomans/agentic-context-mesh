@@ -2,17 +2,19 @@
 
 Drives the use case through ``RecommendDeps`` injection — no @patch, no
 monkeypatch, public surface only (F1/F2/F5). The recommender is a thin
-retrieval-over-``capabilities`` use case: given a task description it
+retrieval-over-capability-collections use case: given a task description it
 returns a ranked list of ``CapabilityRecommendation``s, each with a
 ready-to-call invocation, and it never raises.
 
 Sabotage-proof log (executed mutate -> fail -> restore):
 ``test_run_recommend_records_explicit_collection_contract`` pins the
-``collections=["capabilities"]`` / ``agent=None`` query contract. Mutating
-the ``collections=[_CAPABILITIES_COLLECTION]`` literal in
-``run_recommend`` to ``["wrong"]`` was run and confirmed to fail that
-assertion (``assert fake.calls[0]["kwargs"]["collections"] == ...``);
-restoring the literal turned it green again.
+``collections=["capabilities", "skills"]`` / ``agent=None`` query contract
+— the recommender must rank over BOTH capability-bearing collections
+(kairix caps in ``capabilities`` + the external skills connector's output
+in ``skills``). Mutating ``_CAPABILITY_COLLECTIONS`` in ``run_recommend``
+to drop ``"skills"`` (``["capabilities"]``) was run and confirmed to fail
+that assertion (``assert fake.calls[0]["kwargs"]["collections"] == ...``);
+restoring the constant turned it green again.
 """
 
 from __future__ import annotations
@@ -189,12 +191,16 @@ def test_run_recommend_maps_hits_to_recommendations() -> None:
 
 
 def test_run_recommend_records_explicit_collection_contract() -> None:
-    """Sabotage anchor: the agent=None / collections=["capabilities"] query.
+    """Sabotage anchor: agent=None / collections=["capabilities", "skills"].
 
     ``agent=None`` makes the pipeline use the collection list verbatim, so
-    the unregistered ``capabilities`` collection is queryable. Mutate the
-    ``collections=[_CAPABILITIES_COLLECTION]`` literal in ``run_recommend``
-    and this assertion fails.
+    the unregistered capability-bearing collections are queryable. The
+    recommender MUST rank over BOTH: ``capabilities`` (Feeder 1, kairix
+    caps) AND ``skills`` (Feeder 2, the external skills connector's
+    production collection — the connector framework names a connector's
+    collection after the connector). Mutate ``_CAPABILITY_COLLECTIONS`` in
+    ``run_recommend`` to drop ``"skills"`` and this assertion fails —
+    proving external skills would become invisible to the recommender.
     """
     from kairix.use_cases.recommend import RecommendDeps, run_recommend
 
@@ -205,7 +211,7 @@ def test_run_recommend_records_explicit_collection_contract() -> None:
         correlation_id_fn=lambda: "cid",
     )
     run_recommend("any task", deps=deps)
-    assert fake.calls[0]["kwargs"]["collections"] == ["capabilities"]
+    assert fake.calls[0]["kwargs"]["collections"] == ["capabilities", "skills"]
     assert fake.calls[0]["kwargs"]["agent"] is None
 
 
