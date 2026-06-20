@@ -878,3 +878,55 @@ def test_db_path_seam_searches_seeded_index_in_process(tmp_path) -> None:
     envelope = json.loads(out.getvalue())
     assert envelope["error"] == ""
     assert "contradict" in [r["name"] for r in envelope["recommendations"]]
+
+
+# ---------------------------------------------------------------------------
+# Behaviour pins for recommend.py internals (relocated from the CLI↔MCP parity
+# contract file once mutation_parity's impacted-test window started keeping a
+# module's own tests in-scope — see scripts/checks/mutation_parity.py).
+# ---------------------------------------------------------------------------
+
+
+def test_read_only_db_search_config_is_bm25_only() -> None:
+    """The ``--db-path`` seam config is BM25-only (``skip_vector`` True) + rerank on.
+
+    Mutation anchor: flipping ``skip_vector=True`` to ``False`` in
+    ``read_only_db_search_config`` makes the read-only seam attempt the vector
+    leg against a missing provider. This pins the constant.
+    """
+    from kairix.use_cases.recommend import read_only_db_search_config
+
+    cfg = read_only_db_search_config()
+    assert cfg.skip_vector is True, "the read-only --db-path seam must be BM25-only (no provider)"
+    assert cfg.rerank.enabled is True, "rerank stays force-on for the recommender"
+
+
+def test_cli_human_invocation_prefers_cli_when_mcp_tool_empty() -> None:
+    """``_format_human`` picks ``cli`` when ``mcp_tool`` is empty (``or`` chain).
+
+    Mutation anchor: ``rec.mcp_tool or rec.cli or rec.name`` with ``or`` ->
+    ``and`` would resolve to ``""`` (first falsy) for a CLI-only cap and the
+    ``call:`` line would lose the invocation. Drive a CLI-only hit through the
+    human (non-JSON) CLI output and assert the cli invocation appears.
+    """
+    import io
+
+    from kairix.use_cases.recommend import RecommendDeps
+    from kairix.use_cases.recommend import main as recommend_main
+
+    fake = FakeSearchPipeline(
+        scripted_results=[
+            FakeSearchPipeline.make_chunk_row(path="capability://kairix/doctor", title="doctor", content="diagnose"),
+        ]
+    )
+    deps = RecommendDeps(
+        # CLI-only cap: mcp_tool empty, cli set — the `or` chain must pick cli.
+        search_fn=lambda **kw: fake.search(**kw),
+        catalogue_fn=lambda: [{"name": "doctor", "mcp_tool": None, "cli": "kairix doctor", "category": "diagnostic"}],
+        correlation_id_fn=lambda: "cid",
+    )
+    out, err = io.StringIO(), io.StringIO()
+    code = recommend_main(["is the system healthy?"], out=out, err=err, deps=deps, flag_reader=lambda: True)
+    assert code == 0
+    text = out.getvalue()
+    assert "call: kairix doctor" in text, f"CLI-only cap must show its cli invocation; got:\n{text}"
