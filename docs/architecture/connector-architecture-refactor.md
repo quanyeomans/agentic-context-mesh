@@ -74,26 +74,22 @@ The READ path + apply-at-boot already cut over to `topology_v2` unconditionally 
 
 ## 4. Phased plan
 
-Each phase is independently shippable and green-on-merge. The production-config cutover (Phase 2) is **HITL-gated**.
+**Sequenced to optimise for the total work, not for fixing any single bug fastest** (operator steer, 2026-06-21): do the structural collapse first so every later fix lands *once* on the single canonical path; build the framework primitives (the deletion fix is one of them) on that foundation; then per-connector hardening. **The deletion bug is fixed as the Phase-2 delete-dispatch primitive, not as a rushed standalone hotfix** — accepting it persists slightly longer in exchange for not doing throwaway work on the soon-deleted legacy path. Each phase is independently shippable and green-on-merge; the production-config cutover (Phase 1) is **HITL-gated**.
 
-### Phase 1 — Correctness core (no topology change; prod-safe)
-- Primitive #1 (delete-dispatch in the pipeline) + the missing **deletion-through-pipeline integration tests** (drive a `deleted` ChangeEvent through `factory.build_connector_pipeline().run_batch` and assert removal — these fail today; they pin the whole class).
-- The live per-connector bugs: github inclusive-since boundary; slack `reindex()` semantics + a MockTransport real-wire test; gmail None-historyId cursor safety.
-- The PLA-189 loop predicate (flag actually gates on the live path) — prod-safe (all live connectors flag-true or flagless).
-- F51 de-vacuous (fetch-tags in CI or git-describe fallback) + `retire-extension` comments on the six over-window flags.
-
-### Phase 2 — Canonical topology collapse (HITL on the prod cutover)
-- Point ingest enumeration + ranking-tier read at `topology`; delete the legacy `connectors:`/`collections:` blocks; rename `topology_v2`→`topology`, drop `_v2` suffixes.
-- Delete the dead `dispatch_<name>_sync` trios; re-point/​de-theatre the F54 connector tests at the real path; fix the m365_calendar invented-gate test.
+### Phase 1 — Canonical topology collapse (foundation; HITL on the prod cutover)
+- Point ingest enumeration (`_load_connector_config_entries`, `_load_connector_entry`) + the ranking-tier read (`factory.py:312`) at `topology`; delete the legacy top-level `connectors:`/`collections:` blocks; rename `topology_v2`→`topology`, drop `_v2` suffixes; retire the inert `topology_v2_*` config residue.
+- Resolve PLA-189 *on the canonical path*: enablement = config-presence in `topology.connectors`; flagged + effective-false → skip (logged); flagless → always-on. Then **delete the dead `dispatch_<name>_sync` trios** (~430 lines) and **de-theatre the F54 connector tests** (assert `ConnectorSyncResult` counters on the real path; fix the m365_calendar invented-gate test).
+- This is also the wizard-onboarding fix (wizard writes topology, ingest now reads topology).
 - **Migration** (capture-flip-soak-gate, §5): convert the live production-instance config from dual-block to canonical, last.
 
-### Phase 3 — Framework resilience primitives
-- Primitive #2 (prune cycle wired into the worker), #3 (pagination-drain helper + migrate the eager connectors), #4 (timestamp-cursor helper + migrate the watermark connectors), #5 (rate-limiter + migrate the gap connectors).
+### Phase 2 — Framework resilience primitives (includes the deletion fix)
+- **Primitive #1 — delete-dispatch** in `ConnectorPipeline._process_item` (`op in {deleted,archived,access_lost,cancelled}` → `chunk_writer.delete_by_source_uri(...)`, skip fetch/extract) + the **deletion-through-pipeline integration tests** (drive a `deleted` ChangeEvent through `factory.build_connector_pipeline().run_batch` and assert removal — they fail today; they pin the whole class). *This is the deletion-bug fix, done once on the canonical pipeline.*
+- Primitive #2 prune cycle (wired into the worker, off-tick); #3 pagination-drain helper; #4 timestamp-cursor helper; #5 rate-limiter helper. Each helper ships with the migration of its adopting connectors + the budget-path test in the same change.
 
-### Phase 4 — Per-connector completeness + discipline
-- google_drive shared-drives + native-file export; gmail history taxonomy; slack thread replies; linear nested-connection pagination; obsidian glob honesty.
-- Primitive #6 (F75-shape capability-parity rule).
-- Vestigial flag/seam sweep (apple_caldav README, dex_crm dead flag, github unused `_flag_reader`, `_last_path_taken`).
+### Phase 3 — Per-connector hardening + completeness + discipline
+- The live per-connector bugs, each fixed as that connector migrates onto the primitives: github inclusive-since boundary; slack `reindex()` semantics (+ MockTransport real-wire test); gmail None-historyId cursor + history taxonomy; google_calendar budget-yield (subsumed by the #3 lazy-drain migration).
+- Completeness/scope: google_drive shared-drives + native-file export; slack thread replies; linear nested-connection pagination; obsidian glob honesty.
+- Primitive #6 (F75-shape capability-parity rule); F51 de-vacuous (fetch-tags in CI or git-describe fallback) + `retire-extension` comments; vestigial flag/seam sweep (apple_caldav README, dex_crm dead flag, github unused `_flag_reader`, `_last_path_taken`).
 
 ---
 
@@ -119,10 +115,11 @@ A config-migration helper converts a dual-block config to canonical (lossless), 
 ---
 
 ## 7. Risks & sequencing notes
-- Phase 1 is prod-safe and high-value (stops live data staleness) — do it first even though we're speccing the whole program.
-- Phase 2's prod cutover is the highest-risk step → capture-flip-soak-gate + HITL.
-- Phases 3–4 are mostly additive/consolidation; the pagination-drain and timestamp-cursor helpers must each ship with a migration of their adopting connectors + the budget-path test in the same change.
-- Deleting the dead trios MUST follow the Phase-1 loop predicate (don't remove the trios while the loop still ignores flags — that leaves F54 with nothing real to assert).
+- **Collapse-first is the efficiency choice** (operator steer): every later fix lands once on the single canonical path instead of being built on the legacy path then reworked. The cost is that the deletion bug persists through Phase 1 — accepted deliberately ("optimise for the work, not the bug"); it is fixed in Phase 2 as the delete-dispatch primitive, done once on the canonical pipeline.
+- Phase 1's prod cutover is the highest-risk step → capture-flip-soak-gate + HITL; touch the live config last.
+- Within Phase 1, delete the dead `dispatch_<name>_sync` trios only **after** the canonical config-presence + flag-skip enablement is in place, so the F54 tests have a real gate to assert against.
+- Phase 2/3 helpers (pagination-drain, timestamp-cursor, rate-limiter) each ship with the migration of their adopting connectors + the budget-path test in the same change — not as a bare helper followed by a separate migration.
+- Two cursor families stay distinct (watermark vs opaque-token); do not collapse them into one abstraction.
 
 ---
 
