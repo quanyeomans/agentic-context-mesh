@@ -158,6 +158,10 @@ def _iter_kind_files(plugins_cache: Path) -> Iterator[tuple[Path, str, str]]:
         for kind_root in sorted(plugins_cache.rglob(kind_dir)):
             if not kind_root.is_dir():
                 continue
+            # Assumes the documented cache layout (.../<plugin>/<version>/<kind>/).
+            # A version-less layout (.../<plugin>/<kind>/) degrades to the plugin
+            # name as a deterministic-but-imprecise version string — dedup still
+            # converges, it just may not pick the newest. No crash either way.
             version = kind_root.parent.name
             if kind == _FLAT_KIND:
                 files = sorted(kind_root.glob(f"*/{_SKILL_FILENAME}"))

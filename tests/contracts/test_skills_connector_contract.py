@@ -39,44 +39,48 @@ def _container() -> Container:
     )
 
 
-def _absent() -> SkillsConnector:
-    """Connector pointed at a non-existent ~/.claude tree (graceful-degrade host)."""
-    return SkillsConnector(claude_root=Path("/nonexistent/_skills_f68_probe/.claude"))
+def _absent(tmp_path: Path) -> SkillsConnector:
+    """Connector pointed at a non-existent ~/.claude tree (graceful-degrade host).
+
+    The probe path is a never-created subdir of ``tmp_path`` (read-only; the
+    connector only stats it), keeping every tree tmp-rooted per the module rule.
+    """
+    return SkillsConnector(claude_root=tmp_path / "missing" / ".claude")
 
 
-def test_list_changes_degrades_to_empty_when_tree_absent() -> None:
+def test_list_changes_degrades_to_empty_when_tree_absent(tmp_path: Path) -> None:
     """A missing ~/.claude yields zero events and never raises (design §7)."""
-    connector = _absent()
+    connector = _absent(tmp_path)
     assert list(connector.list_changes(cursor=None)) == []
 
 
-def test_retrieve_all_slim_docs_degrades_to_empty_when_tree_absent() -> None:
+def test_retrieve_all_slim_docs_degrades_to_empty_when_tree_absent(tmp_path: Path) -> None:
     """The slim enumeration yields nothing when the tree is absent — no raise."""
-    connector = _absent()
+    connector = _absent(tmp_path)
     assert list(connector.retrieve_all_slim_docs(_container())) == []
 
 
-def test_list_changes_for_container_degrades_to_empty_when_tree_absent() -> None:
+def test_list_changes_for_container_degrades_to_empty_when_tree_absent(tmp_path: Path) -> None:
     """The poll surface yields nothing when the tree is absent — no raise."""
-    connector = _absent()
+    connector = _absent(tmp_path)
     assert list(connector.list_changes_for_container(_container())) == []
 
 
-def test_fetch_raises_keyerror_for_unknown_item() -> None:
+def test_fetch_raises_keyerror_for_unknown_item(tmp_path: Path) -> None:
     """fetch on an unknown id raises a fix-pointer KeyError, not a silent artefact."""
-    connector = _absent()
+    connector = _absent(tmp_path)
     with pytest.raises(KeyError, match="no artefact in cache"):
         connector.fetch("skill:never-installed")
 
 
-def test_metadata_for_returns_empty_when_item_unknown() -> None:
+def test_metadata_for_returns_empty_when_item_unknown(tmp_path: Path) -> None:
     """metadata_for returns an empty SourceMetadata for an unknown id."""
-    connector = _absent()
+    connector = _absent(tmp_path)
     assert connector.metadata_for("skill:never-installed") == SourceMetadata()
 
 
-def test_source_link_rejects_unprefixed_item_id() -> None:
+def test_source_link_rejects_unprefixed_item_id(tmp_path: Path) -> None:
     """source_link on a malformed (un-prefixed) id raises a fix-pointer ValueError."""
-    connector = _absent()
+    connector = _absent(tmp_path)
     with pytest.raises(ValueError, match="not kind-prefixed"):
         connector.source_link("brainstorming")

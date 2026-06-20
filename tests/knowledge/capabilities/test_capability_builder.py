@@ -252,6 +252,34 @@ def test_build_corpus_never_raises_on_writer_failure():
     assert "disk full" in result.error
 
 
+def test_build_corpus_warning_carries_traceback(caplog):
+    # The never-raise guard logs the swallowed exception WITH exc_info=True so the
+    # stack trace reaches the logs (not just type+message on .error). Pins the
+    # traceback against a mutation that would silence it (exc_info True -> False).
+    import logging
+
+    from kairix.knowledge.capabilities.builder import CapabilityCorpusDeps, build_capability_corpus
+
+    def _boom(_db):
+        raise RuntimeError("disk full")
+
+    deps = CapabilityCorpusDeps(
+        builder=_one_cap_builder(),
+        chunk_writer_fn=_boom,
+        embed_batch_fn=lambda texts: [],
+    )
+    with caplog.at_level(logging.WARNING):
+        result = build_capability_corpus(object(), deps=deps)
+
+    assert "RuntimeError" in result.error
+    warnings = [
+        r for r in caplog.records if r.levelno == logging.WARNING and "build_capability_corpus failed" in r.getMessage()
+    ]
+    assert warnings, "expected a never-raise WARNING record"
+    assert warnings[0].exc_info is not None  # traceback captured (exc_info=True)
+    assert warnings[0].exc_info[0] is RuntimeError
+
+
 def test_build_corpus_default_deps_drive_writer_and_embed_seams():
     # F86 via the PUBLIC surface (F5): build_capability_corpus(db) with a default
     # (uninjected) CapabilityCorpusDeps drives the `_default_chunk_writer` seam

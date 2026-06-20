@@ -230,7 +230,7 @@ def build_capability_corpus(
         embedded = _embed_capabilities(chunks, d)
         return CapabilityCorpusResult(written=written, embedded=embedded)
     except Exception as exc:  # never raise — surface via .error
-        logger.warning("build_capability_corpus failed: %s", exc)
+        logger.warning("build_capability_corpus failed: %s", exc, exc_info=True)
         return CapabilityCorpusResult(error=f"{type(exc).__name__}: {exc}")
 
 

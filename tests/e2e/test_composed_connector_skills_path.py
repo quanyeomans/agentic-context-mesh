@@ -136,3 +136,10 @@ def test_composed_skills_capability_path(tmp_path: Path) -> None:
         f"Sabotage hint: check that the skill body contained {_QUERY_TOKEN!r} and "
         "the chunk-writer populated documents/content for the 'capabilities' collection."
     )
+    # Close the end-to-end URI loop: the searchable doc must carry the
+    # capability://skill/<name> source URI, proving the connector's source_link
+    # shape survives the whole compose path (not just that *some* doc matched).
+    paths = [p for (p,) in rows]
+    assert any(p.startswith("capability://skill/heat-planning") for p in paths), (
+        f"expected a capability://skill/heat-planning document; got {paths}"
+    )
