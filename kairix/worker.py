@@ -1427,6 +1427,58 @@ def dispatch_linear_sync(
     return off_branch()
 
 
+def skills_off_branch_noop() -> ConnectorSyncResult:
+    """OFF-branch default for :func:`dispatch_skills_sync` —
+    return zero counters and emit the operator-visible signal that the
+    skills connector is gated off.
+
+    F6-clean: a real callable default, no ``None``. Public so the
+    feature-flag BDD steps can reach it without an internal-name
+    import (F5).
+    """
+    logger.info("worker: skills connector gated off (flag OFF)")
+    return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
+
+
+def run_via_skills_connector() -> ConnectorSyncResult:
+    """ON-branch default for :func:`dispatch_skills_sync` — delegate
+    to the canonical :func:`run_connector_sync_pipeline` which resolves
+    the ``skills`` plugin via its entry-point factory and drives the
+    standard ConnectorPipeline into the capabilities collection.
+
+    The branch log distinguishes the skills path from the sibling
+    connector paths so operators can tell which connector ran by
+    grep-ing INFO logs.
+    """
+    logger.info("worker: skills connector running (flag ON)")
+    return run_connector_sync_pipeline()
+
+
+def dispatch_skills_sync(
+    read_flag: Callable[[str], bool] = _default_flag_value,
+    on_branch: Callable[[], ConnectorSyncResult] = run_via_skills_connector,
+    off_branch: Callable[[], ConnectorSyncResult] = skills_off_branch_noop,
+) -> ConnectorSyncResult:
+    """Compose the flag-branching dispatcher for the skills connector slot.
+
+    Reads the ``connector_skills`` flag and routes to the ON branch
+    (the standard connector pipeline, which resolves the ``skills``
+    plugin and walks the host's ``~/.claude`` tree) or the OFF branch (a
+    no-op that skips the connector entirely). Mirrors
+    :func:`dispatch_linear_sync` shape — the BDD + integration tests pin
+    the flag through :class:`FakeFeatureFlagResolver` and observe the
+    branch via the per-helper INFO log.
+
+    Gating happens at the connector-selection boundary — when OFF, the
+    skills plugin never runs even if listed in ``kairix.config.yaml``.
+    The skills connector degrades gracefully where ``~/.claude`` is
+    absent, so the ON branch is safe on hosts without a skills set.
+    """
+    if read_flag("connector_skills"):
+        return on_branch()
+    return off_branch()
+
+
 def gmail_off_branch_noop() -> ConnectorSyncResult:
     """OFF-branch default for :func:`dispatch_gmail_sync` —
     return zero counters and emit the operator-visible signal that the

@@ -243,6 +243,8 @@ pytest_plugins = [
     "tests.bdd.steps.feature_flag_connector_slack_steps",
     "tests.bdd.steps.connector_linear_steps",
     "tests.bdd.steps.feature_flag_connector_linear_steps",
+    "tests.bdd.steps.connector_skills_steps",
+    "tests.bdd.steps.feature_flag_connector_skills_steps",
     # IM-6 FTS-gap regression pin — connector-ingested chunks must be
     # findable via BM25 (the cutover surfaced 68,814 chunks in the
     # ``obsidian`` collection invisible to BM25 because the chunk-writer

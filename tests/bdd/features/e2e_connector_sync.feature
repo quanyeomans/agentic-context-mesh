@@ -46,3 +46,4 @@ Feature: End-to-end connector sync journey
       | google_calendar     | passthrough  |
       | linear              | passthrough  |
       | linear              | markitdown   |
+      | skills              | passthrough  |
