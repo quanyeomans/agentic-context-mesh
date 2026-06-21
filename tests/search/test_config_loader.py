@@ -319,6 +319,33 @@ class TestParseCollections:
         result = parse_collections({"collections": None})
         assert result is None
 
+    @pytest.mark.unit
+    def test_in_default_true_parses_onto_collection_def(self):
+        """An explicit ``in_default: true`` round-trips onto the CollectionDef."""
+        data = {"collections": {"shared": [{"name": "home", "path": "home", "in_default": True}]}}
+        result = parse_collections(data)
+        assert result is not None
+        assert result.shared[0].in_default is True
+
+    @pytest.mark.unit
+    def test_in_default_defaults_to_true_when_omitted(self):
+        """A collection without ``in_default`` keeps the back-compat default."""
+        data = {"collections": {"shared": [{"name": "home", "path": "home"}]}}
+        result = parse_collections(data)
+        assert result is not None
+        assert result.shared[0].in_default is True
+
+    @pytest.mark.unit
+    def test_non_bool_in_default_is_rejected_at_parse_time(self):
+        """A non-boolean ``in_default`` value raises ConfigValidationError
+        naming the offending key — ``_coerce_bool`` rejects the
+        ``"false"``-as-string footgun rather than silently coercing to
+        True (which would route the collection into the opposite scope).
+        """
+        data = {"collections": {"shared": [{"name": "archive", "path": "archive", "in_default": "false-as-string"}]}}
+        with pytest.raises(ConfigValidationError, match="in_default"):
+            parse_collections(data)
+
 
 @pytest.mark.unit
 class TestFusionStrategy:

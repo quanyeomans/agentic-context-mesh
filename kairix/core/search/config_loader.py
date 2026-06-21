@@ -439,34 +439,16 @@ class CollectionsConfig:
     """Parsed collections configuration.
 
     ``shared`` is stored as a tuple — frozen at construction — so callers
-    cannot mutate the collection list after the boundary parses YAML.
-    Predicates (:meth:`default_collection_names`, :meth:`all_collection_names`)
-    are the only public surface for membership questions; consumers should
-    not iterate ``shared`` directly to filter on ``in_default``.
+    cannot mutate the collection list after the boundary parses YAML. The
+    FS document-scanner (``kairix/core/embed/use_cases.py``) reads
+    ``shared`` to drive the scan walk (name / path / glob per collection);
+    default-scope membership is now governed by the canonical topology
+    scope-profile resolver, not by a predicate on this config.
     """
 
     shared: tuple[CollectionDef, ...]
     agent_pattern: str = "{agent}-memory"
     agent_paths: dict[str, str] = field(default_factory=dict)
-
-    def default_collection_names(self) -> list[str]:
-        """Names of shared collections eligible for default search scopes.
-
-        Excludes any collection whose ``in_default`` flag is False. This is
-        the predicate the resolver consults — it is intentionally the only
-        ``in_default``-aware code path in the codebase, so the policy lives
-        with the data it describes.
-        """
-        return [c.name for c in self.shared if c.in_default]
-
-    def all_collection_names(self) -> list[str]:
-        """Names of every configured shared collection.
-
-        Used for diagnostics and for callers that need to enumerate every
-        configured collection regardless of default-scope eligibility (e.g.,
-        validation that warns about unknown ``--collection`` arguments).
-        """
-        return [c.name for c in self.shared]
 
 
 def _coerce_bool(value: object, *, key: str, default: bool) -> bool:
