@@ -44,6 +44,7 @@ from kairix.core.connectors.dead_letter import DeadLetterStore
 from kairix.core.connectors.pipeline import BatchResult, ConnectorPipeline
 from kairix.core.connectors.silver import DefaultSilverProcessor
 from kairix.core.db.schema import create_schema
+from kairix.core.factory import build_connector_pipeline
 from kairix.core.protocols import ChangeEvent
 from tests.fakes import FakeChunkWriter, FakeEntityGraphSink, FakeExtractor, FakeSourceConnector
 
@@ -297,5 +298,150 @@ def test_silver_failure_rolls_back_entire_batch(tmp_path: Path) -> None:
             fresh.close()
         assert chunk_writer.writes == []
         assert entity_graph_sink.staged == []
+    finally:
+        db.close()
+
+
+# ----------------------------------------------------------------------
+# Delete-dispatch (connector-architecture-refactor §3.3 primitive #1).
+#
+# Before this primitive ``ConnectorPipeline._process_item`` never
+# branched on ``ChangeEvent.op`` — every event ran fetch→bronze→silver→
+# upsert, so a ``deleted`` event RE-INDEXED the item (if fetch returned
+# a payload) instead of removing it. These tests drive a ``created``
+# event then a ``deleted`` event for the SAME item through the real
+# ``build_connector_pipeline`` path and assert the chunk is gone from
+# ``documents`` (and from FTS5 search) after the delete tick.
+#
+# Sabotage proof (executed by the agent, recorded for the reader):
+#   In ``kairix/core/connectors/pipeline.py`` ``_process_item``, remove
+#   the ``op in _DELETE_OPS`` branch (or change the body to call
+#   ``upsert`` instead of ``delete_by_source_uri``). Re-run
+#   ``test_deleted_event_removes_indexed_chunk``: the post-delete
+#   ``documents`` count assertion fails because the row survives (or is
+#   re-indexed). Restore the branch; the test passes again.
+# ----------------------------------------------------------------------
+
+
+def _doc_count_for(db: sqlite3.Connection, *, collection: str, source_uri: str) -> int:
+    """Active ``documents`` rows for ``source_uri`` in ``collection``."""
+    return int(
+        db.execute(
+            "SELECT COUNT(*) FROM documents WHERE collection = ? AND source_uri = ?",  # F63-bounded: one URI scope
+            (collection, source_uri),
+        ).fetchone()[0]
+    )
+
+
+def _bm25_hits_for(db: sqlite3.Connection, *, collection: str, term: str) -> int:
+    """Count FTS5 BM25 hits for ``term`` in ``collection`` — proves searchability."""
+    return int(
+        db.execute(
+            "SELECT COUNT(*) FROM documents d JOIN documents_fts fts ON fts.rowid = d.id "
+            "WHERE documents_fts MATCH ? AND d.collection = ?",
+            (term, collection),
+        ).fetchone()[0]
+    )
+
+
+@pytest.mark.parametrize("delete_op", ["deleted", "archived", "access_lost"])
+def test_deleted_event_removes_indexed_chunk(tmp_path: Path, delete_op: str) -> None:
+    """A ``created`` event indexes a chunk; a later delete-op event removes it.
+
+    Drives both ticks through the production ``build_connector_pipeline``
+    path (real SQLite chunk writer + FTS5) so the assertion is against
+    ``documents`` / searchable state — exactly the live-staleness class
+    the audit named. ``source_link(item_id)`` is the ``source_uri`` the
+    chunk was written under, so the delete targets the right rows.
+    """
+    db_path = tmp_path / "delete_dispatch.sqlite"
+    db = sqlite3.connect(str(db_path))
+    try:
+        create_schema(db, dims=4)
+        collection = "obsidian"
+        item_id = "deleted-note.md"
+
+        # Tick 1: created → chunk lands + is searchable.
+        created = FakeSourceConnector(
+            name=collection,
+            events=[ChangeEvent(op="created", item_id=item_id, modified_at="2026-06-21T10:00:00Z")],
+            content={item_id: b"# Stale Note\n\nThis note about retrieval will be deleted soon."},
+        )
+        pipeline = build_connector_pipeline(db=db, collection=collection)
+        created_result = pipeline.run_batch(created, FakeExtractor())
+        db.commit()
+        assert created_result.processed == 1, f"create tick should index the item; got {created_result}"
+
+        source_uri = created.source_link(item_id)
+        assert _doc_count_for(db, collection=collection, source_uri=source_uri) >= 1, (
+            "create tick must leave at least one indexed documents row"
+        )
+        assert _bm25_hits_for(db, collection=collection, term="retrieval") >= 1, (
+            "create tick must leave the chunk searchable via BM25"
+        )
+
+        # Tick 2: delete-op for the SAME item → chunk removed, no re-index.
+        deleted = FakeSourceConnector(
+            name=collection,
+            events=[ChangeEvent(op=delete_op, item_id=item_id, modified_at="2026-06-21T11:00:00Z")],  # type: ignore[arg-type]  # F3-rationale: delete_op is a member of the ChangeEvent.op literal, parametrized for table coverage.
+            content={item_id: b"# Stale Note\n\nThis note about retrieval will be deleted soon."},
+        )
+        delete_pipeline = build_connector_pipeline(db=db, collection=collection)
+        delete_pipeline.run_batch(deleted, FakeExtractor())
+        db.commit()
+
+        # The chunk is gone from documents AND from FTS5 search.
+        assert _doc_count_for(db, collection=collection, source_uri=source_uri) == 0, (
+            f"{delete_op!r} event must remove the indexed documents row; the deletion-staleness "
+            "bug (re-index or never-remove) has returned"
+        )
+        assert _bm25_hits_for(db, collection=collection, term="retrieval") == 0, (
+            f"{delete_op!r} event must leave zero BM25 hits — the chunk stayed searchable after delete"
+        )
+
+        # The delete path did NOT fetch the item (fetch/extract/upsert skipped).
+        assert deleted.fetch_calls == [], (
+            "delete-op processing must skip fetch entirely; a fetched delete-op item is re-indexed"
+        )
+    finally:
+        db.close()
+
+
+def test_deleted_event_skips_fetch_and_calls_delete(tmp_path: Path) -> None:
+    """Delete-op dispatch contract: delete_by_source_uri is called with the
+    item's source_uri and fetch/silver are skipped.
+
+    Uses the ``FakeChunkWriter`` (capture-only) so the assertion is on the
+    exact delete call — F68-shape contract proof for the delete branch.
+    """
+    db = _open_db(tmp_path)
+    try:
+        pipeline, chunk_writer, entity_graph_sink = _build_pipeline(db, tmp_path / "bronze")
+        item_id = "gone.md"
+        connector = FakeSourceConnector(
+            name="fake-source",
+            events=[ChangeEvent(op="deleted", item_id=item_id, modified_at="2026-06-21T12:00:00Z")],
+            content={item_id: b"would-be-reindexed body"},
+        )
+
+        result = pipeline.run_batch(connector, FakeExtractor())
+
+        # Delete-op does not write a chunk (processed counts end-to-end
+        # upserts only); it is not a fetch/extract failure either.
+        assert result.processed == 0, f"delete-op must not count as a processed upsert; got {result}"
+        assert result.dead_lettered == 0, "delete-op must not dead-letter"
+        assert chunk_writer.writes == [], "delete-op must not upsert any chunk"
+        assert entity_graph_sink.staged == [], "delete-op must not buffer entity signals"
+
+        # The delete call targeted the item's source_uri.
+        expected_uri = connector.source_link(item_id)
+        assert chunk_writer.deletes == [expected_uri], (
+            f"delete-op must call delete_by_source_uri({expected_uri!r}); got {chunk_writer.deletes!r}"
+        )
+
+        # Fetch/extract/silver were skipped — no bronze row, no fetch call.
+        assert connector.fetch_calls == [], "delete-op must skip fetch"
+        bronze_rows = db.execute("SELECT COUNT(*) FROM bronze_records").fetchone()[0]
+        assert bronze_rows == 0, "delete-op must not write a bronze record"
     finally:
         db.close()

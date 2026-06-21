@@ -1,6 +1,8 @@
 """FlagGatedCapability ABC — ADR-026 Track C.
 
-Today every feature-flag callsite repeats the same scaffold:
+Historically every feature-flag callsite repeated the same scaffold
+(the connector ``dispatch_<name>_sync`` trios, since removed — connector
+enablement is now config-presence in the canonical topology):
 
 * A ``dispatch_<name>_sync(read_flag, on_branch, off_branch)`` function
 * Two helper functions (``run_via_<name>_connector`` for ON,

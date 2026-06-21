@@ -156,10 +156,11 @@ class NotionConnector:
         resolution rides the F2-clean DI seam; production defaults
         to :class:`~kairix.secrets.SecretsLoader` (ADR-031).
 
-    Flag gating happens at the worker-dispatch boundary
-    (:func:`kairix.worker.dispatch_notion_sync`) — when the
-    ``connector_notion`` flag is OFF the connector slot is a no-op and
-    this constructor is never called.
+    Flag gating happens in the canonical connector-sync loop
+    (:func:`kairix.worker.run_connector_sync_pipeline`), which consults
+    :func:`kairix.worker.connector_enabled` per configured entry — when
+    the ``connector_notion`` flag is OFF the notion entry is skipped
+    before plugin resolution, so this constructor is never called.
     """
 
     name: str = CONNECTOR_NAME

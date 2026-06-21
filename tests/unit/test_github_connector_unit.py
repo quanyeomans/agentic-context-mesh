@@ -83,16 +83,46 @@ def test_capabilities_set_matches_spec_section_1() -> None:
 
 
 def test_serialise_then_deserialise_round_trips() -> None:
-    """JSON map round-trips through serialise / deserialise without loss."""
+    """JSON map round-trips through serialise / deserialise without loss.
+
+    Covers the compound inclusive-since cursor — the boundary timestamps
+    AND the per-boundary seen-id sets (``seen_commit_shas`` /
+    ``seen_issue_ids``) must survive the round-trip so the next tick can
+    skip the already-emitted boundary rows.
+    """
     state = {
-        "org/repo-1": PerRepoCursorState(code_sha="sha-1", issues_since="2026-05-23T00:00:00Z"),
+        "org/repo-1": PerRepoCursorState(
+            code_sha="2026-05-23T02:00:00Z",
+            issues_since="2026-05-23T00:00:00Z",
+            seen_commit_shas=frozenset({"sha-a", "sha-b"}),
+            seen_issue_ids=frozenset({"github://org/repo-1/issues/7"}),
+        ),
         "org/repo-2": PerRepoCursorState(code_sha=None, issues_since=None),
     }
     encoded = serialise_cursor(state)
     decoded = deserialise_cursor(encoded)
-    assert decoded["org/repo-1"].code_sha == "sha-1"
+    assert decoded["org/repo-1"].code_sha == "2026-05-23T02:00:00Z"
     assert decoded["org/repo-1"].issues_since == "2026-05-23T00:00:00Z"
+    assert decoded["org/repo-1"].seen_commit_shas == frozenset({"sha-a", "sha-b"})
+    assert decoded["org/repo-1"].seen_issue_ids == frozenset({"github://org/repo-1/issues/7"})
     assert decoded["org/repo-2"].code_sha is None
+    # Stale pre-fix cursors that omit the seen-id fields upgrade to empty sets.
+    assert decoded["org/repo-2"].seen_commit_shas == frozenset()
+    assert decoded["org/repo-2"].seen_issue_ids == frozenset()
+
+
+def test_deserialise_pre_fix_cursor_without_seen_sets_upgrades_cleanly() -> None:
+    """A persisted cursor from before the fix (no seen-id fields) loads cleanly.
+
+    Pins the back-compat path in ``_coerce_id_set`` — a stale cursor that
+    carries only ``code_sha`` / ``issues_since`` upgrades to empty seen-sets
+    rather than crashing or forcing a full re-backfill.
+    """
+    legacy = json.dumps({"org/legacy": {"code_sha": "2026-05-23T01:00:00Z", "issues_since": "2026-05-23T01:00:00Z"}})
+    decoded = deserialise_cursor(legacy)
+    assert decoded["org/legacy"].code_sha == "2026-05-23T01:00:00Z"
+    assert decoded["org/legacy"].seen_commit_shas == frozenset()
+    assert decoded["org/legacy"].seen_issue_ids == frozenset()
 
 
 def test_deserialise_tolerates_malformed_input() -> None:
@@ -1332,3 +1362,125 @@ def test_app_mode_list_repositories_still_uses_installation_endpoint() -> None:
     assert "/installation/repositories" in paths_hit
     assert "/user/repos" not in paths_hit
     assert repos[0].full_name == "tc/app"
+
+
+# ---------------------------------------------------------------------------
+# Inclusive-``since`` boundary cursor advance (resilience-audit fix)
+# ---------------------------------------------------------------------------
+
+
+class _InclusiveSinceUnitClient:
+    """Scripted client honouring GitHub's INCLUSIVE ``since`` semantics.
+
+    ``list_commits_since`` returns every scripted commit whose
+    ``committed_at`` is ``>= since`` (oldest-first), mirroring GitHub's
+    real boundary behaviour — the exact wire contract that triggers the
+    boundary re-emit bug when the connector persists the boundary
+    timestamp as the next ``since``.
+    """
+
+    _REPO = "agent-alpha-org/quiet-repo"
+
+    def __init__(self, *, commits: list[GitHubCommitRef]) -> None:
+        from kairix.connectors.github.api_client import ClientStatsSnapshot
+
+        self._commits = list(commits)
+        self._stats = ClientStatsSnapshot(
+            rest_requests=0,
+            rest_rate_remaining=5000,
+            rest_rate_reset_epoch=0,
+            rest_403_secondary_total=0,
+            installation_token_rotations=0,
+        )
+
+    def list_installation_repositories(self):
+        return (
+            GitHubRepoRef(
+                repo_id=1,
+                full_name=self._REPO,
+                default_branch="main",
+                visibility="private",
+                archived=False,
+            ),
+        )
+
+    def list_commits_since(self, *, full_name: str, since: str | None):
+        _ = full_name
+        kept = [c for c in self._commits if since is None or c.committed_at >= since]
+        kept.sort(key=lambda c: c.committed_at)
+        return tuple(kept)
+
+    def list_issues_since(self, *, full_name: str, since: str | None):
+        _ = (full_name, since)
+        return ()
+
+    def get_tree_recursive(self, *, full_name: str, ref: str):
+        _ = (full_name, ref)
+        return (), False
+
+    def fetch_blob(self, *, full_name: str, sha: str) -> bytes:
+        _ = (full_name, sha)
+        return b""
+
+    def stats(self):
+        return self._stats
+
+    def invalidate_token(self) -> None:
+        return None
+
+
+def test_drain_advances_cursor_to_max_committed_at_with_only_that_seconds_shas() -> None:
+    """A drain records the MAX ``committed_at`` + only the SHAs at that second.
+
+    Pins the inclusive-since boundary computation precisely:
+
+      * the persisted boundary (``code_sha``) is the MAX ``committed_at``
+        across the drained commits — not an earlier one;
+      * the boundary seen-set (``seen_commit_shas``) holds ONLY the SHAs
+        AT that max second (an earlier-second commit is excluded; a
+        same-max-second sibling is included).
+
+    Sabotage-proof: neutering ``_advance_boundary``'s seen-set (returning
+    ``frozenset()``) leaves ``seen_commit_shas`` empty and flips this test
+    to fail; reverting the boundary ``>`` scan to keep an earlier value
+    flips the ``code_sha`` assertion.
+    """
+    commits = [
+        GitHubCommitRef(sha="earlier-sha", committed_at="2026-05-23T01:00:00Z", message="e", author="agent-alpha"),
+        GitHubCommitRef(sha="max-sha-a", committed_at="2026-05-23T02:00:00Z", message="a", author="agent-alpha"),
+        GitHubCommitRef(sha="max-sha-b", committed_at="2026-05-23T02:00:00Z", message="b", author="agent-beta"),
+    ]
+    client = _InclusiveSinceUnitClient(commits=commits)
+    connector = GitHubConnector(client=client)  # type: ignore[arg-type]  # F3 rationale: local stub mirrors GitHubApiClient shape but isn't typed as the Protocol — boundary-only suppression for the test seam
+
+    first = list(connector.list_changes(cursor=None))
+    assert len(first) == 3, f"tick 1 should emit all three commits; got {first!r}"
+
+    state = connector._per_repo_cursors[_InclusiveSinceUnitClient._REPO]
+    assert state.code_sha == "2026-05-23T02:00:00Z", f"boundary must be the max committed_at; got {state.code_sha!r}"
+    assert state.seen_commit_shas == frozenset({"max-sha-a", "max-sha-b"}), (
+        f"seen-set must hold exactly the max-second SHAs; got {sorted(state.seen_commit_shas)!r}"
+    )
+    assert "earlier-sha" not in state.seen_commit_shas, "an earlier-second commit must NOT be in the boundary seen-set"
+
+
+def test_quiet_repo_reemits_zero_commits_on_next_tick() -> None:
+    """A repo with no new commits re-emits ZERO events on tick 2.
+
+    GitHub's inclusive ``commits?since=`` re-returns the boundary commit,
+    but the connector must skip it via the persisted seen-set.
+
+    Sabotage-proof: neutering the seen-set (so the boundary commit is no
+    longer suppressed) flips this test to fail — tick 2 re-emits the
+    boundary commit.
+    """
+    commits = [
+        GitHubCommitRef(sha="boundary-sha", committed_at="2026-05-23T01:00:00Z", message="b", author="agent-alpha"),
+    ]
+    client = _InclusiveSinceUnitClient(commits=commits)
+    connector = GitHubConnector(client=client)  # type: ignore[arg-type]  # F3 rationale: local stub mirrors GitHubApiClient shape but isn't typed as the Protocol — boundary-only suppression for the test seam
+
+    first = list(connector.list_changes(cursor=None))
+    assert len(first) == 1, f"tick 1 should emit the boundary commit; got {first!r}"
+    second = list(connector.list_changes(cursor=connector.next_cursor()))
+    assert second == [], f"quiet repo must re-emit ZERO events on tick 2; got {second!r}"

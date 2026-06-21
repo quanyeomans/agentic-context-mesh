@@ -277,7 +277,10 @@ def _distinct_per_repo_cursor(github_ctx: _Ctx) -> None:
     cursor_json = github_ctx.connector.next_cursor()
     parsed = json.loads(cursor_json)
     assert len(parsed) == 2, f"expected per-repo cursor entries for 2 repos; got {parsed!r}"
-    values = {tuple(sorted(v.items())) for v in parsed.values()}
+    # The compound inclusive-since cursor carries list-valued seen-id sets,
+    # so canonicalise each per-repo value to a stable JSON string before
+    # building the distinctness set (lists are unhashable).
+    values = {json.dumps(v, sort_keys=True) for v in parsed.values()}
     assert len(values) == 2, f"expected distinct cursors per repo; got {parsed!r}"
 
 

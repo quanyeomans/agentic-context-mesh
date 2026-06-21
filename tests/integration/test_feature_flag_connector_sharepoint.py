@@ -1,124 +1,193 @@
 """Integration tests for the ``connector_sharepoint`` flag.
 
-Exercises both branches of
-:func:`kairix.worker.dispatch_sharepoint_sync` through the production
-composition surface:
+Exercises both branches of the connector-enablement gate through the
+REAL production loop — :func:`kairix.worker.run_connector_sync_pipeline`
+with ``flag_reader`` pinned via :class:`FakeFeatureFlagResolver`. The
+gate is :func:`kairix.worker.connector_enabled` consulted per entry in
+that loop; the assertion target is the observable
+:class:`ConnectorSyncResult` counter outcome, NOT a dead dispatcher's
+branch-marker log.
 
-  * **Flag OFF** — the connector slot is a no-op; the off-branch
-    helper returns zero counters and emits the OFF-branch INFO log.
-    The ON branch is wrapped with a never-call stub; a misroute
-    increments its counter and the assertion fails loudly.
-  * **Flag ON** — the ON branch fires; the OFF branch is wrapped
-    with a never-call stub. The ON branch's marker INFO log appears.
+  * **Flag OFF** — ``connector_sharepoint`` reads False. The sharepoint
+    entry is gated off (skipped before plugin resolution, so it never
+    needs a Graph credential); a flagless ``obsidian`` sibling in the
+    same tick still indexes its notes. The aggregate ``synced`` reflects
+    only the sibling.
+  * **Flag ON** — ``connector_sharepoint`` reads True. The gate lets the
+    sharepoint entry through to ``_run_one_connector_batch``, where it
+    fails to resolve a live Graph credential and is logged + counted as a
+    per-entry failure (the loop continues). The "gated off" log does NOT
+    fire for sharepoint; the flagless sibling still indexes its notes.
 
-F47 — both branches are reached via the production
-``dispatch_sharepoint_sync`` entry point; no direct
-``*Pipeline(...)`` construction in this file.
+F47 — both branches are reached through the production
+``run_connector_sync_pipeline`` entry point; no direct
+``*Pipeline(...)`` construction in the flag tests.
 
 F1-clean: ``FakeFeatureFlagResolver`` from ``tests/fakes.py`` is
-threaded through the production ``dispatch_sharepoint_sync(read_flag=...)``
-DI seam — no @patch / module-attribute substitution on kairix.
+threaded through ``ConnectorSyncDeps(flag_reader=...)`` — no @patch /
+module-attribute substitution on kairix.
+F2-clean: no ``KAIRIX_*`` env-var manipulation.
 
 Sabotage proof (executed by the agent, restored on completion):
-inverting the if/else in :func:`dispatch_sharepoint_sync` so OFF runs
-the ON branch and ON runs the OFF branch — confirmed that BOTH
-:func:`test_sharepoint_flag_off_branch_runs` AND
-:func:`test_sharepoint_flag_on_branch_runs` fail. Restoring the
-original branch direction returns both tests to green.
+deleting the ``if not connector_enabled(...)`` skip in
+``run_connector_sync_pipeline``'s loop makes the OFF test fail — the
+"gated off" log no longer fires and the sharepoint entry runs. Restoring
+the gate returns the test to green.
 """
 
 from __future__ import annotations
 
 import logging
+import sqlite3
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from kairix.worker import (
-    ConnectorSyncResult,
-    dispatch_sharepoint_sync,
+    ConnectorSyncDeps,
+    run_connector_sync_pipeline,
 )
 from tests.fakes import FakeFeatureFlagResolver
 
 pytestmark = pytest.mark.integration
 
-_ON_MARKER = "sharepoint connector running (flag ON)"
-_OFF_MARKER = "sharepoint connector gated off (flag OFF)"
+_KIND = "sharepoint"
 
 
-def test_sharepoint_flag_off_branch_runs(caplog: pytest.LogCaptureFixture) -> None:
-    """OFF branch — sharepoint connector slot is a no-op; ON does not fire.
+def _two_connector_topology(vault: Path) -> dict[str, Any]:
+    """Merged mapping: the gated connector kind + a flagless obsidian sibling.
 
-    The fake resolver pins ``connector_sharepoint`` to False, the
-    production :func:`dispatch_sharepoint_sync` routes through the OFF
-    branch, the OFF marker INFO log appears, and the ON branch's
-    never-call stub records zero invocations.
+    Mirrors the canonical ``topology.connectors`` / ``topology.cc_pairs``
+    shape the setup wizard writes. The sibling vault carries two markdown
+    files so the flagless connector has observable work.
     """
+    return {
+        "topology_v2": {
+            "connectors": [
+                {
+                    "id": f"{_KIND}-conn",
+                    "kind": _KIND,
+                    "name": f"Corp {_KIND}",
+                    "connector_specific_config": {},
+                },
+                {
+                    "id": "obsidian-conn",
+                    "kind": "obsidian",
+                    "name": "Personal Vault",
+                    "extractor": "passthrough",
+                    "connector_specific_config": {"vault_root": str(vault)},
+                },
+            ],
+            "cc_pairs": [
+                {"id": f"{_KIND}-pair", "connector": f"{_KIND}-conn", "credential": None, "name": f"{_KIND}-cc"},
+                {"id": "ob-pair", "connector": "obsidian-conn", "credential": None, "name": "obsidian-cc"},
+            ],
+        }
+    }
+
+
+def _seed_vault(tmp_path: Path) -> Path:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "alpha.md").write_text("# Alpha\n\nFirst note body.\n", encoding="utf-8")
+    (vault / "beta.md").write_text("# Beta\n\nSecond note body.\n", encoding="utf-8")
+    return vault
+
+
+def test_flag_off_gates_connector_sibling_still_runs(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """OFF — the sharepoint entry is gated off in the loop; the flagless
+    obsidian sibling still syncs both notes.
+
+    Drives the real ``run_connector_sync_pipeline``. With the flag OFF
+    the predicate skips the sharepoint entry BEFORE plugin resolution, so
+    no Graph credential is needed; the "gated off" INFO log fires and the
+    aggregate ``synced`` reflects only the obsidian sibling's two notes.
+    """
+    vault = _seed_vault(tmp_path)
+    db_path = tmp_path / "index.sqlite"
     resolver = FakeFeatureFlagResolver().with_flag("connector_sharepoint", False)
 
-    on_calls = {"n": 0}
-
-    def _never_on() -> ConnectorSyncResult:
-        on_calls["n"] += 1
-        return ConnectorSyncResult(synced=99, failed=0, dead_letter_added=0)
+    deps = ConnectorSyncDeps(
+        disabled_fn=lambda: False,
+        config_mapping_fn=lambda: _two_connector_topology(vault),
+        flag_reader=resolver.get,
+        db_factory=lambda: sqlite3.connect(str(db_path)),
+        bronze_root_resolver=lambda: tmp_path / "bronze",
+    )
 
     with caplog.at_level(logging.INFO, logger="kairix.worker"):
-        result = dispatch_sharepoint_sync(
-            read_flag=resolver.get,
-            on_branch=_never_on,
-        )
+        result = run_connector_sync_pipeline(deps)
 
-    messages = [rec.getMessage() for rec in caplog.records]
-    assert any(_OFF_MARKER in m for m in messages), f"flag OFF must route through the OFF branch; logs={messages!r}"
-    assert not any(_ON_MARKER in m for m in messages), (
-        f"flag OFF must NOT route through the ON branch; logs={messages!r}"
+    assert result.synced == 2, f"flagless obsidian sibling must still sync both notes; got {result}"
+    assert result.failed == 0, f"OFF gate must not surface a failure for the gated connector; got {result}"
+
+    gated_logs = [
+        rec.getMessage()
+        for rec in caplog.records
+        if _KIND in rec.getMessage().lower() and "gated" in rec.getMessage().lower()
+    ]
+    assert gated_logs, (
+        f"flag OFF must skip the {_KIND} entry with a 'gated off' INFO log; "
+        f"got {[r.getMessage() for r in caplog.records]}"
     )
-    assert on_calls["n"] == 0, "ON branch must not run when flag is OFF"
-    assert result.synced == 0, f"OFF branch must return zero counters; got {result}"
 
 
-def test_sharepoint_flag_on_branch_runs(caplog: pytest.LogCaptureFixture) -> None:
-    """ON branch — sharepoint connector ON branch helper fires; OFF does not.
+def test_flag_on_lets_connector_through_sibling_still_runs(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """ON — the gate lets the sharepoint entry through to the batch runner;
+    the flagless obsidian sibling still syncs both notes.
 
-    The fake resolver pins ``connector_sharepoint`` to True, the
-    production :func:`dispatch_sharepoint_sync` routes through the ON
-    branch helper, the ON marker INFO log appears, and the OFF
-    branch's never-call stub records zero invocations.
-
-    The ON branch is wrapped with a marker-emitting stub here so the
-    integration test doesn't drive a real connector-pipeline run
-    (that's the E2E test's job). The branch selection — gated by the
-    flag — is the property under test.
+    With the flag ON the predicate does NOT skip the sharepoint entry: it
+    reaches ``_run_one_connector_batch`` where, lacking a live Graph
+    credential, it fails and is logged + counted as a per-entry failure
+    (the loop continues). The "gated off" log must NOT fire for sharepoint
+    — proving the ON branch took a different path than OFF.
     """
+    vault = _seed_vault(tmp_path)
+    db_path = tmp_path / "index.sqlite"
     resolver = FakeFeatureFlagResolver().with_flag("connector_sharepoint", True)
 
-    off_calls = {"n": 0}
-
-    def _never_off() -> ConnectorSyncResult:
-        off_calls["n"] += 1
-        return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
-
-    def _wrapped_on() -> ConnectorSyncResult:
-        logging.getLogger("kairix.worker").info(_ON_MARKER)
-        return ConnectorSyncResult(synced=1, failed=0, dead_letter_added=0)
+    deps = ConnectorSyncDeps(
+        disabled_fn=lambda: False,
+        config_mapping_fn=lambda: _two_connector_topology(vault),
+        flag_reader=resolver.get,
+        db_factory=lambda: sqlite3.connect(str(db_path)),
+        bronze_root_resolver=lambda: tmp_path / "bronze",
+    )
 
     with caplog.at_level(logging.INFO, logger="kairix.worker"):
-        result = dispatch_sharepoint_sync(
-            read_flag=resolver.get,
-            on_branch=_wrapped_on,
-            off_branch=_never_off,
-        )
+        result = run_connector_sync_pipeline(deps)
 
-    messages = [rec.getMessage() for rec in caplog.records]
-    assert any(_ON_MARKER in m for m in messages), f"flag ON must route through the ON branch; logs={messages!r}"
-    assert not any(_OFF_MARKER in m for m in messages), (
-        f"flag ON must NOT route through the OFF branch; logs={messages!r}"
+    assert result.synced == 2, f"flagless obsidian sibling must still sync both notes; got {result}"
+
+    gated_logs = [
+        rec.getMessage()
+        for rec in caplog.records
+        if _KIND in rec.getMessage().lower() and "gated" in rec.getMessage().lower()
+    ]
+    assert not gated_logs, (
+        f"flag ON must NOT gate off the {_KIND} entry; the 'gated off' log fired anyway: {gated_logs!r}"
     )
-    assert off_calls["n"] == 0, "OFF branch must not run when flag is ON"
-    assert result.synced == 1, f"ON branch must have run and returned its result; got {result}"
+
+    failure_logs = [
+        rec.getMessage() for rec in caplog.records if f"{_KIND}-cc" in rec.getMessage() and "failed" in rec.getMessage()
+    ]
+    assert failure_logs, (
+        f"flag ON must let the {_KIND} entry reach the batch runner (where it fails without a "
+        f"live credential); got {[r.getMessage() for r in caplog.records]}"
+    )
 
 
 # ---------------------------------------------------------------------------
-# Path filtering — both filter-state branches against the same flag-ON setup
+# Path filtering — both filter-state branches against the same flag-ON setup.
+# These exercise the real SharePoint connector's include_paths filter, not the
+# enablement gate above.
 # ---------------------------------------------------------------------------
 
 

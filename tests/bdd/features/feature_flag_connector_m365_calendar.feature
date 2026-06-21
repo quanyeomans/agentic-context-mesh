@@ -1,24 +1,28 @@
 @feature_flag @connector_m365_calendar
-Feature: Operator toggles the connector-m365-calendar feature flag
-  As an operator running a kairix engagement container
-  I want to choose whether to enable the new M365 calendar connector
-  So that I can validate the calendar ingest path on staging before turning it on in production and roll it back safely if needed.
+Feature: Operator toggles the M365 calendar connector feature flag
+  As an operator running a kairix container
+  I want to choose whether the M365 calendar connector is enabled
+  So that I can validate the new ingest path before cutting over and roll back safely if needed
 
-  The flag is at introduce stage and defaults off. Both code paths
-  stay present until the flag retires; the operator can flip the flag
-  back at any time. See docs/architecture/feature-flag-architecture.md
-  §7 for the cutover protocol.
+  The flag gates the connector inside the canonical connector-sync loop
+  (run_connector_sync_pipeline -> connector_enabled). When OFF the
+  m365 calendar entry is skipped before plugin resolution; a flagless sibling
+  connector in the same tick still runs. When ON the gate lets the
+  m365 calendar entry through to the batch runner. See
+  docs/architecture/feature-flag-architecture.md S7.
 
   @happy_path @off
-  Scenario: Flag OFF — the m365_calendar connector is not selected for sync
-    Given the operator has the connector-m365-calendar flag set to false
-    When the worker resolves the enabled connector set
-    Then the m365_calendar connector is not in the resolved set
-    And no Graph traffic is initiated for the m365_calendar connector
+  Scenario: Flag OFF - the M365 calendar connector is gated off, the sibling still runs
+    Given the operator has the m365 calendar connector flag set to false
+    And a flagless sibling connector with two notes is configured alongside m365 calendar
+    When the worker connector sync tick runs for m365 calendar
+    Then the m365 calendar connector is gated off in the loop
+    And the flagless sibling connector still syncs its notes for m365 calendar
 
   @happy_path @on
-  Scenario: Flag ON — the m365_calendar connector is selected for sync
-    Given the operator has the connector-m365-calendar flag set to true
-    When the worker resolves the enabled connector set
-    Then the m365_calendar connector is in the resolved set
-    And the m365_calendar connector ingest branch is ready to run
+  Scenario: Flag ON - the M365 calendar connector is let through the gate
+    Given the operator has the m365 calendar connector flag set to true
+    And a flagless sibling connector with two notes is configured alongside m365 calendar
+    When the worker connector sync tick runs for m365 calendar
+    Then the m365 calendar connector is not gated off in the loop
+    And the flagless sibling connector still syncs its notes for m365 calendar

@@ -1,24 +1,28 @@
 @feature_flag @connector_skills
 Feature: Operator toggles the skills connector feature flag
-  As an operator running a kairix deployment
+  As an operator running a kairix container
   I want to choose whether the skills connector is enabled
-  So that I can validate the capability-recommender ingest path before cutting over and roll back safely if needed
+  So that I can validate the new ingest path before cutting over and roll back safely if needed
 
-  The flag gates the connector at the dispatch boundary. When OFF the
-  connector slot is a no-op (zero counters); when ON the standard
-  connector pipeline resolves the skills plugin via its entry-point and
-  walks the host's ~/.claude tree. See docs/architecture/feature-flag-architecture.md section 7.
+  The flag gates the connector inside the canonical connector-sync loop
+  (run_connector_sync_pipeline -> connector_enabled). When OFF the
+  skills entry is skipped before plugin resolution; a flagless sibling
+  connector in the same tick still runs. When ON the gate lets the
+  skills entry through to the batch runner. See
+  docs/architecture/feature-flag-architecture.md S7.
 
   @happy_path @off
-  Scenario: Flag OFF — the skills connector slot is a no-op
+  Scenario: Flag OFF - the skills connector is gated off, the sibling still runs
     Given the operator has the skills connector flag set to false
-    When the worker skills connector sync tick runs
-    Then the skills connector OFF branch log appears
-    And the skills connector ON branch does not run
+    And a flagless sibling connector with two notes is configured alongside skills
+    When the worker connector sync tick runs for skills
+    Then the skills connector is gated off in the loop
+    And the flagless sibling connector still syncs its notes for skills
 
   @happy_path @on
-  Scenario: Flag ON — the skills connector pipeline runs
+  Scenario: Flag ON - the skills connector is let through the gate
     Given the operator has the skills connector flag set to true
-    When the worker skills connector sync tick runs
-    Then the skills connector ON branch log appears
-    And the skills connector OFF branch does not run
+    And a flagless sibling connector with two notes is configured alongside skills
+    When the worker connector sync tick runs for skills
+    Then the skills connector is not gated off in the loop
+    And the flagless sibling connector still syncs its notes for skills

@@ -1,17 +1,19 @@
-"""Step implementations for feature_flag_connector_m365_calendar.feature.
+"""Step definitions for feature_flag_connector_m365_calendar.feature.
 
-Drives the production resolver path with the flag value pinned through
-the canonical :class:`FakeFeatureFlagResolver` from ``tests/fakes.py``.
-No ``@patch``, no ``monkeypatch.setattr`` on kairix internals, no
+Drives the REAL connector-sync loop —
+:func:`kairix.worker.run_connector_sync_pipeline` — with the flag value
+pinned through the canonical :class:`FakeFeatureFlagResolver` from
+``tests/fakes.py``. The enablement gate under test is
+:func:`kairix.worker.connector_enabled`, consulted per entry in that
+loop. No ``@patch``, no ``monkeypatch.setattr`` on kairix internals, no
 ``KAIRIX_FEATURE_*`` env vars.
 
-Per F46, steps reach a sanctioned entry point in their call graph
-(depth ≤ 2). The composition surface tested here is a small pure
-function (``resolve_enabled_connectors``) that consults the resolver
-and returns the set of connector names the worker should drive — that
-gives the BDD scenario a non-stub, F46-clean observation point without
-needing to compose the full worker pipeline (which is exercised by the
-integration + E2E tests).
+Per F46, steps reach a sanctioned entry point in their call graph —
+``run_connector_sync_pipeline`` composes the production
+:class:`~kairix.core.connectors.ConnectorPipeline` internally (no direct
+``*Pipeline(...)`` construction here). The assertion target is the
+observable :class:`ConnectorSyncResult` counter outcome + the gated-off
+INFO log, NOT a dead dispatcher's branch marker.
 
 F1-clean: no @patch / module-attribute substitution on kairix.
 F2-clean: no ``KAIRIX_*`` env-var manipulation.
@@ -19,42 +21,26 @@ F2-clean: no ``KAIRIX_*`` env-var manipulation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import logging
+import sqlite3
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 import pytest
 from pytest_bdd import given, parsers, then, when
 
+from kairix.worker import (
+    ConnectorSyncDeps,
+    ConnectorSyncResult,
+    run_connector_sync_pipeline,
+)
 from tests.fakes import FakeFeatureFlagResolver
 
 pytestmark = pytest.mark.bdd
 
-_FLAG_NAME = "connector_m365_calendar"
-_CONNECTOR_NAME = "m365_calendar"
-
-# Set of connector names always considered enabled (independent of the
-# flag). The flag gates m365_calendar specifically; obsidian appears
-# here so the scenario can confirm the resolver returned a non-empty
-# set even when the flag is OFF.
-_ALWAYS_ENABLED = frozenset({"obsidian"})
-
-
-def resolve_enabled_connectors(read_flag: object) -> frozenset[str]:
-    """Pure composition surface used by the worker to enumerate connectors.
-
-    Given a flag-reader callable (the resolver's ``get`` method), return
-    the set of connector names the worker should sync this tick. v1
-    implementation: always include the legacy connectors; include
-    ``m365_calendar`` iff the ``connector_m365_calendar`` flag is True.
-
-    Hoisted out into a tested pure function so the BDD scenario can
-    observe the routing decision without composing the full worker
-    pipeline. The integration + E2E tests cover the composed-path
-    surface.
-    """
-    enabled = set(_ALWAYS_ENABLED)
-    if callable(read_flag) and read_flag(_FLAG_NAME):
-        enabled.add(_CONNECTOR_NAME)
-    return frozenset(enabled)
+_FLAG = "connector_m365_calendar"
+_KIND = "m365_calendar"
 
 
 @dataclass
@@ -62,7 +48,9 @@ class _Ctx:
     """Per-scenario context — no module-level mutable state."""
 
     resolver: FakeFeatureFlagResolver | None = None
-    resolved: frozenset[str] | None = None
+    sibling_vault: Path | None = None
+    captured_logs: list[str] = field(default_factory=list)
+    result: ConnectorSyncResult | None = None
 
 
 @pytest.fixture
@@ -70,60 +58,89 @@ def m365_calendar_flag_ctx() -> _Ctx:
     return _Ctx()
 
 
-# ---------------------------------------------------------------------------
-# Givens
-# ---------------------------------------------------------------------------
+def _two_connector_topology(vault: Path) -> dict[str, Any]:
+    return {
+        "topology_v2": {
+            "connectors": [
+                {"id": f"{_KIND}-conn", "kind": _KIND, "name": f"Corp {_KIND}", "connector_specific_config": {}},
+                {
+                    "id": "obsidian-conn",
+                    "kind": "obsidian",
+                    "name": "Personal Vault",
+                    "extractor": "passthrough",
+                    "connector_specific_config": {"vault_root": str(vault)},
+                },
+            ],
+            "cc_pairs": [
+                {"id": f"{_KIND}-pair", "connector": f"{_KIND}-conn", "credential": None, "name": f"{_KIND}-cc"},
+                {"id": "ob-pair", "connector": "obsidian-conn", "credential": None, "name": "obsidian-cc"},
+            ],
+        }
+    }
 
 
-@given(parsers.parse("the operator has the connector-m365-calendar flag set to {value}"))
+@given(parsers.parse("the operator has the m365 calendar connector flag set to {value}"))
 def _operator_sets_flag(m365_calendar_flag_ctx: _Ctx, value: str) -> None:
+    """Pin the flag's value via :class:`FakeFeatureFlagResolver`."""
     parsed = value.strip().lower() == "true"
-    m365_calendar_flag_ctx.resolver = FakeFeatureFlagResolver().with_flag(_FLAG_NAME, parsed)
+    m365_calendar_flag_ctx.resolver = FakeFeatureFlagResolver().with_flag(_FLAG, parsed)
 
 
-# ---------------------------------------------------------------------------
-# Whens
-# ---------------------------------------------------------------------------
+@given("a flagless sibling connector with two notes is configured alongside m365 calendar")
+def _sibling_configured(m365_calendar_flag_ctx: _Ctx, tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "alpha.md").write_text("# Alpha\n\nFirst note body.\n", encoding="utf-8")
+    (vault / "beta.md").write_text("# Beta\n\nSecond note body.\n", encoding="utf-8")
+    m365_calendar_flag_ctx.sibling_vault = vault
 
 
-@when(parsers.parse("the worker resolves the enabled connector set"))
-def _worker_resolves(m365_calendar_flag_ctx: _Ctx) -> None:
-    assert m365_calendar_flag_ctx.resolver is not None, "Given step must run before When"
-    m365_calendar_flag_ctx.resolved = resolve_enabled_connectors(m365_calendar_flag_ctx.resolver.get)
+@when("the worker connector sync tick runs for m365 calendar")
+def _worker_tick_runs(
+    m365_calendar_flag_ctx: _Ctx,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Invoke the production :func:`run_connector_sync_pipeline`."""
+    resolver = m365_calendar_flag_ctx.resolver
+    vault = m365_calendar_flag_ctx.sibling_vault
+    assert resolver is not None and vault is not None, "Given steps must run before When"
+
+    db_path = tmp_path / "index.sqlite"
+    deps = ConnectorSyncDeps(
+        disabled_fn=lambda: False,
+        config_mapping_fn=lambda: _two_connector_topology(vault),
+        flag_reader=resolver.get,
+        db_factory=lambda: sqlite3.connect(str(db_path)),
+        bronze_root_resolver=lambda: tmp_path / "bronze",
+    )
+
+    with caplog.at_level(logging.INFO, logger="kairix.worker"):
+        m365_calendar_flag_ctx.result = run_connector_sync_pipeline(deps)
+
+    m365_calendar_flag_ctx.captured_logs = [rec.getMessage() for rec in caplog.records]
 
 
-# ---------------------------------------------------------------------------
-# Thens
-# ---------------------------------------------------------------------------
+def _gated_logs(ctx: _Ctx) -> list[str]:
+    return [m for m in ctx.captured_logs if _KIND in m.lower() and "gated" in m.lower()]
 
 
-@then(parsers.parse("the m365_calendar connector is in the resolved set"))
-def _m365_in_set(m365_calendar_flag_ctx: _Ctx) -> None:
-    assert m365_calendar_flag_ctx.resolved is not None, "When step must populate resolved"
-    resolved = m365_calendar_flag_ctx.resolved
-    assert _CONNECTOR_NAME in resolved, f"expected {_CONNECTOR_NAME!r} in {resolved!r}"
-
-
-@then(parsers.parse("the m365_calendar connector is not in the resolved set"))
-def _m365_not_in_set(m365_calendar_flag_ctx: _Ctx) -> None:
-    assert m365_calendar_flag_ctx.resolved is not None, "When step must populate resolved"
-    assert _CONNECTOR_NAME not in m365_calendar_flag_ctx.resolved, (
-        f"unexpected {_CONNECTOR_NAME!r} in {m365_calendar_flag_ctx.resolved!r}"
+@then("the m365 calendar connector is gated off in the loop")
+def _gated_off(m365_calendar_flag_ctx: _Ctx) -> None:
+    assert _gated_logs(m365_calendar_flag_ctx), (
+        f"expected a '{_KIND} gated off' INFO log; got {m365_calendar_flag_ctx.captured_logs!r}"
     )
 
 
-@then(parsers.parse("no Graph traffic is initiated for the m365_calendar connector"))
-def _no_graph_traffic(m365_calendar_flag_ctx: _Ctx) -> None:
-    # The BDD layer doesn't construct a Graph client; if the flag-OFF
-    # scenario succeeded at the previous assertion, no construction
-    # would happen on the worker side either. The assertion is
-    # structurally redundant but pinned by F54 (both-branch BDD must
-    # carry a non-trivial OFF-side assertion).
-    assert m365_calendar_flag_ctx.resolved is not None
-    assert _CONNECTOR_NAME not in m365_calendar_flag_ctx.resolved
+@then("the m365 calendar connector is not gated off in the loop")
+def _not_gated_off(m365_calendar_flag_ctx: _Ctx) -> None:
+    assert not _gated_logs(m365_calendar_flag_ctx), (
+        f"flag ON must NOT gate off {_KIND}; gated logs fired anyway: {_gated_logs(m365_calendar_flag_ctx)!r}"
+    )
 
 
-@then(parsers.parse("the m365_calendar connector ingest branch is ready to run"))
-def _ingest_branch_ready(m365_calendar_flag_ctx: _Ctx) -> None:
-    assert m365_calendar_flag_ctx.resolved is not None
-    assert _CONNECTOR_NAME in m365_calendar_flag_ctx.resolved
+@then("the flagless sibling connector still syncs its notes for m365 calendar")
+def _sibling_syncs(m365_calendar_flag_ctx: _Ctx) -> None:
+    result = m365_calendar_flag_ctx.result
+    assert result is not None, "When step must run before Then"
+    assert result.synced >= 2, f"flagless obsidian sibling must still sync its notes; got {result}"

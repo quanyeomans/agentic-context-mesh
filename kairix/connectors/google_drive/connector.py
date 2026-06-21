@@ -19,13 +19,16 @@ operator grants ``drive.readonly`` on the configured service-account
 (or end-user OAuth grant) for the workspace user whose Drive view the
 connector pulls from.
 
+Shared (Team) Drive items ARE enumerated — the changes / files /
+export calls carry ``supportsAllDrives`` + ``includeItemsFromAllDrives``
++ ``corpora=allDrives`` so files outside the credential's My Drive
+surface too. Google-native types (``application/vnd.google-apps.*`` —
+Docs / Sheets / Slides) ARE exported via the Drive ``files.export``
+endpoint (``alt=media`` 403s for them), so native files no longer
+dead-letter every sync.
+
 Out of scope for this slice (deferred to follow-up):
 
-* Google-native file export — files whose ``mimeType`` is
-  ``application/vnd.google-apps.*`` (Docs / Sheets / Slides) require
-  the ``/export`` endpoint instead of ``alt=media``. v1 surfaces the
-  native mime to the extractor registry and lets the extractor decide;
-  a follow-up slice adds the export step.
 * Per-actor sharing-ACL sync — the connector pulls every file the
   configured credential can see, with the operator-declared sensitivity
   tier applied uniformly. Per-file ACL propagation is a Wave-E+1
@@ -282,7 +285,7 @@ class GoogleDriveConnector:
                 "next: see kairix/core/connectors/pipeline.py for the orchestrator's "
                 "list_changes -> fetch contract."
             )
-        raw, content_type = self._client.fetch_file_content(envelope.file_id)
+        raw, content_type = self._client.fetch_file_content(envelope.file_id, mime_type=envelope.mime_type)
         mime = envelope.mime_type or content_type or DEFAULT_FETCH_MIME
         return RawArtefact(raw=raw, mime=mime, fetched_at=_now_iso())
 
