@@ -14,10 +14,21 @@ For each configured corpus, the connector:
 2. Calls `GET /drive/v3/changes/startPageToken` on first sync to seed
    the cursor; subsequent ticks resume from the persisted
    `newStartPageToken`.
-3. Walks `GET /drive/v3/changes?pageToken=…` page-by-page, emitting one
+3. Walks `GET /drive/v3/changes?pageToken=…` page-by-page (with the
+   Shared-Drive enumeration flags `supportsAllDrives`,
+   `includeItemsFromAllDrives` and `corpora=allDrives`, so files on
+   Shared / Team Drives are included, not just My Drive), emitting one
    typed `ChangeEvent` per file (created / modified / deleted).
-4. Lazy-fetches the file binary via `GET /drive/v3/files/{id}?alt=media`
-   when the orchestrator calls `fetch(item_id)`.
+4. Lazy-fetches the file content when the orchestrator calls
+   `fetch(item_id)`, branching on the file's `mimeType`:
+   - Google-native types (`application/vnd.google-apps.*` — Docs /
+     Sheets / Slides) export via
+     `GET /drive/v3/files/{id}/export?mimeType=…` (Docs → `text/plain`,
+     Sheets → `text/csv`, Slides → `text/plain`).
+   - All other (binary) types download via
+     `GET /drive/v3/files/{id}?alt=media`.
+   Both paths carry `supportsAllDrives=true` so Shared-Drive files
+   resolve.
 5. Surfaces envelope metadata (`lastModifyingUser.emailAddress`,
    `modifiedTime`, `webViewLink`) on every emitted chunk via
    `metadata_for` per ADR-021.
@@ -73,12 +84,9 @@ for the capture-flip-soak-gate cutover protocol.
 
 ## Out of scope (v1)
 
-- Google-native file export. Files whose `mimeType` is
-  `application/vnd.google-apps.*` (Docs / Sheets / Slides) require the
-  `/export` endpoint instead of `alt=media`. v1 surfaces the native
-  mime to the extractor registry and lets the extractor decide; a
-  follow-up slice adds the export step.
 - Per-actor sharing-ACL sync. v1 applies the operator-declared
   sensitivity tier uniformly across the corpus.
-- Shared-drive enumeration. v1 supports one corpus per connector
-  instance.
+- Per-Shared-Drive corpus isolation. Shared (Team) Drive *items* are
+  now enumerated and exported (see above), but v1 still maps every
+  configured corpus through a single connector instance — a future
+  Wave-E branch adds per-Shared-Drive container cursors.
