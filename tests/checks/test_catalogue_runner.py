@@ -156,12 +156,19 @@ def test_all_dispatch_set_matches_run_all_entries() -> None:
 
 
 def test_every_dispatched_script_exists_on_disk() -> None:
-    """Every script the runner would dispatch for ``--all`` exists — a
-    dangling dispatch is a silent gate hole."""
+    """Every LOCAL script the runner would dispatch for ``--all`` exists — a
+    dangling dispatch is a silent gate hole.
+
+    A ``core:<module>`` row dispatches IN-PROCESS to an engine CORE module
+    (``tc_fitness.core_checks.<module>``), not to a local ``scripts/checks``
+    file; ``resolve_script`` returns a display string for it, so it is excluded
+    here. The engine guarantees the module's presence and
+    ``tests/checks/test_rule_catalogue.py`` pins that every ``core:`` row
+    resolves to a real CORE module."""
     missing = [
         run_checks.resolve_script(e)
         for e in run_checks._select_all()
-        if not (_CHECKS_DIR / run_checks.resolve_script(e)).exists()
+        if not e.check.startswith("core:") and not (_CHECKS_DIR / run_checks.resolve_script(e)).exists()
     ]
     assert missing == [], f"runner would dispatch non-existent scripts: {missing}"
 

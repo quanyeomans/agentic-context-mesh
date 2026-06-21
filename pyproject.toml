@@ -201,7 +201,7 @@ dev = [
     # The python_version marker is required: the package pins >=3.12 but kairix
     # declares >=3.10 with a 3.10/3.11/3.12 matrix; without the marker uv's
     # universal resolver fails. The checks only run under the 3.12 venv.
-    "three-cubes-fitness @ git+https://github.com/three-cubes/fitness-engine.git@v0.4.1 ; python_version >= '3.12'",
+    "three-cubes-fitness @ git+https://github.com/three-cubes/fitness-engine.git@v0.6.1 ; python_version >= '3.12'",
 ]
 
 [project.scripts]
@@ -537,3 +537,68 @@ ignore = ["W004"]
 version_scheme = "guess-next-dev"
 local_scheme = "no-local-version"
 fallback_version = "0.0.0"
+
+# ── tc-fitness gate declaration (the convergence surface) ────────────────────
+# `uv run tc-fitness run` reads this block and dispatches kairix's OWN catalogue
+# (scripts/checks/_rule_catalogue.py:ALL_ENTRIES) through the shared engine —
+# the SAME binary tc-agent-zone runs, the SAME catalogue `run-all.sh` /
+# `run_checks.py` dispatch. ADDITIVE: run_checks.py + run-all.sh + safe-commit.sh
+# keep working unchanged (they thread kairix's --skip-coverage + scope-resolver
+# seams); this block is the engine-native entrypoint CI Stage 0 invokes.
+[tool.tc_fitness]
+name = "kairix quality gate (architecture fitness catalogue)"
+
+# The catalogue step: kairix's full RuleEntry tuple. Local rows dispatch as
+# guarded subprocesses (parallel); core:<module> rows are forced in-process by
+# the engine with their [tool.tc_fitness.core_checks.<module>] block injected.
+[[tool.tc_fitness.steps]]
+id = "fitness-catalogue"
+summary = "architecture fitness functions (full catalogue)"
+catalogue = "scripts.checks._rule_catalogue:ALL_ENTRIES"
+checks_dir = "scripts/checks"
+dispatch = "subprocess"
+parallel = true
+
+# ── CORE-check config blocks (one per bound check) ───────────────────────────
+# Mirrors scripts/checks/_core_bindings.py:CORE_BINDINGS verbatim. Only checks
+# PROVEN equivalent to their retired local reimplementation are bound — same raw
+# violation set on kairix's tree + positive/negative differential fixture parity.
+
+[tool.tc_fitness.core_checks.no_duplicate_string]
+roots = ["kairix"]
+extensions = [".py"]
+min_length = 10
+min_occurrences = 3
+name = "no-duplicate-string"
+
+[tool.tc_fitness.core_checks.no_commented_out_code]
+roots = ["kairix"]
+extensions = [".py"]
+min_run = 3
+name = "no-commented-out-code"
+
+[tool.tc_fitness.core_checks.cognitive_complexity]
+roots = ["kairix"]
+extensions = [".py"]
+threshold = 15
+name = "cognitive-complexity"
+
+[tool.tc_fitness.core_checks.unused_params_named]
+roots = ["kairix"]
+extensions = [".py"]
+name = "unused-params-named"
+
+[tool.tc_fitness.core_checks.empty_body_intent]
+roots = ["kairix"]
+extensions = [".py"]
+name = "empty-body-intent"
+
+[tool.tc_fitness.core_checks.no_test_imports_in_prod]
+roots = ["kairix"]
+extensions = [".py"]
+name = "no-test-imports-in-prod"
+
+[tool.tc_fitness.core_checks.test_skip_rationale]
+roots = ["tests"]
+extensions = [".py"]
+name = "test-skip-rationale"

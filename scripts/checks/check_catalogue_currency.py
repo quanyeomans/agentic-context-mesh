@@ -83,8 +83,16 @@ it no longer matches the catalogue."""
 
 
 def _cataloged_py_checks() -> set[str]:
-    """``{check_<check>.py}`` for every non-proposed RuleEntry."""
-    return {f"check_{e.check}.py" for e in ALL_ENTRIES if e.check != "(proposed)"}
+    """``{check_<check>.py}`` for every non-proposed, non-CORE RuleEntry.
+
+    A ``core:<module>`` row resolves to an engine CORE module
+    (``tc_fitness.core_checks.<module>``), not a local ``check_*.py`` file —
+    so it names no local script and is excluded here."""
+    return {
+        f"check_{e.check}.py"
+        for e in ALL_ENTRIES
+        if e.check != "(proposed)" and not e.check.startswith("core:")
+    }
 
 
 def _cataloged_scripts() -> set[str]:
@@ -139,6 +147,11 @@ def _dangling_entries() -> list[tuple[str, str]]:
     missing: list[tuple[str, str]] = []
     for entry in ALL_ENTRIES:
         if entry.check == "(proposed)" or entry.status == "proposed":
+            continue
+        # A core:<module> row resolves to an engine CORE module, never a local
+        # check_<check>.py — the engine guarantees the module exists (the
+        # catalogue-consistency test pins core: resolution separately).
+        if entry.check.startswith("core:"):
             continue
         script = entry.script if entry.script else f"check_{entry.check}.py"
         if not (CHECKS_DIR / script).exists():
