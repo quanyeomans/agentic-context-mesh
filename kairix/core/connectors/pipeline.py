@@ -71,6 +71,18 @@ logger = logging.getLogger(__name__)
 # ``_process_batch`` to bump the right :class:`BatchResult` counter.
 _OUTCOME_PROCESSED = "processed"
 _OUTCOME_DEAD_LETTERED = "dead_lettered"
+_OUTCOME_DELETED = "deleted"
+
+# ChangeEvent.op values that mean "remove this item from the index"
+# (connector-architecture-refactor §3.3 primitive #1). ``deleted`` is a
+# hard removal; ``archived`` is a recoverable soft-delete; ``access_lost``
+# means the credential was revoked so the item is no longer re-fetchable.
+# All three retire the previously-indexed chunks via
+# :meth:`ChunkWriter.delete_by_source_uri` — re-indexing them (or leaving
+# them searchable) is the deletion-staleness bug this set fixes. The
+# ``ChangeEvent.op`` literal (protocols.py) does NOT include "cancelled";
+# connectors that observe a cancellation surface it as ``deleted``.
+_DELETE_OPS = frozenset({"deleted", "archived", "access_lost"})
 
 
 @dataclass
@@ -80,6 +92,7 @@ class _BatchTotals:
     processed: int = 0
     dead_lettered: int = 0
     poisoned_skipped: int = 0
+    deleted: int = 0
 
 
 @dataclass
@@ -88,11 +101,12 @@ class _ChunkAccumulator:
 
     processed: int = 0
     dead_lettered: int = 0
+    deleted: int = 0
     latest_modified_at: str | None = None
 
     @property
     def size(self) -> int:
-        return self.processed + self.dead_lettered
+        return self.processed + self.dead_lettered + self.deleted
 
     def record(self, outcome: str, modified_at: str) -> None:
         self.latest_modified_at = modified_at
@@ -100,10 +114,13 @@ class _ChunkAccumulator:
             self.processed += 1
         elif outcome == _OUTCOME_DEAD_LETTERED:
             self.dead_lettered += 1
+        elif outcome == _OUTCOME_DELETED:
+            self.deleted += 1
 
     def reset(self) -> None:
         self.processed = 0
         self.dead_lettered = 0
+        self.deleted = 0
         self.latest_modified_at = None
 
 
@@ -130,6 +147,16 @@ class BatchResult:
       drained. The partial cursor is committed; the next tick resumes
       from there. The operator's signal that a backlog is converging
       over many ticks.
+
+    Connector-architecture-refactor §3.3 primitive #1:
+
+    * ``deleted`` — count of items whose :class:`~kairix.core.protocols.ChangeEvent`
+      carried a delete-op (``deleted`` / ``archived`` / ``access_lost``)
+      and were retired from the index via
+      :meth:`ChunkWriter.delete_by_source_uri`. These items skipped
+      fetch / extract / upsert entirely, so they do NOT count toward
+      ``processed``; ``deleted`` is the operator's signal that
+      upstream removals are propagating instead of silently re-indexing.
     """
 
     processed: int
@@ -137,6 +164,7 @@ class BatchResult:
     poisoned_skipped: int
     skipped_low_disk: bool = False
     budget_yielded: bool = False
+    deleted: int = 0
 
 
 _BUDGET_EXHAUSTED_SENTINEL = "F66:budget_exhausted"
@@ -343,6 +371,7 @@ class ConnectorPipeline:
             dead_lettered=totals.dead_lettered,
             poisoned_skipped=totals.poisoned_skipped,
             budget_yielded=budget_yielded,
+            deleted=totals.deleted,
         )
 
     def _process_change(
@@ -386,6 +415,7 @@ class ConnectorPipeline:
         self._db.commit()
         totals.processed += chunk.processed
         totals.dead_lettered += chunk.dead_lettered
+        totals.deleted += chunk.deleted
         chunk.reset()
 
     def _process_item(
@@ -394,7 +424,24 @@ class ConnectorPipeline:
         extractor: Extractor,
         change: object,
     ) -> str:
-        """Process one :class:`ChangeEvent`; return ``"processed"`` or ``"dead_lettered"``.
+        """Process one :class:`ChangeEvent`; return the outcome tag.
+
+        Returns ``"processed"`` (flowed end-to-end through Bronze +
+        Silver + writer + sink), ``"dead_lettered"`` (fetch / extract
+        raised), or ``"deleted"`` (a delete-op event retired the item).
+
+        Connector-architecture-refactor §3.3 primitive #1 — delete
+        dispatch. When ``change.op`` is a delete-op
+        (``deleted`` / ``archived`` / ``access_lost``), the item's
+        previously-indexed chunks are removed via
+        :meth:`ChunkWriter.delete_by_source_uri` and fetch / extract /
+        upsert are skipped entirely. ``connector.source_link(item_id)``
+        is the same ``source_uri`` the chunks were written under (Silver
+        sets ``Chunk.source_uri = connector.source_link(item_id)`` on
+        the create / modify path below), so the delete targets exactly
+        those rows. Without this branch a deleted item is re-indexed
+        with stale content (if fetch still returns a payload) or
+        dead-lettered forever (if fetch 404s) — never removed.
 
         Per-item failures (fetch / extract raised) are recorded in
         dead_letter and absorbed — sibling items still process. Silver
@@ -416,6 +463,16 @@ class ConnectorPipeline:
         # across future ChangeEvent extensions.
         item_id = change.item_id  # type: ignore[attr-defined]  # F3-rationale: change is ChangeEvent from connector.list_changes; attr is on the dataclass.
         modified_at = change.modified_at  # type: ignore[attr-defined]  # F3-rationale: same as item_id above.
+        op = change.op  # type: ignore[attr-defined]  # F3-rationale: ChangeEvent.op literal from connector.list_changes; attr is on the dataclass.
+        if op in _DELETE_OPS:
+            # Delete-op: retire the item's prior chunks by the URI they
+            # were written under; skip fetch / extract / upsert. The
+            # delete is part of the per-batch transaction (same commit
+            # discipline as upsert) — it commits with the chunk in
+            # ``_commit_and_flush`` or rolls back with a failing chunk.
+            source_uri = connector.source_link(item_id)
+            self._chunk_writer.delete_by_source_uri(source_uri)
+            return _OUTCOME_DELETED
         try:
             raw = connector.fetch(item_id)
         except Exception as exc:
