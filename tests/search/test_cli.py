@@ -303,8 +303,8 @@ def test_main_exits_nonzero_when_search_output_has_error(
     # Sabotage: removing the `if out.error: sys.exit(1)` branch makes SystemExit
     # not fire and the pytest.raises block fails (no exception caught).
     #
-    # We trigger an error by passing scope=all-agents which raises
-    # NotImplementedError inside run_search (DefaultCollectionResolver).
+    # We trigger an error by passing scope=all-agents which surfaces an
+    # error inside run_search (the collection resolver path).
     main_module = __import__("kairix.core.search.cli", fromlist=["main"])
     with pytest.raises(SystemExit) as exc_info:
         main_module.main(["query", "--scope", "all-agents", "--agent", "shape"])

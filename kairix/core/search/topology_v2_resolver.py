@@ -4,12 +4,11 @@ GH #372 — when an agent calls kairix without specifying ``collections=``,
 return the superset of every collection the agent's scope_profile grants
 read access to.
 
-Today the legacy :class:`kairix.core.search.resolver.DefaultCollectionResolver`
-reads ``collections.shared[].in_default`` from ``kairix.config.yaml`` —
-entirely blind to ``topology_scope_profiles`` + ``topology_scope_entries``.
-The right primitive already exists:
-:class:`kairix.core.connectors.scope_profile_resolver.ScopeProfileResolver`.
-The wiring gap is what this Adapter closes.
+This is the canonical collection resolver. It reads
+``topology_scope_profiles`` + ``topology_scope_entries`` via the
+:class:`kairix.core.connectors.scope_profile_resolver.ScopeProfileResolver`
+primitive — rather than the retired legacy
+``collections.shared[].in_default`` default-scope model.
 
 Behaviour summary (mirrors the existing :class:`CollectionResolver` Protocol
 at :mod:`kairix.core.protocols`):
@@ -117,8 +116,7 @@ class TopologyV2CollectionResolver:
 
         ``extra_collections`` — appended verbatim to every non-None
         ``resolve()`` result. Preserves the operator-facing
-        ``KAIRIX_EXTRA_COLLECTIONS`` env-var contract that the legacy
-        ``DefaultCollectionResolver`` honoured before the
+        ``KAIRIX_EXTRA_COLLECTIONS`` env-var contract honoured before the
         ``topology_v2_collection_resolver`` flag retirement. The factory
         reads the env var at the boundary and passes the parsed list in
         here; nothing else in the v2 path knows about env vars.

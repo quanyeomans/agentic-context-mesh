@@ -30,17 +30,17 @@ Feature: Multi-path agent collections
     Then shape has exactly three collections
     And the collections are named "shape-0", "shape-1", and "shape-2"
 
-  Scenario: scope=agent returns the union of an agent's collections
+  Scenario: an agent's collection list is the union of its declared paths
     Given an agent named "shape" with paths
       | path                          |
       | /data/workspaces/shape        |
       | 04-Agent-Knowledge/shape      |
-    When I resolve scope=agent for "shape"
-    Then the resolver returns both of shape's synthetic collections
+    When I ask the registry for shape's collections
+    Then the registry returns both of shape's synthetic collections
 
-  Scenario: scope=all-agents dedupes shared collections across agents
+  Scenario: the cross-agent collection list dedupes shared collections
     Given two agents "shape" and "builder" sharing path "04-Agent-Knowledge/shared"
-    When I resolve scope=all-agents
+    When I ask the registry for all collections
     Then each unique synthetic collection appears exactly once
 
   Scenario: Legacy "collection" field still parses

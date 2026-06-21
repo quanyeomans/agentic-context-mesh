@@ -3,8 +3,14 @@
 Pins the **current** contract for ``resolve_retrieval_config``: the resolver
 no longer hardcodes a REFLIB_RETRIEVAL_CONFIG identity for the
 "reference-library" collection (#158). Instead, operators carry their own
-per-collection overrides in YAML, and the resolver merges them over the
-global config when the search is scoped to a single collection.
+per-collection overrides in their config, and the resolver merges them over
+the global config when the search is scoped to a single collection.
+
+Canonical-collapse (T3): the per-collection override now flows from the
+canonical topology collection's ``retrieval:`` block via the topology-backed
+producer ``kairix.core.factory.derive_collection_overrides``. The
+topology-backed scenario drives that producer directly so the override is
+proven to originate from a topology collection.
 
 These scenarios drive ``resolve_retrieval_config`` via its public injection
 seam (``deps=ResolveConfigDeps(config_fn, overrides_fn)``) — no
@@ -45,22 +51,60 @@ def _set_global_strategy(overrides_ctx: _OverridesCtx, strategy: str) -> None:
     overrides_ctx.global_strategy = strategy
 
 
+def _payload_from_datatable(datatable: list[list[str]]) -> dict[str, Any]:
+    """Cast a ``| retrieval_field | value |`` datatable into an override dict.
+
+    Ints stay ints; everything else stays a string (matches the typed YAML
+    shape the parser would carry through).
+    """
+    headers = datatable[0]
+    rows = datatable[1:]
+    payload: dict[str, Any] = {}
+    for field_name, raw_value in (dict(zip(headers, row, strict=True)).values() for row in rows):
+        try:
+            payload[field_name] = int(raw_value)
+        except ValueError:
+            payload[field_name] = raw_value
+    return payload
+
+
 @given(parsers.parse('the operator declares a per-collection override on "{collection}":'))
 def _set_collection_override(
     overrides_ctx: _OverridesCtx,
     collection: str,
     datatable: list[list[str]],
 ) -> None:
-    headers = datatable[0]
-    rows = datatable[1:]
-    payload: dict[str, Any] = {}
-    for field_name, raw_value in (dict(zip(headers, row, strict=True)).values() for row in rows):
-        # Cast the typed YAML values: ints stay ints, everything else stays str.
-        try:
-            payload[field_name] = int(raw_value)
-        except ValueError:
-            payload[field_name] = raw_value
-    overrides_ctx.overrides[collection] = payload
+    overrides_ctx.overrides[collection] = _payload_from_datatable(datatable)
+
+
+@given(parsers.parse('the topology declares a "retrieval" block on collection "{collection}":'))
+def _set_topology_override(
+    overrides_ctx: _OverridesCtx,
+    collection: str,
+    datatable: list[list[str]],
+) -> None:
+    """Source the override from the canonical topology producer.
+
+    Builds a ``topology_v2.collections[*].retrieval`` mapping and runs it
+    through ``derive_collection_overrides`` — so the resolved override is
+    proven to flow from the topology collection's ``retrieval:`` block, not
+    from an inline dict.
+    """
+    from kairix.core.factory import derive_collection_overrides
+
+    payload = _payload_from_datatable(datatable)
+    topology = {
+        "topology_v2": {
+            "collections": [
+                {
+                    "name": collection,
+                    "sources": [{"cc_pair": "obs-cp", "path_filter": "*"}],
+                    "retrieval": payload,
+                }
+            ]
+        }
+    }
+    overrides_ctx.overrides = derive_collection_overrides(mapping=topology)
 
 
 # ---------------------------------------------------------------------------

@@ -1,10 +1,15 @@
 """End-to-end integration test for multi-path agent collections (#115).
 
-Constructs a real ``ConfigDrivenAgentRegistry`` from YAML, wires it into a
-real ``DefaultCollectionResolver``, and verifies that scope resolution
-returns the correct multi-path collection lists. No fakes, no monkeypatch
-— the actual production parsing + resolution code path is exercised end
-to end.
+Constructs a real ``ConfigDrivenAgentRegistry`` from YAML and verifies
+that its collection-name resolution returns the correct multi-path
+collection lists. No fakes, no monkeypatch — the actual production
+parsing + registry resolution code path is exercised end to end.
+
+Canonical-collapse: the legacy ``DefaultCollectionResolver`` that wrapped
+these registry methods has been retired (the canonical resolver is
+``TopologyV2CollectionResolver``); these tests now assert directly against
+the live ``ConfigDrivenAgentRegistry`` surface (``collections_for`` /
+``all_collections``) that the resolver consumed.
 """
 
 from __future__ import annotations
@@ -16,8 +21,6 @@ import pytest
 import yaml
 
 from kairix.core.search.registry import parse_agent_registry
-from kairix.core.search.resolver import DefaultCollectionResolver
-from kairix.core.search.scope import Scope
 
 pytestmark = pytest.mark.integration
 
@@ -28,17 +31,16 @@ def _load_registry_from_yaml(yaml_text: str):
 
 @pytest.mark.integration
 def test_default_workspace_when_paths_omitted_resolves_correctly() -> None:
-    """End-to-end: YAML omits paths → resolver produces /data/workspaces/{name}-shaped collections."""
+    """End-to-end: YAML omits paths → registry produces a single
+    legacy-pattern collection name."""
     yaml_text = textwrap.dedent("""
         agents:
           - name: alice
             write_path: /data/workspaces/alice
     """)
     registry = _load_registry_from_yaml(yaml_text)
-    resolver = DefaultCollectionResolver(collections_config=None, agent_registry=registry)
 
-    cols = resolver.resolve("alice", Scope.AGENT)
-    assert cols is not None
+    cols = registry.collections_for("alice")
     assert len(cols) == 1
     # Synthetic name follows ``{agent}-memory`` legacy pattern when paths are omitted
     # (the parser falls back to ``default_pattern`` for that legacy scenario).
@@ -47,7 +49,7 @@ def test_default_workspace_when_paths_omitted_resolves_correctly() -> None:
 
 @pytest.mark.integration
 def test_three_path_tc_pattern_resolves_to_three_collections() -> None:
-    """End-to-end: TC-style three-path agent → resolver returns three synthetic names."""
+    """End-to-end: TC-style three-path agent → registry returns three synthetic names."""
     yaml_text = textwrap.dedent("""
         agents:
           - name: shape
@@ -58,15 +60,14 @@ def test_three_path_tc_pattern_resolves_to_three_collections() -> None:
             write_path: /data/workspaces/shape
     """)
     registry = _load_registry_from_yaml(yaml_text)
-    resolver = DefaultCollectionResolver(collections_config=None, agent_registry=registry)
 
-    cols = resolver.resolve("shape", Scope.AGENT)
+    cols = registry.collections_for("shape")
     assert cols == ["shape-0", "shape-1", "shape-2"]
 
 
 @pytest.mark.integration
 def test_all_agents_dedupes_shared_collections() -> None:
-    """End-to-end: scope=all-agents across two agents with a shared collection name dedupes."""
+    """End-to-end: all_collections() across two agents with a shared collection name dedupes."""
     yaml_text = textwrap.dedent("""
         agents:
           - name: shape
@@ -81,10 +82,8 @@ def test_all_agents_dedupes_shared_collections() -> None:
               - 04-Agent-Knowledge/shared
     """)
     registry = _load_registry_from_yaml(yaml_text)
-    resolver = DefaultCollectionResolver(collections_config=None, agent_registry=registry)
 
-    cols = resolver.resolve(None, Scope.ALL_AGENTS)
-    assert cols is not None
+    cols = registry.all_collections()
     # Each unique synthetic name appears exactly once
     assert len(cols) == len(set(cols)), f"duplicates in {cols}"
     # The shared legacy_collection_name appears exactly once
@@ -101,13 +100,12 @@ def test_legacy_collection_field_backwards_compat() -> None:
             write_path: 04-Agent-Knowledge/legacy
     """)
     registry = _load_registry_from_yaml(yaml_text)
-    resolver = DefaultCollectionResolver(collections_config=None, agent_registry=registry)
 
     # Legacy single-collection access still works
     assert registry.collection_for("legacy") == "legacy-memory"
 
-    # And resolver produces the expected name
-    cols = resolver.resolve("legacy", Scope.AGENT)
+    # And the registry produces the expected collection name
+    cols = registry.collections_for("legacy")
     assert cols == ["legacy-memory"]
 
 
@@ -144,7 +142,7 @@ def test_registry_drops_legacy_name_clashing_with_auto_injected_collection() -> 
     Replaces the historical resolver-side carve-out (deleted 2026-05-07) —
     the protection is now structural (name-collision against runtime-created
     collections) rather than policy (which collections appear in default
-    scope is operator-controlled via ``in_default``).
+    scope is operator-controlled via the topology scope profiles).
     """
     yaml_text = textwrap.dedent("""
         agents:
@@ -154,10 +152,8 @@ def test_registry_drops_legacy_name_clashing_with_auto_injected_collection() -> 
               - /data/workspaces/rogue
     """)
     registry = _load_registry_from_yaml(yaml_text)
-    resolver = DefaultCollectionResolver(collections_config=None, agent_registry=registry)
 
-    cols = resolver.resolve("rogue", Scope.AGENT)
-    assert cols is not None
+    cols = registry.collections_for("rogue")
     assert "reference-library" not in cols
     # The agent gets the synthetic naming since the legacy override was dropped.
     assert cols == ["rogue-0"]

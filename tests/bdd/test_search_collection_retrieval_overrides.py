@@ -31,3 +31,12 @@ def test_unconfigured_collection_uses_global() -> None:
 )
 def test_multi_collection_uses_global() -> None:
     """Body populated by @scenario from the .feature file."""
+
+
+@pytest.mark.bdd
+@scenario(
+    "features/search_collection_retrieval_overrides.feature",
+    "A topology collection's retrieval block drives the per-collection override",
+)
+def test_topology_collection_override_drives_resolution() -> None:
+    """Body populated by @scenario from the .feature file."""

@@ -5,7 +5,7 @@ recommendation-2026-04-16) needs kairix to know which agents exist for
 two operations the historical code couldn't do:
 
   - Resolve scope=all-agents / scope=everything to a concrete list of
-    collection names (DefaultCollectionResolver consults the registry).
+    collection names (the collection resolver consults the registry).
   - Validate that an embed-pipeline write under a path tagged for one
     agent is being performed by that agent (write isolation).
 
@@ -204,7 +204,7 @@ class ConfigDrivenAgentRegistry:
     def all_collections(self) -> list[str]:
         """Every agent's collection names, deduped, in registration order.
 
-        Used by ``DefaultCollectionResolver`` for ``scope=all-agents`` and
+        Consumed by the collection resolver for ``scope=all-agents`` and
         ``scope=everything``. The dedupe matters when multiple agents share
         a path (e.g. ``04-Agent-Knowledge/shared``).
         """
