@@ -1,6 +1,14 @@
 # `kairix probe-config` JSON report schema
 
-> **Status**: proposed (Wave 1 SK-7; instrumentation lands in Wave 2 IM-9).
+> **Status**: Implemented. Shipped as `kairix probe-config`
+> (`kairix/quality/probe/config_report.py` — the report dataclass,
+> `config_runner.py` — the cold/warm/fan-out/repeated runner, and
+> `config_cli.py` — the CLI wrapper wired into `kairix/cli.py`). The
+> SK-7 strawman thresholds and tuning heuristics were calibrated and
+> locked into module constants in `config_runner.py` (the former
+> "Wave 2 IM-9" follow-up); see [Status thresholds](#status-thresholds)
+> and [Tuning-recommendation heuristics](#tuning-recommendation-heuristics)
+> for the as-shipped values.
 > Companion to [`provider-plugin-architecture.md`](provider-plugin-architecture.md).
 > Defines the JSON shape that an end user gets from
 > `kairix probe-config` after they've configured their provider — a
@@ -56,6 +64,8 @@ stage-timing variation, which is provider-agnostic by contract.
 
 ```json
 {
+  "schema_version": "1.0",
+  "kairix_version": "2026.6.18",
   "status": "healthy",
   "provider": {
     "name": "azure_foundry",
@@ -81,6 +91,7 @@ stage-timing variation, which is provider-agnostic by contract.
     "response_parse": 1.8
   },
   "tuning_recommendations": [],
+  "warnings": [],
   "exit_code": 0
 }
 ```
@@ -89,6 +100,8 @@ stage-timing variation, which is provider-agnostic by contract.
 
 ```json
 {
+  "schema_version": "1.0",
+  "kairix_version": "2026.6.18",
   "status": "degraded",
   "provider": {
     "name": "openai",
@@ -104,10 +117,10 @@ stage-timing variation, which is provider-agnostic by contract.
   "transport": {
     "coalesce_ratio": 0.78,
     "cache_hit_rate": 0.02,
-    "pool_acquire_p50_ms": 14.3
+    "pool_acquire_p50_ms": 64.0
   },
   "stage_latency_ms": {
-    "pool_acquire": 14.3,
+    "pool_acquire": 64.0,
     "coalesce_wait": 92.0,
     "cache_lookup": 0.4,
     "http_roundtrip": 1980.0,
@@ -118,12 +131,12 @@ stage-timing variation, which is provider-agnostic by contract.
       "field": "pool_size",
       "current": 4,
       "suggested": 16,
-      "rationale": "pool_acquire_p50_ms is 14.3 ms (target <2 ms); pool is the bottleneck under your concurrency"
+      "rationale": "pool_acquire_p50_ms is 64.0 ms (target <50 ms); pool is the bottleneck under your concurrency"
     },
     {
       "field": "coalesce_window_ms",
       "current": 50,
-      "suggested": 20,
+      "suggested": 25,
       "rationale": "coalesce_ratio is 0.78 — most requests are waiting for batchmates that never arrive"
     },
     {
@@ -133,11 +146,27 @@ stage-timing variation, which is provider-agnostic by contract.
       "rationale": "cache_hit_rate is 0.02 under a repeated-query workload; the cache is undersized"
     }
   ],
+  "warnings": [],
   "exit_code": 1
 }
 ```
 
 ## Field definitions
+
+### `schema_version` (string, required)
+
+The report schema version (currently `"1.0"`). Bumped only on a
+backward-incompatible field rename or removal; adding a new optional
+field keeps the same version. A reader can branch on this before
+parsing the rest of the report. Sourced from `SCHEMA_VERSION` in
+`config_report.py`.
+
+### `kairix_version` (string, required)
+
+The installed kairix package version that produced the report (e.g.
+`"2026.6.18"`). Lets a support engineer match a shared report to a
+release. Falls back to `"0.0.0"` when package metadata is unavailable
+(an editable checkout that was never `pip install`-ed).
 
 ### `status` (string, required)
 
@@ -248,29 +277,53 @@ without parsing the JSON.
 
 ## Status thresholds
 
-> **TODO (Wave 2 IM-9)** — the thresholds below are the SK-7 strawman;
-> IM-9 will calibrate them against real probe runs and may move them.
-> All thresholds live in one config table when IM-9 lands so a future
-> change is a one-line edit, not a refactor.
+> **As-shipped.** These are the calibrated values locked into module
+> constants in `config_runner.py` (the former "Wave 2 IM-9" follow-up).
+> The two warm-p95 thresholds are also overridable per-invocation via
+> `--degraded-p95-ms` / `--critical-p95-ms` so an operator can tune the
+> verdict to their endpoint distance without a code change; the
+> defaults below are `WARM_P95_DEGRADED_MS` / `WARM_P95_CRITICAL_MS`.
 
 | Verdict | Trigger (any one) |
 |---|---|
-| `unreachable` | every probe call errored, or the configured provider's `healthcheck()` returned a failure |
-| `degraded` | `warm_p95_ms > 1000`, OR `pool_acquire_p50_ms > 5`, OR `coalesce_ratio > 0.7` under a workload the probe classifies as solo, OR `cache_hit_rate < 0.05` under the repeated-query phase |
+| `unreachable` | the configured provider's `healthcheck()` returned a failure (or itself raised), OR every probe call errored |
+| `degraded` | `warm_p95_ms > 1000` (`WARM_P95_DEGRADED_MS`). Above `5000` (`WARM_P95_CRITICAL_MS`) the verdict stays `degraded` but a critical warning is appended to `warnings`. |
 | `healthy` | none of the above |
+
+The verdict is decided by the warm-p95 latency tail alone. The
+`pool_acquire_p50_ms`, `coalesce_ratio`, and `cache_hit_rate` metrics
+do **not** move the `status` field — they drive
+[tuning recommendations](#tuning-recommendation-heuristics), not the
+top-level verdict. A run can therefore be `healthy` and still carry
+recommendations (the endpoint is fast enough, but a config knob would
+make it faster). When some — but not all — probe calls error, the
+verdict reflects the surviving samples and an "endpoint is intermittent"
+note is added to `warnings`.
 
 ## Tuning-recommendation heuristics
 
-> **TODO (Wave 2 IM-9)** — these heuristics are the SK-7 strawman.
-> IM-9 will lock the trigger metrics and the `suggested` formulas into
-> a single dispatch table (one row per (`field`, trigger) pair) so the
-> ruleset is auditable and overridable.
+> **As-shipped.** These triggers and `suggested` formulas are locked
+> into module constants in `config_runner.py` (`POOL_ACQUIRE_RECOMMEND_MS`,
+> `COALESCE_RATIO_RECOMMEND`, `CACHE_HIT_RATE_RECOMMEND`) and applied by
+> `_build_recommendations`. The recommendations are emitted in the
+> order below (pool → coalesce → cache) so an operator addresses the
+> highest-impact lever first.
 
 | Recommendation `field` | Trigger | `suggested` formula |
 |---|---|---|
-| `pool_size` | `pool_acquire_p50_ms > 5` | `min(current * 4, 32)` |
+| `pool_size` | `pool_acquire_p50_ms > 50` | `min(current * 4, 32)` |
 | `coalesce_window_ms` | `coalesce_ratio > 0.7` under solo-workload phase | `max(current // 2, 5)` |
-| `cache_max_entries` | `cache_hit_rate < 0.05` under repeated-query phase | `current * 8` |
+| `cache_max_entries` | `0 < cache_hit_rate < 0.05` under repeated-query phase | `current * 8` |
+
+The `pool_size` trigger calibrated to `> 50 ms` rather than the
+original SK-7 `> 5 ms` strawman: a 5 ms floor sits below the noise of
+an in-process run, whereas 50 ms is the actionable boundary where pool
+exhaustion is the dominant cost. The `current` value in each
+recommendation comes from the transport snapshot when it reports one,
+falling back to the module defaults (`DEFAULT_POOL_SIZE = 4`,
+`DEFAULT_COALESCE_WINDOW_MS = 50`, `DEFAULT_CACHE_MAX_ENTRIES = 1024`) —
+which is why the example degraded report above shows `current: 4 / 50 /
+1024`.
 
 Heuristics are deliberately coarse: the goal of probe-config is to
 nudge the operator toward a sensible region, not to find the optimum.

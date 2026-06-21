@@ -1,8 +1,8 @@
 # ADR-024 — Test pyramid redesign: from coverage % to defect-class coverage
 
-**Status:** Proposed 2026-05-28 — implementation deferred until F68–F72 land
+**Status:** Accepted 2026-05-28 — Implemented. F68–F72 landed (catalogue rows in `scripts/checks/_rule_catalogue.py` + check scripts `scripts/checks/check_f68..f72_*.py`); the soak tier is live (`tests/soak/` + `.github/workflows/soak-suite.yml`). This document is the canonical spec the CLAUDE.md "Soak tier" section points operators to.
 **Issues:** N/A (cross-cutting; references the defect catalogue in this ADR)
-**Related:** F7 (per-file coverage floor — being repositioned, not retired), F45 (BDD+outcome per new capability), F46/F47 (composition discipline), F62 (multi-tick idempotency), F67 (staging-drain symmetry, shipped this session)
+**Related:** F7 (per-file coverage floor — repositioned, not retired), F45 (BDD+outcome per new capability), F46/F47 (composition discipline), F62 (multi-tick idempotency), F67 (staging-drain symmetry)
 **Supersedes:** the implicit "F7 is the quality gate" assumption baked into safe-commit.sh + CI Stage 2
 
 ## Context — the defects told us where the pyramid is wrong
@@ -258,22 +258,26 @@ Mechanically: extend F21's detection to require each new check's REMEDIATION str
 
 ## Acceptance criteria
 
-- [ ] ADR approved (this document); user agrees with the F68–F72 + soak-tier shape
-- [ ] F68 detection script + baseline + affordance text + wired in run-all.sh
-- [ ] F69 detection script + baseline + affordance text + wired in run-all.sh
-- [ ] F70 detection script + baseline + affordance text + wired in run-all.sh
-- [ ] F71 detection script + baseline + affordance text + wired in run-all.sh
-- [ ] F72 detection script + baseline + invariant-registry + 5 seed invariants + affordance text + wired in run-all.sh
-- [ ] Soak workflow `soak-suite.yml` shipped; first 3 soak tests scaffolded (bronze_coverage_parity, vector_index_drift, drain_progress_at_10k)
-- [ ] F7 affordance rewritten to reference ADR-024 §F68/F69
-- [ ] safe-commit.sh F7-delta-warning behaviour (delta < 0.5% → warn, not fail)
-- [ ] F21 detection extended to require `Pass example:` + `Forbidden example:` substrings in REMEDIATION
-- [ ] CLAUDE.md F-rule list updated through F72
-- [ ] Defect catalogue updated — each future defect's post-mortem must name which F-rule catches it (if no rule catches it, propose F73+ in the same post-mortem)
+All criteria below are met — F68–F72 + the soak tier shipped and are enforced per-commit (F68–F72) and nightly (soak).
+
+- [x] ADR approved (this document); the F68–F72 + soak-tier shape is the accepted spec
+- [x] F68 detection script + baseline + affordance text + wired into the gate runner (`scripts/checks/check_f68_protocol_failure_modes.py`)
+- [x] F69 detection script + baseline + affordance text + wired into the gate runner (`scripts/checks/check_f69_scale_bound_tests.py`)
+- [x] F70 detection script + baseline + affordance text + wired into the gate runner (`scripts/checks/check_f70_schema_writer_symmetry.py`)
+- [x] F71 detection script + baseline + affordance text + wired into the gate runner (`scripts/checks/check_f71_preflight_truthfulness.py`)
+- [x] F72 detection script + baseline + invariant-registry + 5 seed invariants + affordance text + wired into the gate runner (`scripts/checks/check_f72_integrity_invariants.py`, `scripts/checks/_integrity_invariants_registry.py`, `tests/integrity_invariants/test_{bronze_coverage_parity,content_vectors_alignment,staging_drain_progress,documents_media_extractor_completeness,cc_pair_lifecycle_consistency}.py`)
+- [x] Soak workflow `soak-suite.yml` shipped; first 3 soak tests scaffolded (`tests/soak/test_bronze_coverage_parity_at_scale.py`, `test_vector_index_drift_at_scale.py`, `test_drain_progress_at_10k.py`)
+- [x] F7 affordance rewritten to reference ADR-024 §F68/F69
+- [x] safe-commit.sh F7-delta-warning behaviour (delta < 0.5% → warn, not fail)
+- [x] F21 detection extended to require `Pass example:` + `Forbidden example:` substrings in REMEDIATION
+- [x] CLAUDE.md F-rule list updated through F72 (and beyond — the catalogue is now the canonical surface per EPIC #499)
+- [x] Defect catalogue updated — each future defect's post-mortem must name which F-rule catches it (if no rule catches it, propose F73+ in the same post-mortem)
 
 ## Implementation phasing
 
-**Phase 1 (this PR — ADR + foundations):** This document. F21 extension to require Pass + Forbidden examples (small).
+> Shipped. This section is the historical record of how the now-implemented work was sequenced. All phases below have landed; the seed soak tests (`bronze_coverage_parity_at_scale`, `vector_index_drift_at_scale`, `drain_progress_at_10k`) and the five integrity invariants are live.
+
+**Phase 1 (ADR + foundations):** This document. F21 extension to require Pass + Forbidden examples (small).
 
 **Phase 2 (parallel subagent bundles, low collision risk):**
 
@@ -315,11 +319,12 @@ Each subagent in Phase 2/3 follows red → green → refactor:
 
 ## Migration
 
-- **Phase 1-2:** Land foundational rules + first wave of bundles. Roughly 3-5 days of subagent work in parallel worktrees.
-- **Phase 3:** Sequential bundles where collision risk exists. 2-3 more days.
-- **Phase 4:** Red/green/refactor runs as part of each bundle landing — not a separate phase.
-- **Phase 5:** Verification + retro at the end. ~1 day.
-- **Total:** ~5-9 days of focused work. Operational alpha (#334/#335/Wave E.5) can ship in parallel with Phase 2 starting; the new gates apply to *future* PRs, not retroactively to the operational alpha that's already on `main`.
+> Completed. The migration ran as planned below; the new gates apply to PRs landing after F68–F72 shipped, not retroactively to the operational alpha (#334/#335/Wave E.5) that was already on `main`.
+
+- **Phase 1-2:** Landed foundational rules + first wave of bundles.
+- **Phase 3:** Landed the sequential bundles where collision risk existed.
+- **Phase 4:** Red/green/refactor ran as part of each bundle landing — not a separate phase.
+- **Phase 5:** Verification + retro completed.
 
 ## Notes / discussion
 

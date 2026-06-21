@@ -1,18 +1,18 @@
 # Connector + ingestion architecture — Bronze/Silver plugins, with Python-discipline locks
 
-> **Status**: proposed (awaiting orchestrator-led implementation).
-> Names the connector + extractor + plugin architecture for Wave 1, defines the separation of concerns and Protocol seams between layers, and encodes the engineering patterns + fitness functions that close the gap between "Python by default" (per kairix-pro `ADR-019-implementation-language-strategy`) and the strong-typing / encapsulation properties needed for a wide ingest surface that grows without refactoring.
+> **Status**: Implemented. The connector + ingestion framework shipped across Waves 0–5 (see §10 wave plan) and is mechanically enforced by F34–F44 (catalogued in `scripts/checks/_rule_catalogue.py`, run per-commit via pre-commit + `scripts/safe-commit.sh` + CI Stage 0). The forward evolution of this framework — canonical-topology collapse and per-connector resilience hardening — is tracked in `connector-architecture-refactor.md`.
+> Names the connector + extractor + plugin architecture, defines the separation of concerns and Protocol seams between layers, and encodes the engineering patterns + fitness functions that close the gap between "Python by default" (the project's language strategy) and the strong-typing / encapsulation properties needed for a wide ingest surface that grows without refactoring.
 >
-> Companion to: `provider-plugin-architecture.md` (the precedent shape this document deliberately mirrors), `test-discipline-hardening.md` (the Wave 0 lock-in this implementation rides on — F45..F49 + `e2e_db` fixture + CI Stage 4.5), `feature-flag-architecture.md` (the cutover pattern that gates IM-6 and Wave 5+), `fact-layer.md`, `performance-testing-approach.md`, and the kairix-pro repo's `ADR-017` (two-scope architecture), `ADR-018` (storage tiering), `ADR-019` (language strategy), `ADR-020` (engagement-container destruction unit).
+> Companion to: `provider-plugin-architecture.md` (the precedent shape this document deliberately mirrors), `test-discipline-hardening.md` (the Wave 0 lock-in this implementation rides on — F45..F49 + `e2e_db` fixture + CI Stage 4.5), `feature-flag-architecture.md` (the cutover pattern that gated IM-6 and the flag-gated connectors), `streaming-bronze-plan.md` (the streaming-only bronze rollout that retired the filesystem blob store), `connector-architecture-refactor.md` (the canonical-topology + resilience-hardening evolution), `fact-layer.md`, and `ADR-018-dlt-connector-framework.md`.
 
 ## 1. Context and forcing functions
 
-Wave 1 of the kairix-pro roadmap (`Roadmap-Waves/Wave-1-Connectors`) demands:
+The connector framework was built to satisfy these requirements (all shipped — see §10):
 
 - A pluggable `SourceConnector` Protocol with first-party Obsidian + SharePoint implementations.
-- Mixed-media extraction (PDF, Office, OCR) per KFEAT-012 — originals preserved, derivatives produced.
-- Entity-signal emission alongside chunks, per KFEAT-005 — the Curator consumes signals downstream.
-- A "Plain Python, no LLM" connector path, with the LLM-driven work (fact extraction, Curator enrichment) staying on existing surfaces.
+- Mixed-media extraction (PDF, Office, OCR) — originals preserved, derivatives produced.
+- Entity-signal emission alongside chunks — the entity-graph stage consumes signals downstream.
+- A "Plain Python, no LLM" connector path, with the LLM-driven work (fact extraction, entity enrichment) staying on existing surfaces.
 - Worker robustness: persistent cursor, per-batch transaction, dead-letter, tombstones on source delete.
 - Schema additions that travel source metadata with chunks (`source_uri`, `source_modified_at`, `sensitivity`, `source_page`).
 
@@ -29,7 +29,10 @@ kairix/
                                       SourceConnector, Extractor, BronzeStore,
                                       SilverProcessor, EntityGraphSink
     connectors/                    ← orchestration (Plain Python; no LLM)
-      bronze.py                    ← BronzeStore impl: filesystem blob + SQLite pointer
+      streaming_bronze.py          ← BronzeStore impl: metadata-only bronze (no raw-byte blobs;
+                                      re-extract re-fetches via connector.fetch). Replaced the
+                                      former filesystem-blob FilesystemBronzeStore — see
+                                      streaming-bronze-plan.md
       silver.py                    ← SilverProcessor impl: chunking + signal extraction
       pipeline.py                  ← list_changes → fetch → bronze → silver → index → advance
       cursor_store.py              ← connector_cursors row management
@@ -40,9 +43,9 @@ kairix/
     _base.py                       ← SourceConnector Protocol + ConnectorRegistry Protocol
     obsidian/                      ← watchdog + periodic full-scan reconciliation
     sharepoint/                    ← Microsoft Graph delta query
-    dex_crm/                       ← KFEAT-005 P1-5 (CRM Seed)
-    m365_email_headers/            ← KFEAT-005 P1-6 (signals only, no body — per pro ADR-004)
-    m365_calendar/                 ← KFEAT-005 P1-7
+    dex_crm/                       ← CRM seed connector (flag-gated)
+    m365_email_headers/            ← email signals only, no body (flag-gated)
+    m365_calendar/                 ← calendar connector (flag-gated)
     # future: notion/, github/, confluence/, slack/, teams_transcripts/
 
   extractors/                      ← format-specific bytes-to-ExtractedDocument
@@ -51,7 +54,7 @@ kairix/
     pdf_fallback/                  ← pdfplumber for tables markitdown loses
     ocr/                           ← Pillow + opencv-headless + Tesseract; PaddleOCR opt-in
     office/                        ← python-pptx / python-docx / openpyxl (structure-aware)
-    vision/                        ← KFEAT-012 Phase 3; budget-gated
+    vision/                        ← vision-enhanced extraction (deferred); budget-gated
     passthrough/                   ← .md → .md no-op (Obsidian)
 ```
 
@@ -99,14 +102,21 @@ class Extractor(Protocol):
 
 
 class BronzeStore(Protocol):
-    """Raw-bytes-as-fetched persistence. Filesystem-with-pointer (ADR-018)."""
+    """Bronze-tier persistence of fetched artefacts. The shipped implementation is
+    StreamingBronzeStore: it records a metadata-only bronze_records row
+    (source_name, item_id, mime, fetched_at, content_hash) without persisting raw
+    bytes to disk. The re-extract recovery path re-fetches bytes via
+    connector.fetch(item_id); read() raises BronzeNotPersistedError. This replaced
+    the original FilesystemBronzeStore (filesystem blob + SQLite pointer), which the
+    SharePoint dogfood showed was unsustainable (~13 MB/item on disk). See
+    streaming-bronze-plan.md."""
     def write(self, source_name: str, item_id: str, raw: bytes, mime: MimeType) -> BronzeRef: ...
     def read(self, ref: BronzeRef) -> tuple[bytes, MimeType]: ...
     def replay(self, source_name: str, since: datetime | None = None) -> Iterator[BronzeRef]: ...
 
 
 class SilverProcessor(Protocol):
-    """Chunking + entity-signal extraction. No LLM (per KFEAT-005 'Plain Python')."""
+    """Chunking + entity-signal extraction. No LLM (the 'Plain Python' connector path)."""
     def process(self, raw: BronzeRef, extracted: ExtractedDocument,
                 source_uri: str, source_modified_at: str,
                 sensitivity: Sensitivity) -> SilverOutput: ...
@@ -175,16 +185,16 @@ No `dict[str, Any]` returns from public Protocol methods. No `list[dict]`. The b
 
 ## 4. The Bronze/Silver split — and why the connector Protocol stays narrow
 
-KFEAT-005's brief puts both `write_bronze` and `process_silver` *inside* the connector Protocol. This document deliberately keeps the `SourceConnector` Protocol narrow (`list_changes` / `fetch` / `source_link` / `sensitivity_for`) and lifts Bronze and Silver to shared infrastructure under `kairix/core/connectors/`.
+An alternative considered (and rejected) was putting both `write_bronze` and `process_silver` *inside* the connector Protocol. This document deliberately keeps the `SourceConnector` Protocol narrow (`list_changes` / `fetch` / `source_link` / `sensitivity_for`) and lifts Bronze and Silver to shared infrastructure under `kairix/core/connectors/`.
 
-**Reason**: putting Silver inside the connector means every plugin re-implements chunking, image-extraction handoff, entity-signal extraction. Fitness functions that say "no cross-connector imports" then force chunking duplication. Lifting Silver to shared infrastructure preserves both the Plain-Python intent of KFEAT-005 *and* the enforceable layer separation.
+**Reason**: putting Silver inside the connector means every plugin re-implements chunking, image-extraction handoff, entity-signal extraction. Fitness functions that say "no cross-connector imports" then force chunking duplication. Lifting Silver to shared infrastructure preserves both the Plain-Python intent of the connector path *and* the enforceable layer separation.
 
-Concretely, the Wave-1 pipeline runs:
+Concretely, the pipeline runs:
 
 ```
 for change in connector.list_changes(cursor):                  # per-source
     raw = connector.fetch(change.item_id)                      # per-source
-    ref = bronze.write(connector.name, change.item_id, raw)    # core/connectors
+    ref = bronze.write(connector.name, change.item_id, raw)    # core/connectors (streaming: metadata-only row, no blob)
     extractor = registry.resolve(raw.mime, raw.bytes[:8])      # extractors registry
     doc = extractor.extract(raw.raw, raw.mime)
     if not extractor.quality_ok(doc):
@@ -293,7 +303,7 @@ This section is the heart of the document. It names each material Python weaknes
 | **F41** | Every plugin carries `py.typed`, mypy-strict-clean, zero unjustified `type: ignore` | (new — strictness at plugin boundary) |
 | **F42** | Public Protocol returns are frozen dataclasses or tuples of them; never `dict`/`list[dict]` | (new — typed boundary) |
 | **F43** | Every plugin has `tests/contracts/test_<plugin>_protocol.py` exercising canonical fake + real impl | F30 |
-| **F44** | Engagement-scope code cannot import firm-scope storage clients (`psycopg`, `asyncpg`, …) | (new — pro ADR-017 boundary) |
+| **F44** | Engagement-scope code cannot import firm-scope storage clients (`psycopg`, `asyncpg`, …) | (new — two-scope boundary, see `connector-scope-topology/ADR.md`) |
 
 All follow the F21 action-marked-failure template (`fix:` / `next:` / `run:`), have a per-rule baseline file in `.architecture/baseline/`, and wire into pre-commit + `scripts/safe-commit.sh` + CI Stage 0. Pre-existing violations are grandfathered; net-new violations block.
 
@@ -364,9 +374,11 @@ CREATE TABLE connector_deadletter (
 CREATE TABLE bronze_records (
     source_name TEXT NOT NULL,
     item_id TEXT NOT NULL,
-    raw_path TEXT NOT NULL,        -- relative to paths.bronze_root()
+    raw_path TEXT NOT NULL,        -- streaming bronze writes a sentinel here (no blob on disk);
+                                   -- BronzeRef.raw_path is None for streaming rows
     mime TEXT NOT NULL,
     fetched_at TEXT NOT NULL,
+    content_hash TEXT,             -- sha256 of fetched bytes; lets re-extract detect drift
     PRIMARY KEY (source_name, item_id)
 );
 
@@ -383,7 +395,7 @@ CREATE TABLE entity_signals (
 );
 ```
 
-Bronze blob bytes go to `.kairix/bronze/<source>/<hash>` on the filesystem. Atomic with cursor advance via fsync-then-commit ordering inside the per-batch transaction.
+No blob bytes are persisted: streaming bronze records the metadata row only and re-fetches via `connector.fetch(item_id)` on the re-extract path (see `streaming-bronze-plan.md`). The bronze write is atomic with cursor advance inside the per-batch SQLite transaction. (The original `FilesystemBronzeStore` wrote blobs to `.kairix/bronze/<source>/<hash>`; the SharePoint dogfood — ~13 MB/item — showed that was unsustainable, and `StreamingBronzeStore` replaced it.)
 
 ## 8. Plugin discovery — entry points
 
@@ -423,10 +435,10 @@ connectors:
 extractors:
   default: markitdown
   escalate_chain: [pdf_fallback, ocr]
-  vision_enabled: false                   # KFEAT-012 Phase 3 — off in Wave 1
+  vision_enabled: false                   # vision-enhanced extraction — deferred, off by default
 ```
 
-Third parties ship a separate pip distribution declaring the same entry-point group. `pip install kairix-connector-foo` + `connectors: [foo]` works with zero kairix code change. **Third-party plugin sandboxing** is committed to via WASM/Extism (per kairix-pro `ADR-019`) but not built in Wave 1 — Wave 1 ships first-party only.
+Third parties ship a separate pip distribution declaring the same entry-point group. `pip install kairix-connector-foo` + `connectors: [foo]` works with zero kairix code change. **Third-party plugin sandboxing** (WASM/Extism) is a future direction; the shipped surface is first-party only.
 
 ## 9. BDD coverage matrix
 
@@ -445,23 +457,23 @@ Mirrors the `provider-plugin-architecture.md` Wave 0/1/2/3 cadence; each wave a 
 
 | Wave | Items | Parallel? | Depends on |
 |---|---|---|---|
-| **0 (ADR + arming) — DONE 2026-05-22** | This document; F34–F44 check scripts with empty (or seeded) baselines; CLAUDE.md edits; fitness-functions.md canonical entries. Landed in commits `acf89f81..6f8359c2` plus this doc's earlier commits. F41 + F43 baselines seeded at 7 entries each (existing provider plugins); F49 will shrink them as plugins gain `py.typed` + contract tests. All other F34–F44 baselines empty (vacuous-green; armed for Wave 1 surfaces). | foreground | kairix-pro ADRs 017/018/019/020 |
+| **0 (ADR + arming) — DONE 2026-05-22** | This document; F34–F44 check scripts with empty (or seeded) baselines; CLAUDE.md edits; fitness-functions.md canonical entries. Landed in commits `acf89f81..6f8359c2` plus this doc's earlier commits. F41 + F43 baselines seeded at 7 entries each (existing provider plugins); F49 will shrink them as plugins gain `py.typed` + contract tests. All other F34–F44 baselines empty (vacuous-green; armed for Wave 1 surfaces). | foreground | — |
 | **1 (scaffold) — DONE 2026-05-23** | SC-1 `kairix/core/connectors/` skeleton + Protocols (commit `3e12f236`) · SC-2 `kairix/connectors/_base.py` + entry-points (`da625018`) · SC-3 `kairix/extractors/_base.py` + entry-points (`41b22646`) · SC-4 schema migration v1→v2 with 6 new tables + 5 new columns on `documents` (`27e4f73f`) · SC-5 BDD feature stubs (`8bcae8b5`) · SC-6 worker `_default_connector_sync` seam (`d8b775c3`) · placeholder→canonical swap (`9eda46fb`). Decision 1 ratified: EntityGraphSink stages to SQLite `entity_signals`; async Neo4j push in a separate worker job (out of Wave 2 scope). F34–F44 already armed in connector-Wave-0 (separate from this Wave 1). | yes | Wave 0 |
-| **2 (Obsidian end-to-end) — IM-1..IM-5 DONE 2026-05-23; IM-6 IN SOAK** | IM-1 CursorStore + DeadLetterStore impls with caller-owned-commit atomicity (`77667c06`) · IM-2 ConnectorPipeline.run_batch + FilesystemBronzeStore + DefaultSilverProcessor + registry iter_* (`d954a053`) · IM-3 worker `_default_connector_sync` + `ConnectorSyncDeps` + `_SqliteChunkWriter`/`_SqliteEntityGraphSink` (`26ebc0c5`) · IM-4 passthrough + markitdown extractors + entry-points + BDD (`286ab5bb`) · IM-5 Obsidian connector with watchdog + reconciliation (`b6c23b58`). **IM-6**: alpha `v2026.5.23a1` deployed to dogfood VM 2026-05-23 05:00 UTC; `obsidian_connector_primary` flipped to `true` in operator overlay 05:00 UTC; worker container restarted; both containers report `effective=true source=config`. Pre-flip state digest (against new image, flag-off): 15119 docs / 17091 content rows / 64616 vectors / 0 entity_signals / 0 deadletter. Soak window in progress (24h minimum per `feature-flag-architecture.md` §4.2); post-flip diff + promote-or-rollback decision at 2026-05-24 05:00 UTC+. | yes | Wave 1 |
+| **2 (Obsidian end-to-end) — DONE 2026-05-24** | IM-1 CursorStore + DeadLetterStore impls with caller-owned-commit atomicity (`77667c06`) · IM-2 ConnectorPipeline.run_batch + bronze store + DefaultSilverProcessor + registry iter_* (`d954a053`; the original `FilesystemBronzeStore` shipped here was later replaced by `StreamingBronzeStore` — see `streaming-bronze-plan.md`) · IM-3 worker `_default_connector_sync` + `ConnectorSyncDeps` + `_SqliteChunkWriter`/`_SqliteEntityGraphSink` (`26ebc0c5`) · IM-4 passthrough + markitdown extractors + entry-points + BDD (`286ab5bb`) · IM-5 Obsidian connector with watchdog + reconciliation (`b6c23b58`). **IM-6** (DocumentScanner retirement via `obsidian_connector_primary`): cutover ran per `feature-flag-architecture.md` §4.2 (baseline → flip → 24h+ soak → post-flip gates); the Obsidian connector promoted to primary. | yes | Wave 1 |
 | **3 (PDF mixed-media) — DONE 2026-05-23** | MM-1 pdfplumber fallback extractor (`a0fd9147`); MM-2 OCR extractor with Tesseract + pre-processing chain (deskew/binarise/orientation/layout, `01dde3c2`); MM-3 per-page chunk citation threaded end-to-end through Silver → SQL → search projection → MCP envelope (`efc407d6`). Decision 4 ratified: pdfplumber (MIT) shipped; pymupdf (AGPL) explicitly NOT shipped. Decision 5 ratified: Tesseract default; PaddleOCR opt-in is a future plugin. Reference-library PDF eval (NIST/OpenStax/APRA) deferred to a follow-up commit. | yes | Wave 2 |
 | **4 (Office mixed-media) — DONE 2026-05-23** | OF-1 pptx slide-aware + speaker notes (`6579cf56`) · OF-2 docx heading-hierarchy + track-changes detection (`6dfd04d3`) · OF-3 xlsx sheet-as-document with merged-cell + formula handling (`a222d04e`). All three plugins: python-pptx/python-docx/openpyxl (MIT), lazy-imported through the extractor entry-points registry. | yes | Wave 3 |
-| **5 (KFEAT-005 P1 connectors, flag-gated, 3 worktrees) — DONE 2026-05-22** | KP-1 dex_crm (`259c25c4`, flag `connector_dex_crm`) · KP-2 m365_email_headers (`08ac321a`, flag `connector_m365_email_headers`, OAuth2 client-creds auth helper) · KP-3 m365_calendar (`aad33570`, flag `connector_m365_calendar`). All landed at `introduce` stage default-off per `feature-flag-architecture.md`; auth via existing `kairix.secrets.get_secret()` chain — `connector-dex-api-key` for Dex; `connector-m365-{tenant-id,client-id,client-secret}` for M365 client-credentials. F54 both-branch tests + E2E rows for all three connectors in `e2e_connector_sync.feature`. Operator opt-in via `kairix.config.yaml` `features:` overlay; cutover protocol per flag flip when a tenant enables it. | yes | Wave 2 + Feature-flag PRs 1-4 |
+| **5 (P1 connectors, flag-gated, 3 worktrees) — DONE 2026-05-22** | KP-1 dex_crm (`259c25c4`, flag `connector_dex_crm`) · KP-2 m365_email_headers (`08ac321a`, flag `connector_m365_email_headers`, OAuth2 client-creds auth helper) · KP-3 m365_calendar (`aad33570`, flag `connector_m365_calendar`). All landed at `introduce` stage default-off per `feature-flag-architecture.md`; auth via existing `kairix.secrets.get_secret()` chain — `connector-dex-api-key` for Dex; `connector-m365-{tenant-id,client-id,client-secret}` for M365 client-credentials. F54 both-branch tests + E2E rows for all three connectors in `e2e_connector_sync.feature`. Operator opt-in via `kairix.config.yaml` `features:` overlay; cutover protocol per flag flip when a tenant enables it. | yes | Wave 2 + Feature-flag PRs 1-4 |
 | **6 (SharePoint, flag-gated)** | SP-1 Graph delta connector (flag `connector_sharepoint`); sensitivity tier wiring exercised end-to-end. Client-confidential surface; cutover protocol's sensitivity-parity check is non-negotiable. | foreground | Wave 5 |
-| **7 (deferred, flag-gated)** | Vision-enhanced extraction (flag `extractor_vision_enabled`, cost-gated; KFEAT-012 Phase 3); Teams transcripts (flag `connector_teams_transcripts`; KFEAT-005 P3-5); Curator-side EntitySignal → Neo4j push (flag `entity_signal_neo4j_push_enabled`). | — | Wave 6; Curator |
+| **7 (deferred, flag-gated)** | Vision-enhanced extraction (flag `extractor_vision_enabled`, cost-gated); Teams transcripts (flag `connector_teams_transcripts`); Curator-side EntitySignal → Neo4j push (flag `entity_signal_neo4j_push_enabled`). | — | Wave 6; Curator |
 | **IM-6 (DocumentScanner retirement, flag-gated via `obsidian_connector_primary`)** | Stage 1: registry entry default-off; worker branches on the flag; legacy `DocumentScanner` runs by default. Stage 2: dogfood VM operator overlay → `true`; cutover protocol runs (baseline → flip → 24h+ soak → post-flip eval/perf/latency/sample-journey gates). Stage 3: 4 weeks of validation → registry PR `default=True`, `stage=cutover`. Stage 4: 4+ weeks cutover-stage with no rollbacks → retire flag, delete `kairix/core/db/scanner.py`. | sequential | Feature-flag PRs 1-7 |
 
-Waves 0–2 deliver the vault's stated Wave-1 exit criteria. Waves 3–6 absorb KFEAT-005/012 substance. Wave 7 is Curator-gated.
+Waves 0–2 deliver the connector-framework exit criteria (pluggable `SourceConnector` + Obsidian end-to-end). Waves 3–6 absorb the mixed-media extraction and P1-connector substance. Wave 7 is Curator-gated.
 
 ## 11. What this document is *not*
 
-- **Not a Curator / LLM design.** KFEAT-005 commits the connector layer to "Plain Python, no LLM" — LLM-driven work (fact extraction in `kairix/corpus/ingest.py`, Curator enrichment) stays on its own surfaces. The connector path and the conversational corpus path are disjoint.
-- **Not the firm-scope storage design.** Reflection-extractor schema, engagement-registry, audit envelope — all firm-scope, governed by the pro repo's storage ADR. F44 locks the boundary so this document's plugins cannot accidentally cross it.
-- **Not a third-party plugin sandbox.** WASM/Extism is committed to in pro ADR-019; Wave 1 ships first-party only.
+- **Not a Curator / LLM design.** The connector layer is "Plain Python, no LLM" — LLM-driven work (fact extraction in `kairix/corpus/ingest.py`, Curator enrichment) stays on its own surfaces. The connector path and the conversational corpus path are disjoint.
+- **Not the firm-scope storage design.** Reflection-extractor schema, engagement-registry, audit envelope — all firm-scope, governed by the two-scope architecture (`connector-scope-topology/ADR.md`). F44 locks the boundary so this document's plugins cannot accidentally cross it.
+- **Not a third-party plugin sandbox.** WASM/Extism is a future direction (see §8); the shipped surface is first-party only.
 
 ## 12. References
 
@@ -470,11 +482,6 @@ Waves 0–2 deliver the vault's stated Wave-1 exit criteria. Waves 3–6 absorb 
 - `fitness-functions.md` — F-rule canon; this document adds F34–F44
 - `ENGINEERING.md` — repository-wide testing patterns
 - `fact-layer.md` — the fact-extraction surface that stays on its existing path
-- kairix-pro repo:
-  - `docs/ADRs/ADR-017-two-scope-architecture.md`
-  - `docs/ADRs/ADR-018-storage-tiering.md`
-  - `docs/ADRs/ADR-019-implementation-language-strategy.md`
-  - `docs/ADRs/ADR-020-engagement-container-destruction-unit.md`
-  - `docs/features/KFEAT-005-connector-framework/BRIEF.md`
-  - `docs/features/KFEAT-012-mixed-media/BRIEF.md`
-- Vault working notes: `02-Areas/02-Three-Cubes-Ventures/Kairix-Pro-Platform/Roadmap-Waves/Wave-1-Connectors/Notes.md`
+- `ADR-018-dlt-connector-framework.md` — the in-repo connector-framework ADR (the connector-framework brief this document realises)
+- `connector-scope-topology/ADR.md` — the engagement-scope / firm-scope two-scope boundary that F44 locks (the in-repo home of the scope-architecture rationale)
+- `streaming-bronze-plan.md` — the streaming-only bronze rollout that retired the filesystem blob store

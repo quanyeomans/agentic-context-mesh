@@ -1,11 +1,22 @@
 # ADR-029 — Agent-facing query queue + carry-along delivery (replaces cold-start error envelope)
 
-**Status:** Proposed
-**Date:** 2026-05-30
-**Supersedes:** Cold-start `ColdStart` error-envelope pattern in [`kairix/platform/warm/state.py`](../../kairix/platform/warm/state.py) (introduced GH #320)
+**Status:** Accepted — Wave G.1 implemented (flag-gated, default OFF); waves G.2/G.3 not delivered
+**Date:** 2026-05-30 (accepted); G.1 shipped 2026-05-31
+**Supersedes:** Cold-start `ColdStart` error-envelope pattern in [`kairix/platform/warm/state.py`](../../kairix/platform/warm/state.py) (introduced GH #320). NOTE: the supersession is *intended*, not yet *effected* — the `ColdStart` path is still the live default and is only replaced for `tool_search` when the `agent_query_queue` flag is ON. See "Implementation status" below.
 **Superseded by:** none
-**Tracking:** GH #354 (implementation tracking — created alongside this ADR)
+**Tracking:** GH #354 (closed NOT_PLANNED 2026-06-18 — the broader cross-tool roll-out was descoped after the G.1 spike; the ADR stands and G.1 is in production behind a default-OFF flag)
+**Implementing change:** commit `fc199695` "feat(queue): ADR-029 G.1 spike — pending_queries + dispatch_or_queue + carry-along, applied to tool_search behind agent_query_queue flag (OFF default)" — first released in alpha `v2026.5.31a1`, present in current `main` and stable `v2026.6.18`. There is **no implementing PR** for #354: the G.1 spike landed as a direct-to-main commit (per the trunk-based / direct-to-main workflow for routine work), and #354 was later closed NOT_PLANNED with the cross-tool roll-out descoped — so `fc199695` is the canonical citation, not a PR number. Verified `kairix/core/queue/carry_along.py` + `kairix/core/queue/dispatch.py` present on `main` 2026-06-22.
 **Related:** ADR-025 (pipeline observability — queue becomes a new observability surface), GH #320 (the original cold-start visibility issue this ADR supersedes), GH #335 / GH #352 (the operator-side `embed --force` lock contention surfaced during this ADR's investigation)
+
+## Implementation status
+
+| Wave | Status | Evidence |
+|---|---|---|
+| **G.1** — `pending_queries` schema + `dispatch_or_queue` decorator + `carry_along_prefix` middleware + `agent_query_queue` flag (both-branch tested), wired into `tool_search` only | **Shipped, flag default OFF** | [`kairix/core/queue/dispatch.py`](../../kairix/core/queue/dispatch.py), [`kairix/core/queue/carry_along.py`](../../kairix/core/queue/carry_along.py); schema in [`kairix/core/db/schema.py`](../../kairix/core/db/schema.py); flag in [`kairix/core/features/registry.py`](../../kairix/core/features/registry.py) (`introduced_in="v2026.5.30"`, `default=False`); queue-aware wiring `tool_search_queue_aware` in [`kairix/agents/mcp/server.py`](../../kairix/agents/mcp/server.py); operator doc [`docs/architecture/agent-query-queue.md`](agent-query-queue.md) |
+| **G.2** — roll the decorator across the remaining MCP tools (`tool_brief`, `tool_research`, …) + retire `ColdStart` from those paths | **Not delivered** | #354 closed NOT_PLANNED; only `tool_search` is wired |
+| **G.3** — `kairix queue status` CLI + `tool_queue_status` MCP tool + 24h GC + scale-bound integration | **Not delivered** | No `queue status` / `tool_queue_status` surface exists |
+
+The `ColdStart` envelope is **still live — confirmed NOT retired** (codebase check 2026-06-22 against `main` / stable `v2026.6.18`). It is the default response shape (flag OFF) for `tool_search` and the only shape for every other tool. The `ColdStart` machinery remains in `kairix/agents/mcp/cold_start.py`, `kairix/agents/mcp/exceptions.py`, `kairix/agents/mcp/transport.py`, `kairix/agents/mcp/server.py`, `kairix/agents/mcp/cli.py`, and `kairix/platform/warm/{state,runner}.py`; the OFF branch of the `agent_query_queue` flag (`kairix/core/features/registry.py`) still routes `tool_search` through it. Retirement (Definition-of-done #11) is therefore **not done** — it stays deferred until the flag is dogfooded ON and the cross-tool roll-out (G.2) lands.
 
 ## Context
 
@@ -154,19 +165,21 @@ When MCP streamable-HTTP transport is enabled and the client advertises `experim
 
 ## Definition of done
 
-| # | Criterion | Verification |
+Status reflects stable `v2026.6.18`. G.1 (items 1–7, 10) shipped; the cross-tool roll-out (item 2's "every MCP tool", item 11) and the operator status/GC surface (items 8–9) were descoped when #354 closed NOT_PLANNED.
+
+| # | Criterion | Status / verification |
 |---|---|---|
-| 1 | `pending_queries` table + writer + reader + ordered-by-submitted-at carry-along read | Schema-bootstrap test + unit tests |
-| 2 | `dispatch_or_queue` decorator implementation + applied to every MCP tool | F30/F45 tests pass; queue-aware behaviour verifiable per tool |
-| 3 | Carry-along middleware fires on every tool entry, dedups via `status='delivered'` flip | Sabotage-proof test: drop the middleware → second call doesn't carry first's result |
-| 4 | `"Processing your request (id: q_<hash>). Your answer will be delivered when ready."` returned as plain text (NOT error envelope) on queued path | Outcome test asserts response is plain text; not `{"error": ...}` |
-| 5 | Agent identity from MCP session-id with X-Kairix-Agent fallback + process-global fallback with F21 message | Contract test per identity source |
-| 6 | 60s dedup window: identical `(agent_id, args_hash)` within window returns existing job_id | Sabotage-proof test: remove dedup → identical query within 60s queues a second job |
-| 7 | `agent_query_queue` feature flag with both-branch tests (F54) | OFF: legacy `ColdStart` envelope; ON: new queue path |
-| 8 | `kairix queue status` CLI + `tool_queue_status` MCP tool | F30/F45/F53 tests pass |
-| 9 | Cleanup: `delivered` rows older than 24h get GC'd by a maintenance tick | F66-bounded; sabotage-proof test for the GC predicate |
-| 10 | `docs/architecture/agent-query-queue.md` operator-facing runbook | Doc exists; links from `docs/operations/OPERATIONS.md` and `docs/architecture/ENGINEERING.md` |
-| 11 | `ColdStart` envelope code path retired (or kept behind the OFF branch of the flag for one release, then removed) | Grep for `cold_start_envelope` returns zero call sites in MCP tools |
+| 1 | `pending_queries` table + writer + reader + ordered-by-submitted-at carry-along read | **Done** — schema in `kairix/core/db/schema.py`; schema-bootstrap test + unit tests |
+| 2 | `dispatch_or_queue` decorator implementation + applied to MCP tools | **Partial** — decorator implemented; applied to `tool_search` only (G.1). Remaining tools = G.2, not delivered |
+| 3 | Carry-along middleware fires on tool entry, dedups via `status='delivered'` flip | **Done for `tool_search`** — `carry_along_prefix`; sabotage-proof test: drop the middleware → second call doesn't carry first's result |
+| 4 | `"Processing your request (id: q_<hash>). Your answer will be delivered when ready."` returned as plain text (NOT error envelope) on queued path | **Done** — `PROCESSING_TEMPLATE`; outcome test asserts plain text, not `{"error": ...}` |
+| 5 | Agent identity from MCP session-id with X-Kairix-Agent fallback + process-global fallback with F21 message | **Done** — contract test per identity source |
+| 6 | 60s dedup window: identical `(agent_id, args_hash)` within window returns existing job_id | **Done** — `DEDUP_WINDOW_SECONDS`; sabotage-proof test: remove dedup → identical query within 60s queues a second job |
+| 7 | `agent_query_queue` feature flag with both-branch tests (F54) | **Done** — default OFF (legacy `ColdStart` envelope path); ON (new queue path) |
+| 8 | `kairix queue status` CLI + `tool_queue_status` MCP tool | **Not delivered** (G.3) — no such CLI subcommand or MCP tool exists |
+| 9 | Cleanup: `delivered` rows older than 24h get GC'd by a maintenance tick | **Not delivered** (G.3) |
+| 10 | `docs/architecture/agent-query-queue.md` operator-facing runbook | **Done** — doc exists |
+| 11 | `ColdStart` envelope code path retired (or kept behind the OFF branch of the flag for one release, then removed) | **Not done** — `ColdStart` is still the live default; it is the OFF-branch path for `tool_search` and the only path for every other tool. Retirement deferred until the flag is dogfooded ON and G.2 lands |
 
 ## Open decisions
 
@@ -180,13 +193,13 @@ When MCP streamable-HTTP transport is enabled and the client advertises `experim
 
 ## Sequencing
 
-Three waves. Each ships independently behind the `agent_query_queue` flag (default OFF until v1 is dogfooded).
+Three waves. Each ships independently behind the `agent_query_queue` flag (default OFF until v1 is dogfooded). Status as of stable `v2026.6.18` is in the rightmost column — see "Implementation status" above for evidence.
 
-| Wave | Scope | Estimated duration |
+| Wave | Scope | Status |
 |---|---|---|
-| **G.1** | `pending_queries` schema + `dispatch_or_queue` decorator + carry-along middleware + `agent_query_queue` flag both-branch tested. Applied to `tool_search` only (proves the pattern). Replaces `ColdStart` envelope for that tool. | 2 weeks |
-| **G.2** | Apply decorator to remaining MCP tools (`tool_brief`, `tool_research`, `tool_classify`, `tool_contradict`, `tool_warm`, etc.). Each migration is one PR; F45/F30 tests per tool. Retire `ColdStart` envelope from those tools' code paths. | 1 week |
-| **G.3** | `kairix queue status` CLI + `tool_queue_status` MCP + operator runbook + maintenance-tick GC (24h delivered cleanup) + F69 scale-bound integration test (10K+ pending rows). | 1 week |
+| **G.1** | `pending_queries` schema + `dispatch_or_queue` decorator + carry-along middleware + `agent_query_queue` flag both-branch tested. Applied to `tool_search` only (proves the pattern). The `ColdStart` envelope stays as the OFF-default path for that tool until cutover. | **Shipped** (commit `fc199695`, `v2026.5.31a1`; flag default OFF) |
+| **G.2** | Apply decorator to remaining MCP tools (`tool_brief`, `tool_research`, `tool_classify`, `tool_contradict`, `tool_warm`, etc.). Each migration is one PR; F45/F30 tests per tool. Retire `ColdStart` envelope from those tools' code paths. | **Not delivered** (#354 closed NOT_PLANNED) |
+| **G.3** | `kairix queue status` CLI + `tool_queue_status` MCP + operator runbook + maintenance-tick GC (24h delivered cleanup) + F69 scale-bound integration test (10K+ pending rows). | **Not delivered** (operator runbook [`agent-query-queue.md`](agent-query-queue.md) exists; CLI/MCP status surface + GC do not) |
 
 Phase 2 (notification push): separate ADR-030 if Phase 1 dogfood shows the case.
 
@@ -196,7 +209,7 @@ ADR-028 covers chunking strategy + chunking quality evaluation. The queue is ort
 
 ## Related work
 
-* GH #320 — cold-start visibility (this ADR supersedes the response shape; the underlying warm-tracking machinery stays)
+* GH #320 — cold-start visibility (this ADR is *intended* to supersede the response shape; as of `v2026.6.18` the supersession is effected only for `tool_search` under the ON branch of `agent_query_queue` — the `ColdStart` envelope and the underlying warm-tracking machinery both stay)
 * GH #335 — worker OOM under `embed --force` (related: today's embed-lock observation belongs in this ADR's "open decision #5")
 * GH #352 — `VectorIndex` read_only mode + `clear()` (the operator-side `embed --force` whose verification was blocked by the same lock contention that motivates this ADR's Open decision #5)
 * ADR-025 — pipeline observability (the queue is a new observability surface; queue status emit goes through the same `status_emit` plumbing)
