@@ -113,13 +113,6 @@ GRAPH_DEFAULT_SCOPE = "https://graph.microsoft.com/.default"
 # RFC822.
 HEADER_ARTEFACT_MIME = "application/json"
 
-# Wave E topology v2 pilot — name of the per-connector flag that gates
-# the multi-container (per-mailbox) shape. Module-level constant so the
-# F52 call-site scan picks up exactly one verbatim reference per call
-# site. Mirrors the ``TOPOLOGY_V2_OBSIDIAN_FLAG`` shape in the obsidian
-# Wave E pilot.
-TOPOLOGY_V2_M365_EMAIL_HEADERS_FLAG = "topology_v2_m365_email_headers"
-
 # Stable identifier for the synthetic root hierarchy node. Each mailbox
 # FOLDER node hangs off this single root so the receiver builds the
 # tree in one pass (F58 parent-before-child).

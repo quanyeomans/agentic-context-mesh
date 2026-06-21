@@ -81,11 +81,6 @@ _VALID_SENSITIVITY_TIERS: tuple[str, ...] = ("public", "internal", "client-confi
 # the literal lives in one place.
 _SENSITIVITY_METADATA_KEY = "sensitivity"
 
-# Wave E topology v2 pilot — name of the per-connector flag that gates
-# the multi-container shape. Module-level constant so the F52
-# call-site scan picks up exactly one verbatim reference per call site.
-TOPOLOGY_V2_GMAIL_FLAG = "topology_v2_gmail"
-
 # Stable identifier for the synthetic root hierarchy node.
 _HIERARCHY_ROOT_ID = "gmail"
 

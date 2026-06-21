@@ -71,11 +71,6 @@ DEFAULT_INITIAL_WINDOW_DAYS_BACK = 30
 # it (e.g. for cancelled tombstones).
 _CALENDAR_HTML_LINK_FALLBACK = "https://calendar.google.com/calendar/u/0/r/eventedit/{event_id}"
 
-# F52 — single literal so the call-site scan picks it up at exactly one
-# place. The dispatcher (``kairix.worker.dispatch_google_calendar_sync``)
-# reads the same name verbatim.
-TOPOLOGY_V2_GOOGLE_CALENDAR_FLAG = "topology_v2_google_calendar"
-
 # Description chunking — render Google's event envelope into a text
 # block for the extractor. Each section is separated by a blank line so
 # the extractor's default chunker can break on the section boundary.

@@ -66,7 +66,6 @@ from kairix.connectors.github.api_client import (
     GitHubRepoRef,
 )
 from kairix.connectors.github.connector import (
-    TOPOLOGY_V2_GITHUB_FLAG,
     GitHubConnector,
     GitHubCredentials,
     make_connector,
@@ -105,7 +104,6 @@ __all__ = [
     "HEADER_DELIVERY_ID",
     "HEADER_EVENT_TYPE",
     "HEADER_SIGNATURE_256",
-    "TOPOLOGY_V2_GITHUB_FLAG",
     "ClientStatsSnapshot",
     "GitHubApiClient",
     "GitHubBlobRef",

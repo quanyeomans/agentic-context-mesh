@@ -93,10 +93,6 @@ GITHUB_APP_LEAVES: tuple[str, ...] = (
     GITHUB_LEAF_INSTALLATION_ID,
 )
 
-# F17 — Wave E topology flag name; module-level so the F52 call-site
-# scan picks up exactly one verbatim reference per call site.
-TOPOLOGY_V2_GITHUB_FLAG = "topology_v2_github"
-
 # F17 — sensitivity defaults extracted to constants; each appears in
 # ≥3 sites across this module + the webhook handler.
 _DEFAULT_SENSITIVITY: Sensitivity = "client-confidential"

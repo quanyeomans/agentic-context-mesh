@@ -72,11 +72,6 @@ DEFAULT_SENSITIVITY: Sensitivity = "internal"
 # Mime hint for files whose changes-list envelope didn't declare one.
 DEFAULT_FETCH_MIME = "application/octet-stream"
 
-# Wave E topology v2 pilot — name of the per-connector flag that gates
-# the multi-container shape. Module-level constant so the F52 call-site
-# scan picks up exactly one verbatim reference per call site.
-TOPOLOGY_V2_GOOGLE_DRIVE_FLAG = "topology_v2_google_drive"
-
 # Hierarchy root node id for the Wave B shim shape.
 _HIERARCHY_ROOT_ID = CONNECTOR_NAME
 _HIERARCHY_ROOT_DISPLAY = "Google Drive"

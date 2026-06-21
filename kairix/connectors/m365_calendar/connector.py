@@ -75,11 +75,6 @@ MAX_WINDOW_TOTAL_DAYS = 390
 # clickable affordance for the operator.
 _OUTLOOK_WEB_URL = "https://outlook.office.com/calendar/item/{event_id}"
 
-# Wave E topology v2 pilot — name of the per-connector flag that gates
-# the multi-container shape. Module-level constant so the F52 call-site
-# scan picks up exactly one verbatim reference per call site.
-TOPOLOGY_V2_M365_CALENDAR_FLAG = "topology_v2_m365_calendar"
-
 # Hierarchy root node id for the calendar tree. Each configured calendar
 # (one per UPN) becomes a child FOLDER node under this root.
 _HIERARCHY_ROOT_ID = "m365-calendar"

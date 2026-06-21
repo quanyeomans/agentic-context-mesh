@@ -67,11 +67,6 @@ _AREA_APPLE_CALDAV = "apple-caldav"
 _SECRET_SCOPE_USERNAME: tuple[Scope, str, str | None, str] = ("connector", _AREA_APPLE_CALDAV, None, "username")
 _SECRET_SCOPE_ACCESS: tuple[Scope, str, str | None, str] = ("connector", _AREA_APPLE_CALDAV, None, "access")
 
-# Wave-E topology v2 pilot — name of the per-connector flag that gates
-# the multi-container shape. Module-level constant so the F52 call-site
-# scan picks up exactly one verbatim reference per call site.
-TOPOLOGY_V2_APPLE_CALDAV_FLAG = "topology_v2_apple_caldav"
-
 # Hierarchy root node id for the calendar tree. Each discovered (or
 # operator-pinned) calendar becomes a child FOLDER node under this root.
 _HIERARCHY_ROOT_ID = _AREA_APPLE_CALDAV

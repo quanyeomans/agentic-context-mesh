@@ -81,11 +81,6 @@ GRAPH_DEFAULT_SCOPE = "https://graph.microsoft.com/.default"
 # Mime hint for binaries whose Graph envelope didn't declare one.
 DEFAULT_FETCH_MIME = "application/octet-stream"
 
-# Wave E topology v2 pilot — name of the per-connector flag that gates
-# the multi-container shape. Module-level constant so the F52 call-site
-# scan picks up exactly one verbatim reference per call site.
-TOPOLOGY_V2_SHAREPOINT_FLAG = "topology_v2_sharepoint"
-
 # Wave E hierarchy root node id. Each configured drive becomes a DRIVE-
 # typed child FOLDER under this root SITE node.
 _HIERARCHY_ROOT_ID = CONNECTOR_NAME

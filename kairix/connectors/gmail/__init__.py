@@ -49,7 +49,6 @@ from kairix.connectors.gmail.client import (
 )
 from kairix.connectors.gmail.connector import (
     DEFAULT_SENSITIVITY,
-    TOPOLOGY_V2_GMAIL_FLAG,
     GmailConnector,
     GmailCredentials,
     make_connector,
@@ -72,7 +71,6 @@ CAPABILITIES: frozenset[str] = frozenset(
 __all__ = [
     "CAPABILITIES",
     "DEFAULT_SENSITIVITY",
-    "TOPOLOGY_V2_GMAIL_FLAG",
     "GmailAttachment",
     "GmailClient",
     "GmailConnector",
