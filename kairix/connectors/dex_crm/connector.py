@@ -60,11 +60,6 @@ CONNECTOR_NAME = "dex_crm"
 # loader's alias-fallback path.
 _SECRET_SCOPE_API_KEY: tuple[Scope, str, str | None, str] = ("connector", "dex", None, "api-key")
 
-# Wave E topology v2 pilot — name of the per-connector flag that gates
-# the multi-container shape. Module-level constant so the F52 call-site
-# scan picks up exactly one verbatim reference per call site.
-TOPOLOGY_V2_DEX_CRM_FLAG = "topology_v2_dex_crm"
-
 # Hierarchy node identifiers for the Wave E ON-branch ``load_hierarchy``
 # emission. The root carries ``raw_node_id="dex"`` (the connector kind)
 # with one FOLDER child per top-level entity type the connector polls.

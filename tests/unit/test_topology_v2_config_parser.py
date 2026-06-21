@@ -112,6 +112,96 @@ def test_single_connector_parses() -> None:
     assert ("vault_root", "/data/vault") in c.connector_specific_config
 
 
+def test_connector_extractor_fields_default_when_absent() -> None:
+    """A connector without extractor keys defaults to passthrough + empty chain/config.
+
+    D1 — the canonical ``ConnectorConfig`` carries the extractor selection
+    that legacy entries supplied to ``build_extractor_from_entry``. Absent
+    keys must default to the back-compat ``passthrough`` extractor with an
+    empty chain and empty config so existing operator configs see no change.
+    """
+    config = parse_topology_v2(
+        {
+            "topology_v2": {
+                "connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}],
+            }
+        }
+    )
+    c = config.connectors[0]
+    assert c.extractor == "passthrough"
+    assert c.extractor_chain == ()
+    assert c.extractor_config == ()
+
+
+def test_connector_extractor_fields_parse() -> None:
+    """A connector declaring extractor/chain/config round-trips into the frozen shape.
+
+    Mirrors the live SharePoint connector (``extractor: markitdown``) plus
+    the optional ordered chain and tuple-of-pairs extractor_config the
+    legacy registry path consumed.
+    """
+    config = parse_topology_v2(
+        {
+            "topology_v2": {
+                "connectors": [
+                    {
+                        "id": "sp-conn",
+                        "kind": "sharepoint",
+                        "name": "sp-conn",
+                        "extractor": "markitdown",
+                        "extractor_chain": ["markitdown", "passthrough"],
+                        "extractor_config": {"max_pages": "50", "ocr": "true"},
+                    }
+                ]
+            }
+        }
+    )
+    c = config.connectors[0]
+    assert isinstance(c, ConnectorConfig)
+    assert c.extractor == "markitdown"
+    assert c.extractor_chain == ("markitdown", "passthrough")
+    # extractor_config is a sorted tuple of (key, value-as-str) pairs (F42).
+    assert c.extractor_config == (("max_pages", "50"), ("ocr", "true"))
+
+
+def test_connector_extractor_config_must_be_mapping() -> None:
+    """``connectors.*.extractor_config`` must be a mapping — string fails loud."""
+    with pytest.raises(TopologyV2ParseError):
+        parse_topology_v2(
+            {
+                "topology_v2": {
+                    "connectors": [
+                        {
+                            "id": "c1",
+                            "kind": "obsidian",
+                            "name": "c1",
+                            "extractor_config": "max_pages=50",
+                        }
+                    ]
+                }
+            }
+        )
+
+
+def test_connector_extractor_chain_must_be_list() -> None:
+    """``connectors.*.extractor_chain`` must be a list — string fails loud."""
+    with pytest.raises(TopologyV2ParseError):
+        parse_topology_v2(
+            {
+                "topology_v2": {
+                    "connectors": [
+                        {
+                            "id": "c1",
+                            "kind": "obsidian",
+                            "name": "c1",
+                            "extractor_chain": "markitdown",
+                        }
+                    ]
+                }
+            }
+        )
+
+
 def test_single_credential_parses() -> None:
     """One credential block round-trips into a frozen CredentialConfig."""
     config = parse_topology_v2(
@@ -183,6 +273,48 @@ def test_collection_with_sources_parses() -> None:
     assert len(col.sources) == 2
     assert isinstance(col.sources[0], CollectionSourceConfig)
     assert col.sources[0].cc_pair == "obsidian-personal-default"
+
+
+def test_collection_tier_defaults_to_none() -> None:
+    """A collection without a ``tier`` key parses to ``tier=None``.
+
+    D4 — the ranking ``tier`` is sourced from topology collections at
+    build time. Absent ``tier`` means "no tier boost" (None) so existing
+    operator configs see no ranking change.
+    """
+    config = parse_topology_v2(
+        {
+            "topology_v2": {
+                "collections": [{"name": "obsidian-all", "sources": [{"cc_pair": "obs-cp", "path_filter": "*"}]}]
+            }
+        }
+    )
+    assert config.collections[0].tier is None
+
+
+def test_collection_tier_parses() -> None:
+    """A collection declaring ``tier: reference`` round-trips into the frozen shape.
+
+    D4 — the parser carries the operator-declared ranking tier onto
+    ``CollectionConfig.tier`` so the (db-free) tier-map derivation can read
+    it at pipeline-build time.
+    """
+    config = parse_topology_v2(
+        {
+            "topology_v2": {
+                "collections": [
+                    {
+                        "name": "reflib",
+                        "tier": "reference",
+                        "sources": [{"cc_pair": "obs-cp", "path_filter": "*"}],
+                    }
+                ]
+            }
+        }
+    )
+    col = config.collections[0]
+    assert isinstance(col, CollectionConfig)
+    assert col.tier == "reference"
 
 
 def test_scope_profile_parses() -> None:

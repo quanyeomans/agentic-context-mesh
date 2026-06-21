@@ -326,15 +326,27 @@ def _module_path(rel: Path) -> str:
 def _same_module_tests(paths: set[Path], found: set[str]) -> list[str]:
     """The mutated modules' OWN test files within ``found``.
 
-    A test file named ``test_<mod>.py`` is the natural home for mutations to
-    ``kairix/**/<mod>.py``. These must always survive the impacted-test cap:
-    otherwise a co-mutated widely-imported file (e.g. ``factory.py``, imported
-    by 100+ test files) evicts a small module's own tests via the alphabetical
-    truncation, leaving the module's mutants un-covered (the recommender
-    regression that forced behaviour-pin tests into the wrong file). Returns a
-    deterministic (sorted) list."""
-    stems = {f"test_{p.stem}.py" for p in paths}
-    return sorted(tf for tf in found if Path(tf).name in stems)
+    A mutation to ``kairix/**/<mod>.py`` is most reliably killed by that
+    module's own tests, which live in either ``test_<mod>.py`` OR the common
+    aspect-suffixed form ``test_<mod>_<aspect>.py`` (e.g. a mutation to
+    ``topology_v2.py`` is killed by ``test_topology_v2_config_parser.py``; one
+    to ``topology_v2_applier.py`` by ``test_topology_v2_applier_unit.py``).
+    Both shapes count as same-module so they always survive the impacted-test
+    cap: otherwise a co-mutated widely-imported file (e.g. ``factory.py``,
+    imported by 100+ test files) evicts a small module's own tests via the
+    alphabetical truncation, leaving the module's mutants un-covered. Without
+    the suffix match, an aspect-named unit test that genuinely kills a mutant
+    is silently dropped from the window and the mutant reads as a survivor.
+    Returns a deterministic (sorted) list."""
+    out: set[str] = set()
+    for p in paths:
+        exact = f"test_{p.stem}.py"
+        prefix = f"test_{p.stem}_"
+        for tf in found:
+            name = Path(tf).name
+            if name == exact or name.startswith(prefix):
+                out.add(tf)
+    return sorted(out)
 
 
 def _prioritise(found: set[str], paths: set[Path]) -> list[str]:

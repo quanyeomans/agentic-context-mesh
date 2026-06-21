@@ -35,7 +35,6 @@ from kairix.connectors.github.api_client import (
     guess_mime_from_path,
 )
 from kairix.connectors.github.connector import (
-    TOPOLOGY_V2_GITHUB_FLAG,
     PerRepoCursorState,
     deserialise_cursor,
     f39_tier_from_visibility,
@@ -76,21 +75,6 @@ def test_capabilities_set_matches_spec_section_1() -> None:
         "CredentialsConnector",
     }
     assert CAPABILITIES == frozenset(expected)
-
-
-def test_topology_v2_github_flag_constant_is_retired_string() -> None:
-    """``topology_v2_github`` retired post-cutover (task #132).
-
-    The module-level constant is retained for back-compat with any
-    operator scripts / log greps that reference it, but the flag is no
-    longer in REGISTRY and the connector no longer reads it.
-    """
-    from kairix.core.features.registry import REGISTRY
-
-    assert TOPOLOGY_V2_GITHUB_FLAG == "topology_v2_github"
-    assert TOPOLOGY_V2_GITHUB_FLAG not in REGISTRY, (
-        "topology_v2_github was retired post-cutover; it must not reappear in REGISTRY"
-    )
 
 
 # ---------------------------------------------------------------------------

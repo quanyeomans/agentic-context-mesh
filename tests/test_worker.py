@@ -1880,3 +1880,44 @@ def test_run_wal_checkpoint_handles_non_dict_return() -> None:
         return None
 
     run_wal_checkpoint(deps=WorkerDeps(wal_checkpoint_fn=_returns_none))  # type: ignore[arg-type] — intentional shape mismatch: pins the runtime-tolerance for misbehaving checkpoint impls.
+
+
+# ---------------------------------------------------------------------------
+# connector_enabled() — same-module behaviour-pin (mutation parity).
+#
+# The full predicate matrix lives in
+# tests/unit/test_worker_connector_sync.py. This same-module home guarantees
+# the flagless-branch outcome stays in the mutation-parity impacted window
+# (mutation_parity prioritises test_<mod>.py), so the
+# ``... else True`` -> ``... else False`` mutant on the flagless arm is
+# reliably KILLED even when worker.py's wide importer set is truncated by the
+# impacted-test cap.
+# ---------------------------------------------------------------------------
+
+
+def test_connector_enabled_flagless_kind_is_true_even_when_flag_off() -> None:
+    """A flagless connector kind (no ``connector_<kind>`` in REGISTRY) always
+    runs — the predicate returns True without consulting ``read_flag``.
+
+    Sabotage: change ``... else True`` to ``... else False`` on the flagless
+    arm of connector_enabled → this test fails because a flagless kind would
+    report disabled.
+    """
+    from kairix.worker import connector_enabled
+
+    # ``obsidian`` is flagless — no ``connector_obsidian`` REGISTRY entry — so
+    # the OFF read_flag is never consulted and the kind stays enabled.
+    assert connector_enabled("obsidian", read_flag=lambda _name: False) is True
+
+
+def test_connector_enabled_registered_kind_follows_flag() -> None:
+    """A registered connector kind (``sharepoint`` → ``connector_sharepoint``
+    is in REGISTRY) is enabled iff its flag resolves True.
+
+    Sabotage: drop the ``name in registry`` guard (always read_flag) or
+    invert it → one of these two assertions fails.
+    """
+    from kairix.worker import connector_enabled
+
+    assert connector_enabled("sharepoint", read_flag=lambda _name: False) is False
+    assert connector_enabled("sharepoint", read_flag=lambda _name: True) is True

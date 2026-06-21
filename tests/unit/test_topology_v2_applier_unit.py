@@ -226,6 +226,63 @@ def test_apply_updates_collection_source_when_sensitivity_min_changes() -> None:
     assert sources[0] == 1  # not duplicated
 
 
+def _tier_config(tier: str | None) -> dict[str, object]:
+    """One connector / cc_pair / collection, with an optional collection tier."""
+    collection: dict[str, object] = {"name": "col1", "sources": [{"cc_pair": "p1", "path_filter": "*"}]}
+    if tier is not None:
+        collection["tier"] = tier
+    return {
+        "topology_v2": {
+            "connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}],
+            "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "cp1"}],
+            "collections": [collection],
+        }
+    }
+
+
+def _collection_tier(db: sqlite3.Connection, name: str) -> str | None:
+    return db.execute("SELECT tier FROM topology_collections WHERE name = ?", (name,)).fetchone()[0]
+
+
+def test_apply_writes_collection_tier_on_insert() -> None:
+    """The applier INSERTs the operator-declared collection ``tier`` onto the row."""
+    db = _build_db()
+    apply_topology_v2(db, parse_topology_v2(_tier_config("reference")))
+    assert _collection_tier(db, "col1") == "reference"
+
+
+def test_apply_collection_tier_absent_lands_null() -> None:
+    """A collection without ``tier:`` INSERTs NULL — back-compat default."""
+    db = _build_db()
+    apply_topology_v2(db, parse_topology_v2(_tier_config(None)))
+    assert _collection_tier(db, "col1") is None
+
+
+def test_apply_updates_collection_when_tier_changes() -> None:
+    """Editing a collection's ``tier:`` re-writes the row in place (load-bearing UPDATE).
+
+    Pins the previously no-op collection UPDATE branch: a changed tier must
+    report ``updated`` and overwrite the stored value, with no duplicate row.
+    """
+    db = _build_db()
+    apply_topology_v2(db, parse_topology_v2(_tier_config("reference")))
+    second = apply_topology_v2(db, parse_topology_v2(_tier_config("primary")))
+    assert second.updated == 1
+    assert _collection_tier(db, "col1") == "primary"
+    count = db.execute("SELECT COUNT(*) FROM topology_collections WHERE name = 'col1'").fetchone()[0]
+    assert count == 1
+
+
+def test_apply_collection_unchanged_when_tier_identical() -> None:
+    """Re-applying the same tier reports ``unchanged`` — the diff guard holds."""
+    db = _build_db()
+    config = _tier_config("reference")
+    apply_topology_v2(db, parse_topology_v2(config))
+    second = apply_topology_v2(db, parse_topology_v2(config))
+    assert second.updated == 0
+    assert _collection_tier(db, "col1") == "reference"
+
+
 # ---------------------------------------------------------------------------
 # Error paths.
 # ---------------------------------------------------------------------------

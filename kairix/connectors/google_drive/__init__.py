@@ -46,7 +46,6 @@ from kairix.connectors.google_drive.client import (
 from kairix.connectors.google_drive.connector import (
     CONNECTOR_NAME,
     DEFAULT_SENSITIVITY,
-    TOPOLOGY_V2_GOOGLE_DRIVE_FLAG,
     GoogleDriveConnector,
     GoogleDriveCorpusSpec,
     GoogleDriveCredentials,
@@ -78,7 +77,6 @@ __all__ = [
     "CAPABILITIES",
     "CONNECTOR_NAME",
     "DEFAULT_SENSITIVITY",
-    "TOPOLOGY_V2_GOOGLE_DRIVE_FLAG",
     "ChangesPage",
     "DriveFileRef",
     "GoogleDriveClient",

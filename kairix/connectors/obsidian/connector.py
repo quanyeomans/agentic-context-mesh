@@ -71,11 +71,6 @@ CONNECTOR_NAME = "obsidian"
 # long enough to amortise the walk on a large vault.
 DEFAULT_RECONCILE_EVERY = 10
 
-# Wave E topology v2 pilot — name of the per-connector flag that gates
-# the multi-container shape. Module-level constant so the F52 call-site
-# scan picks up exactly one verbatim reference per call site.
-TOPOLOGY_V2_OBSIDIAN_FLAG = "topology_v2_obsidian"
-
 
 def _iso_z(dt: datetime) -> str:
     return dt.isoformat().replace("+00:00", "Z")

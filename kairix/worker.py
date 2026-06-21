@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from kairix.core.embed.use_cases import EmbedPipelineResult
+    from kairix.core.features.registry import FeatureFlag
     from kairix.core.protocols import Chunk, EntitySignal
 
 logger = logging.getLogger(__name__)
@@ -551,6 +552,16 @@ class ConnectorSyncDeps:
       * ``config_path_resolver`` — returns the ``kairix.config.yaml``
         path or ``None`` when no config exists; default
         :func:`resolve_config_path` via :func:`_resolve_config_path_default`.
+      * ``config_mapping_fn`` — returns the parsed + MERGED operator
+        config mapping (base + overlay, #492); default
+        :func:`_load_merged_config_mapping_default`. Mirrors
+        :class:`TopologyV2ApplyDeps`'s seam so the canonical ingest
+        redirect (Task 4) reads connectors off ``topology`` through the
+        same overlay-aware path the wizard writes to.
+      * ``flag_reader`` — resolves a feature-flag name to its effective
+        value; default :func:`_default_flag_value`. Feeds
+        :func:`connector_enabled` so per-connector enablement keys on
+        connector KIND (``connector_<kind>``).
       * ``db_factory`` — opens a fresh SQLite connection; default
         :func:`kairix.core.db.open_db`.
       * ``bronze_root_resolver`` — returns the Bronze blob root; default
@@ -559,6 +570,8 @@ class ConnectorSyncDeps:
 
     disabled_fn: Callable[[], bool] = field(default_factory=lambda: connector_sync_disabled)
     config_path_resolver: Callable[[], Path | None] = field(default_factory=lambda: _resolve_config_path_default)
+    config_mapping_fn: Callable[[], dict[str, Any]] = field(default_factory=lambda: _load_merged_config_mapping_default)
+    flag_reader: Callable[[str], bool] = field(default_factory=lambda: _default_flag_value)
     db_factory: Callable[[], sqlite3.Connection] = field(default_factory=lambda: _open_db_default)
     bronze_root_resolver: Callable[[], Path] = field(default_factory=lambda: _bronze_root_default)
 
@@ -1151,6 +1164,34 @@ def _default_flag_value(name: str) -> bool:
     from kairix.core.features import flag as _prod_flag
 
     return _prod_flag(name)
+
+
+def connector_enabled(
+    kind: str,
+    read_flag: Callable[[str], bool],
+    registry: dict[str, FeatureFlag] | None = None,
+) -> bool:
+    """Return whether a connector ``kind`` is enabled for this tick.
+
+    Enablement keys on connector KIND — the ``ConnectorConfig.kind`` value
+    (== entry-point name == REGISTRY suffix, e.g. ``sharepoint`` →
+    ``connector_sharepoint``) — NOT the cc_pair routing name. A kind whose
+    ``connector_<kind>`` flag is registered runs iff ``read_flag`` resolves
+    True; a flagless kind (no matching REGISTRY entry) always runs.
+
+    ``registry`` is injectable for tests; production passes ``None`` and the
+    canonical :data:`kairix.core.features.registry.REGISTRY` is resolved.
+
+    Per Task 2+3 this predicate is landed but NOT yet wired into
+    ``run_connector_sync_pipeline``'s per-entry loop — Task 4 wires it once
+    entries carry ``kind``.
+    """
+    if registry is None:
+        from kairix.core.features.registry import REGISTRY
+
+        registry = REGISTRY
+    name = f"connector_{kind}"
+    return read_flag(name) if name in registry else True
 
 
 def dispatch_connector_sync(

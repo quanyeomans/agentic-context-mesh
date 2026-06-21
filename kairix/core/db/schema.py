@@ -45,6 +45,10 @@ _TABLE_ENTITY_SIGNALS = "entity_signals"
 # list + the default_in_scope ALTER TABLE migration (2 sites in migrate). One
 # constant per table keeps the SQL identifier in a single edit site.
 _TABLE_TOPOLOGY_SCOPE_ENTRIES = "topology_scope_entries"
+# topology_collections referenced by the create-table DDL + the additive
+# ``tier`` ALTER TABLE migration. One constant keeps the SQL identifier in a
+# single edit site (F17).
+_TABLE_TOPOLOGY_COLLECTIONS = "topology_collections"
 
 
 def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> None:
@@ -614,6 +618,7 @@ CREATE TABLE IF NOT EXISTS topology_collections (
     default_sensitivity TEXT NOT NULL DEFAULT 'internal',
     on_unmapped_item TEXT NOT NULL DEFAULT 'land_in_default_collection',
     visibility TEXT NOT NULL DEFAULT 'engagement',
+    tier TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -707,6 +712,12 @@ _TOPOLOGY_SCOPE_ENTRIES_TOPOLOGY_V2_COLUMNS: tuple[tuple[str, str], ...] = (
     ("default_in_scope", "INTEGER NOT NULL DEFAULT 1"),
 )
 
+# Canonical-collapse Phase 1 — additive ``tier`` column on the existing
+# topology_collections table. Each tuple is (column_name, column_def). The
+# default is NULL ("no tier boost") so pre-migration rows keep their existing
+# ranking behaviour after the ALTER TABLE runs — pure-additive, low-risk.
+_TOPOLOGY_COLLECTIONS_TIER_COLUMNS: tuple[tuple[str, str], ...] = (("tier", "TEXT"),)
+
 
 def _migrate_documents_connector_columns(db: sqlite3.Connection, tables: set[str]) -> None:
     """Add connector-framework Wave 1 columns to legacy documents tables."""
@@ -759,6 +770,10 @@ def _migrate_topology_v2_columns(db: sqlite3.Connection, tables: set[str]) -> No
     GH #373 — also adds `default_in_scope INTEGER NOT NULL DEFAULT 1` to
     `topology_scope_entries`. Existing rows get `default_in_scope=1` so
     they continue to surface in default search after the migration runs.
+
+    Canonical-collapse Phase 1 — also adds the nullable `tier TEXT` column
+    to `topology_collections`. Existing rows get `tier=NULL` ("no tier
+    boost") so their ranking is unchanged after the migration runs.
     """
     if "documents" in tables:
         for column, column_def in _DOCUMENTS_TOPOLOGY_V2_COLUMNS:
@@ -769,6 +784,9 @@ def _migrate_topology_v2_columns(db: sqlite3.Connection, tables: set[str]) -> No
     if _TABLE_TOPOLOGY_SCOPE_ENTRIES in tables:
         for column, column_def in _TOPOLOGY_SCOPE_ENTRIES_TOPOLOGY_V2_COLUMNS:
             _add_column_if_missing(db, _TABLE_TOPOLOGY_SCOPE_ENTRIES, column, column_def)
+    if _TABLE_TOPOLOGY_COLLECTIONS in tables:
+        for column, column_def in _TOPOLOGY_COLLECTIONS_TIER_COLUMNS:
+            _add_column_if_missing(db, _TABLE_TOPOLOGY_COLLECTIONS, column, column_def)
 
 
 def migrate(db: sqlite3.Connection) -> None:
