@@ -38,6 +38,7 @@ import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any, Final
+from urllib.parse import quote
 
 import httpx
 from tenacity import (
@@ -97,6 +98,35 @@ _FIELD_NEW_START_PAGE_TOKEN: Final[str] = "newStartPageToken"  # noqa: S105  # D
 _DRIVE_403_RATE_LIMIT_REASONS: Final[frozenset[str]] = frozenset(
     {"userRateLimitExceeded", "rateLimitExceeded", "quotaExceeded"}
 )
+
+# Shared / Team Drive enumeration. Without these flags the Drive v3
+# files / changes surface silently scopes to the credential's My Drive
+# and every Shared-Drive (Team-Drive) item is invisible. ``corpora`` is
+# required by the changes API alongside the include flag to declare the
+# enumeration scope; ``supportsAllDrives`` is required on every call
+# (list / get / export / alt=media) that may touch a Shared-Drive item.
+_SHARED_DRIVE_SUPPORT_PARAM: Final[str] = "supportsAllDrives=true"
+_SHARED_DRIVE_INCLUDE_PARAM: Final[str] = "includeItemsFromAllDrives=true"
+_SHARED_DRIVE_CORPORA_PARAM: Final[str] = "corpora=allDrives"
+
+# Google-native types. Files whose ``mimeType`` is one of these export
+# only via ``files.export`` — ``alt=media`` returns HTTP 403 for them.
+_NATIVE_MIME_PREFIX: Final[str] = "application/vnd.google-apps."
+
+# Export-MIME map for Google-native types. Each native ``mimeType`` maps
+# to the export format we pull for downstream extraction: Docs → plain
+# text, Sheets → CSV, Slides → plain text, Drawings → PNG. Any
+# google-apps type not in the map falls back to
+# :data:`_DEFAULT_NATIVE_EXPORT_MIME` (plain text) so a new native type
+# still exports something extractable instead of dead-lettering.
+_DEFAULT_NATIVE_EXPORT_MIME: Final[str] = "text/plain"
+_NATIVE_EXPORT_MIME_BY_TYPE: Final[dict[str, str]] = {
+    "application/vnd.google-apps.document": _DEFAULT_NATIVE_EXPORT_MIME,
+    "application/vnd.google-apps.spreadsheet": "text/csv",
+    "application/vnd.google-apps.presentation": _DEFAULT_NATIVE_EXPORT_MIME,
+    "application/vnd.google-apps.drawing": "image/png",
+    "application/vnd.google-apps.script": "application/vnd.google-apps.script+json",
+}
 
 
 @dataclass(frozen=True)
@@ -191,8 +221,11 @@ class GoogleDriveClient:
         Calls ``GET /changes/startPageToken``; the response carries a
         single ``startPageToken`` field that the connector uses as the
         cursor seed for its first ``list_changes`` drain.
+
+        ``supportsAllDrives=true`` scopes the seed token so the first
+        drain's window covers Shared (Team) Drives, not just My Drive.
         """
-        url = f"{self._drive_base}/changes/startPageToken"
+        url = f"{self._drive_base}/changes/startPageToken?{_SHARED_DRIVE_SUPPORT_PARAM}"
         body = self._authorised_get(url).json()
         token = body.get("startPageToken")
         if not isinstance(token, str) or not token:
@@ -220,10 +253,18 @@ class GoogleDriveClient:
         Raises:
             CredentialExpiredError: On 401 — credential rotation needed.
             httpx.HTTPStatusError: On other non-2xx response.
+
+        The request carries the Shared-Drive enumeration params
+        (``supportsAllDrives`` + ``includeItemsFromAllDrives`` +
+        ``corpora=allDrives``) so files living on Shared (Team) Drives
+        are enumerated, not just the credential's My Drive.
         """
         url = (
             f"{self._drive_base}/changes"
             f"?pageToken={page_token}"
+            f"&{_SHARED_DRIVE_SUPPORT_PARAM}"
+            f"&{_SHARED_DRIVE_INCLUDE_PARAM}"
+            f"&{_SHARED_DRIVE_CORPORA_PARAM}"
             "&fields=newStartPageToken,nextPageToken,changes("
             "fileId,removed,file(id,name,mimeType,webViewLink,modifiedTime,createdTime,"
             "lastModifyingUser(emailAddress,displayName),owners(emailAddress),parents,size))"
@@ -257,25 +298,65 @@ class GoogleDriveClient:
         if last_new_start is not None:
             self._last_new_start_page_token = last_new_start
 
-    def fetch_file_content(self, file_id: str) -> tuple[bytes, str]:
-        """Download the binary content of one Drive file.
+    def fetch_file_content(self, file_id: str, *, mime_type: str | None = None) -> tuple[bytes, str]:
+        """Download the content of one Drive file, branching on its type.
 
-        Calls ``GET /files/{file-id}?alt=media`` — Drive returns the raw
-        bytes (or a redirect to a time-limited download URL; ``httpx``
-        follows redirects by default so the caller gets the bytes
-        either way).
+        Two paths, selected by ``mime_type``:
 
-        Returns ``(raw_bytes, content_type)`` so the connector can route
-        the mime hint through to the extractor registry. Google-native
-        types (``application/vnd.google-apps.*``) require ``/export``
-        instead of ``alt=media``; this slice surfaces the native mime
-        and lets the connector decide whether to skip or escalate to
-        export (deferred to a follow-up — first slice handles binary
-        uploads only).
+          * **Google-native types** (``application/vnd.google-apps.*`` —
+            Docs / Sheets / Slides / Drawings) export via
+            ``GET /files/{file-id}/export?mimeType=<mapped>``.
+            ``alt=media`` returns HTTP 403 for these types, so every
+            native file would otherwise dead-letter every sync. The
+            export MIME is resolved from
+            :data:`_NATIVE_EXPORT_MIME_BY_TYPE` (Docs → ``text/plain``,
+            Sheets → ``text/csv``, Slides → ``text/plain`` …), falling
+            back to :data:`_DEFAULT_NATIVE_EXPORT_MIME` for an unmapped
+            native type.
+          * **Everything else** (binary uploads — PDF / DOCX / images …)
+            downloads via ``GET /files/{file-id}?alt=media``. Drive
+            returns the raw bytes (or a redirect to a time-limited
+            download URL; ``httpx`` follows redirects by default so the
+            caller gets the bytes either way).
+
+        Both paths carry ``supportsAllDrives=true`` so Shared (Team)
+        Drive files resolve (they 404 / 403 otherwise).
+
+        Args:
+            file_id: The Drive file id.
+            mime_type: The file's ``mimeType`` from the changes-list
+                envelope. ``None`` (or a non-native type) takes the
+                ``alt=media`` path; a google-apps type takes the export
+                path.
+
+        Returns:
+            ``(raw_bytes, content_type)`` so the connector can route the
+            mime hint through to the extractor registry.
         """
-        url = f"{self._drive_base}/files/{file_id}?alt=media"
+        if mime_type is not None and mime_type.startswith(_NATIVE_MIME_PREFIX):
+            return self._export_native_file(file_id, mime_type)
+        url = f"{self._drive_base}/files/{file_id}?alt=media&{_SHARED_DRIVE_SUPPORT_PARAM}"
         response = self._authorised_get(url, timeout=_DRIVE_CONTENT_TIMEOUT_S)
         content_type = response.headers.get("Content-Type", "application/octet-stream").split(";")[0].strip()
+        return response.content, content_type
+
+    def _export_native_file(self, file_id: str, mime_type: str) -> tuple[bytes, str]:
+        """Export a Google-native file via ``files.export``.
+
+        Resolves the export MIME for the native ``mime_type`` and calls
+        ``GET /files/{file-id}/export?mimeType=<mapped>&supportsAllDrives=true``.
+        Returns ``(raw_bytes, content_type)`` — the content-type from the
+        response header, falling back to the requested export MIME when
+        the server omits it.
+        """
+        export_mime = _NATIVE_EXPORT_MIME_BY_TYPE.get(mime_type, _DEFAULT_NATIVE_EXPORT_MIME)
+        url = (
+            f"{self._drive_base}/files/{file_id}/export"
+            f"?mimeType={quote(export_mime, safe='')}"
+            f"&{_SHARED_DRIVE_SUPPORT_PARAM}"
+        )
+        response = self._authorised_get(url, timeout=_DRIVE_CONTENT_TIMEOUT_S)
+        content_type = response.headers.get("Content-Type", export_mime).split(";")[0].strip()
         return response.content, content_type
 
     def fetch_file_metadata(self, file_id: str) -> DriveFileRef:
@@ -285,10 +366,14 @@ class GoogleDriveClient:
         that were not seen via a previous changes-list drain (e.g. a
         replay of a failed item via :meth:`reindex`). Cached envelopes
         from changes-list are preferred — this is the fallback path.
+
+        ``supportsAllDrives=true`` is required for ``files.get`` to
+        resolve a Shared-Drive file id (it 404s otherwise).
         """
         url = (
             f"{self._drive_base}/files/{file_id}"
-            "?fields=id,name,mimeType,webViewLink,modifiedTime,createdTime,"
+            f"?{_SHARED_DRIVE_SUPPORT_PARAM}"
+            "&fields=id,name,mimeType,webViewLink,modifiedTime,createdTime,"
             "lastModifyingUser(emailAddress,displayName),owners(emailAddress),parents,size"
         )
         body = self._authorised_get(url).json()
