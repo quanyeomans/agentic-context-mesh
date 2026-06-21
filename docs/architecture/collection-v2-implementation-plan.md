@@ -1,6 +1,6 @@
 # Topology_v2 Collection Model — Implementation Plan + Test Coverage
 
-**Status:** Implementation plan (2026-06-02)
+**Status:** ✅ Implemented — spent plan (2026-06-02). The topology_v2 collection model shipped (#372/#373 CLOSED; `kairix/core/search/topology_v2_resolver.py`, `default_in_scope`). Retained as design provenance — the topology_v2 / collection-v2 test suite cites it. Design of record: `docs/architecture/collection-structure-design.md`. Not active work.
 **Drives:** #373 (cutover), #372 (resolver — already on main, needs `default_in_scope` extension)
 **Design doc:** `docs/architecture/collection-structure-design.md`
 **Audience:** subagents implementing the changes; reviewer cherry-picking

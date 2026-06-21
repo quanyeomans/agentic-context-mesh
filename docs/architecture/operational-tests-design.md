@@ -1,8 +1,23 @@
-# Operational tests as kairix capabilities — design (closes #276 design phase)
+# Operational tests as kairix capabilities — design (closes #276)
 
-> **Status**: design-only. No code in this phase. Implementation issues file separately per Tier once accepted.
+> **Status**: Implemented. [#276](https://github.com/three-cubes/kairix/issues/276) is CLOSED — the soak / load / probe capabilities shipped under `kairix/quality/probe/` and `kairix/quality/soak/`, and the affordance gate shipped as the `capability-affordance` fitness rule. This document is retained as the durable record of the two design rules below and as the pointer to the shipped surface.
 >
 > **Companion**: this design is the test-tooling complement to [`sre-worker-design.md`](sre-worker-design.md). The SRE worker doesn't implement health checks itself — it invokes the primitives defined here.
+
+## Shipped state — where the capabilities live now
+
+The design below is realised in code. Use this section as the index; the rest of the document is the rationale.
+
+| design surface | shipped as |
+|---|---|
+| Soak / load / probe Python APIs | `kairix/quality/probe/{runner,burst,perf_runner,executor,sampler,stats,clients}.py` and `kairix/quality/soak/runner.py` |
+| Soak + concurrent-latency CLI | folded into `kairix benchmark` (the former `kairix probe` / `kairix soak` modes — see `kairix/cli.py`) |
+| Provider/tuning probe + observability CLIs | `kairix probe-config`, `kairix mcp-calls`, `kairix caches`, `kairix warm` (`kairix/quality/probe/{config_cli,mcp_calls_cli,caches_cli}.py`, `kairix/platform/warm/cli.py`) |
+| Affordance enforcement (proposed below as `F25`) | shipped as the id-agnostic **`capability-affordance`** rule (`scripts/checks/check_capability_affordance.py`); the catalogue uses descriptive names, not an `F25` number |
+| Capability-probe at the readiness boundary | `kairix/agents/mcp/capability_probe.py` (wired into `/healthz/ready`) |
+| PVT transport seam (Phase 4) | `kairix/quality/probe/clients.py` (`SearchClient` Protocol) |
+
+The two rules below are the durable principles this work encoded; treat them as the canonical statement of how an operational test becomes a kairix capability.
 
 ## Why this design
 
@@ -61,25 +76,25 @@ The decision per capability lives in the capability's design — it is NOT impli
 
 ## Capabilities catalogue (this design's scope)
 
-### Existing capabilities — current binding posture
+### Existing capabilities — binding posture (as shipped)
 
-| capability | Python API | CLI | MCP | rationale for current posture |
+| capability | Python API | CLI | MCP | rationale for posture |
 |---|---|---|---|---|
-| `onboard check` | ✅ `kairix.core.health.run_all_checks` | ✅ `kairix onboard check` | ❌ | read-only, agent-useful — **MCP exposure proposed in follow-up** |
-| `worker status` | ✅ | ✅ `kairix worker status` | ❌ | read-only, agent-useful — **MCP exposure proposed in follow-up** |
-| `benchmark run` | ✅ | ✅ `kairix benchmark run` | ❌ | minutes-long, load-generating — **stays CLI-only** |
+| `onboard check` | ✅ `kairix.platform.onboard.check.run_onboard_check` | ✅ `kairix onboard check` | ✅ `tool_onboard_check` | read-only, agent-useful — **MCP exposure shipped** (server.py) |
+| `worker status` | ✅ | ✅ `kairix worker status` | ✅ `tool_worker_status` | read-only, agent-useful — **MCP exposure shipped** (server.py) |
+| `benchmark run` | ✅ | ✅ `kairix benchmark` | ❌ | minutes-long, load-generating — **stays CLI-only** |
 | `embed --limit N` | ✅ | ✅ `kairix embed` | ❌ | mutates state, expensive — **stays CLI-only** |
 | `store crawl` | ✅ | ✅ `kairix store crawl` | ❌ | mutates Neo4j, minutes-long — **stays CLI-only** |
 | `embed rebuild-fts` | ✅ | ✅ | ❌ | destructive recovery action — **stays CLI-only with operator confirmation** |
 
-The follow-up issue (filed alongside this design) captures the retroactive MCP exposure of the two safe read-only capabilities.
+The two safe read-only capabilities (`onboard check`, `worker status`) were retroactively MCP-exposed exactly as planned — `tool_onboard_check` and `tool_worker_status` are registered in `kairix/agents/mcp/server.py`.
 
-### New capabilities — proposed binding posture
+### New capabilities — binding posture (as shipped)
 
 | capability | CLI | MCP | rationale |
 |---|---|---|---|
-| `soak run` | ✅ `kairix benchmark run --mode soak` | ❌ | minutes-long; load-generating; gate behind operator/SRE-worker explicit invocation |
-| `probe search` (low-concurrency) | ✅ `kairix benchmark run --mode concurrent --concurrency N` | ✅ `tool_probe_search` with hard cap concurrency≤3, queries≤20 | hard-capped variant is read-only; full variant is load-generating (CLI flag opens the range) |
+| `soak run` | ✅ folded into `kairix benchmark` (the former `kairix soak` mode); Python API `kairix.quality.soak.runner` | ❌ stub only (`tool_soak_run` returns an operator-handoff envelope) | minutes-long; load-generating; gate behind operator/SRE-worker explicit invocation |
+| `probe search` (low-concurrency) | ✅ folded into `kairix benchmark` (the former `kairix probe` concurrent mode); Python API `kairix.quality.probe.run_probe_search` | ✅ `tool_probe_search` with hard cap concurrency≤3, queries≤20 | hard-capped variant is read-only; full variant is load-generating (CLI opens the range) |
 | `probe log-volume` | ✅ `kairix benchmark run --mode soak --max-log-volume-mb N` | ❌ | requires running a benchmark; long; better as CLI/scheduled |
 | `probe factory-calls` (future) | ✅ | ❌ | development/debugging tool, not a runtime signal |
 
@@ -178,8 +193,8 @@ The existing `tool_usage_guide` (already MCP-exposed) gets a `capabilities` topi
 | `tool_probe_search` | "is search slow?" | MCP — direct (hard-capped) |
 | Full latency probe | full diagnostic | escalate: `kairix benchmark run --mode concurrent --concurrency 10 --queries 100` |
 | Soak test | "does this hold under load?" | escalate: `kairix benchmark run --suite reflib --repeat 3` |
-| Onboard check | "is kairix healthy?" | MCP — `tool_onboard_check` (when shipped) |
-| Worker state | "is the worker running?" | MCP — `tool_worker_status` (when shipped) |
+| Onboard check | "is kairix healthy?" | MCP — `tool_onboard_check` |
+| Worker state | "is the worker running?" | MCP — `tool_worker_status` |
 ```
 
 The guide is the index; the stubs are the per-capability handoffs. Both must ship — an agent that knows to call `tool_probe_search` doesn't need the guide; an agent who doesn't know what's available finds it via the guide.
@@ -215,9 +230,9 @@ MCP equivalent: tool_probe_search (hard-capped: concurrency≤3, queries≤20).
 
 The help text *is* the affordance. An operator looking at `--help` learns whether to run from terminal or escalate to the agent surface.
 
-### Affordance pattern 4 — `tool_capabilities()` introspection (optional, Phase 3)
+### Affordance pattern 4 — `tool_capabilities()` introspection (shipped, Phase 3)
 
-A future capability for agents to discover the surface programmatically:
+A capability for agents to discover the surface programmatically — registered in `kairix/agents/mcp/server.py` (`tool_capabilities()`):
 
 ```python
 @server.tool()
@@ -232,14 +247,14 @@ def tool_capabilities() -> dict:
     }
 ```
 
-This is optional because the stub-tools + usage-guide pattern already gives agents working discoverability. `tool_capabilities` is for AI-driven SRE agents that want to introspect rather than guess. Ship if/when there's demand.
+The stub-tools + usage-guide pattern already gives agents working discoverability; `tool_capabilities` adds programmatic introspection for AI-driven SRE agents that want to enumerate the surface rather than guess. It shipped alongside the rest of Phase 3.
 
-### Affordance enforcement — fitness function `F25`
+### Affordance enforcement — the `capability-affordance` fitness rule
 
-To prevent the affordance layer rotting:
+To prevent the affordance layer rotting (this design proposed it as `F25`; it shipped under the catalogue's id-agnostic naming as the **`capability-affordance`** rule):
 
 ```python
-# scripts/checks/check_capability_affordance.py — proposed
+# scripts/checks/check_capability_affordance.py — shipped
 # For every CLI subcommand:
 #   - either MCP-binds with the same name (tool_<subcommand>) OR
 #   - MCP stub exists with operator-handoff envelope
@@ -247,7 +262,7 @@ To prevent the affordance layer rotting:
 # or stub fails the gate.
 ```
 
-This becomes F25 in the fitness-function rule list. New CLI capability without affordance → block at pre-commit.
+This is enforced as the `capability-affordance` rule in the fitness catalogue. New CLI capability without affordance → block at pre-commit.
 
 ## How invokers use the catalogue
 
@@ -272,57 +287,56 @@ The alpha-deploy webhook (Go, on the VM) already shells out to `kairix benchmark
 
 For capabilities exposed via MCP, agents call directly. For CLI-only capabilities, agents call the MCP stub and receive a structured escalation envelope.
 
-## Phased rollout (unchanged from previous draft + affordance integrated)
+## Phased rollout (history — all phases landed)
 
-### Phase 1 — soak primitive + affordance scaffolding
+The rollout below is retained as the record of how the capability set was sequenced. Phases 1–4 have all landed; the one remaining deferral (`--mode stability`) is scoped explicitly in Phase 3.
 
-Ships:
-- `kairix.quality.soak.run_soak()` Python API
-- `kairix benchmark run --mode soak` CLI binding
+### Phase 1 — soak primitive + affordance scaffolding ✅ landed
+
+Shipped:
+- soak Python API (`kairix.quality.soak.runner`)
+- soak run folded into `kairix benchmark` (the former `kairix soak` mode)
 - `tool_soak_run` MCP **stub** with operator-handoff envelope (pattern 1)
 - `tool_usage_guide` updated with the capabilities table (pattern 2)
 - CLI `--help` cross-references MCP / absence (pattern 3)
-- `scripts/checks/check_capability_affordance.py` (F25)
+- `scripts/checks/check_capability_affordance.py` (the `capability-affordance` rule)
 - Runbook section in `docs/runbooks/kairix-retrieval-health.md`
 - Wired into CI / alpha-deploy webhook
 
-Acceptance:
-- `kairix benchmark run --suite reflib --repeat 2` against pre-#275-fix state fails with `log_volume_exceeded`, exit 1.
-- Same command against post-#275-fix state passes.
+Acceptance (proven at ship time):
+- A soak run against pre-#275-fix state fails with `log_volume_exceeded`, exit 1.
+- The same run against post-#275-fix state passes.
 - `tool_soak_run` returns the expected operator-handoff envelope.
 - Agent searching `tool_usage_guide("diagnostics")` gets the capabilities table.
-- F25 fitness check blocks a hand-rolled new CLI command without affordance.
+- The `capability-affordance` fitness check blocks a hand-rolled new CLI command without affordance.
 
-### Phase 2 — probe primitives + read-only MCP retroactives
+### Phase 2 — probe primitives + read-only MCP retroactives ✅ landed
 
-Ships:
-- `kairix benchmark run --mode concurrent` CLI + `tool_probe_search` MCP (hard-capped)
-- `kairix benchmark run --mode soak --max-log-volume-mb N` CLI + MCP stub
-- **Retroactive MCP exposures** (per follow-up issue): `tool_onboard_check`, `tool_worker_status`
+Shipped:
+- concurrent-latency probe folded into `kairix benchmark` (the former `kairix probe` mode) + `tool_probe_search` MCP (hard-capped)
+- log-volume probe assertions on the soak path + MCP stub
+- **Retroactive MCP exposures**: `tool_onboard_check`, `tool_worker_status`
 - Tier-2 integration in CI suite
 
-### Phase 3 — burst + failure-injection + capability introspection
+### Phase 3 — burst + failure-injection + capability introspection ✅ landed
 
-Ships:
-- `kairix benchmark run --mode burst` (CLI-only) ✅ landed
-- `tool_capabilities()` programmatic introspection (pattern 4) ✅ landed
-- `kairix benchmark run --mode stability` (long soak, CLI-only) — **deferred** until `--mode burst` surfaces fault-shape regressions worth catching (see #276 Phase 3 closure)
+Shipped:
+- burst mode (CLI-only; `kairix/quality/probe/burst.py`) ✅ landed
+- `tool_capabilities()` programmatic introspection (pattern 4; `kairix/agents/mcp/server.py`) ✅ landed
+- `--mode stability` (long soak, CLI-only) — **deferred** until burst mode surfaces fault-shape regressions worth catching (see #276 Phase 3 closure)
 
-### Phase 4 — PVT layer (production-truth measurement)
+### Phase 4 — PVT layer (production-truth measurement) ✅ landed
 
-Phase 2 + 3 live verification on `v2026.5.16a4/a5` surfaced that the in-process probe CLI measures the **Python-pipeline regression surface** — cold subprocess + in-process call — not what an agent over MCP actually experiences. The probes still surface the right Tier 1 lever recommendation; they just over-report magnitude.
+Phase 2 + 3 live verification surfaced that the in-process probe CLI measures the **Python-pipeline regression surface** — cold subprocess + in-process call — not what an agent over MCP actually experiences. The probes still surface the right Tier 1 lever recommendation; they just over-report magnitude.
 
-Phase 4 redefines the layer that owns "what do agents see":
+Phase 4 redefines the layer that owns "what do agents see". Shipped:
 
 - **`docs/architecture/performance-testing-approach.md`** — four-layer ADR (unit / bdd / integration / **PVT**), explicit framing that PVT is opt-in (`KAIRIX_PVT=1`), never CI-blocking.
-- **`tests/pvt/`** — five Gherkin scenarios describing agent-experienced behaviours: cold-start envelope timing, warm-server baseline, teaming-load latency, session-start storm, in-session stability.
-- **`kairix.quality.probe.clients.SearchClient` Protocol** — the seam between the probe runner and the transport. `InProcessSearchClient` is the current implementation; `MCPHttpSearchClient` is the future drop-in.
-- **#284** — the harness build (server fixture + MCPHttpSearchClient). Until it lands, PVT scenarios are inert (catch-all skip).
+- **`tests/pvt/`** — the PVT scenario suite (features + steps + `conftest.py` server fixture + `test_pvt_scenarios.py`) describing agent-experienced behaviours: cold-start envelope timing, warm-server baseline, teaming-load latency, session-start storm, in-session stability.
+- **`kairix.quality.probe.clients.SearchClient` Protocol** — the seam between the probe runner and the transport. `InProcessSearchClient` is the production implementation.
+- **#284** (CLOSED) — the MCP HTTP test harness (server fixture for the PVT layer) landed.
 
-When #284 ships:
-- The PVT scenarios fire against the live VM (and optionally an in-CI fake-server fixture).
-- `kairix benchmark run --mode concurrent` / `--mode burst` keep working — they're now explicitly the Python-pipeline regression gate, not the production-latency gate.
-- The runbook §6 measurement-shape caveat goes away (PVT layer is the production-truth answer).
+Residual: the production `MCPHttpSearchClient` drop-in is not yet a named class in `kairix/quality/probe/clients.py` — `clients.py` still ships only `InProcessSearchClient`, so the concurrent / burst probe CLIs remain the Python-pipeline regression gate (not the production-latency gate). The runbook §6 measurement-shape caveat applies until that production transport client lands.
 
 ## Out of scope (deliberately)
 
@@ -336,11 +350,11 @@ When #284 ships:
 
 | Risk | Mitigation |
 |---|---|
-| MCP surface bloats to mirror every CLI | Rule 2: explicit per-capability decision; F25 enforces affordance not exposure |
+| MCP surface bloats to mirror every CLI | Rule 2: explicit per-capability decision; the `capability-affordance` rule enforces affordance not exposure |
 | Agent triggers expensive operations via MCP | MCP variants are hard-capped (concurrency, queries, runtime); full surface is CLI-only |
 | Stub tools mislead agents into thinking the operation isn't supported | Stub returns structured envelope with `operator_command` and `expected_runtime_seconds` — clear path to escalation |
-| `tool_usage_guide` capabilities table drifts from reality | F25 cross-checks the table against the actual CLI dispatch + MCP registry; new capability without table entry fails the gate |
-| Phase 2 retroactive MCP exposure breaks existing agents | New MCP tools are additive; existing tool surface unchanged |
+| `tool_usage_guide` capabilities table drifts from reality | the `capability-affordance` rule cross-checks the table against the actual CLI dispatch + MCP registry; new capability without table entry fails the gate |
+| Retroactive MCP exposure breaks existing agents | New MCP tools are additive; existing tool surface unchanged |
 
 ## Related
 
@@ -349,4 +363,5 @@ When #284 ships:
 - [#243](https://github.com/three-cubes/kairix/issues/243) — SRE worker (primary capability consumer)
 - [`sre-worker-design.md`](sre-worker-design.md) — companion; specifies the worker as a scheduler over the capabilities defined here
 - [#272](https://github.com/three-cubes/kairix/issues/272) — alpha-validation chain (Phase 1 proving ground)
-- Follow-up issue (filed alongside this design) — retroactive MCP exposure of `onboard check` + `worker status`
+- [#284](https://github.com/three-cubes/kairix/issues/284) — MCP HTTP test harness for the Phase 4 PVT layer (CLOSED)
+- Retroactive MCP exposure of `onboard check` + `worker status` — **shipped** as `tool_onboard_check` / `tool_worker_status` (`kairix/agents/mcp/server.py`)

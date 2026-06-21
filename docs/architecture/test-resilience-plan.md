@@ -1,6 +1,6 @@
 # Test Resilience Plan — failure-mode coverage across BDD/E2E/Integration/Contract
 
-**Status:** Planning + active implementation · **Owner:** kairix engineering · **Opened:** 2026-05-26
+**Status:** ✅ Implemented — spent plan · **Owner:** kairix engineering · **Opened:** 2026-05-26. The failure-mode coverage shipped (the integration/contract suites it specifies exist; the F-rules it motivated — F62/F67/F70/F71 + F68/F69/F72 — are live per `docs/architecture/defect-catalogue.md` and ADR-024). Retained as design provenance — the failure-injection test suite cites it. Not active work.
 
 ## 1. Why this exists
 

@@ -1,12 +1,19 @@
 # ADR-027 — Entity-enrichment worker stage (post-iter_5 deployment)
 
-**Status:** Proposed
+**Status:** Accepted — partially implemented
 **Date:** 2026-05-29
 **Supersedes:** none
 **Superseded by:** none
-**Tracking:** GH #343 (one-time iter_5 deployment); follow-up wave for the worker integration
+**Tracking:** GH #343 (one-time iter_5 deployment). The enrich capability shipped via GH #415 (commit `11d44075`, 2026-06-06). The continuous-worker goal of this ADR was realised through ADR-036's entity-summary projector tick rather than the `_run_entity_enrichment` tick proposed below — see [ADR-036](ADR-036-entity-summary-indexing-surface.md).
 **Source plan:** entity-modelling repo, `docs/kairix-deployment-plan.md` §11
 **Norm reference:** entity-modelling repo, `docs/graph-modelling-external-refs-as-properties.md` (ported in same wave as `docs/architecture/graph-modelling-refs-as-properties.md`)
+
+> **Implementation status (2026-06-22).** Read this ADR against what landed, not as a forward plan:
+> - **Shipped (GH #415, commit `11d44075`).** `kairix entity enrich` — a Wikidata-only description enricher in `kairix/knowledge/entities/enrich.py`, with `run_entity_enrich` / `run_entity_enrich_batch` in `kairix/use_cases/entity.py`, BDD feature `tests/bdd/features/entity_enrich.feature`, contract tests, and CLI outcome tests. It fetches the canonical Wikidata description for entities that already have a `wikidata_qid` and writes it back as `n.summary` in Neo4j. No API key required.
+> - **Continuous goal realised differently (ADR-036).** The "enrichment must be continuous, not periodic" objective of this ADR was met by [ADR-036](ADR-036-entity-summary-indexing-surface.md)'s `EntitySummaryProjectorImpl` + `run_entity_summary_projector_tick`, gated behind the `entity_summary_indexing_enabled` feature flag and wired into the worker loop via `maybe_run_entity_summary_projector_tick` (`kairix/worker.py`). That tick projects `n.summary` into the synthetic `entity-summaries` collection so enriched descriptions become searchable. The `_run_entity_enrichment` enrich → resolve → promote tick proposed in the **Decision** section below was **not** built as specified.
+> - **Not shipped (still proposal-only).** The Perplexity fallback, the three SQLite tables (`entities_enrichment`, `entities_canonical_map`, `entities_review_queue`), the candidate review queue with `kairix entities review` CLI + `tool_entities_review` MCP tool, the `entity_enrichment_continuous` feature flag, and the drift-monitoring weekly job remain unbuilt. The "follow-up wave for the worker integration" tracking note resolved as ADR-036 (summary projector), not as the worker tick described here.
+>
+> The **Decision** / **Module layout** / **Mechanics** sections below are preserved as the original proposal record. They are the design substrate; treat them as historical design, not as a description of shipped code.
 
 ## Context
 
@@ -115,16 +122,16 @@ def _run_entity_enrichment(deps: EntityEnrichmentDeps | None = None) -> EntityEn
 
 ### Forward-going graph-write topology
 
-After this ADR lands, three concurrent writers continue + one new:
+As proposed, three concurrent writers continue + one new. The **Landed** column records what actually shipped against the proposal:
 
-| Writer | Status | Output |
-|---|---|---|
-| `crawler.py` (ADR-014) | unchanged | curated entities from vault frontmatter |
-| `seed.py` (regex auto-discovery) | already patched in #343 | minimal entities NOT in canonical map |
-| `curator/drain.py` (entity_signals → Neo4j) | unchanged | silver-layer entity signal MERGE |
-| `_run_entity_enrichment` (NEW) | this ADR | continuous Wikidata + Perplexity enrichment of newly-seeded entities |
+| Writer | Proposal status | Output | Landed |
+|---|---|---|---|
+| `crawler.py` (ADR-014) | unchanged | curated entities from vault frontmatter | yes — unchanged |
+| `seed.py` (regex auto-discovery) | already patched in #343 | minimal entities NOT in canonical map | yes |
+| `curator/drain.py` (entity_signals → Neo4j) | unchanged | silver-layer entity signal MERGE | yes — unchanged |
+| `_run_entity_enrichment` (NEW) | this ADR | continuous Wikidata + Perplexity enrichment of newly-seeded entities | **no** — superseded by ADR-036's `run_entity_summary_projector_tick` (Wikidata-only `n.summary` projection into the `entity-summaries` collection; the manual `kairix entity enrich` path from #415 supplies the `n.summary` values) |
 
-The §11.3 vision goes further: `suggest.py` would be patched so that **all new entities flow through the candidate queue instead of direct Neo4j writes**. That's a behaviour change (today `suggest_entities` writes immediately if confidence > threshold; after the patch it would queue). Defer that change to a follow-up ADR — for the initial ADR-027 cut, keep `suggest.py` behaviour unchanged and run enrichment as an additive layer.
+The §11.3 vision goes further: `suggest.py` would be patched so that **all new entities flow through the candidate queue instead of direct Neo4j writes**. That's a behaviour change (today `suggest_entities` writes immediately if confidence > threshold; after the patch it would queue). This was deferred and remains unbuilt — `suggest.py` behaviour is unchanged, and the candidate queue does not exist.
 
 ## Mechanics
 
@@ -215,18 +222,20 @@ Per my review of the §11 plan, the worker integration will trigger several exis
 
 ## Definition of done
 
-| # | Criterion | Verification |
-|---|---|---|
-| 1 | iter_5 cypher-shell deployment landed in production (GH #343 phases 1-4 complete) | Verify queries §9.1–9.6 green |
-| 2 | `kairix.knowledge.entities.{enrich,resolve,promote,candidates}` modules exist | Import + unit test coverage |
-| 3 | Three new SQLite tables in schema.py + writers exist | F70 baseline shrinks |
-| 4 | `_run_entity_enrichment` worker tick wired with F66 budget declarations | F66 green; tick runs without OOM on production-scale entity table |
-| 5 | F67 `promoted_to_neo4j` flip implemented | F67 sees the UPDATE site; drain backlog trends to zero |
-| 6 | `kairix entities review` CLI + `tool_entities_review` MCP + F45/F30/F53 tests | All four green |
-| 7 | Both-branch tests for any new feature flag (e.g. `entity_enrichment_continuous`) | F54 green |
-| 8 | Wikidata + Perplexity Protocol failure-mode tests (F68) + rate-limit tests (F64) | Both green; baselines reduced |
-| 9 | Drift monitoring writes weekly summary to worker log | Operator-attested after first weekly cycle |
-| 10 | `docs/architecture/graph-modelling-refs-as-properties.md` ported from entity-modelling repo as kairix norm | Document exists; ADR-027 references it |
+The original DoD is preserved below with a **State** column showing what actually landed. The proposal's full enrich → resolve → promote worker tick was not built; the continuous-enrichment intent was met by ADR-036's summary projector instead (see the status header).
+
+| # | Criterion | Verification | State |
+|---|---|---|---|
+| 1 | iter_5 cypher-shell deployment landed in production (GH #343 phases 1-4 complete) | Verify queries §9.1–9.6 green | Done (GH #343) |
+| 2 | `kairix.knowledge.entities.{enrich,resolve,promote,candidates}` modules exist | Import + unit test coverage | Partial — only `enrich.py` shipped (GH #415); `resolve.py`/`promote.py`/`candidates.py` not built |
+| 3 | Three new SQLite tables in schema.py + writers exist | F70 baseline shrinks | Not done — no `entities_enrichment` / `entities_canonical_map` / `entities_review_queue` tables exist |
+| 4 | `_run_entity_enrichment` worker tick wired with F66 budget declarations | F66 green; tick runs without OOM on production-scale entity table | Superseded — ADR-036's `run_entity_summary_projector_tick` is the continuous worker tick (wired via `maybe_run_entity_summary_projector_tick` in `kairix/worker.py`) |
+| 5 | F67 `promoted_to_neo4j` flip implemented | F67 sees the UPDATE site; drain backlog trends to zero | Not done — no `promoted_to_neo4j` column (no enrichment table) |
+| 6 | `kairix entities review` CLI + `tool_entities_review` MCP + F45/F30/F53 tests | All four green | Not done — no review queue; the shipped entity CLI exposes `suggest`/`validate`/`enrich`/`seed`/`get`/`count`/`audit`/`purge`, with `tool_entity`/`tool_entity_suggest`/`tool_entity_validate` on MCP |
+| 7 | Both-branch tests for any new feature flag (e.g. `entity_enrichment_continuous`) | F54 green | N/A — `entity_enrichment_continuous` was never registered; the relevant flag is ADR-036's `entity_summary_indexing_enabled` |
+| 8 | Wikidata + Perplexity Protocol failure-mode tests (F68) + rate-limit tests (F64) | Both green; baselines reduced | Partial — Wikidata enrich (#415) ships contract tests; Perplexity path was never built |
+| 9 | Drift monitoring writes weekly summary to worker log | Operator-attested after first weekly cycle | Not done |
+| 10 | `docs/architecture/graph-modelling-refs-as-properties.md` ported from entity-modelling repo as kairix norm | Document exists; ADR-027 references it | Done — document ported |
 
 ## Open decisions for later
 
@@ -238,8 +247,12 @@ Per my review of the §11 plan, the worker integration will trigger several exis
 
 ## Sequencing
 
-1. **First (this session)**: GH #343 phases 0a/0b/0c/0d/0e + this ADR + cypher-shell deployment artefacts
-2. **After GH #343 phase 4 complete (operator runs deploy)**: write the schema migration + module skeletons for ADR-027
-3. **Within 1 month of deployment**: ship the `_run_entity_enrichment` tick + review CLI
-4. **Within 3 months**: drift-monitoring weekly summary live
-5. **Within 6 months**: evaluate whether to ship the §11.3 `suggest.py` patch (queue-instead-of-write) under ADR-028
+The originally-planned sequence and how it actually resolved:
+
+1. **GH #343 phases 0a–0e + this ADR + cypher-shell deployment artefacts** — done. The one-time iter_5 deployment landed via GH #343.
+2. **Schema migration + module skeletons for ADR-027** — only `enrich.py` shipped (GH #415, commit `11d44075`, 2026-06-06). The `entities_enrichment` / `entities_canonical_map` / `entities_review_queue` tables and the `resolve.py` / `promote.py` / `candidates.py` skeletons were not built.
+3. **`_run_entity_enrichment` tick + review CLI** — superseded. Instead of the proposed enrich → resolve → promote tick, the continuous-enrichment goal was met by ADR-036's `run_entity_summary_projector_tick` (flag `entity_summary_indexing_enabled`, wired into the worker loop). The review CLI / `tool_entities_review` MCP queue was not built.
+4. **Drift-monitoring weekly summary** — not built.
+5. **§11.3 `suggest.py` queue-instead-of-write patch** — not built; `suggest.py` behaviour is unchanged.
+
+Remaining proposal-only items (Perplexity fallback, the enrichment/canonical-map/review-queue tables, the candidate review surface, the `entity_enrichment_continuous` flag, drift monitoring) are not on a committed near-term plan; revive them through a fresh issue if the enrich → resolve → promote pipeline is still wanted on top of the ADR-036 projector.
