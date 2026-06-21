@@ -88,6 +88,9 @@ class ConnectorConfig:
     prune_freq_seconds: int | None = None
     perm_sync_freq_seconds: int | None = None
     default_sensitivity: F39Tier = "internal"
+    extractor: str = "passthrough"
+    extractor_chain: tuple[str, ...] = ()
+    extractor_config: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -133,10 +136,17 @@ class CollectionSourceConfig:
 
 @dataclass(frozen=True)
 class CollectionConfig:
-    """One entry in the operator's ``collections:`` block."""
+    """One entry in the operator's ``collections:`` block.
+
+    ``tier`` is the optional ranking tier (D4) — when set, the build-time
+    tier-map derivation reads it to apply a ``SourceTierBoost`` so chunks
+    in this collection rank above/below the default. ``None`` (the
+    back-compat default) means "no tier boost".
+    """
 
     name: str
     sources: tuple[CollectionSourceConfig, ...]
+    tier: str | None = None
 
 
 @dataclass(frozen=True)
@@ -280,6 +290,35 @@ def _parse_connector_specific_config(value: Any) -> tuple[tuple[str, str], ...]:
     return tuple((str(k), str(v)) for k, v in sorted(value.items()))
 
 
+def _parse_extractor_config(value: Any) -> tuple[tuple[str, str], ...]:
+    """Render an extractor_config mapping as a sorted tuple of (k, v) pairs.
+
+    Mirrors :func:`_parse_connector_specific_config` for the tuple-of-pairs
+    shape (D1) so the frozen :class:`ConnectorConfig` stays hashable; the
+    ingest redirect reads it back as a dict at the per-connector boundary.
+    """
+    if value is None:
+        return ()
+    if not isinstance(value, dict):
+        raise TopologyV2ParseError(
+            "connectors[*].extractor_config: must be a mapping. "
+            "fix: use `key: value` pairs. next: run kairix config validate"
+        )
+    return tuple((str(k), str(v)) for k, v in sorted(value.items()))
+
+
+def _parse_extractor_chain(value: Any) -> tuple[str, ...]:
+    """Parse the optional ``extractor_chain:`` list into a tuple of names (D1)."""
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise TopologyV2ParseError(
+            "connectors[*].extractor_chain: must be a list of extractor names. "
+            "fix: render as a YAML list. next: run kairix config validate"
+        )
+    return tuple(str(name) for name in value)
+
+
 def _parse_one_connector(prefix: str, raw: Any) -> ConnectorConfig:
     item = _require_dict(prefix, raw)
     return ConnectorConfig(
@@ -291,6 +330,9 @@ def _parse_one_connector(prefix: str, raw: Any) -> ConnectorConfig:
         prune_freq_seconds=_optional_int(item.get("prune_freq_seconds")),
         perm_sync_freq_seconds=_optional_int(item.get("perm_sync_freq_seconds")),
         default_sensitivity=_parse_sensitivity(item.get("default_sensitivity"), default="internal"),
+        extractor=str(item.get("extractor") or "passthrough"),
+        extractor_chain=_parse_extractor_chain(item.get("extractor_chain")),
+        extractor_config=_parse_extractor_config(item.get("extractor_config")),
     )
 
 
@@ -409,6 +451,7 @@ def _parse_one_collection(prefix: str, raw: Any) -> CollectionConfig:
     return CollectionConfig(
         name=_require_str(prefix, item.get("name"), field="name"),
         sources=sources,
+        tier=_optional_str(item.get("tier")),
     )
 
 

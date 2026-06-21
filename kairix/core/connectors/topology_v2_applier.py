@@ -549,29 +549,39 @@ def _upsert_collection_row(
 
     Returns ``(collection_id, action)`` where ``action`` is one of
     ``"created"`` / ``"updated"`` / ``"unchanged"``. The collection
-    spec carries only ``name`` + ``sources`` today; defaults for
-    ``default_sensitivity`` / ``on_unmapped_item`` / ``visibility``
+    spec carries ``name`` + ``sources`` + the ranking ``tier``; defaults
+    for ``default_sensitivity`` / ``on_unmapped_item`` / ``visibility``
     stay at the schema's column defaults.
+
+    The ``tier`` is load-bearing on UPDATE: an operator who edits a
+    collection's ``tier:`` (e.g. promotes ``reflib`` to ``reference``)
+    must see the row's ``tier`` re-written in place, so an existing row
+    whose stored ``tier`` differs from the spec's reports ``"updated"``.
     """
     existing = db.execute(
-        "SELECT id FROM topology_collections WHERE name = ?",
+        "SELECT id, tier FROM topology_collections WHERE name = ?",
         (spec.name,),
     ).fetchone()
     if existing is None:
         cur = db.execute(
             "INSERT INTO topology_collections "
-            "(name, default_sensitivity, on_unmapped_item, visibility, "
+            "(name, default_sensitivity, on_unmapped_item, visibility, tier, "
             "created_at, updated_at) "
-            "VALUES (?, 'internal', 'land_in_default_collection', 'engagement', ?, ?)",
-            (spec.name, now, now),
+            "VALUES (?, 'internal', 'land_in_default_collection', 'engagement', ?, ?, ?)",
+            (spec.name, spec.tier, now, now),
         )
         new_id = cur.lastrowid
         if new_id is None:
             raise RuntimeError(f"topology_v2_applier: INSERT topology_collections name={spec.name!r} failed")
         return int(new_id), "created"
-    # Collection spec doesn't carry sensitivity / unmapped policy /
-    # visibility overrides yet, so an existing row is always "unchanged".
-    return int(existing[0]), "unchanged"
+    collection_id = int(existing[0])
+    if existing[1] == spec.tier:
+        return collection_id, "unchanged"
+    db.execute(
+        "UPDATE topology_collections SET tier = ?, updated_at = ? WHERE id = ?",
+        (spec.tier, now, collection_id),
+    )
+    return collection_id, "updated"
 
 
 def _upsert_collection_sources(

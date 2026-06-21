@@ -1567,6 +1567,7 @@ class Collection:
     group_grants: tuple[GroupGrant, ...]
     created_at: str
     updated_at: str
+    tier: str | None = None
 
 
 @dataclass(frozen=True)
