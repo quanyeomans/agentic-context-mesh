@@ -910,12 +910,22 @@ def merge_retrieval_config(base: RetrievalConfig, overrides: dict) -> RetrievalC
     return replace(base, **top_fields) if top_fields else base
 
 
-def _get_collection_overrides() -> dict[str, dict]:
-    """Load per-collection retrieval override dicts from config YAML."""
-    collections_cfg = load_collections()
-    if not collections_cfg:
-        return {}
-    return {c.name: c.retrieval_overrides for c in collections_cfg.shared if c.retrieval_overrides}
+def _topology_collection_overrides() -> dict[str, dict]:
+    """Load per-collection retrieval override dicts from the canonical topology.
+
+    Delegates to :func:`kairix.core.factory.derive_collection_overrides`,
+    which reads ``topology_v2.collections[*].retrieval`` from the
+    overlay-aware merged config — the same canonical source the
+    ranking-tier map derives from (canonical-collapse). The import is lazy
+    to avoid a config_loader → factory import cycle (factory imports
+    config_loader at resolution time). Returns
+    ``{collection_name: override_dict}``; empty when no collection
+    declares a ``retrieval:`` block so ``resolve_retrieval_config`` falls
+    back to the global config.
+    """
+    from kairix.core.factory import derive_collection_overrides
+
+    return derive_collection_overrides()
 
 
 @dataclass
@@ -930,7 +940,7 @@ class ResolveConfigDeps:
     """
 
     config_fn: Callable[[], RetrievalConfig] = field(default_factory=lambda: load_config)
-    overrides_fn: Callable[[], dict[str, dict]] = field(default_factory=lambda: _get_collection_overrides)
+    overrides_fn: Callable[[], dict[str, dict]] = field(default_factory=lambda: _topology_collection_overrides)
 
 
 def resolve_retrieval_config(
