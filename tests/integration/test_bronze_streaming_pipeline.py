@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
-import yaml
 
 from kairix.core.db.schema import create_schema
 from kairix.worker import ConnectorSyncDeps, run_via_connector_pipeline
@@ -31,23 +31,25 @@ def _seed_vault(document_root: Path, count: int) -> None:
         )
 
 
-def _write_obsidian_config(tmp_path: Path, vault_root: Path) -> Path:
-    cfg = tmp_path / "kairix.config.yaml"
-    cfg.write_text(
-        yaml.safe_dump(
-            {
-                "connectors": [
-                    {
-                        "name": "obsidian",
-                        "extractor": "passthrough",
-                        "config": {"vault_root": str(vault_root)},
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    return cfg
+def _obsidian_topology_mapping(vault_root: Path) -> dict[str, Any]:
+    """Canonical ``topology.connectors`` + cc_pair mapping for an obsidian
+    connector — the read shape ingest enumerates after the Task 4
+    canonical-collapse redirect (no legacy top-level ``connectors:``).
+    """
+    return {
+        "topology_v2": {
+            "connectors": [
+                {
+                    "id": "obsidian-conn",
+                    "kind": "obsidian",
+                    "name": "Obsidian Vault",
+                    "extractor": "passthrough",
+                    "connector_specific_config": {"vault_root": str(vault_root)},
+                }
+            ],
+            "cc_pairs": [{"id": "obsidian-pair", "connector": "obsidian-conn", "credential": None, "name": "obsidian"}],
+        }
+    }
 
 
 def test_streaming_bronze_pipeline_writes_no_disk_blobs(tmp_path: Path) -> None:
@@ -77,10 +79,10 @@ def test_streaming_bronze_pipeline_writes_no_disk_blobs(tmp_path: Path) -> None:
     create_schema(db)
     db.close()
 
-    config_path = _write_obsidian_config(tmp_path, document_root)
+    mapping = _obsidian_topology_mapping(document_root)
     deps = ConnectorSyncDeps(
         disabled_fn=lambda: False,
-        config_path_resolver=lambda: config_path,
+        config_mapping_fn=lambda: mapping,
         db_factory=lambda: sqlite3.connect(str(db_path), timeout=10.0),
         bronze_root_resolver=lambda: bronze_root,
     )
@@ -110,50 +112,27 @@ def test_streaming_bronze_pipeline_writes_no_disk_blobs(tmp_path: Path) -> None:
 
 
 def test_legacy_bronze_mode_field_fails_fast(tmp_path: Path) -> None:
-    """Phase 7 removed the bronze_mode config field. Configs that still
-    carry it must surface a fix-pointer error at first connector
-    resolution so operators see the failure at deploy time.
+    """Phase 7 removed the bronze_mode config field. An entry that still
+    carries it must surface a fix-pointer error at bronze-store
+    construction so operators see the failure at deploy time.
 
-    Sabotage proof: drop the ``raise ValueError`` from build_bronze_from_entry;
-    this test fails because the sync proceeds instead of failing with the
-    fix-pointer message.
+    Driven through the public ``build_bronze_from_entry`` boundary — the
+    canonical Task 4 ingest entry never carries a top-level ``bronze_mode``
+    key, so the guard is exercised at the registry boundary it protects,
+    not via a legacy top-level ``connectors:`` config block (that read
+    path is gone).
+
+    Sabotage proof: drop the ``raise ValueError`` from
+    build_bronze_from_entry; this test fails because no ValueError is
+    raised.
     """
-    document_root = tmp_path / "vault"
-    bronze_root = tmp_path / "bronze"
+    from kairix.core.connectors.registry import build_bronze_from_entry
+
     db_path = tmp_path / "index.sqlite"
-
-    _seed_vault(document_root, count=3)
-
     db = sqlite3.connect(str(db_path), timeout=10.0)
     create_schema(db)
-    db.close()
-
-    # Legacy config with the obsolete bronze_mode field
-    cfg = tmp_path / "kairix.config.yaml"
-    cfg.write_text(
-        yaml.safe_dump(
-            {
-                "connectors": [
-                    {
-                        "name": "obsidian",
-                        "bronze_mode": "filesystem",
-                        "extractor": "passthrough",
-                        "config": {"vault_root": str(document_root)},
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    deps = ConnectorSyncDeps(
-        disabled_fn=lambda: False,
-        config_path_resolver=lambda: cfg,
-        db_factory=lambda: sqlite3.connect(str(db_path), timeout=10.0),
-        bronze_root_resolver=lambda: bronze_root,
-    )
-    # Worker absorbs per-connector failures (logs warning, returns zero
-    # synced for the failed connector). Sync reports 0 synced and 0 failed
-    # because the failure happened at resolution before any item was processed.
-    result = run_via_connector_pipeline(deps)
-    assert result.synced == 0, f"legacy bronze_mode field should prevent sync; got {result}"
+    try:
+        with pytest.raises(ValueError, match="bronze_mode"):
+            build_bronze_from_entry({"name": "obsidian", "bronze_mode": "filesystem"}, db=db)
+    finally:
+        db.close()

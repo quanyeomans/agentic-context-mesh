@@ -286,30 +286,38 @@ def select_boosts(
     return boosts
 
 
-def derive_tier_map() -> dict[str, str]:
-    """Derive ``{collection_name: tier_name}`` from the operator's
-    collections config (Issue #432).
+def derive_tier_map(mapping: dict[str, Any] | None = None) -> dict[str, str]:
+    """Derive ``{collection_name: tier_name}`` from the canonical
+    topology collections (Issue #432, canonical-collapse Task 6).
 
-    Reads via :func:`kairix.core.search.config_loader.load_collections`
-    so the env / cwd resolution chain applies — same surface the rest
-    of the kairix-config-aware code uses. Returns an empty dict when
-    no collections config is present, when no collection declares a
-    ``tier:`` field, or when the load fails — in all cases the
+    Reads ``topology_v2.collections[*].tier`` from the operator's MERGED
+    config mapping (base + overlay) via
+    :func:`kairix.config_layers.load_merged_mapping` — the same
+    overlay-aware read path the setup wizard writes through (#492), so a
+    wizard-saved topology block is honoured. Returns an empty dict when
+    no topology collections are present, when no collection declares a
+    ``tier:`` field, or when the parse fails — in all cases the
     :class:`SourceTierBoost` falls back to its default tier (x1.0)
     and preserves pre-#432 ranking byte-for-byte.
 
-    Pure read; no I/O beyond the YAML load. Safe to call at
-    pipeline-construction time.
+    DB-free: this is a config-parse, not a read of the materialised
+    ``topology_collections`` rows, so it stays safe to call at
+    pipeline-construction time before any DB is open. Pass ``mapping=``
+    to inject an explicit merged mapping (mirrors the
+    ``_resolve_retrieval_config(config=...)`` seam); the default resolves
+    the live merged config.
     """
     try:
-        from kairix.core.search.config_loader import load_collections
+        if mapping is None:
+            from kairix.config_layers import load_merged_mapping
 
-        collections = load_collections()
+            mapping = load_merged_mapping()
+        from kairix.config.topology_v2 import parse_topology_v2
+
+        topology = parse_topology_v2(mapping)
     except Exception:
         return {}
-    if collections is None:
-        return {}
-    return {c.name: c.tier for c in collections.shared if c.tier}
+    return {c.name: c.tier for c in topology.collections if c.tier}
 
 
 def _resolve_retrieval_config(config: RetrievalConfig | None) -> RetrievalConfig:

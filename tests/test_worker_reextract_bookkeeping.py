@@ -27,9 +27,9 @@ import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
-import yaml
 
 from kairix.core.connectors import StreamingBronzeStore
 from kairix.core.db.schema import create_schema
@@ -55,27 +55,35 @@ _OLD_ERROR = "stale error from boot"
 _OLD_ATTEMPT_ISO = "2020-01-01T00:00:00+00:00"
 
 
-def _write_pdf_fallback_config(tmp_path: Path, vault: Path) -> Path:
-    """Write a kairix.config.yaml routing obsidian through pdf_fallback.
+def _pdf_fallback_mapping(vault: Path) -> dict[str, Any]:
+    """Canonical topology mapping routing obsidian through pdf_fallback.
 
     pdf_fallback is the extractor that will raise on invalid PDF bytes.
+    Task 5: re-extract reads ``topology`` (cc_pair name matches the
+    dead_letter ``source_name``; kind resolves the plugin), not the legacy
+    top-level ``connectors:`` list.
     """
-    cfg = tmp_path / "kairix.config.yaml"
-    cfg.write_text(
-        yaml.safe_dump(
-            {
-                "connectors": [
-                    {
-                        "name": "obsidian",
-                        "extractor": "pdf_fallback",
-                        "config": {"vault_root": str(vault)},
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    return cfg
+    return {
+        "topology_v2": {
+            "connectors": [
+                {
+                    "id": "obsidian-conn",
+                    "kind": "obsidian",
+                    "name": "Personal Obsidian Vault",
+                    "extractor": "pdf_fallback",
+                    "connector_specific_config": {"vault_root": str(vault)},
+                }
+            ],
+            "cc_pairs": [
+                {
+                    "id": "obsidian-pair",
+                    "connector": "obsidian-conn",
+                    "credential": None,
+                    "name": "obsidian",
+                }
+            ],
+        }
+    }
 
 
 def _seed_dead_letter_with_history(
@@ -146,7 +154,7 @@ def test_reextract_failure_bumps_failure_count_and_records_fresh_error(tmp_path:
     StreamingBronzeStore(db).write(source_name, item_id, _BAD_PDF_BYTES, "application/pdf")
     _seed_dead_letter_with_history(db=db, source_name=source_name, item_id=item_id)
 
-    config_path = _write_pdf_fallback_config(tmp_path, vault)
+    mapping = _pdf_fallback_mapping(vault)
 
     before_ts = datetime.now(timezone.utc)
     # Sleep a tick so timestamp ordering is unambiguous on fast CI runners.
@@ -156,7 +164,7 @@ def test_reextract_failure_bumps_failure_count_and_records_fresh_error(tmp_path:
         source_name=source_name,
         db=db,
         bronze_root=tmp_path / "bronze",
-        config_path=config_path,
+        config_mapping=mapping,
     )
 
     assert isinstance(result, ReextractResult)
@@ -212,13 +220,13 @@ def test_reextract_dry_run_failure_does_not_touch_bookkeeping(tmp_path: Path) ->
     StreamingBronzeStore(db).write(source_name, item_id, _BAD_PDF_BYTES, "application/pdf")
     _seed_dead_letter_with_history(db=db, source_name=source_name, item_id=item_id)
 
-    config_path = _write_pdf_fallback_config(tmp_path, vault)
+    mapping = _pdf_fallback_mapping(vault)
 
     result = run_reextract_dead_letter(
         source_name=source_name,
         db=db,
         bronze_root=tmp_path / "bronze",
-        config_path=config_path,
+        config_mapping=mapping,
         dry_run=True,
     )
 
