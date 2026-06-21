@@ -447,12 +447,19 @@ def test_list_changes_for_container_flag_on_warm_drain_threads_mailbox_metadata(
     assert connector.next_cursor_for_container(_USER) == "post-drain-tip"
 
 
-def test_list_changes_for_container_flag_on_warm_drain_falls_back_to_cursor_when_no_terminal_tip() -> None:
-    """ON branch — when the client has no last_history_id, cursor falls back.
+def test_list_changes_for_container_flag_on_warm_drain_returns_none_when_no_terminal_tip() -> None:
+    """ON branch — a drain with no advancing historyId returns None (don't-clobber).
 
-    Sabotage proof: removing the ``or cursor`` fallback in the cursor
-    assignment would set the per-mailbox cursor to None and the next
-    tick would refetch the same window.
+    When the client surfaces no ``last_history_id`` the per-mailbox
+    cursor must report None per the ``next_cursor`` Protocol contract:
+    None means "no advance this tick; do not clobber the prior cursor".
+    Echoing the stale input cursor would falsely signal an advance to a
+    window we already drained, making the next tick re-query the
+    identical window and re-emit every already-processed message.
+
+    Sabotage proof: restoring the ``or cursor`` fallback in the cursor
+    assignment makes this read the stale ``"warm-cursor-no-tip"`` and
+    fail.
     """
     msg = _make_message("scoped-msg-no-tip")
     client = _FakeGmailClient(messages=[msg], terminal_history_id=None)
@@ -461,9 +468,10 @@ def test_list_changes_for_container_flag_on_warm_drain_falls_back_to_cursor_when
         client=client,  # type: ignore[arg-type]  # F3 rationale: test-local stub mirrors GmailClient shape.
         flag_reader=lambda _name: True,
     )
-    list(connector.list_changes_for_container(_make_container(cursor_token="fallback-cursor")))
-    # No terminal tip from the client → cursor falls back to the input value.
-    assert connector.next_cursor_for_container(_USER) == "fallback-cursor"
+    events = list(connector.list_changes_for_container(_make_container(cursor_token="warm-cursor-no-tip")))
+    assert len(events) == 1, f"the message must still be emitted this tick; got {events!r}"
+    # No advancing historyId → don't-clobber: report None, never the stale input cursor.
+    assert connector.next_cursor_for_container(_USER) is None
 
 
 def test_next_cursor_for_container_returns_none_for_unknown_mailbox() -> None:

@@ -313,7 +313,16 @@ class GmailConnector:
             message = self._client.get_message(message_id)
             self._cache[message_id] = message
             events.append(self._build_change_event(message))
-        self._next_cursor = self._client.last_history_id() or cursor
+        # Don't-clobber contract (SourceConnector.next_cursor): the drain
+        # only advanced the cursor if the History API surfaced an
+        # advancing historyId. When ``last_history_id()`` is None — the
+        # parser defensively collapsed a non-string historyId to None —
+        # we MUST return None so the pipeline preserves the prior
+        # persisted cursor. Echoing the stale input ``cursor`` would
+        # falsely signal an advance to a window we already processed,
+        # making the next tick re-query the identical window and re-emit
+        # every already-processed message.
+        self._next_cursor = self._client.last_history_id()
         return iter(events)
 
     def fetch(self, item_id: str) -> RawArtefact:
@@ -486,7 +495,13 @@ class GmailConnector:
             self._cache[message_id] = message
             event = self._build_change_event(message, extra_metadata={"mailbox": mailbox})
             events.append(event)
-        self._next_cursor_by_container[mailbox] = self._client.last_history_id() or cursor
+        # Don't-clobber contract (mirrors :meth:`list_changes`): only
+        # advance the per-mailbox cursor when the History API surfaced an
+        # advancing historyId. A None ``last_history_id()`` means "no
+        # advance this tick" — return None so the framework preserves the
+        # prior persisted per-mailbox cursor instead of re-asserting a
+        # false advance to an already-processed window.
+        self._next_cursor_by_container[mailbox] = self._client.last_history_id()
         return iter(events)
 
     def _build_change_event(

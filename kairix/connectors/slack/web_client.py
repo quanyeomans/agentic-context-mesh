@@ -242,13 +242,30 @@ class SlackWebClient:
             if not cursor:
                 return
 
-    def conversations_history(self, *, channel_id: str, oldest: str | None = None) -> Iterator[SlackMessage]:
-        """Stream messages in ``channel_id`` newer than ``oldest`` (a ``ts``).
+    def conversations_history(
+        self,
+        *,
+        channel_id: str,
+        oldest: str | None = None,
+        inclusive: bool = False,
+    ) -> Iterator[SlackMessage]:
+        """Stream messages in ``channel_id`` from the ``oldest`` ``ts`` boundary.
 
         Server-side paginates 200 messages at a time per slack.md §6
         ("200 msgs/page cursor pagination").  Each emitted SlackMessage
         carries the channel id so downstream consumers don't need to
         re-thread it.
+
+        ``oldest`` is Slack's boundary timestamp. Slack treats it as
+        EXCLUSIVE by default — a message whose ``ts`` exactly equals
+        ``oldest`` is NOT returned. This is what the poll / list_changes
+        advance path relies on (re-feed the high-water ``ts`` next tick
+        without re-emitting the boundary message). Set ``inclusive=True``
+        to flip Slack into including the boundary message itself — used by
+        the dead-letter replay (:meth:`SlackConnector.reindex`) so a
+        targeted ``oldest=<failed_ts>`` actually returns the failed
+        message. ``inclusive`` is ignored by Slack unless ``oldest`` (or
+        ``latest``) is specified, so it's only threaded when ``oldest`` is.
         """
         cursor: str | None = None
         while True:
@@ -258,6 +275,7 @@ class SlackWebClient:
                     "channel": channel_id,
                     "limit": "200",
                     **({"oldest": oldest} if oldest else {}),
+                    **({"inclusive": "true"} if oldest and inclusive else {}),
                     **({"cursor": cursor} if cursor else {}),
                 },
             )
