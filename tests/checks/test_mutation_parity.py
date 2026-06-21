@@ -220,11 +220,13 @@ def test_module_path_maps_to_dotted_import() -> None:
 
 
 def test_same_module_tests_picks_a_modules_own_test_files() -> None:
-    """Only ``test_<mod>.py`` for a mutated module counts — not look-alikes."""
+    """``test_<mod>.py`` counts; an unrelated file that merely contains the
+    module name (``test_cli_mcp_parity_recommend.py`` — does NOT start with
+    ``test_recommend_``) does not."""
     paths = {Path("kairix/use_cases/recommend.py"), Path("kairix/core/factory.py")}
     found = {
         "tests/use_cases/test_recommend.py",  # recommend.py's own test
-        "tests/contracts/test_cli_mcp_parity_recommend.py",  # NOT test_recommend.py
+        "tests/contracts/test_cli_mcp_parity_recommend.py",  # NOT test_recommend / test_recommend_*
         "tests/core/test_factory.py",  # factory.py's own test
         "tests/integration/test_pipeline_cache_race.py",  # incidental importer
     }
@@ -232,6 +234,29 @@ def test_same_module_tests_picks_a_modules_own_test_files() -> None:
         "tests/core/test_factory.py",
         "tests/use_cases/test_recommend.py",
     ]
+
+
+def test_same_module_tests_matches_aspect_suffixed_files() -> None:
+    """A module's aspect-suffixed unit tests (``test_<mod>_<aspect>.py``) count
+    as same-module, so an aspect-named killer (e.g. test_topology_v2_config_parser
+    for topology_v2.py) is not evicted from the impacted-test window.
+
+    Sabotage proof: revert ``_same_module_tests`` to the exact ``test_<mod>.py``
+    set and these aspect-suffixed files fall out — this assertion fails.
+    """
+    paths = {
+        Path("kairix/config/topology_v2.py"),
+        Path("kairix/core/connectors/topology_v2_applier.py"),
+    }
+    found = {
+        "tests/unit/test_topology_v2_config_parser.py",  # topology_v2.py aspect test
+        "tests/unit/test_topology_v2_applier_unit.py",  # applier aspect test
+        "tests/integration/test_unrelated_importer.py",  # incidental importer
+    }
+    same = mp._same_module_tests(paths, found)
+    assert "tests/unit/test_topology_v2_config_parser.py" in same
+    assert "tests/unit/test_topology_v2_applier_unit.py" in same
+    assert "tests/integration/test_unrelated_importer.py" not in same
 
 
 def test_prioritise_keeps_same_module_test_even_when_cap_would_evict_it() -> None:
