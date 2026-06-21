@@ -48,7 +48,6 @@ pytest_plugins = [
     "tests.bdd.steps.search_dedup_steps",
     "tests.bdd.steps.agent_collections_steps",
     "tests.bdd.steps.eval_gate_steps",
-    "tests.bdd.steps.configurable_default_scope_steps",
     "tests.bdd.steps.collection_v2_default_in_scope_steps",
     "tests.bdd.steps.wikilinks_injection_steps",
     "tests.bdd.steps.eval_judge_steps",

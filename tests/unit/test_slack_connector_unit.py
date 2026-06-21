@@ -85,8 +85,10 @@ class _InMemoryWeb(SlackWebClient):
         del types
         yield from self._channels
 
-    def conversations_history(self, *, channel_id: str, oldest: str | None = None) -> Iterator[SlackMessage]:
-        del oldest
+    def conversations_history(
+        self, *, channel_id: str, oldest: str | None = None, inclusive: bool = False
+    ) -> Iterator[SlackMessage]:
+        del oldest, inclusive
         exc = self._raise_on_history.get(channel_id)
         if exc is not None:
             raise exc
@@ -598,6 +600,94 @@ def test_reindex_skips_access_denied_items() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Resolver — real-wire ``oldest``/``inclusive`` boundary semantics
+# ---------------------------------------------------------------------------
+#
+# The in-memory ``_InMemoryWeb`` fake does ``del oldest`` and so can't catch
+# the dead-letter-replay bug: it returns the targeted message regardless of
+# the ``oldest``/``inclusive`` boundary. On the real Slack wire,
+# ``conversations.history?oldest=<ts>`` is EXCLUSIVE by default — a message
+# whose ``ts`` exactly equals ``oldest`` is NOT returned unless the request
+# also carries ``inclusive=true`` (Slack docs: "If a message has the same
+# timestamp as oldest or latest it will not be included … you can have both
+# timestamps be included by setting inclusive to true"). ``reindex`` targets
+# the failed message's exact ``ts`` and filters ``message.ts == ts``, so
+# without ``inclusive=true`` the replay returns ZERO messages on the deployed
+# connector. This MockTransport honours the real boundary so the bug is
+# observable.
+
+
+def _wire_honouring_oldest_inclusive(*, channel_id: str, boundary_ts: str) -> SlackWebClient:
+    """Real ``SlackWebClient`` over a transport that models Slack's boundary.
+
+    The handler returns a single message at ``boundary_ts`` ONLY when the
+    request carries BOTH ``oldest=<boundary_ts>`` AND ``inclusive=true`` —
+    the real wire's exclusive-by-default ``oldest`` semantics. A request
+    without ``inclusive=true`` (or with a different ``oldest``) returns an
+    empty page, exactly as Slack would for a boundary-equal ``ts``.
+    """
+    boundary_message = {
+        "ts": boundary_ts,
+        "user": "U_TEST",
+        "text": "the dead-lettered message",
+    }
+    empty_page = {"ok": True, "messages": [], "response_metadata": {"next_cursor": ""}}
+    boundary_page = {"ok": True, "messages": [boundary_message], "response_metadata": {"next_cursor": ""}}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if "conversations.history" not in str(request.url):
+            return httpx.Response(200, json={"ok": True})
+        form = httpx.QueryParams(bytes(request.content).decode("ascii"))
+        oldest = form.get("oldest")
+        inclusive = form.get("inclusive")
+        # Slack: a message at ts == oldest is excluded unless inclusive=true.
+        if oldest == boundary_ts and inclusive == "true":
+            return httpx.Response(200, json=boundary_page)
+        return httpx.Response(200, json=empty_page)
+
+    shared = httpx.Client(transport=httpx.MockTransport(_handler))
+
+    def _builder(_c: SlackCredentials) -> SlackWebClient:
+        return SlackWebClient(token="xoxb-test-fake-token-value", http_client=shared)
+
+    del channel_id  # only used by the caller to build the item_id
+    connector_web = _builder(SlackCredentials(bot_token="xoxb-test-fake-token-value"))
+    return connector_web
+
+
+def test_reindex_replays_boundary_message_on_real_wire() -> None:
+    """Dead-letter replay returns the targeted message against a real-wire transport.
+
+    Models Slack's exclusive-by-default ``oldest``: the message at
+    ``ts == oldest`` is only returned when the request also carries
+    ``inclusive=true``. ``reindex`` MUST request the inclusive boundary,
+    otherwise the deployed connector silently replays ZERO messages.
+
+    Sabotage proof (executed): reverting ``reindex`` to
+    ``conversations_history(channel_id=..., oldest=ts)`` (dropping
+    ``inclusive=True``) makes this test fail — the transport returns an
+    empty page for the boundary ``ts``, ``events`` is ``[]``, and the
+    ``assert events`` line trips.
+    """
+    boundary_ts = "1715000000.000100"
+    channel_id = "C1"
+    shared_web = _wire_honouring_oldest_inclusive(channel_id=channel_id, boundary_ts=boundary_ts)
+
+    def _builder(_c: SlackCredentials) -> SlackWebClient:
+        return shared_web
+
+    connector = SlackConnector(
+        credentials=SlackCredentials(bot_token="xoxb-test-fake-token-value"),
+        web_client_factory=_builder,
+        flag_reader=FakeFeatureFlagResolver().with_flag("connector_slack", False).get,
+    )
+    events = list(connector.reindex((f"{channel_id}:{boundary_ts}",)))
+    assert events, "reindex replayed ZERO messages — the boundary message was excluded by an exclusive oldest"
+    assert events[0].item_id == f"{channel_id}:{boundary_ts}"
+    assert events[0].op == "created"
+
+
+# ---------------------------------------------------------------------------
 # OAuthConnector
 # ---------------------------------------------------------------------------
 
@@ -720,6 +810,73 @@ def test_web_client_conversations_history_paginates() -> None:
     )
     messages = list(client.conversations_history(channel_id="C1", oldest=None))
     assert [m.ts for m in messages] == ["1.0", "2.0"]
+
+
+def _capture_history_params(**call_kwargs: Any) -> dict[str, str]:
+    """Drive one ``conversations_history`` call and return the wire form params.
+
+    Wires a real :class:`SlackWebClient` to a MockTransport handler that
+    captures the outbound ``conversations.history`` request body, so the
+    test can assert exactly which Slack params (``oldest`` / ``inclusive``)
+    the client put on the wire for a given call signature.
+    """
+    captured: dict[str, str] = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        form = httpx.QueryParams(bytes(request.content).decode("ascii"))
+        captured.update({k: form[k] for k in form})
+        return httpx.Response(200, json={"ok": True, "messages": [], "response_metadata": {"next_cursor": ""}})
+
+    client = SlackWebClient(
+        token="xoxb-test-fake-token-value", http_client=httpx.Client(transport=_stub_transport(_handler))
+    )
+    list(client.conversations_history(channel_id="C1", **call_kwargs))
+    return captured
+
+
+def test_web_client_history_default_does_not_send_inclusive() -> None:
+    """The advance/poll path keeps Slack's default-EXCLUSIVE ``oldest`` boundary.
+
+    A plain ``conversations_history(oldest=<ts>)`` (default ``inclusive``)
+    must NOT put ``inclusive=true`` on the wire — the legacy list_changes /
+    _drain_channel advance relies on the boundary message being EXCLUDED so
+    re-feeding the high-water ``ts`` next tick doesn't re-emit it.
+
+    Sabotage proof (executed): flipping the default to ``inclusive: bool =
+    True`` (line 250) makes this assertion fail — the wire then carries
+    ``inclusive=true`` and the poll path would re-emit the boundary message.
+    """
+    params = _capture_history_params(oldest="1715000000.000100")
+    assert params.get("oldest") == "1715000000.000100"
+    assert "inclusive" not in params, f"poll path must not send inclusive; wire carried: {params!r}"
+
+
+def test_web_client_history_inclusive_with_oldest_sends_inclusive_true() -> None:
+    """The replay path sends ``inclusive=true`` so Slack returns the boundary message.
+
+    Sabotage proof (executed): dropping the ``inclusive`` branch on
+    line 278 makes this assertion fail — the wire no longer carries
+    ``inclusive=true`` and the dead-letter replay loses the boundary
+    message on the real wire.
+    """
+    params = _capture_history_params(oldest="1715000000.000100", inclusive=True)
+    assert params.get("oldest") == "1715000000.000100"
+    assert params.get("inclusive") == "true", f"replay path must send inclusive=true; wire carried: {params!r}"
+
+
+def test_web_client_history_inclusive_without_oldest_is_dropped() -> None:
+    """``inclusive`` is meaningless without ``oldest`` and must not reach the wire.
+
+    Slack ignores ``inclusive`` unless ``oldest`` (or ``latest``) is set,
+    so the client must NOT emit a bare ``inclusive=true``.
+
+    Sabotage proof (executed): mutating the guard from ``oldest and
+    inclusive`` to ``oldest or inclusive`` (line 278) makes this assertion
+    fail — the wire then carries ``inclusive=true`` with no ``oldest``.
+    """
+    params = _capture_history_params(inclusive=True)
+    assert "oldest" not in params
+    assert "inclusive" not in params, f"bare inclusive must be dropped; wire carried: {params!r}"
 
 
 def test_web_client_conversations_replies_paginates() -> None:
