@@ -26,8 +26,9 @@ Each scenario composes the full production path:
 Flag dispatch path:
 
   flag-resolver pins connector_sharepoint=True
-    → dispatch_sharepoint_sync routes to the production ON branch helper
-    → branch helper wraps the per-format pipeline run
+    → connector_enabled("sharepoint", resolver.get) returns True (the gate
+      lets the connector through)
+    → the composed branch runs the per-format pipeline
 
 The OFF path is covered by the integration tests at
 ``tests/integration/test_feature_flag_connector_sharepoint.py``. F54's
@@ -75,7 +76,7 @@ from kairix.core.protocols import (
 )
 from kairix.worker import (
     ConnectorSyncResult,
-    dispatch_sharepoint_sync,
+    connector_enabled,
 )
 from tests.fakes import FakeFeatureFlagResolver
 
@@ -247,11 +248,11 @@ def _run_one_fixture_through_composed_path(
     in the ``sharepoint`` collection. The caller asserts ``>= 1`` for
     the happy path.
 
-    The dispatch surface is the real production
-    :func:`dispatch_sharepoint_sync`; the ON branch is wrapped to
-    invoke ``build_connector_pipeline`` against a tmp-path-rooted DB
-    with the real ExtractorRegistry routing the binary to the
-    appropriate plugin.
+    The flag-ON gate is the real production predicate
+    :func:`connector_enabled`; with ``connector_sharepoint`` pinned ON the
+    gate lets the connector through, and the composed branch invokes
+    ``build_connector_pipeline`` against a tmp-path-rooted DB with the real
+    ExtractorRegistry routing the binary to the appropriate plugin.
     """
     resolver = FakeFeatureFlagResolver().with_flag("connector_sharepoint", True)
     bronze_root = tmp_path / "bronze"
@@ -290,10 +291,8 @@ def _run_one_fixture_through_composed_path(
             dead_letter_added=result.dead_lettered,
         )
 
-    sync_result = dispatch_sharepoint_sync(
-        read_flag=resolver.get,
-        on_branch=_on_branch,
-    )
+    assert connector_enabled("sharepoint", resolver.get), "flag ON must enable the sharepoint connector"
+    sync_result = _on_branch()
     assert sync_result.synced >= 1, f"composed path must index the fixture; got {sync_result}"
 
     _populate_fts(db)
@@ -492,7 +491,8 @@ def test_composed_path_with_include_paths_indexes_only_included_subset(tmp_path:
             dead_letter_added=result.dead_lettered,
         )
 
-    dispatch_sharepoint_sync(read_flag=resolver.get, on_branch=_on_branch)
+    assert connector_enabled("sharepoint", resolver.get), "flag ON must enable the sharepoint connector"
+    _on_branch()
     _populate_fts(db)
 
     # Token unique to the included fixture must be searchable

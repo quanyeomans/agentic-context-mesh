@@ -1,106 +1,162 @@
-"""Integration tests for the ``connector_skills`` flag (F54).
+"""Integration tests for the ``connector_skills`` flag.
 
-Exercises both branches of :func:`kairix.worker.dispatch_skills_sync`
-through the production composition surface:
+Exercises both branches of the connector-enablement gate through the
+REAL production loop — :func:`kairix.worker.run_connector_sync_pipeline`
+with ``flag_reader`` pinned via :class:`FakeFeatureFlagResolver`. The
+gate is :func:`kairix.worker.connector_enabled` consulted per entry in
+that loop; the assertion target is the observable
+:class:`ConnectorSyncResult` counter outcome + the gated-off INFO log,
+NOT a dead dispatcher's branch-marker log.
 
-  * **Flag OFF** — the connector slot is a no-op; the off-branch helper
-    returns zero counters and emits the OFF-branch INFO log. The ON
-    branch is wrapped with a never-call stub; a misroute increments its
-    counter and the assertion fails loudly.
-  * **Flag ON** — the ON branch fires; the OFF branch is wrapped with a
-    never-call stub. The ON branch's marker INFO log appears.
+The skills connector is unusual: it degrades gracefully (it walks a
+``~/.claude`` tree and indexes whatever skills/agents are present, or
+no-ops where absent) rather than raising when un-credentialled. The test
+points it at an EMPTY ``claude_root`` so the ON branch reaches the batch
+runner deterministically — zero local skills → the flagless sibling is
+the only contributor to ``synced``. The distinguishing observable across
+branches is the gated-off log.
 
-F47 — both branches are reached via the production
-``dispatch_skills_sync`` entry point; no direct ``*Pipeline(...)``
-construction in this file.
+  * **Flag OFF** — ``connector_skills`` reads False. The skills entry is
+    gated off (skipped); a flagless ``obsidian`` sibling still indexes its
+    two notes. The aggregate ``synced`` is exactly the sibling's count.
+  * **Flag ON** — ``connector_skills`` reads True. The gate lets the
+    skills entry through; the "gated off" log does NOT fire and the
+    flagless sibling still indexes its notes.
 
-F1-clean: ``FakeFeatureFlagResolver`` from ``tests/fakes.py`` is threaded
-through the production ``dispatch_skills_sync(read_flag=...)`` DI seam —
-no @patch / module-attribute substitution on kairix.
+F47 — both branches are reached through the production
+``run_connector_sync_pipeline`` entry point; no direct
+``*Pipeline(...)`` construction here.
+
+F1-clean: ``FakeFeatureFlagResolver`` from ``tests/fakes.py`` is
+threaded through ``ConnectorSyncDeps(flag_reader=...)`` — no @patch /
+module-attribute substitution on kairix.
+F2-clean: no ``KAIRIX_*`` env-var manipulation.
 
 Sabotage proof (executed by the agent, restored on completion):
-inverting the if/else in :func:`dispatch_skills_sync` so OFF runs the ON
-branch and ON runs the OFF branch — confirmed that BOTH
-:func:`test_skills_flag_off_branch_runs` AND
-:func:`test_skills_flag_on_branch_runs` fail. Restoring the original
-branch direction returns both tests to green. (See Step 2.6 report for
-the observed run.)
+deleting the ``if not connector_enabled(...)`` skip in
+``run_connector_sync_pipeline``'s loop makes the OFF test fail — the
+"gated off" log no longer fires for skills. Restoring the gate returns
+the test to green.
 """
 
 from __future__ import annotations
 
 import logging
+import sqlite3
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from kairix.worker import (
-    ConnectorSyncResult,
-    dispatch_skills_sync,
+    ConnectorSyncDeps,
+    run_connector_sync_pipeline,
 )
 from tests.fakes import FakeFeatureFlagResolver
 
 pytestmark = pytest.mark.integration
 
-_ON_MARKER = "skills connector running (flag ON)"
-_OFF_MARKER = "skills connector gated off (flag OFF)"
+_KIND = "skills"
 
 
-def test_skills_flag_off_branch_runs(caplog: pytest.LogCaptureFixture) -> None:
-    """OFF branch — skills connector slot is a no-op; ON does not fire."""
-    resolver = FakeFeatureFlagResolver().with_flag("connector_skills", False)
+def _two_connector_topology(vault: Path, claude_root: Path) -> dict[str, Any]:
+    """Merged mapping: the skills connector kind + a flagless obsidian sibling.
 
-    on_calls = {"n": 0}
+    The skills connector is pointed at an EMPTY ``claude_root`` so the ON
+    branch reaches the batch runner deterministically (zero local skills →
+    the sibling is the only contributor to ``synced``).
+    """
+    return {
+        "topology_v2": {
+            "connectors": [
+                {
+                    "id": "skills-conn",
+                    "kind": _KIND,
+                    "name": "Local skills",
+                    "connector_specific_config": {"claude_root": str(claude_root)},
+                },
+                {
+                    "id": "obsidian-conn",
+                    "kind": "obsidian",
+                    "name": "Personal Vault",
+                    "extractor": "passthrough",
+                    "connector_specific_config": {"vault_root": str(vault)},
+                },
+            ],
+            "cc_pairs": [
+                {"id": "skills-pair", "connector": "skills-conn", "credential": None, "name": "skills-cc"},
+                {"id": "ob-pair", "connector": "obsidian-conn", "credential": None, "name": "obsidian-cc"},
+            ],
+        }
+    }
 
-    def _never_on() -> ConnectorSyncResult:
-        on_calls["n"] += 1
-        return ConnectorSyncResult(synced=99, failed=0, dead_letter_added=0)
 
-    with caplog.at_level(logging.INFO, logger="kairix.worker"):
-        result = dispatch_skills_sync(
-            read_flag=resolver.get,
-            on_branch=_never_on,
-        )
+def _seed_vault(tmp_path: Path) -> Path:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "alpha.md").write_text("# Alpha\n\nFirst note body.\n", encoding="utf-8")
+    (vault / "beta.md").write_text("# Beta\n\nSecond note body.\n", encoding="utf-8")
+    return vault
 
-    messages = [rec.getMessage() for rec in caplog.records]
-    assert any(_OFF_MARKER in m for m in messages), f"flag OFF must route through the OFF branch; logs={messages!r}"
-    assert not any(_ON_MARKER in m for m in messages), (
-        f"flag OFF must NOT route through the ON branch; logs={messages!r}"
+
+def _drive_loop(
+    tmp_path: Path,
+    resolver: FakeFeatureFlagResolver,
+    caplog: pytest.LogCaptureFixture,
+) -> Any:
+    vault = _seed_vault(tmp_path)
+    claude_root = tmp_path / "claude_home"
+    claude_root.mkdir()
+    db_path = tmp_path / "index.sqlite"
+    deps = ConnectorSyncDeps(
+        disabled_fn=lambda: False,
+        config_mapping_fn=lambda: _two_connector_topology(vault, claude_root),
+        flag_reader=resolver.get,
+        db_factory=lambda: sqlite3.connect(str(db_path)),
+        bronze_root_resolver=lambda: tmp_path / "bronze",
     )
-    assert on_calls["n"] == 0, "ON branch must not run when flag is OFF"
-    assert result.synced == 0, f"OFF branch must return zero counters; got {result}"
+    with caplog.at_level(logging.INFO, logger="kairix.worker"):
+        return run_connector_sync_pipeline(deps)
 
 
-def test_skills_flag_on_branch_runs(caplog: pytest.LogCaptureFixture) -> None:
-    """ON branch — skills connector ON branch helper fires; OFF does not.
+def _gated_logs(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        rec.getMessage()
+        for rec in caplog.records
+        if _KIND in rec.getMessage().lower() and "gated" in rec.getMessage().lower()
+    ]
 
-    The ON branch is wrapped with a marker-emitting stub here so the
-    integration test doesn't drive a real connector-pipeline run (that's
-    the E2E test's job). The branch selection — gated by the flag — is
-    the property under test.
+
+def test_flag_off_gates_connector_sibling_still_runs(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """OFF — the skills entry is gated off in the loop; the flagless obsidian
+    sibling still syncs both notes and is the only contributor to ``synced``.
+    """
+    resolver = FakeFeatureFlagResolver().with_flag("connector_skills", False)
+    result = _drive_loop(tmp_path, resolver, caplog)
+
+    assert result.synced == 2, (
+        f"flag OFF must gate skills; only the flagless obsidian sibling's two notes sync; got {result}"
+    )
+    assert _gated_logs(caplog), (
+        f"flag OFF must skip the {_KIND} entry with a 'gated off' INFO log; "
+        f"got {[r.getMessage() for r in caplog.records]}"
+    )
+
+
+def test_flag_on_lets_connector_through_sibling_still_runs(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """ON — the gate lets the skills entry through to the batch runner; the
+    "gated off" log does NOT fire and the flagless sibling still syncs.
     """
     resolver = FakeFeatureFlagResolver().with_flag("connector_skills", True)
+    result = _drive_loop(tmp_path, resolver, caplog)
 
-    off_calls = {"n": 0}
-
-    def _never_off() -> ConnectorSyncResult:
-        off_calls["n"] += 1
-        return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
-
-    def _wrapped_on() -> ConnectorSyncResult:
-        logging.getLogger("kairix.worker").info(_ON_MARKER)
-        return ConnectorSyncResult(synced=1, failed=0, dead_letter_added=0)
-
-    with caplog.at_level(logging.INFO, logger="kairix.worker"):
-        result = dispatch_skills_sync(
-            read_flag=resolver.get,
-            on_branch=_wrapped_on,
-            off_branch=_never_off,
-        )
-
-    messages = [rec.getMessage() for rec in caplog.records]
-    assert any(_ON_MARKER in m for m in messages), f"flag ON must route through the ON branch; logs={messages!r}"
-    assert not any(_OFF_MARKER in m for m in messages), (
-        f"flag ON must NOT route through the OFF branch; logs={messages!r}"
+    assert result.synced >= 2, f"flagless obsidian sibling must still sync its notes; got {result}"
+    assert not _gated_logs(caplog), (
+        f"flag ON must NOT gate off the {_KIND} entry; the 'gated off' log fired anyway: {_gated_logs(caplog)!r}"
     )
-    assert off_calls["n"] == 0, "OFF branch must not run when flag is ON"
-    assert result.synced == 1, f"ON branch must have run and returned its result; got {result}"

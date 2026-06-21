@@ -22,8 +22,13 @@ to a fresh initial sync.
 Auth uses an OAuth 2.0 access token configured via the operator's
 secret-resolution boundary (KV-backed in production; the connector
 itself never touches the token endpoint). Google Workspace OAuth
-credentials are tracked under GH #356 — until they land, the
-connector ships flag-gated OFF (``topology_v2_google_calendar``).
+credentials are tracked under GH #356. The connector is flagless — it
+runs whenever it is configured in the canonical ``topology.connectors``
+block and the canonical loop's enablement gate
+(:func:`kairix.worker.connector_enabled`, consulted inside
+:func:`kairix.worker.run_connector_sync_pipeline`) lets it through
+(flagless kinds always run); until credentials land, an
+un-credentialled tick degrades rather than indexing.
 
 Per F35, this module only imports from
 ``kairix.connectors.google_calendar.*`` (same plugin) and
