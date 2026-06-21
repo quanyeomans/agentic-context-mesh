@@ -320,6 +320,42 @@ def derive_tier_map(mapping: dict[str, Any] | None = None) -> dict[str, str]:
     return {c.name: c.tier for c in topology.collections if c.tier}
 
 
+def derive_collection_overrides(mapping: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+    """Derive ``{collection_name: retrieval_override_dict}`` from the
+    canonical topology collections (canonical-collapse).
+
+    Reads ``topology_v2.collections[*].retrieval`` from the operator's
+    MERGED config mapping (base + overlay) via
+    :func:`kairix.config_layers.load_merged_mapping` — the same
+    overlay-aware read path the setup wizard writes through (#492), so a
+    wizard-saved topology block is honoured. Returns an empty dict when no
+    topology collections are present, when no collection declares a
+    ``retrieval:`` block, or when the parse fails — in all cases
+    :func:`kairix.core.search.config_loader.resolve_retrieval_config`
+    falls back to the global retrieval config for the collection.
+
+    DB-free: this is a config-parse, not a read of the materialised
+    ``topology_collections`` rows, so it stays safe to call at
+    pipeline-construction time before any DB is open. Pass ``mapping=`` to
+    inject an explicit merged mapping (mirrors the
+    ``_resolve_retrieval_config(config=...)`` seam); the default resolves
+    the live merged config. Each override is materialised as a plain
+    ``dict`` (the parser stores it as a read-only ``MappingProxyType``)
+    so the consumer can splat it into ``merge_retrieval_config``.
+    """
+    try:
+        if mapping is None:
+            from kairix.config_layers import load_merged_mapping
+
+            mapping = load_merged_mapping()
+        from kairix.config.topology_v2 import parse_topology_v2
+
+        topology = parse_topology_v2(mapping)
+    except Exception:
+        return {}
+    return {c.name: dict(c.retrieval_overrides) for c in topology.collections if c.retrieval_overrides}
+
+
 def _resolve_retrieval_config(config: RetrievalConfig | None) -> RetrievalConfig:
     """Pick the explicit config or fall back to ``load_config`` (which itself
     falls back to ``RetrievalConfig.defaults()`` when no YAML is present).
