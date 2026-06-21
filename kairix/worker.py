@@ -335,28 +335,68 @@ class _SqliteEntityGraphSink:
         return staged
 
 
-def _load_connector_config_entries(config_path: Path | None) -> list[dict[str, Any]]:
-    """Read the ``connectors:`` list from ``config_path`` (if present).
+def _load_connector_config_entries(mapping: dict[str, Any]) -> list[dict[str, Any]]:
+    """Enumerate ingestable connector entries from ``topology.connectors``.
 
-    Returns the raw list of operator entries — each one is a dict with
-    at minimum a ``name`` key. Returns ``[]`` when ``config_path`` is
-    ``None``, the file does not exist, or no connectors are configured;
-    the worker treats every such case as a no-op sync.
+    Task 4 of the connector canonical-collapse refactor: ingest reads the
+    canonical ``topology`` block (parsed from the overlay-aware MERGED
+    operator mapping), NOT the legacy top-level ``connectors:`` list. This
+    is the wizard-onboarding fix — the setup wizard writes
+    ``topology.connectors`` and ingest now reads it from the same place.
+
+    The overloaded legacy ``entry["name"]`` splits into three canonical
+    values (D1/D2/D3):
+
+      * ``kind`` — the plugin resolution key (``ConnectorConfig.kind``,
+        == entry-point name == ``connector_<kind>`` flag suffix);
+      * ``name`` — the cc_pair routing key (chunk-writer collection name),
+        from ``CCPairConfig.name``;
+      * ``config`` — the connector_specific_config mapping, read back as a
+        dict at the per-connector boundary.
+
+    Yields **one entry per cc_pair** (D2): a topology connector referenced
+    by N cc_pairs produces N entries (each cc_pair is the
+    connector/credential/collection binding). A connector with **zero**
+    cc_pairs is not ingestable — there is no collection target — so it is
+    skipped with an INFO log.
+
+    Returns ``[]`` when the mapping carries no parseable topology
+    connectors; the worker treats that as a no-op sync.
     """
-    if config_path is None or not config_path.exists():
-        return []
-    try:
-        import yaml
+    from kairix.config.topology_v2 import parse_topology_v2
 
-        with config_path.open(encoding="utf-8") as f:
-            raw = yaml.safe_load(f) or {}
-    except Exception as exc:  # pragma: no cover — yaml parse errors are rare and logged
-        logger.warning("worker: failed to load connector config from %s — %s", config_path, exc)
+    try:
+        parsed = parse_topology_v2(mapping)
+    except Exception as exc:  # pragma: no cover — parse errors are rare and logged
+        logger.warning("worker: failed to parse topology connectors — %s", exc)
         return []
-    entries = raw.get("connectors")
-    if not isinstance(entries, list):
-        return []
-    return [e for e in entries if isinstance(e, dict) and isinstance(e.get("name"), str)]
+
+    cc_pairs_by_connector_id: dict[str, list[Any]] = {}
+    for cc_pair in parsed.cc_pairs:
+        cc_pairs_by_connector_id.setdefault(cc_pair.connector, []).append(cc_pair)
+
+    entries: list[dict[str, Any]] = []
+    for connector in parsed.connectors:
+        pairs = cc_pairs_by_connector_id.get(connector.id, [])
+        if not pairs:
+            logger.info(
+                "worker: connector %s (kind=%s) has no cc_pair — not ingestable, skipping",
+                connector.id,
+                connector.kind,
+            )
+            continue
+        for cc_pair in pairs:
+            entries.append(
+                {
+                    "name": cc_pair.name,
+                    "kind": connector.kind,
+                    "config": dict(connector.connector_specific_config),
+                    "extractor": connector.extractor,
+                    "extractor_chain": list(connector.extractor_chain),
+                    "extractor_config": dict(connector.extractor_config),
+                }
+            )
+    return entries
 
 
 def _run_one_connector_batch(
@@ -370,16 +410,14 @@ def _run_one_connector_batch(
     registry / pipeline construction failures so the caller's per-entry
     try/except logs them and continues to the next connector.
 
-    Topology v2 Wave C: when the ``topology_v2_runtime`` flag is OFF, the
-    chunk writer is constructed via
-    :func:`kairix.core.connectors.collection_router._legacy_chunk_writer`
-    (paying down the F61 baseline — the writer is built inside the
-    framework). When ON, a :class:`CollectionRouter` is built per cc_pair
-    and used as the pipeline's chunk_writer; routing happens per-item.
-    For the Wave C landing, the ON path is wired through the registry
-    but the cc_pair lookup falls back to the legacy single-collection
-    writer when no cc_pair has been registered for ``entry["name"]``
-    (zero-behavioural-change guarantee).
+    Task 4 canonical-collapse split: the overloaded legacy ``name`` is
+    now three distinct values. The plugin is resolved via ``entry["kind"]``
+    (``ConnectorConfig.kind`` == entry-point name); the chunk-writer and
+    cursor routing key is ``entry["name"]`` (the cc_pair name). A cc_pair
+    routes through :class:`CollectionRouter` when a cc_pair + mapping is
+    registered for that name; :func:`legacy_chunk_writer` remains the
+    fallback when no cc_pair has been registered yet (zero-behavioural-
+    change guarantee for entries the operator hasn't fully wired).
     """
     from kairix.core.connectors import (
         ConnectorPipeline,
@@ -393,16 +431,18 @@ def _run_one_connector_batch(
     from kairix.core.connectors.registry import build_bronze_from_entry, build_extractor_from_entry
 
     name = entry["name"]
+    kind = entry["kind"]
     # bronze_root is signature-only; streaming bronze writes no files.
     if bronze_root is not None:
         logger.debug("_run_one_connector_batch: bronze_root parameter is unused.")
-    connector_factory = resolve_connector(name)
+    # Plugin resolution keys on KIND; routing keys on the cc_pair NAME.
+    connector_factory = resolve_connector(kind)
     connector = connector_factory(entry.get("config", {}))
     extractor = build_extractor_from_entry(entry)
     bronze_store = build_bronze_from_entry(entry, db=db)
-    # topology_v2_runtime cutover complete (task #132) — always route through
-    # CollectionRouter when a cc_pair exists for `name`; legacy_chunk_writer
-    # remains the fallback when no cc_pair has been registered for the entry.
+    # Route through CollectionRouter when a cc_pair exists for `name`;
+    # legacy_chunk_writer remains the fallback when no cc_pair has been
+    # registered for the entry.
     chunk_writer = resolve_chunk_writer_for_entry(db, name)
     pipeline = ConnectorPipeline(
         db=db,
@@ -609,7 +649,7 @@ def run_connector_sync_pipeline(deps: ConnectorSyncDeps | None = None) -> Connec
         logger.info("worker: connector sync disabled via KAIRIX_CONNECTOR_SYNC_DISABLED")
         return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
 
-    entries = _load_connector_config_entries(deps.config_path_resolver())
+    entries = _load_connector_config_entries(deps.config_mapping_fn())
     if not entries:
         return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
 
@@ -624,6 +664,12 @@ def run_connector_sync_pipeline(deps: ConnectorSyncDeps | None = None) -> Connec
         failed = 0
         dead_letter_added = 0
         for entry in entries:
+            # D3: enablement keys on connector KIND (``connector_<kind>``).
+            # A registered-and-OFF kind is skipped (logged); a flagless kind
+            # always runs. A sibling connector in the same tick is unaffected.
+            if not connector_enabled(entry["kind"], deps.flag_reader):
+                logger.info("worker: connector %s gated off (flag connector_%s OFF)", entry["kind"], entry["kind"])
+                continue
             try:
                 indexed, dead_lettered = _run_one_connector_batch(db, entry, bronze_root)
             except Exception as exc:

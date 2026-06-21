@@ -25,9 +25,9 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
-import yaml
 
 from kairix.core.db.schema import create_schema
 from kairix.worker import (
@@ -46,23 +46,25 @@ def _seed_vault(document_root: Path, count: int) -> None:
         )
 
 
-def _write_config(tmp_path: Path, vault_root: Path) -> Path:
-    cfg = tmp_path / "kairix.config.yaml"
-    cfg.write_text(
-        yaml.safe_dump(
-            {
-                "connectors": [
-                    {
-                        "name": "obsidian",
-                        "extractor": "passthrough",
-                        "config": {"vault_root": str(vault_root)},
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    return cfg
+def _topology_mapping(vault_root: Path) -> dict[str, Any]:
+    """Canonical ``topology.connectors`` + cc_pair mapping for an obsidian
+    connector — the read shape ingest enumerates after the Task 4
+    canonical-collapse redirect (no legacy top-level ``connectors:``).
+    """
+    return {
+        "topology_v2": {
+            "connectors": [
+                {
+                    "id": "obsidian-conn",
+                    "kind": "obsidian",
+                    "name": "Obsidian Vault",
+                    "extractor": "passthrough",
+                    "connector_specific_config": {"vault_root": str(vault_root)},
+                }
+            ],
+            "cc_pairs": [{"id": "obsidian-pair", "connector": "obsidian-conn", "credential": None, "name": "obsidian"}],
+        }
+    }
 
 
 @pytest.mark.e2e
@@ -94,10 +96,10 @@ def test_composed_pipeline_leaves_scratch_clean_after_50_item_batch(tmp_path: Pa
     create_schema(db)
     db.close()
 
-    config_path = _write_config(tmp_path, document_root)
+    mapping = _topology_mapping(document_root)
     deps = ConnectorSyncDeps(
         disabled_fn=lambda: False,
-        config_path_resolver=lambda: config_path,
+        config_mapping_fn=lambda: mapping,
         db_factory=lambda: sqlite3.connect(str(db_path), timeout=10.0),
         bronze_root_resolver=lambda: bronze_root,
     )
@@ -140,10 +142,10 @@ def test_composed_pipeline_bronze_records_match_documents_count(tmp_path: Path) 
     create_schema(db)
     db.close()
 
-    config_path = _write_config(tmp_path, document_root)
+    mapping = _topology_mapping(document_root)
     deps = ConnectorSyncDeps(
         disabled_fn=lambda: False,
-        config_path_resolver=lambda: config_path,
+        config_mapping_fn=lambda: mapping,
         db_factory=lambda: sqlite3.connect(str(db_path), timeout=10.0),
         bronze_root_resolver=lambda: bronze_root,
     )

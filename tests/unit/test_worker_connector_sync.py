@@ -7,10 +7,10 @@ source) — plus the module-level :func:`kairix.worker.connector_enabled`
 predicate that keys on connector KIND (``connector_<kind>`` == REGISTRY
 suffix), NOT the cc_pair name.
 
-The predicate is landed but NOT yet wired into
-``run_connector_sync_pipeline``'s per-entry loop — Task 4 wires it once
-entries carry ``kind``. These tests pin the predicate behaviour and the
-new default-factory wiring.
+Task 4 wires this predicate into ``run_connector_sync_pipeline``'s
+per-entry loop (the loop-wiring test lives in
+``tests/test_worker_connector_sync.py``). These tests pin the predicate
+behaviour and the default-factory wiring in isolation.
 """
 
 from __future__ import annotations
