@@ -47,6 +47,7 @@ Operational procedures and incident runbooks for kairix deployments.
 | [how-to-upgrade-kairix](how-to-upgrade-kairix.md) | Install tagged release, verify, run onboard check |
 | [secrets-configuration](../secrets-configuration.md) | Cross-provider secrets setup — Docker / pip × Azure KV / AWS Secrets Manager / GCP Secret Manager / 1Password / ECS / Cloud Run / AKS / plain .env; canonical naming convention; rotation + verification |
 | [how-to-run-benchmark](how-to-run-benchmark.md) | Run benchmark suite, interpret results, compare before/after |
+| [how-to-run-kairix-search](how-to-run-kairix-search.md) | Quick reference for the main query commands — `kairix search` / `brief` / `timeline` / `entity` / `curator health` / `onboard check`, with examples and healthy/broken output interpretation |
 | [how-to-debug-search-ranking](how-to-debug-search-ranking.md) | Query intent dispatch, RRF weights, category-specific tuning |
 | [how-to-rebuild-entity-graph](how-to-rebuild-entity-graph.md) | Drop and rebuild the Neo4j entity graph from the document store |
 | [how-to-set-up-the-linear-connector](how-to-set-up-the-linear-connector.md) | Turn on the Linear connector — store the API key, add the topology_v2 block, flip `connector_linear`, verify ingestion; troubleshooting (auth / rate-limit / nothing-ingested / flag-still-off) |
