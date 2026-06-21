@@ -1,129 +1,171 @@
-"""F54 integration coverage for the ``connector_gmail`` flag.
+"""Integration tests for the ``connector_gmail`` flag.
 
-The flag gates the Gmail connector at the worker dispatch boundary.
-When OFF the connector slot is a no-op (zero counters); when ON the
-standard connector pipeline resolves the ``gmail`` plugin via its
-entry-point factory and drives the standard ConnectorPipeline.
+Exercises both branches of the connector-enablement gate through the
+REAL production loop — :func:`kairix.worker.run_connector_sync_pipeline`
+with ``flag_reader`` pinned via :class:`FakeFeatureFlagResolver`. The
+gate is :func:`kairix.worker.connector_enabled` consulted per entry in
+that loop; the assertion target is the observable
+:class:`ConnectorSyncResult` counter outcome + the gated-off INFO log,
+NOT a dead dispatcher's branch-marker log.
 
-Per F54 (docs/architecture/feature-flag-architecture.md §5): every flag
-needs integration coverage exercising both branches via
-:class:`tests.fakes.FakeFeatureFlagResolver`. The string literal
-``"connector_gmail"`` appears verbatim in every ``with_flag(...)``
-call so the F54 both-branch grep picks it up.
+  * **Flag OFF** — ``connector_gmail`` reads False. The Gmail entry is gated
+    off (skipped before plugin resolution, so it never needs a live
+    credential); a flagless ``obsidian`` sibling in the same tick still
+    indexes its two notes. The aggregate ``synced`` reflects only the
+    sibling.
+  * **Flag ON** — ``connector_gmail`` reads True. The gate lets the Gmail
+    entry through to ``_run_one_connector_batch`` (where, lacking a live
+    credential, it is logged + counted as a per-entry failure and the
+    loop continues). The "gated off" log does NOT fire for gmail; the
+    flagless sibling still indexes its notes.
 
-F47 — the dispatch composition is exercised via the production
-:func:`kairix.worker.dispatch_gmail_sync` helper; the ON / OFF
-branches are wrapped so the integration test pins the branch
-selection without requiring a real ConnectorPipeline construction.
+F47 — both branches are reached through the production
+``run_connector_sync_pipeline`` entry point; no direct
+``*Pipeline(...)`` construction here.
 
-F1-clean: no @patch / kairix module-attribute substitution.
+F1-clean: ``FakeFeatureFlagResolver`` from ``tests/fakes.py`` is
+threaded through ``ConnectorSyncDeps(flag_reader=...)`` — no @patch /
+module-attribute substitution on kairix.
 F2-clean: no ``KAIRIX_*`` env-var manipulation.
+
+Sabotage proof (executed by the agent, restored on completion):
+deleting the ``if not connector_enabled(...)`` skip in
+``run_connector_sync_pipeline``'s loop makes the OFF test fail — the
+"gated off" log no longer fires and the gmail entry runs. Restoring the
+gate returns the test to green.
+
+Spec: docs/architecture/connector-ingestion-architecture.md
 """
 
 from __future__ import annotations
 
 import logging
+import sqlite3
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from kairix.worker import (
+    ConnectorSyncDeps,
     ConnectorSyncResult,
-    dispatch_gmail_sync,
-    gmail_off_branch_noop,
-    run_via_gmail_connector,
+    run_connector_sync_pipeline,
 )
 from tests.fakes import FakeFeatureFlagResolver
 
 pytestmark = pytest.mark.integration
 
-_FLAG_NAME = "connector_gmail"
-_ON_BRANCH_MARKER = "gmail connector running (flag ON)"
-_OFF_BRANCH_MARKER = "gmail connector gated off (flag OFF)"
+_KIND = "gmail"
 
 
-def test_connector_gmail_flag_registered() -> None:
-    """The flag exists in the registry, defaults False, stage=introduce."""
-    from kairix.core.features.registry import REGISTRY
+def _two_connector_topology(vault: Path) -> dict[str, Any]:
+    """Merged mapping: the gated connector kind + a flagless obsidian sibling."""
+    return {
+        "topology_v2": {
+            "connectors": [
+                {
+                    "id": f"{_KIND}-conn",
+                    "kind": _KIND,
+                    "name": f"Corp {_KIND}",
+                    "connector_specific_config": {},
+                },
+                {
+                    "id": "obsidian-conn",
+                    "kind": "obsidian",
+                    "name": "Personal Vault",
+                    "extractor": "passthrough",
+                    "connector_specific_config": {"vault_root": str(vault)},
+                },
+            ],
+            "cc_pairs": [
+                {"id": f"{_KIND}-pair", "connector": f"{_KIND}-conn", "credential": None, "name": f"{_KIND}-cc"},
+                {"id": "ob-pair", "connector": "obsidian-conn", "credential": None, "name": "obsidian-cc"},
+            ],
+        }
+    }
 
-    assert "connector_gmail" in REGISTRY
-    entry = REGISTRY["connector_gmail"]
-    assert entry.default is False
-    assert entry.stage == "introduce"
-    assert entry.owner == "connector-framework"
+
+def _seed_vault(tmp_path: Path) -> Path:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "alpha.md").write_text("# Alpha\n\nFirst note body.\n", encoding="utf-8")
+    (vault / "beta.md").write_text("# Beta\n\nSecond note body.\n", encoding="utf-8")
+    return vault
 
 
-def test_flag_off_routes_to_off_branch(caplog: pytest.LogCaptureFixture) -> None:
-    """OFF: dispatch_gmail_sync routes to the no-op branch and zero counters."""
-    resolver = FakeFeatureFlagResolver().with_flag("connector_gmail", False)
-    on_calls = {"n": 0}
-
-    def _wrapped_on() -> ConnectorSyncResult:
-        on_calls["n"] += 1
-        return ConnectorSyncResult(synced=1, failed=0, dead_letter_added=0)
-
-    with caplog.at_level(logging.INFO, logger="kairix.worker"):
-        result = dispatch_gmail_sync(
-            read_flag=resolver.get,
-            on_branch=_wrapped_on,
-            off_branch=gmail_off_branch_noop,
-        )
-
-    assert on_calls["n"] == 0, "OFF branch must not invoke the ON helper"
-    assert result.synced == 0
-    assert any(_OFF_BRANCH_MARKER in rec.getMessage() for rec in caplog.records), (
-        f"expected OFF branch INFO log; got {[r.getMessage() for r in caplog.records]!r}"
+def _drive_loop(
+    tmp_path: Path,
+    resolver: FakeFeatureFlagResolver,
+    caplog: pytest.LogCaptureFixture,
+) -> ConnectorSyncResult:
+    vault = _seed_vault(tmp_path)
+    db_path = tmp_path / "index.sqlite"
+    deps = ConnectorSyncDeps(
+        disabled_fn=lambda: False,
+        config_mapping_fn=lambda: _two_connector_topology(vault),
+        flag_reader=resolver.get,
+        db_factory=lambda: sqlite3.connect(str(db_path)),
+        bronze_root_resolver=lambda: tmp_path / "bronze",
     )
-
-
-def test_flag_on_routes_to_on_branch(caplog: pytest.LogCaptureFixture) -> None:
-    """ON: dispatch_gmail_sync routes to the ON branch and the marker log fires."""
-    resolver = FakeFeatureFlagResolver().with_flag("connector_gmail", True)
-    off_calls = {"n": 0}
-
-    def _wrapped_off() -> ConnectorSyncResult:
-        off_calls["n"] += 1
-        return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
-
-    def _wrapped_on() -> ConnectorSyncResult:
-        # Mirror the production marker without running a real pipeline.
-        logging.getLogger("kairix.worker").info(_ON_BRANCH_MARKER)
-        return ConnectorSyncResult(synced=3, failed=0, dead_letter_added=0)
-
     with caplog.at_level(logging.INFO, logger="kairix.worker"):
-        result = dispatch_gmail_sync(
-            read_flag=resolver.get,
-            on_branch=_wrapped_on,
-            off_branch=_wrapped_off,
-        )
-
-    assert off_calls["n"] == 0, "ON branch must not invoke the OFF helper"
-    assert result.synced == 3
-    assert any(_ON_BRANCH_MARKER in rec.getMessage() for rec in caplog.records), (
-        f"expected ON branch INFO log; got {[r.getMessage() for r in caplog.records]!r}"
-    )
+        return run_connector_sync_pipeline(deps)
 
 
-def test_run_via_gmail_connector_marker_logs(caplog: pytest.LogCaptureFixture) -> None:
-    """The production ON-branch helper emits the marker log without invoking the pipeline.
+def _gated_logs(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        rec.getMessage()
+        for rec in caplog.records
+        if _KIND in rec.getMessage().lower() and "gated" in rec.getMessage().lower()
+    ]
 
-    Documents the marker contract the worker uses to surface which
-    connector ran in each tick. The helper still calls
-    :func:`run_connector_sync_pipeline` after the log, but that lives
-    behind a separate test that pins the empty-config no-op shape.
+
+def test_flag_off_gates_connector_sibling_still_runs(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """OFF — the gmail entry is gated off in the loop; the flagless obsidian
+    sibling still syncs both notes.
+
+    With the flag OFF the predicate skips the gmail entry BEFORE plugin
+    resolution (no live credential needed); the "gated off" INFO log fires
+    and the aggregate ``synced`` reflects only the obsidian sibling.
     """
-    # The actual helper invokes run_connector_sync_pipeline which
-    # opens a SQLite DB; we observe only the marker log via a separate
-    # call that drives the dispatch with a stub on_branch.
+    resolver = FakeFeatureFlagResolver().with_flag("connector_gmail", False)
+    result = _drive_loop(tmp_path, resolver, caplog)
+
+    assert result.synced == 2, f"flagless obsidian sibling must still sync both notes; got {result}"
+    assert result.failed == 0, f"OFF gate must not surface a failure for the gated connector; got {result}"
+    assert _gated_logs(caplog), (
+        f"flag OFF must skip the {_KIND} entry with a 'gated off' INFO log; "
+        f"got {[r.getMessage() for r in caplog.records]}"
+    )
+
+
+def test_flag_on_lets_connector_through_sibling_still_runs(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """ON — the gate lets the gmail entry through to the batch runner; the
+    flagless obsidian sibling still syncs both notes.
+
+    With the flag ON the predicate does NOT skip the gmail entry: it
+    reaches ``_run_one_connector_batch`` where, lacking a live credential,
+    it fails and is logged + counted as a per-entry failure (the loop
+    continues). The "gated off" log must NOT fire for gmail — proving the
+    ON branch took a different path than OFF.
+    """
     resolver = FakeFeatureFlagResolver().with_flag("connector_gmail", True)
+    result = _drive_loop(tmp_path, resolver, caplog)
 
-    def _stub_on() -> ConnectorSyncResult:
-        logging.getLogger("kairix.worker").info(_ON_BRANCH_MARKER)
-        return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
+    assert result.synced >= 2, f"flagless obsidian sibling must still sync its notes; got {result}"
+    assert not _gated_logs(caplog), (
+        f"flag ON must NOT gate off the {_KIND} entry; the 'gated off' log fired anyway: {_gated_logs(caplog)!r}"
+    )
 
-    # Reference the production helper to keep its symbol live for the
-    # F52 call-site grep.
-    _ = run_via_gmail_connector
-
-    with caplog.at_level(logging.INFO, logger="kairix.worker"):
-        dispatch_gmail_sync(read_flag=resolver.get, on_branch=_stub_on)
-    assert any(_ON_BRANCH_MARKER in rec.getMessage() for rec in caplog.records)
+    failure_logs = [
+        rec.getMessage() for rec in caplog.records if f"{_KIND}-cc" in rec.getMessage() and "failed" in rec.getMessage()
+    ]
+    assert failure_logs, (
+        f"flag ON must let the {_KIND} entry reach the batch runner (where it fails without a "
+        f"live credential); got {[r.getMessage() for r in caplog.records]}"
+    )

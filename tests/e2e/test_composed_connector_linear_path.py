@@ -20,8 +20,9 @@ Scenario: composes the full production path:
 Flag dispatch path:
 
   flag-resolver pins connector_linear=True
-    → dispatch_linear_sync routes to the production ON branch helper
-    → branch helper wraps the pipeline run
+    → connector_enabled("linear", resolver.get) returns True (the gate
+      lets the connector through)
+    → the composed branch runs the pipeline
 
 The OFF path is covered by the integration tests at
 ``tests/integration/test_feature_flag_connector_linear.py``. F54's
@@ -51,7 +52,7 @@ from kairix.core.db.schema import create_schema
 from kairix.core.factory import build_connector_pipeline
 from kairix.worker import (
     ConnectorSyncResult,
-    dispatch_linear_sync,
+    connector_enabled,
 )
 from tests.fakes import FakeFeatureFlagResolver, FakeLinearConnector
 
@@ -122,10 +123,8 @@ def test_composed_linear_issue_path(tmp_path: Path) -> None:
             dead_letter_added=result.dead_lettered,
         )
 
-    sync_result = dispatch_linear_sync(
-        read_flag=resolver.get,
-        on_branch=_on_branch,
-    )
+    assert connector_enabled("linear", resolver.get), "flag ON must enable the linear connector"
+    sync_result = _on_branch()
     assert sync_result.synced >= 1, (
         f"composed path must index the fixture issue; got {sync_result}. "
         "Sabotage hint: check that FakeLinearConnector seeded the issue node "
