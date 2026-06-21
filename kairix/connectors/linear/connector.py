@@ -218,10 +218,11 @@ class LinearConnector:
         :class:`tests.fakes.FakeSecretsLoader`; production defaults to
         :class:`SecretsLoader`.
 
-    Flag gating happens at the worker-dispatch boundary
-    (:func:`kairix.worker.dispatch_linear_sync`) — when the
-    ``connector_linear`` flag is OFF the connector slot is a no-op and
-    this constructor is never called.
+    Flag gating happens in the canonical connector-sync loop
+    (:func:`kairix.worker.run_connector_sync_pipeline`), which consults
+    :func:`kairix.worker.connector_enabled` per configured entry — when
+    the ``connector_linear`` flag is OFF the linear entry is skipped
+    before plugin resolution, so this constructor is never called.
     """
 
     name: str = CONNECTOR_NAME

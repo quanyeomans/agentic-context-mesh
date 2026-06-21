@@ -1,16 +1,17 @@
-"""Source-string contract: the resolver and config loader must not hardcode ``reference-library``.
+"""Source-string contract: the config loader must not hardcode ``reference-library``.
 
-Reference-library treatment is an operator-yaml policy decision driven
-by the ``in_default`` flag on the collection. The resolver and config
-loader are policy-neutral surfaces that must not branch on the literal
-collection name; that asymmetry has previously regressed into hidden
-behaviour where one corpus was treated specially.
+Reference-library treatment is an operator-config policy decision driven
+by the topology collection's ``retrieval:`` block (a per-collection
+override), not by a source branch. The config loader is a policy-neutral
+surface that must not branch on the literal collection name; that
+asymmetry has previously regressed into hidden behaviour where one corpus
+was treated specially.
 
 Justified callers that still legitimately reference the literal:
   - ``kairix/core/embed/cli.py`` — embed harness auto-injects a
     ``CollectionConfig(name="reference-library", ...)``. This is
     structural (the harness *is* the source of the name) and lives
-    outside the resolver/config-loader policy surface.
+    outside the config-loader policy surface.
   - ``kairix/core/search/registry.py`` — ``RESERVED_AGENT_COLLECTION_NAMES``
     structurally defends against agent-collection name collisions with
     that auto-injected name. Single-element constant, name-collision
@@ -24,18 +25,6 @@ from pathlib import Path
 import pytest
 
 from kairix.core.search import config_loader as config_loader_module
-from kairix.core.search import resolver as resolver_module
-
-
-@pytest.mark.contract
-def test_resolver_source_does_not_reference_reflib_literal() -> None:
-    """``DefaultCollectionResolver`` must not reference the literal collection name."""
-    source = Path(resolver_module.__file__).read_text(encoding="utf-8")
-    assert "reference-library" not in source, (
-        "kairix/core/search/resolver.py hardcodes the 'reference-library' "
-        "collection name. Use the in_default flag on the collection in yaml; "
-        "do NOT add reserved-collection logic to the resolver."
-    )
 
 
 @pytest.mark.contract

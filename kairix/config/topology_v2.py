@@ -39,6 +39,8 @@ F42 frozen-dataclass discipline: every public value object is
 
 from __future__ import annotations
 
+import types
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, get_args
 
@@ -142,11 +144,22 @@ class CollectionConfig:
     tier-map derivation reads it to apply a ``SourceTierBoost`` so chunks
     in this collection rank above/below the default. ``None`` (the
     back-compat default) means "no tier boost".
+
+    ``retrieval_overrides`` is the optional per-collection retrieval-config
+    override (canonical-collapse) — the raw nested dict from the
+    collection's ``retrieval:`` YAML block. When set, the build-time
+    override derivation reads it so a single-collection search merges the
+    operator's tuning (e.g. reflib's BM25-primary fusion) over the global
+    retrieval config. ``None`` (the back-compat default) means "no
+    per-collection override". It is a read-only ``MappingProxyType`` so the
+    frozen dataclass can't be mutated through the field after parse; the
+    consumer (``merge_retrieval_config``) reads it as a plain mapping.
     """
 
     name: str
     sources: tuple[CollectionSourceConfig, ...]
     tier: str | None = None
+    retrieval_overrides: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -444,6 +457,23 @@ def _parse_collection_source(prefix: str, raw: Any) -> CollectionSourceConfig:
     )
 
 
+def _parse_retrieval_overrides(prefix: str, value: Any) -> Mapping[str, Any] | None:
+    """Freeze a collection's ``retrieval:`` block into a read-only mapping.
+
+    Returns ``None`` when the key is absent so a collection without an
+    override surfaces ``retrieval_overrides=None`` (the back-compat default
+    — the resolver then uses the global config). A present block must be a
+    mapping; anything else trips the parser's type guard. The raw nested
+    dict is wrapped in :class:`types.MappingProxyType` so the frozen
+    :class:`CollectionConfig` can't be mutated through the field after
+    parse; the consumer (``merge_retrieval_config``) reads it as a plain
+    mapping.
+    """
+    if value is None:
+        return None
+    return types.MappingProxyType(dict(_require_dict(f"{prefix}.retrieval", value)))
+
+
 def _parse_one_collection(prefix: str, raw: Any) -> CollectionConfig:
     item = _require_dict(prefix, raw)
     sources_raw = _require_list(f"{prefix}.sources", item.get("sources"))
@@ -452,6 +482,7 @@ def _parse_one_collection(prefix: str, raw: Any) -> CollectionConfig:
         name=_require_str(prefix, item.get("name"), field="name"),
         sources=sources,
         tier=_optional_str(item.get("tier")),
+        retrieval_overrides=_parse_retrieval_overrides(prefix, item.get("retrieval")),
     )
 
 

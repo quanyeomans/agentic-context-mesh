@@ -38,16 +38,20 @@ sits with the secret-rotation pipeline in the operator's Key Vault.
 | `window_days_back` | `30` | Initial-sync window in days; subsequent syncs use the returned `nextSyncToken` |
 | `page_size` | `250` | `events.list` `maxResults`; Google caps at 2500 |
 
-## Feature flag
+## Enablement
 
-`topology_v2_google_calendar` — introduce stage, default OFF. Defined
-in `kairix/core/features/registry.py`. Retires at
-`v2026.11.30` (6 months from landing per F51).
+The Google Calendar connector is flagless — its
+`topology_v2_google_calendar` introduce-stage flag retired post-cutover
+(task #132), so the connector runs whenever it is configured in the
+canonical `topology.connectors` block.
 
-The dispatcher (`kairix.worker.dispatch_google_calendar_sync`) reads
-the flag at the connector-selection boundary — when OFF, the plugin
-never runs even if listed in `kairix.config.yaml`. When ON, the
-connector is selected via the standard config + entry-point shape.
+The canonical connector-sync loop
+(`kairix.worker.run_connector_sync_pipeline`) enumerates each configured
+connector and gates it via `kairix.worker.connector_enabled(kind,
+flag_reader)` — a connector kind runs iff it has no `connector_<kind>`
+flag in `kairix.core.features.registry.REGISTRY` (flagless → always on,
+which is this connector's case) OR that flag resolves True. Connectors
+with no `cc_pair` are not ingestable and are skipped.
 
 ## Recurring events
 

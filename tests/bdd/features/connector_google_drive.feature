@@ -6,9 +6,10 @@ Feature: Google Drive connector pulls workspace files via the Drive v3 REST API
   without me writing per-format glue or maintaining a parallel sync surface.
 
   The connector reuses the Drive v3 changes endpoint with start-page-token
-  pagination. Binary content is fetched lazily via the per-file alt=media
-  endpoint and handed off to the kairix extractor registry for per-format
-  dispatch.
+  pagination, scoped to all drives so Shared (Team) Drive items surface too.
+  Content is fetched lazily: binary files via the per-file alt=media endpoint,
+  Google-native Docs / Sheets / Slides via the files.export endpoint, then
+  handed off to the kairix extractor registry for per-format dispatch.
 
   @happy_path
   Scenario: A new file in the configured corpus surfaces as a created change event
@@ -25,3 +26,16 @@ Feature: Google Drive connector pulls workspace files via the Drive v3 REST API
     When the operator runs the google drive connector list_changes with no cursor
     Then the google drive connector exposes a non-empty next cursor
     And the google drive next cursor is the persisted new start page token
+
+  @shared_drives
+  Scenario: A file living on a Shared Drive surfaces as a created change event
+    Given a stubbed Google Drive endpoint where the file lives on a Shared Drive
+    When the operator runs the google drive connector list_changes with no cursor
+    Then one created change event is emitted from the google drive connector
+
+  @native_export
+  Scenario: A native Google Doc is exported instead of dead-lettering on alt=media
+    Given a stubbed Google Drive endpoint that returns a native Google Doc whose alt=media 403s
+    When the operator runs the google drive connector list_changes with no cursor
+    And the operator fetches the native google doc content
+    Then the fetched google drive artefact carries the exported document body

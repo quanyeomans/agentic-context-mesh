@@ -30,12 +30,15 @@ from kairix.connectors.google_drive import (
     GoogleDriveCorpusSpec,
     GoogleDriveCredentials,
 )
-from kairix.core.protocols import ChangeEvent
+from kairix.core.protocols import ChangeEvent, RawArtefact
 
 pytestmark = pytest.mark.bdd
 
 _CORPUS_ID = "workspace-bdd"
 _NEW_START_PAGE_TOKEN = "newpagetoken-bdd-1"
+_NATIVE_DOC_ID = "drive-native-doc-bdd"
+_NATIVE_DOC_MIME = "application/vnd.google-apps.document"
+_EXPORTED_DOC_BODY = b"exported google doc body"
 
 
 def _one_pdf_changes_page() -> dict[str, Any]:
@@ -58,6 +61,25 @@ def _one_pdf_changes_page() -> dict[str, Any]:
     }
 
 
+def _native_doc_changes_page() -> dict[str, Any]:
+    """One Drive changes page with a single native Google Doc envelope."""
+    return {
+        "newStartPageToken": _NEW_START_PAGE_TOKEN,
+        "changes": [
+            {
+                "fileId": _NATIVE_DOC_ID,
+                "file": {
+                    "id": _NATIVE_DOC_ID,
+                    "name": "design-notes",
+                    "mimeType": _NATIVE_DOC_MIME,
+                    "modifiedTime": "2026-05-22T10:00:00Z",
+                    "webViewLink": f"https://docs.google.com/document/d/{_NATIVE_DOC_ID}/edit",
+                },
+            }
+        ],
+    }
+
+
 @dataclass
 class _Ctx:
     """Per-scenario context — no module-level mutable state."""
@@ -65,6 +87,7 @@ class _Ctx:
     requested_urls: list[str] = field(default_factory=list)
     connector: GoogleDriveConnector | None = None
     events: list[ChangeEvent] = field(default_factory=list)
+    artefact: RawArtefact | None = None
 
 
 @pytest.fixture
@@ -97,6 +120,59 @@ def _build_connector_with_stubbed_drive(ctx: _Ctx) -> GoogleDriveConnector:
     )
 
 
+def _connector_for_handler(ctx: _Ctx, handler: Any) -> GoogleDriveConnector:
+    """Wire the real connector to ``handler`` via MockTransport."""
+    transport = httpx.MockTransport(handler)
+    shared_client = httpx.Client(transport=transport)
+    return GoogleDriveConnector(
+        corpora=[GoogleDriveCorpusSpec(corpus_id=_CORPUS_ID)],
+        credentials=GoogleDriveCredentials(
+            access_token="fake-bdd-token",  # pragma: allowlist secret — test fixture
+        ),
+        client_builder=lambda creds: GoogleDriveClient(
+            access_token=creds.access_token,
+            http_client=shared_client,
+        ),
+    )
+
+
+def _build_connector_shared_drive_only(ctx: _Ctx) -> GoogleDriveConnector:
+    """Stub that yields the file ONLY when the request is scoped to all drives.
+
+    Mirrors the real Drive API's My-Drive-only default: the Shared-Drive
+    file is invisible unless ``includeItemsFromAllDrives`` +
+    ``supportsAllDrives`` are present.
+    """
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        ctx.requested_urls.append(url)
+        if "/changes/startPageToken" in url:
+            return httpx.Response(200, json={"startPageToken": "seed-shared-bdd"})
+        if "includeItemsFromAllDrives=true" not in url or "supportsAllDrives=true" not in url:
+            return httpx.Response(200, json={"changes": [], "newStartPageToken": _NEW_START_PAGE_TOKEN})
+        return httpx.Response(200, json=_one_pdf_changes_page())
+
+    return _connector_for_handler(ctx, _handler)
+
+
+def _build_connector_native_doc(ctx: _Ctx) -> GoogleDriveConnector:
+    """Stub that 403s on alt=media for the native doc and exports its body."""
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        ctx.requested_urls.append(url)
+        if "/changes/startPageToken" in url:
+            return httpx.Response(200, json={"startPageToken": "seed-native-bdd"})
+        if "alt=media" in url:
+            return httpx.Response(403, json={"error": {"errors": [{"reason": "fileNotDownloadable"}]}})
+        if "/export" in url:
+            return httpx.Response(200, content=_EXPORTED_DOC_BODY, headers={"Content-Type": "text/plain"})
+        return httpx.Response(200, json=_native_doc_changes_page())
+
+    return _connector_for_handler(ctx, _handler)
+
+
 # ---------------------------------------------------------------------------
 # Givens
 # ---------------------------------------------------------------------------
@@ -105,6 +181,16 @@ def _build_connector_with_stubbed_drive(ctx: _Ctx) -> GoogleDriveConnector:
 @given(parsers.parse("a stubbed Google Drive endpoint that returns one configured corpus with a sample pdf envelope"))
 def _given_one_pdf(google_drive_ctx: _Ctx) -> None:
     google_drive_ctx.connector = _build_connector_with_stubbed_drive(google_drive_ctx)
+
+
+@given(parsers.parse("a stubbed Google Drive endpoint where the file lives on a Shared Drive"))
+def _given_shared_drive(google_drive_ctx: _Ctx) -> None:
+    google_drive_ctx.connector = _build_connector_shared_drive_only(google_drive_ctx)
+
+
+@given(parsers.parse("a stubbed Google Drive endpoint that returns a native Google Doc whose alt=media 403s"))
+def _given_native_doc(google_drive_ctx: _Ctx) -> None:
+    google_drive_ctx.connector = _build_connector_native_doc(google_drive_ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +202,12 @@ def _given_one_pdf(google_drive_ctx: _Ctx) -> None:
 def _when_list_changes(google_drive_ctx: _Ctx) -> None:
     assert google_drive_ctx.connector is not None, "Given step must run before When"
     google_drive_ctx.events = list(google_drive_ctx.connector.list_changes(cursor=None))
+
+
+@when(parsers.parse("the operator fetches the native google doc content"))
+def _when_fetch_native(google_drive_ctx: _Ctx) -> None:
+    assert google_drive_ctx.connector is not None, "Given step must run before When"
+    google_drive_ctx.artefact = google_drive_ctx.connector.fetch(_NATIVE_DOC_ID)
 
 
 # ---------------------------------------------------------------------------
@@ -167,4 +259,13 @@ def _cursor_is_new_start_page_token(google_drive_ctx: _Ctx) -> None:
     cursor = google_drive_ctx.connector.next_cursor()
     assert cursor == _NEW_START_PAGE_TOKEN, (
         f"cursor must be the persisted newStartPageToken; got {cursor!r}, expected {_NEW_START_PAGE_TOKEN!r}"
+    )
+
+
+@then("the fetched google drive artefact carries the exported document body")
+def _artefact_has_export_body(google_drive_ctx: _Ctx) -> None:
+    artefact = google_drive_ctx.artefact
+    assert artefact is not None, "When-fetch step must run before this Then"
+    assert artefact.raw == _EXPORTED_DOC_BODY, (
+        f"native doc must export its body instead of dead-lettering; got {artefact.raw!r}"
     )

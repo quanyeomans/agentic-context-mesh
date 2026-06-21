@@ -168,14 +168,24 @@ def _default_flag_reader(name: str) -> bool:
 
 @dataclass
 class PerRepoCursorState:
-    """Per-repo cursor tracking — code SHA + issues ``since=`` timestamp.
+    """Per-repo cursor tracking — code + issues ``since=`` boundary.
 
     Mutable because the connector advances these in place after each
-    successful drain. ``code_sha`` is the most-recent commit SHA; the
-    next list_changes call asks for commits after this SHA.
-    ``issues_since`` is the ISO timestamp of the most-recent issue
-    update; the next list_changes asks for issues with
-    ``updated_at >= issues_since``.
+    successful drain. ``code_sha`` is the most-recent commit's
+    ``committed_at`` ISO timestamp (the value GitHub's ``commits?since=``
+    expects); ``issues_since`` is the most-recent issue's ``updated_at``
+    ISO timestamp (the value GitHub's ``issues?since=`` expects).
+
+    Inclusive-``since`` boundary handling (resilience-audit fix): GitHub's
+    ``?since=`` is INCLUSIVE on the boundary timestamp, so a quiet repo
+    would re-fetch + re-emit the boundary commit/issue every tick. To
+    suppress the re-emit without dropping a genuinely-new commit landing
+    at the SAME second as the boundary, the cursor also tracks the set of
+    commit SHAs (``seen_commit_shas``) and issue item_ids
+    (``seen_issue_ids``) already emitted AT the boundary timestamp. The
+    next drain re-asks ``?since=<boundary>`` (so same-second newcomers are
+    still returned) and skips only the already-seen ids — a compound
+    cursor that is robust to multiple items sharing a timestamp.
 
     Sabotage-proof: replacing this per-repo dict with a single shared
     cursor (e.g. a module-level scalar) flips the
@@ -186,6 +196,8 @@ class PerRepoCursorState:
 
     code_sha: str | None = None
     issues_since: str | None = None
+    seen_commit_shas: frozenset[str] = frozenset()
+    seen_issue_ids: frozenset[str] = frozenset()
 
 
 class GitHubConnector:
@@ -689,12 +701,35 @@ class GitHubConnector:
         return kept
 
     def _drain_repo(self, repo: GitHubRepoRef) -> Iterator[ChangeEvent]:
-        """Drain commits + issues for one repo, advancing the per-repo cursor."""
+        """Drain commits + issues for one repo, advancing the per-repo cursor.
+
+        GitHub's ``?since=`` is inclusive on the boundary timestamp, so the
+        boundary commit/issue from the previous drain is re-returned by the
+        wire. ``_drain_commits`` / ``_drain_issues`` skip the already-seen
+        boundary ids (tracked on the cursor) so a quiet repo re-emits
+        nothing, while a genuinely-new item sharing the boundary second is
+        still emitted. See :class:`PerRepoCursorState`.
+        """
         state = self._per_repo_cursors.setdefault(repo.full_name, PerRepoCursorState())
+        yield from self._drain_commits(repo, state)
+        yield from self._drain_issues(repo, state)
+
+    def _drain_commits(self, repo: GitHubRepoRef, state: PerRepoCursorState) -> Iterator[ChangeEvent]:
+        """Emit new commits for ``repo`` and advance the commit cursor.
+
+        Skips commits whose SHA is in ``state.seen_commit_shas`` (already
+        emitted at the prior boundary timestamp) so the inclusive ``?since=``
+        re-return doesn't double-emit. After the drain, the cursor advances
+        to the max ``committed_at`` across ALL returned commits and records
+        the SHAs at that timestamp as the new boundary seen-set.
+        """
+        sensitivity = sensitivity_from_visibility(repo.visibility)
         commits = self._client.list_commits_since(full_name=repo.full_name, since=state.code_sha)
         for commit in commits:
+            if commit.sha in state.seen_commit_shas:
+                continue
             item_id = f"github://{repo.full_name}/commit/{commit.sha}"
-            envelope = {
+            self._envelope_cache[item_id] = {
                 "sha": commit.sha,
                 "message": commit.message,
                 "committed_at": commit.committed_at,
@@ -702,24 +737,39 @@ class GitHubConnector:
                 "repo": repo.full_name,
                 "kind": "commit",
                 "mime_hint": _MIME_APPLICATION_JSON,
-                _META_SENSITIVITY: sensitivity_from_visibility(repo.visibility),
+                _META_SENSITIVITY: sensitivity,
             }
-            self._envelope_cache[item_id] = envelope
-            state.code_sha = commit.committed_at or state.code_sha
             yield ChangeEvent(
                 op="modified",
                 item_id=item_id,
                 modified_at=commit.committed_at,
                 metadata={
-                    _META_SENSITIVITY: sensitivity_from_visibility(repo.visibility),
+                    _META_SENSITIVITY: sensitivity,
                     "repo": repo.full_name,
                     "kind": "commit",
                 },
             )
+        boundary, seen = _advance_boundary(
+            current_boundary=state.code_sha,
+            items=((commit.committed_at, commit.sha) for commit in commits),
+        )
+        state.code_sha = boundary
+        state.seen_commit_shas = seen
+
+    def _drain_issues(self, repo: GitHubRepoRef, state: PerRepoCursorState) -> Iterator[ChangeEvent]:
+        """Emit new issues/PRs for ``repo`` and advance the issues cursor.
+
+        Mirrors :meth:`_drain_commits` for GitHub's inclusive
+        ``issues?since=`` boundary — skips already-seen item_ids at the
+        boundary ``updated_at`` and advances to the new boundary + seen-set.
+        """
+        sensitivity = sensitivity_from_visibility(repo.visibility)
         issues = self._client.list_issues_since(full_name=repo.full_name, since=state.issues_since)
         for issue in issues:
             item_id = f"github://{repo.full_name}/{issue.kind}s/{issue.number}"
-            envelope_issue: dict[str, Any] = {
+            if item_id in state.seen_issue_ids:
+                continue
+            self._envelope_cache[item_id] = {
                 "title": issue.title,
                 "body": issue.body,
                 "updated_at": issue.updated_at,
@@ -727,20 +777,24 @@ class GitHubConnector:
                 "repo": repo.full_name,
                 "kind": issue.kind,
                 "mime_hint": _MIME_APPLICATION_JSON,
-                _META_SENSITIVITY: sensitivity_from_visibility(repo.visibility),
+                _META_SENSITIVITY: sensitivity,
             }
-            self._envelope_cache[item_id] = envelope_issue
-            state.issues_since = issue.updated_at or state.issues_since
             yield ChangeEvent(
                 op="modified",
                 item_id=item_id,
                 modified_at=issue.updated_at,
                 metadata={
-                    _META_SENSITIVITY: sensitivity_from_visibility(repo.visibility),
+                    _META_SENSITIVITY: sensitivity,
                     "repo": repo.full_name,
                     "kind": issue.kind,
                 },
             )
+        boundary, seen = _advance_boundary(
+            current_boundary=state.issues_since,
+            items=((issue.updated_at, f"github://{repo.full_name}/{issue.kind}s/{issue.number}") for issue in issues),
+        )
+        state.issues_since = boundary
+        state.seen_issue_ids = seen
 
     def _drain_one_container(self, container: Container) -> Iterator[ChangeEvent]:
         """Wave E ON-branch: scope the drain to one repo (Container)."""
@@ -936,10 +990,48 @@ def parse_item_id(item_id: str) -> _ParsedItemId:
     return _ParsedItemId(full_name=full_name, kind=parts[2], identifier=parts[3])
 
 
+def _advance_boundary(
+    *,
+    current_boundary: str | None,
+    items: Iterable[tuple[str, str]],
+) -> tuple[str | None, frozenset[str]]:
+    """Compute the next inclusive-``since`` boundary + its seen-id set.
+
+    ``items`` is an iterable of ``(timestamp, id)`` pairs for every row the
+    drain observed this tick (already-emitted boundary rows included, since
+    GitHub's inclusive ``?since=`` re-returns them). Returns the new
+    boundary timestamp (the max observed timestamp, or the prior boundary
+    when no rows were seen) and the frozenset of ids AT that boundary
+    timestamp — the rows the NEXT tick's inclusive ``?since=`` will
+    re-return and must therefore skip. Rows without a timestamp can't be
+    boundary-tracked, so they're ignored for the boundary computation.
+    """
+    observed = list(items)
+    # ISO-8601 UTC ``Z`` timestamps sort lexicographically == chronologically,
+    # so ``max`` over the non-empty timestamps (seeded with the prior boundary)
+    # yields the new boundary without a hand-rolled comparison.
+    candidates = [timestamp for timestamp, _identifier in observed if timestamp]
+    if current_boundary:
+        candidates.append(current_boundary)
+    if not candidates:
+        return None, frozenset()
+    boundary = max(candidates)
+    seen = frozenset(identifier for timestamp, identifier in observed if timestamp == boundary and identifier)
+    return boundary, seen
+
+
 def serialise_cursor(per_repo: Mapping[str, PerRepoCursorState]) -> str:
-    """JSON-encode the per-repo cursor map."""
+    """JSON-encode the per-repo cursor map (compound inclusive-since cursor)."""
     return json.dumps(
-        {repo: {"code_sha": state.code_sha, "issues_since": state.issues_since} for repo, state in per_repo.items()},
+        {
+            repo: {
+                "code_sha": state.code_sha,
+                "issues_since": state.issues_since,
+                "seen_commit_shas": sorted(state.seen_commit_shas),
+                "seen_issue_ids": sorted(state.seen_issue_ids),
+            }
+            for repo, state in per_repo.items()
+        },
         sort_keys=True,
     )
 
@@ -961,8 +1053,22 @@ def deserialise_cursor(cursor: Cursor | None) -> dict[str, PerRepoCursorState]:
         out[str(repo)] = PerRepoCursorState(
             code_sha=payload.get("code_sha"),
             issues_since=payload.get("issues_since"),
+            seen_commit_shas=_coerce_id_set(payload.get("seen_commit_shas")),
+            seen_issue_ids=_coerce_id_set(payload.get("seen_issue_ids")),
         )
     return out
+
+
+def _coerce_id_set(raw: Any) -> frozenset[str]:
+    """Coerce a deserialised seen-id list into a frozenset of strings.
+
+    Tolerant of stale / pre-fix cursors that omit the field (``None``) or
+    carry a non-list shape — both collapse to an empty set so an older
+    persisted cursor upgrades cleanly without a re-backfill.
+    """
+    if not isinstance(raw, list):
+        return frozenset()
+    return frozenset(str(entry) for entry in raw)
 
 
 def sensitivity_from_visibility(visibility: str) -> Sensitivity:

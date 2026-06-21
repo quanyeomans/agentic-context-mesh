@@ -16,9 +16,8 @@ Exercises the composed production path with the flag ON:
       / uniqueBody keys)
     → assertion that the Graph URL recorded by the stub carries the
       header-only $select projection and contains NO body field
-    → assertion that the connector is selectable via the flag-gated
-      :func:`dispatch_m365_email_headers_sync` dispatcher when the
-      flag is ON
+    → assertion that the connector is enabled via the flag-gated
+      :func:`connector_enabled` predicate when the flag is ON
 
 The OFF path is covered by
 ``tests/integration/test_feature_flag_connector_m365_email_headers.py``
@@ -50,7 +49,7 @@ from kairix.connectors.m365_email_headers.connector import M365Credentials
 from kairix.transport.auth.oauth2_client_creds import OAuth2ClientCredsAuth
 from kairix.worker import (
     ConnectorSyncResult,
-    dispatch_m365_email_headers_sync,
+    connector_enabled,
 )
 from tests.fakes import FakeFeatureFlagResolver
 
@@ -203,25 +202,23 @@ def test_composed_m365_email_headers_on_path() -> None:
     leaks = artefact_keys & forbidden_keys
     assert not leaks, f"fetched artefact leaked body fields: {leaks!r}; keys={artefact_keys!r}"
 
-    # Flag-gated dispatcher routes through the connector when ON.
-    # Wrap the ON branch so the E2E test doesn't try to open a real
-    # SQLite DB — the property under test is "the connector is what
-    # runs when the flag is ON", which is observable via the branch
-    # callable's invocation.
+    # Flag-gated enablement lets the connector through when ON.
+    # Wrap the composed branch so the E2E test doesn't try to open a real
+    # SQLite DB — the property under test is "the connector is what runs
+    # when the flag is ON", observable via the branch callable's
+    # invocation after the gate lets it through.
     resolver = FakeFeatureFlagResolver().with_flag("connector_m365_email_headers", True)
     on_branch_calls = {"n": 0}
 
     def _composed_on_branch() -> ConnectorSyncResult:
         on_branch_calls["n"] += 1
-        # Drive list_changes inside the ON branch to prove the
+        # Drive list_changes inside the composed branch to prove the
         # connector is the active surface when the flag is ON.
         _ = list(connector.list_changes(cursor=connector.next_cursor()))
         return ConnectorSyncResult(synced=1, failed=0, dead_letter_added=0)
 
-    result = dispatch_m365_email_headers_sync(
-        read_flag=resolver.get,
-        on_branch=_composed_on_branch,
-    )
+    assert connector_enabled("m365_email_headers", resolver.get), "flag ON must enable the m365_email_headers connector"
+    result = _composed_on_branch()
 
     assert on_branch_calls["n"] == 1, (
         f"flag ON must invoke the connector branch exactly once; got {on_branch_calls['n']}"

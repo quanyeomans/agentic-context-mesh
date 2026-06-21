@@ -20,8 +20,6 @@ from kairix.core.search.registry import (
     ConfigDrivenAgentRegistry,
     parse_agent_registry,
 )
-from kairix.core.search.resolver import DefaultCollectionResolver
-from kairix.core.search.scope import Scope
 
 pytestmark = pytest.mark.bdd
 
@@ -132,16 +130,17 @@ def given_agent_with_paths_table(state: dict, name: str, datatable) -> None:
     state["last_agent"] = name
 
 
-@when(parsers.parse('I resolve scope=agent for "{name}"'))
-def resolve_scope_agent(state: dict, name: str) -> None:
-    resolver = DefaultCollectionResolver(collections_config=None, agent_registry=state["registry"])
-    state["resolved"] = resolver.resolve(name, Scope.AGENT)
+@when(parsers.parse("I ask the registry for {name}'s collections"))
+def registry_collections_for_agent(state: dict, name: str) -> None:
+    state["resolved"] = state["registry"].collections_for(name)
+    state["last_agent"] = name
 
 
-@then(parsers.parse("the resolver returns both of {name}'s synthetic collections"))
-def resolver_returns_agent_collections(state: dict, name: str) -> None:
-    expected = state["registry"].collections_for(name)
-    assert state["resolved"] == expected, f"resolver returned {state['resolved']}, expected {expected}"
+@then(parsers.parse("the registry returns both of {name}'s synthetic collections"))
+def registry_returns_agent_collections(state: dict, name: str) -> None:
+    cols = state["resolved"]
+    assert len(cols) == 2, f"expected 2 synthetic collections for {name}, got {cols}"
+    assert len(cols) == len(set(cols)), f"unexpected duplicate collections: {cols}"
 
 
 # ---------------------------------------------------------------------------
@@ -162,10 +161,9 @@ def two_agents_shared_path(state: dict, a: str, b: str, shared_path: str) -> Non
     )
 
 
-@when("I resolve scope=all-agents")
-def resolve_scope_all_agents(state: dict) -> None:
-    resolver = DefaultCollectionResolver(collections_config=None, agent_registry=state["registry"])
-    state["resolved"] = resolver.resolve(None, Scope.ALL_AGENTS) or []
+@when("I ask the registry for all collections")
+def registry_all_collections(state: dict) -> None:
+    state["resolved"] = state["registry"].all_collections()
 
 
 @then("each unique synthetic collection appears exactly once")

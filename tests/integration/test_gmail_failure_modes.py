@@ -22,7 +22,9 @@ mutates the production branch, confirms the test fails, restores.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -33,11 +35,14 @@ from kairix.connectors.gmail.client import (
     GmailMessage,
     HistoryPage,
 )
+from kairix.core import factory
+from kairix.core.db.schema import create_schema
 from kairix.core.protocols import (
     ContainerTransientError,
     CredentialExpiredError,
     InsufficientPermissionsError,
 )
+from tests.fakes import FakeChunkWriter, FakeEntityGraphSink, FakeExtractor
 
 pytestmark = pytest.mark.integration
 
@@ -213,6 +218,48 @@ def test_gmail_list_changes_returns_empty_history_page_emits_no_events() -> None
 
 
 # ---------------------------------------------------------------------------
+# drains-but-no-advance — non-empty drain whose page carried no advancing
+# historyId (the parser defensively collapses a non-string historyId to
+# None). The connector must NOT echo the stale input cursor; it must return
+# None so the pipeline's None-means-don't-clobber contract preserves the
+# prior persisted cursor instead of re-asserting a false advance.
+# ---------------------------------------------------------------------------
+
+
+def test_gmail_list_changes_drains_messages_with_no_advancing_history_id_returns_none() -> None:
+    """A non-empty drain whose page carried no advancing historyId returns
+    ``next_cursor() is None`` — NOT the stale input cursor.
+
+    The ``next_cursor`` Protocol contract: ``None`` means "no cursor
+    advance this tick; the orchestrator MUST NOT clobber the prior
+    cursor". Echoing the input cursor falsely signals a fresh advance to
+    a window we already processed, which makes the next tick re-query the
+    identical window and re-emit every already-processed message.
+
+    Sabotage proof (executed): reverting the fix to
+    ``self._next_cursor = self._client.last_history_id() or cursor`` makes
+    this assertion read the stale ``"warm-cursor"`` and fail.
+    """
+    page = HistoryPage(
+        message_ids=("msg-no-advance",),
+        next_page_token=None,
+        # historyId is None — the parser collapsed a non-string value.
+        history_id=None,
+    )
+    client = _ScriptedClient(
+        history_page=page,
+        message_by_id={"msg-no-advance": _make_message("msg-no-advance")},
+    )
+    connector = GmailConnector(user_email=_USER, client=client)  # type: ignore[arg-type]  # F3 rationale: scripted client stand-in.
+    events = list(connector.list_changes(cursor="warm-cursor"))
+    assert len(events) == 1, f"the message must still be emitted this tick; got {events!r}"
+    assert connector.next_cursor() is None, (
+        "a drain with no advancing historyId must return None (don't-clobber), "
+        f"not the stale input cursor; got {connector.next_cursor()!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # unauthorized — credential expired / scope revoked
 # ---------------------------------------------------------------------------
 
@@ -288,3 +335,126 @@ def test_gmail_fetch_unavailable_propagates_container_transient() -> None:
     connector = GmailConnector(user_email=_USER, client=client)  # type: ignore[arg-type]  # F3 rationale: scripted client stand-in.
     with pytest.raises(ContainerTransientError):
         connector.fetch("msg-transient")
+
+
+# ---------------------------------------------------------------------------
+# Two-tick re-query / re-emit proof through the real ConnectorPipeline.
+#
+# Drives the production pipeline (factory.build_connector_pipeline → real
+# CursorStore on SQLite) across two ticks. Tick 1 drains a message whose
+# History page carried no advancing historyId; the connector must return
+# next_cursor()=None so the pipeline preserves the prior persisted cursor
+# (don't-clobber). Tick 2's page advances cleanly with no new messages —
+# the already-processed message must NOT be re-emitted into a second chunk.
+# ---------------------------------------------------------------------------
+
+
+class _TwoTickScriptedClient:
+    """Scripted GmailClient emitting a non-advancing page then an advancing one.
+
+    Tick 1 (cold-start) seeds the cursor at the live tip. Tick 2 drains a
+    single message from a page whose ``historyId`` collapsed to ``None``
+    (no advance). Tick 3 returns an empty, advancing page so the next-tick
+    horizon moves forward without re-emitting the already-processed
+    message. The ``start_history_id`` each ``iter`` call observed is
+    recorded so the test can assert the window the connector queried.
+    """
+
+    def __init__(self) -> None:
+        self._iter_windows: list[str] = []
+        # Pages consumed FIFO by successive iter_history_message_ids calls.
+        self._pages: list[HistoryPage] = [
+            # First warm tick — one message, NO advancing historyId.
+            HistoryPage(message_ids=("msg-tick1",), next_page_token=None, history_id=None),
+            # Second warm tick — empty, but the horizon advanced.
+            HistoryPage(message_ids=(), next_page_token=None, history_id="tip-after-tick2"),
+        ]
+        self._last_history_id: str | None = None
+
+    @property
+    def iter_windows(self) -> list[str]:
+        return list(self._iter_windows)
+
+    def get_profile_history_id(self) -> str:
+        return "tip-cold-start"
+
+    def list_history(self, *, start_history_id: str, page_token: str | None = None) -> HistoryPage:
+        _ = (start_history_id, page_token)
+        return self._pages[0]
+
+    def iter_history_message_ids(self, *, start_history_id: str) -> Iterator[str]:
+        self._iter_windows.append(start_history_id)
+        page = self._pages.pop(0) if self._pages else HistoryPage(message_ids=(), next_page_token=None, history_id=None)
+        # Mirror the real client: only record an advancing historyId.
+        self._last_history_id = page.history_id
+        yield from page.message_ids
+
+    def last_history_id(self) -> str | None:
+        return self._last_history_id
+
+    def get_message(self, message_id: str) -> GmailMessage:
+        return _make_message(message_id, body=b"tick body")
+
+    def stats(self) -> Any:
+        from kairix.connectors.gmail.client import GmailStatsSnapshot
+
+        return GmailStatsSnapshot(requests=0, rate_limited_403_total=0, token_refreshes=0)
+
+    def invalidate_token(self) -> None:
+        return None
+
+
+def test_gmail_no_advance_tick_does_not_reemit_on_next_tick(tmp_path: Path) -> None:
+    """A drain with no advancing historyId does not re-emit on the next tick.
+
+    Two-tick proof through the real ConnectorPipeline:
+
+      * Cold-start seeds the cursor at the live tip (no events).
+      * Tick 1 drains ``msg-tick1`` from a page whose historyId collapsed
+        to ``None``. The connector returns ``next_cursor()=None`` so the
+        pipeline's None-means-don't-clobber contract preserves the prior
+        cursor rather than re-asserting a false advance.
+      * Tick 2 drains an empty, advancing page — ``msg-tick1`` is NOT
+        re-emitted into a second chunk.
+
+    Sabotage proof (executed): reverting the connector fix to
+    ``self._next_cursor = self._client.last_history_id() or cursor`` makes
+    tick 1's post-drain ``next_cursor()`` read the stale ``"tip-cold-start"``
+    instead of ``None`` — the ``assert connector.next_cursor() is None``
+    below fails. The emitted-once assertion pins that the don't-clobber
+    path leaves the message processed exactly once across both ticks.
+    """
+    client = _TwoTickScriptedClient()
+    connector = GmailConnector(user_email=_USER, client=client)  # type: ignore[arg-type]  # F3 rationale: scripted client stand-in.
+    db_path = tmp_path / "gmail_two_tick.sqlite"
+    db = sqlite3.connect(str(db_path))
+    create_schema(db)
+    chunk_writer = FakeChunkWriter()
+    pipeline = factory.build_connector_pipeline(
+        db=db,
+        collection="gmail-no-advance-two-tick",
+        chunk_writer=chunk_writer,
+        entity_graph_sink=FakeEntityGraphSink(),
+    )
+
+    # Cold-start: seeds the cursor at the live tip with no events.
+    pipeline.run_batch(connector, FakeExtractor())
+    # Tick 1: drains msg-tick1 from a page with NO advancing historyId.
+    pipeline.run_batch(connector, FakeExtractor())
+    # The no-advance drain must NOT echo the input cursor — it returns
+    # None so the pipeline preserved the prior persisted cursor.
+    assert connector.next_cursor() is None, (
+        "after a no-advance drain the connector must report None (don't-clobber), "
+        f"not a false advance; got {connector.next_cursor()!r}"
+    )
+    # Tick 2: empty advancing page — must not re-emit msg-tick1.
+    pipeline.run_batch(connector, FakeExtractor())
+
+    chunks = [chunk for batch in chunk_writer.writes for chunk in batch]
+    item_ids = [chunk.source_uri for chunk in chunks]
+    msg_tick1_count = sum(1 for uri in item_ids if "msg-tick1" in uri)
+    assert msg_tick1_count == 1, (
+        "msg-tick1 must be processed exactly once across both ticks; "
+        f"re-emit means the no-advance tick clobbered the cursor with a false advance. "
+        f"got {msg_tick1_count} occurrences in {item_ids!r}"
+    )

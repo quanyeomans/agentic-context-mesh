@@ -165,6 +165,7 @@ class _FakeDriveClient:
         self._raise_on_get_start = raise_on_get_start
         self._fetch_content = fetch_content
         self.iter_calls: list[str] = []
+        self.fetch_mime_args: list[str | None] = []
 
     def get_start_page_token(self) -> str:
         if self._raise_on_get_start is not None:
@@ -175,7 +176,8 @@ class _FakeDriveClient:
         self.iter_calls.append(start_token)
         yield from self._changes
 
-    def fetch_file_content(self, file_id: str) -> tuple[bytes, str]:
+    def fetch_file_content(self, file_id: str, *, mime_type: str | None = None) -> tuple[bytes, str]:
+        self.fetch_mime_args.append(mime_type)
         return self._fetch_content
 
     def last_new_start_page_token(self) -> str | None:
@@ -295,6 +297,26 @@ def test_fetch_falls_back_to_content_type_when_envelope_mime_absent() -> None:
     list(connector.list_changes(cursor=None))
     artefact = connector.fetch("f-1")
     assert artefact.mime == "application/x-fallback"
+
+
+def test_fetch_passes_envelope_mime_to_client_for_export_branching() -> None:
+    """fetch threads the envelope mimeType into fetch_file_content.
+
+    The client branches native (export) vs binary (alt=media) on this
+    value, so the connector MUST pass it through — otherwise every
+    native Google-apps file would silently take the alt=media 403 path.
+
+    Sabotage proof: dropping ``mime_type=envelope.mime_type`` from the
+    connector's fetch (calling ``fetch_file_content(envelope.file_id)``)
+    records None here and this assertion fails.
+    """
+    client = _FakeDriveClient(changes=[_build_drive_file(mime_type="application/vnd.google-apps.document")])
+    connector = _build_connector(fake_client=client)
+    list(connector.list_changes(cursor=None))
+    connector.fetch("f-1")
+    assert client.fetch_mime_args == ["application/vnd.google-apps.document"], (
+        f"connector must pass the envelope mime through to the client, recorded {client.fetch_mime_args!r}"
+    )
 
 
 def test_source_link_falls_back_when_envelope_has_no_web_view_link() -> None:
@@ -795,6 +817,84 @@ def test_client_fetch_file_content_returns_bytes_and_content_type() -> None:
     assert raw == b"binary-bytes"
     # ``application/pdf`` part stripped of charset
     assert mime == "application/pdf"
+
+
+def test_client_fetch_file_content_binary_carries_shared_drive_param() -> None:
+    """alt=media downloads carry supportsAllDrives so Shared-Drive bytes resolve.
+
+    Sabotage proof: removing ``supportsAllDrives=true`` from the
+    alt=media URL fails the URL assertion below.
+    """
+    seen: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200, content=b"bytes", headers={"Content-Type": "application/pdf"})
+
+    shared = httpx.Client(transport=httpx.MockTransport(_handler))
+    client = GoogleDriveClient(
+        access_token="t",  # pragma: allowlist secret — test fixture
+        http_client=shared,
+        sleep_fn=lambda _s: None,
+    )
+    raw, _mime = client.fetch_file_content("f-bin", mime_type="application/pdf")
+    assert raw == b"bytes"
+    assert "supportsAllDrives=true" in seen[0]
+    assert "alt=media" in seen[0]
+
+
+def test_client_export_unmapped_native_type_falls_back_to_plain_text() -> None:
+    """A google-apps type with no explicit map entry exports as text/plain.
+
+    Drive ships native types (forms, sites …) the map doesn't enumerate;
+    they must still export *something* extractable rather than
+    dead-letter.
+
+    Sabotage proof: changing ``_NATIVE_EXPORT_MIME_BY_TYPE.get(mime,
+    _DEFAULT_NATIVE_EXPORT_MIME)`` to ``[mime]`` (KeyError on unmapped)
+    makes this raise instead of exporting.
+    """
+    seen: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200, content=b"form text", headers={"Content-Type": "text/plain"})
+
+    shared = httpx.Client(transport=httpx.MockTransport(_handler))
+    client = GoogleDriveClient(
+        access_token="t",  # pragma: allowlist secret — test fixture
+        http_client=shared,
+        sleep_fn=lambda _s: None,
+    )
+    raw, _mime = client.fetch_file_content("f-form", mime_type="application/vnd.google-apps.form")
+    assert raw == b"form text"
+    export_url = seen[0]
+    assert "/export" in export_url
+    assert "mimeType=text%2Fplain" in export_url, f"unmapped native type must export to text/plain; got {export_url!r}"
+
+
+def test_client_export_falls_back_to_export_mime_when_content_type_absent() -> None:
+    """When the export response omits Content-Type, the requested export MIME surfaces.
+
+    Sabotage proof: removing the ``export_mime`` default from the
+    ``response.headers.get("Content-Type", export_mime)`` call makes the
+    mime surface as ``application/octet-stream`` and this assertion
+    fails.
+    """
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        # No Content-Type header at all.
+        return httpx.Response(200, content=b"a,b\n1,2")
+
+    shared = httpx.Client(transport=httpx.MockTransport(_handler))
+    client = GoogleDriveClient(
+        access_token="t",  # pragma: allowlist secret — test fixture
+        http_client=shared,
+        sleep_fn=lambda _s: None,
+    )
+    raw, mime = client.fetch_file_content("f-sheet", mime_type="application/vnd.google-apps.spreadsheet")
+    assert raw == b"a,b\n1,2"
+    assert mime == "text/csv", f"expected fallback to the requested export MIME, got {mime!r}"
 
 
 def test_client_401_raises_credential_expired_error() -> None:

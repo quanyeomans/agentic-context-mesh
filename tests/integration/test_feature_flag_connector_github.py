@@ -1,99 +1,171 @@
 """Integration tests for the ``connector_github`` flag.
 
-Exercises both branches of :func:`kairix.worker.dispatch_github_sync`
-through the production composition surface:
+Exercises both branches of the connector-enablement gate through the
+REAL production loop — :func:`kairix.worker.run_connector_sync_pipeline`
+with ``flag_reader`` pinned via :class:`FakeFeatureFlagResolver`. The
+gate is :func:`kairix.worker.connector_enabled` consulted per entry in
+that loop; the assertion target is the observable
+:class:`ConnectorSyncResult` counter outcome + the gated-off INFO log,
+NOT a dead dispatcher's branch-marker log.
 
-  * **Flag OFF** — the connector slot is a no-op; the off-branch
-    helper returns zero counters and emits the OFF-branch INFO log.
-    The ON branch is wrapped with a never-call stub; a misroute
-    increments its counter and the assertion fails loudly.
-  * **Flag ON** — the ON branch fires; the OFF branch is wrapped
-    with a never-call stub. The ON branch's marker INFO log appears.
+  * **Flag OFF** — ``connector_github`` reads False. The GitHub entry is gated
+    off (skipped before plugin resolution, so it never needs a live
+    credential); a flagless ``obsidian`` sibling in the same tick still
+    indexes its two notes. The aggregate ``synced`` reflects only the
+    sibling.
+  * **Flag ON** — ``connector_github`` reads True. The gate lets the GitHub
+    entry through to ``_run_one_connector_batch`` (where, lacking a live
+    credential, it is logged + counted as a per-entry failure and the
+    loop continues). The "gated off" log does NOT fire for github; the
+    flagless sibling still indexes its notes.
 
-F47 — both branches are reached via the production
-``dispatch_github_sync`` entry point; no direct ``*Pipeline(...)``
-construction in this file.
+F47 — both branches are reached through the production
+``run_connector_sync_pipeline`` entry point; no direct
+``*Pipeline(...)`` construction here.
 
 F1-clean: ``FakeFeatureFlagResolver`` from ``tests/fakes.py`` is
-threaded through the production ``dispatch_github_sync(read_flag=...)``
-DI seam — no @patch / module-attribute substitution on kairix.
+threaded through ``ConnectorSyncDeps(flag_reader=...)`` — no @patch /
+module-attribute substitution on kairix.
+F2-clean: no ``KAIRIX_*`` env-var manipulation.
 
 Sabotage proof (executed by the agent, restored on completion):
-inverting the if/else in :func:`dispatch_github_sync` so OFF runs
-the ON branch and ON runs the OFF branch — confirmed that BOTH
-:func:`test_github_flag_off_branch_runs` AND
-:func:`test_github_flag_on_branch_runs` fail. Restoring the
-original branch direction returns both tests to green.
+deleting the ``if not connector_enabled(...)`` skip in
+``run_connector_sync_pipeline``'s loop makes the OFF test fail — the
+"gated off" log no longer fires and the github entry runs. Restoring the
+gate returns the test to green.
+
+Spec: docs/architecture/connector-scope-topology/connector-design-specs/github.md
 """
 
 from __future__ import annotations
 
 import logging
+import sqlite3
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from kairix.worker import (
+    ConnectorSyncDeps,
     ConnectorSyncResult,
-    dispatch_github_sync,
+    run_connector_sync_pipeline,
 )
 from tests.fakes import FakeFeatureFlagResolver
 
 pytestmark = pytest.mark.integration
 
-_ON_MARKER = "github connector running (flag ON)"
-_OFF_MARKER = "github connector gated off (flag OFF)"
+_KIND = "github"
 
 
-def test_github_flag_off_branch_runs(caplog: pytest.LogCaptureFixture) -> None:
-    """OFF branch — github connector slot is a no-op; ON does not fire."""
+def _two_connector_topology(vault: Path) -> dict[str, Any]:
+    """Merged mapping: the gated connector kind + a flagless obsidian sibling."""
+    return {
+        "topology_v2": {
+            "connectors": [
+                {
+                    "id": f"{_KIND}-conn",
+                    "kind": _KIND,
+                    "name": f"Corp {_KIND}",
+                    "connector_specific_config": {},
+                },
+                {
+                    "id": "obsidian-conn",
+                    "kind": "obsidian",
+                    "name": "Personal Vault",
+                    "extractor": "passthrough",
+                    "connector_specific_config": {"vault_root": str(vault)},
+                },
+            ],
+            "cc_pairs": [
+                {"id": f"{_KIND}-pair", "connector": f"{_KIND}-conn", "credential": None, "name": f"{_KIND}-cc"},
+                {"id": "ob-pair", "connector": "obsidian-conn", "credential": None, "name": "obsidian-cc"},
+            ],
+        }
+    }
+
+
+def _seed_vault(tmp_path: Path) -> Path:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "alpha.md").write_text("# Alpha\n\nFirst note body.\n", encoding="utf-8")
+    (vault / "beta.md").write_text("# Beta\n\nSecond note body.\n", encoding="utf-8")
+    return vault
+
+
+def _drive_loop(
+    tmp_path: Path,
+    resolver: FakeFeatureFlagResolver,
+    caplog: pytest.LogCaptureFixture,
+) -> ConnectorSyncResult:
+    vault = _seed_vault(tmp_path)
+    db_path = tmp_path / "index.sqlite"
+    deps = ConnectorSyncDeps(
+        disabled_fn=lambda: False,
+        config_mapping_fn=lambda: _two_connector_topology(vault),
+        flag_reader=resolver.get,
+        db_factory=lambda: sqlite3.connect(str(db_path)),
+        bronze_root_resolver=lambda: tmp_path / "bronze",
+    )
+    with caplog.at_level(logging.INFO, logger="kairix.worker"):
+        return run_connector_sync_pipeline(deps)
+
+
+def _gated_logs(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        rec.getMessage()
+        for rec in caplog.records
+        if _KIND in rec.getMessage().lower() and "gated" in rec.getMessage().lower()
+    ]
+
+
+def test_flag_off_gates_connector_sibling_still_runs(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """OFF — the github entry is gated off in the loop; the flagless obsidian
+    sibling still syncs both notes.
+
+    With the flag OFF the predicate skips the github entry BEFORE plugin
+    resolution (no live credential needed); the "gated off" INFO log fires
+    and the aggregate ``synced`` reflects only the obsidian sibling.
+    """
     resolver = FakeFeatureFlagResolver().with_flag("connector_github", False)
+    result = _drive_loop(tmp_path, resolver, caplog)
 
-    on_calls = {"n": 0}
-
-    def _never_on() -> ConnectorSyncResult:
-        on_calls["n"] += 1
-        return ConnectorSyncResult(synced=99, failed=0, dead_letter_added=0)
-
-    with caplog.at_level(logging.INFO, logger="kairix.worker"):
-        result = dispatch_github_sync(
-            read_flag=resolver.get,
-            on_branch=_never_on,
-        )
-
-    messages = [rec.getMessage() for rec in caplog.records]
-    assert any(_OFF_MARKER in m for m in messages), f"flag OFF must route through the OFF branch; logs={messages!r}"
-    assert not any(_ON_MARKER in m for m in messages), (
-        f"flag OFF must NOT route through the ON branch; logs={messages!r}"
+    assert result.synced == 2, f"flagless obsidian sibling must still sync both notes; got {result}"
+    assert result.failed == 0, f"OFF gate must not surface a failure for the gated connector; got {result}"
+    assert _gated_logs(caplog), (
+        f"flag OFF must skip the {_KIND} entry with a 'gated off' INFO log; "
+        f"got {[r.getMessage() for r in caplog.records]}"
     )
-    assert on_calls["n"] == 0, "ON branch must not run when flag is OFF"
-    assert result.synced == 0, f"OFF branch must return zero counters; got {result}"
 
 
-def test_github_flag_on_branch_runs(caplog: pytest.LogCaptureFixture) -> None:
-    """ON branch — github connector ON branch helper fires; OFF does not."""
+def test_flag_on_lets_connector_through_sibling_still_runs(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """ON — the gate lets the github entry through to the batch runner; the
+    flagless obsidian sibling still syncs both notes.
+
+    With the flag ON the predicate does NOT skip the github entry: it
+    reaches ``_run_one_connector_batch`` where, lacking a live credential,
+    it fails and is logged + counted as a per-entry failure (the loop
+    continues). The "gated off" log must NOT fire for github — proving the
+    ON branch took a different path than OFF.
+    """
     resolver = FakeFeatureFlagResolver().with_flag("connector_github", True)
+    result = _drive_loop(tmp_path, resolver, caplog)
 
-    off_calls = {"n": 0}
-
-    def _never_off() -> ConnectorSyncResult:
-        off_calls["n"] += 1
-        return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
-
-    def _wrapped_on() -> ConnectorSyncResult:
-        logging.getLogger("kairix.worker").info(_ON_MARKER)
-        return ConnectorSyncResult(synced=1, failed=0, dead_letter_added=0)
-
-    with caplog.at_level(logging.INFO, logger="kairix.worker"):
-        result = dispatch_github_sync(
-            read_flag=resolver.get,
-            on_branch=_wrapped_on,
-            off_branch=_never_off,
-        )
-
-    messages = [rec.getMessage() for rec in caplog.records]
-    assert any(_ON_MARKER in m for m in messages), f"flag ON must route through the ON branch; logs={messages!r}"
-    assert not any(_OFF_MARKER in m for m in messages), (
-        f"flag ON must NOT route through the OFF branch; logs={messages!r}"
+    assert result.synced >= 2, f"flagless obsidian sibling must still sync its notes; got {result}"
+    assert not _gated_logs(caplog), (
+        f"flag ON must NOT gate off the {_KIND} entry; the 'gated off' log fired anyway: {_gated_logs(caplog)!r}"
     )
-    assert off_calls["n"] == 0, "OFF branch must not run when flag is ON"
-    assert result.synced == 1, f"ON branch must have run and returned its result; got {result}"
+
+    failure_logs = [
+        rec.getMessage() for rec in caplog.records if f"{_KIND}-cc" in rec.getMessage() and "failed" in rec.getMessage()
+    ]
+    assert failure_logs, (
+        f"flag ON must let the {_KIND} entry reach the batch runner (where it fails without a "
+        f"live credential); got {[r.getMessage() for r in caplog.records]}"
+    )

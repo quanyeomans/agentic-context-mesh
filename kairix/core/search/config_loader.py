@@ -439,34 +439,16 @@ class CollectionsConfig:
     """Parsed collections configuration.
 
     ``shared`` is stored as a tuple — frozen at construction — so callers
-    cannot mutate the collection list after the boundary parses YAML.
-    Predicates (:meth:`default_collection_names`, :meth:`all_collection_names`)
-    are the only public surface for membership questions; consumers should
-    not iterate ``shared`` directly to filter on ``in_default``.
+    cannot mutate the collection list after the boundary parses YAML. The
+    FS document-scanner (``kairix/core/embed/use_cases.py``) reads
+    ``shared`` to drive the scan walk (name / path / glob per collection);
+    default-scope membership is now governed by the canonical topology
+    scope-profile resolver, not by a predicate on this config.
     """
 
     shared: tuple[CollectionDef, ...]
     agent_pattern: str = "{agent}-memory"
     agent_paths: dict[str, str] = field(default_factory=dict)
-
-    def default_collection_names(self) -> list[str]:
-        """Names of shared collections eligible for default search scopes.
-
-        Excludes any collection whose ``in_default`` flag is False. This is
-        the predicate the resolver consults — it is intentionally the only
-        ``in_default``-aware code path in the codebase, so the policy lives
-        with the data it describes.
-        """
-        return [c.name for c in self.shared if c.in_default]
-
-    def all_collection_names(self) -> list[str]:
-        """Names of every configured shared collection.
-
-        Used for diagnostics and for callers that need to enumerate every
-        configured collection regardless of default-scope eligibility (e.g.,
-        validation that warns about unknown ``--collection`` arguments).
-        """
-        return [c.name for c in self.shared]
 
 
 def _coerce_bool(value: object, *, key: str, default: bool) -> bool:
@@ -910,12 +892,22 @@ def merge_retrieval_config(base: RetrievalConfig, overrides: dict) -> RetrievalC
     return replace(base, **top_fields) if top_fields else base
 
 
-def _get_collection_overrides() -> dict[str, dict]:
-    """Load per-collection retrieval override dicts from config YAML."""
-    collections_cfg = load_collections()
-    if not collections_cfg:
-        return {}
-    return {c.name: c.retrieval_overrides for c in collections_cfg.shared if c.retrieval_overrides}
+def _topology_collection_overrides() -> dict[str, dict]:
+    """Load per-collection retrieval override dicts from the canonical topology.
+
+    Delegates to :func:`kairix.core.factory.derive_collection_overrides`,
+    which reads ``topology_v2.collections[*].retrieval`` from the
+    overlay-aware merged config — the same canonical source the
+    ranking-tier map derives from (canonical-collapse). The import is lazy
+    to avoid a config_loader → factory import cycle (factory imports
+    config_loader at resolution time). Returns
+    ``{collection_name: override_dict}``; empty when no collection
+    declares a ``retrieval:`` block so ``resolve_retrieval_config`` falls
+    back to the global config.
+    """
+    from kairix.core.factory import derive_collection_overrides
+
+    return derive_collection_overrides()
 
 
 @dataclass
@@ -930,7 +922,7 @@ class ResolveConfigDeps:
     """
 
     config_fn: Callable[[], RetrievalConfig] = field(default_factory=lambda: load_config)
-    overrides_fn: Callable[[], dict[str, dict]] = field(default_factory=lambda: _get_collection_overrides)
+    overrides_fn: Callable[[], dict[str, dict]] = field(default_factory=lambda: _topology_collection_overrides)
 
 
 def resolve_retrieval_config(
