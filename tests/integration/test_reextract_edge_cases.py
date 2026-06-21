@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
-import yaml
 
 from kairix.core.connectors import DeadLetterStore, StreamingBronzeStore
 from kairix.core.db.schema import create_schema
@@ -31,23 +31,34 @@ from kairix.worker import ReextractResult, run_reextract_dead_letter
 pytestmark = pytest.mark.integration
 
 
-def _write_obsidian_config(tmp_path: Path, vault: Path, extractor_name: str = "passthrough") -> Path:
-    cfg = tmp_path / "kairix.config.yaml"
-    cfg.write_text(
-        yaml.safe_dump(
-            {
-                "connectors": [
-                    {
-                        "name": "obsidian",
-                        "extractor": extractor_name,
-                        "config": {"vault_root": str(vault)},
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    return cfg
+def _obsidian_mapping(vault: Path, extractor_name: str = "passthrough") -> dict[str, Any]:
+    """Canonical topology mapping for an obsidian connector + cc_pair.
+
+    Task 5: re-extract reads ``topology`` (cc_pair name matches the
+    dead_letter ``source_name``; kind resolves the plugin), not the legacy
+    top-level ``connectors:`` list.
+    """
+    return {
+        "topology_v2": {
+            "connectors": [
+                {
+                    "id": "obsidian-conn",
+                    "kind": "obsidian",
+                    "name": "Personal Obsidian Vault",
+                    "extractor": extractor_name,
+                    "connector_specific_config": {"vault_root": str(vault)},
+                }
+            ],
+            "cc_pairs": [
+                {
+                    "id": "obsidian-pair",
+                    "connector": "obsidian-conn",
+                    "credential": None,
+                    "name": "obsidian",
+                }
+            ],
+        }
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -84,12 +95,12 @@ def test_reextract_streaming_row_when_source_file_missing(tmp_path: Path) -> Non
     # Now delete the source file — connector.fetch will fail on re-fetch
     note.unlink()
 
-    config_path = _write_obsidian_config(tmp_path, vault)
+    mapping = _obsidian_mapping(vault)
     result = run_reextract_dead_letter(
         source_name="obsidian",
         db=db,
         bronze_root=bronze_root,
-        config_path=config_path,
+        config_mapping=mapping,
     )
 
     assert isinstance(result, ReextractResult)
@@ -132,12 +143,12 @@ def test_reextract_uses_currently_registered_extractor(tmp_path: Path) -> None:
     db.commit()
 
     # Config uses passthrough — should succeed for markdown content
-    config_path = _write_obsidian_config(tmp_path, vault, extractor_name="passthrough")
+    mapping = _obsidian_mapping(vault, extractor_name="passthrough")
     result = run_reextract_dead_letter(
         source_name="obsidian",
         db=db,
         bronze_root=bronze_root,
-        config_path=config_path,
+        config_mapping=mapping,
     )
     assert result.recovered == 1, f"current-extractor recovery should succeed; got {result}"
 
@@ -166,13 +177,13 @@ def test_reextract_with_empty_dead_letter_is_noop(tmp_path: Path) -> None:
     vault.mkdir()
     db = sqlite3.connect(":memory:")
     create_schema(db)
-    config_path = _write_obsidian_config(tmp_path, vault)
+    mapping = _obsidian_mapping(vault)
 
     result = run_reextract_dead_letter(
         source_name="obsidian",
         db=db,
         bronze_root=tmp_path / "bronze",
-        config_path=config_path,
+        config_mapping=mapping,
     )
     assert result == ReextractResult(recovered=0, still_failing=0, skipped_no_bronze=0, skipped_no_connector=0)
 
@@ -205,12 +216,12 @@ def test_reextract_with_limit_larger_than_available_processes_all(tmp_path: Path
         DeadLetterStore(db).record("obsidian", f"note-{i}.md", "boot failure")
     db.commit()
 
-    config_path = _write_obsidian_config(tmp_path, vault)
+    mapping = _obsidian_mapping(vault)
     result = run_reextract_dead_letter(
         source_name="obsidian",
         db=db,
         bronze_root=bronze_root,
-        config_path=config_path,
+        config_mapping=mapping,
         limit=100,  # 100 > 3 rows available
     )
     assert result.recovered == 3, f"limit=100 vs 3 rows should process all 3; got {result}"
@@ -244,12 +255,12 @@ def test_reextract_dry_run_does_not_clear_dead_letter_on_success(tmp_path: Path)
     DeadLetterStore(db).record("obsidian", "alpha.md", "first-pass failed")
     db.commit()
 
-    config_path = _write_obsidian_config(tmp_path, vault)
+    mapping = _obsidian_mapping(vault)
     result = run_reextract_dead_letter(
         source_name="obsidian",
         db=db,
         bronze_root=bronze_root,
-        config_path=config_path,
+        config_mapping=mapping,
         dry_run=True,
     )
     # Counter increments to show the recovery WOULD work

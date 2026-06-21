@@ -25,9 +25,9 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
-import yaml
 
 from kairix.core.db.schema import create_schema
 from kairix.worker import (
@@ -49,23 +49,34 @@ def _seed_vault(document_root: Path) -> list[str]:
     return bodies
 
 
-def _write_config(tmp_path: Path, vault_root: Path, extractor_name: str) -> Path:
-    cfg = tmp_path / f"config_{extractor_name}.yaml"
-    cfg.write_text(
-        yaml.safe_dump(
-            {
-                "connectors": [
-                    {
-                        "name": "obsidian",
-                        "extractor": extractor_name,
-                        "config": {"vault_root": str(vault_root)},
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    return cfg
+def _topology_mapping(vault_root: Path, extractor_name: str) -> dict[str, Any]:
+    """Canonical topology mapping for an obsidian connector + cc_pair.
+
+    Task 5: the composed re-extract path reads ``topology`` (cc_pair name
+    matches the dead_letter ``source_name``; kind resolves the plugin), not
+    the legacy top-level ``connectors:`` list.
+    """
+    return {
+        "topology_v2": {
+            "connectors": [
+                {
+                    "id": "obsidian-conn",
+                    "kind": "obsidian",
+                    "name": "Personal Obsidian Vault",
+                    "extractor": extractor_name,
+                    "connector_specific_config": {"vault_root": str(vault_root)},
+                }
+            ],
+            "cc_pairs": [
+                {
+                    "id": "obsidian-pair",
+                    "connector": "obsidian-conn",
+                    "credential": None,
+                    "name": "obsidian",
+                }
+            ],
+        }
+    }
 
 
 @pytest.mark.e2e
@@ -118,14 +129,14 @@ def test_composed_reextract_recovery_full_path(tmp_path: Path) -> None:
     # passthrough extractor (which exists and works on markdown). Bug D
     # composition: walk dead_letter → re-read bronze → re-run extractor →
     # write chunks → clear dead_letter row. Commits per item.
-    config_path = _write_config(tmp_path, document_root, extractor_name="passthrough")
+    mapping = _topology_mapping(document_root, extractor_name="passthrough")
 
     db = sqlite3.connect(str(db_path), timeout=10.0)
     result = run_reextract_dead_letter(
         source_name="obsidian",
         db=db,
         bronze_root=bronze_root,
-        config_path=config_path,
+        config_mapping=mapping,
     )
     assert isinstance(result, ReextractResult)
     assert result.recovered == 3, (
@@ -187,12 +198,12 @@ def test_composed_reextract_recovery_with_mixed_failure_modes(tmp_path: Path) ->
     # Delete note-1's source file → connector.fetch will fail on re-fetch
     (document_root / "note-1.md").unlink()
 
-    config_path = _write_config(tmp_path, document_root, extractor_name="passthrough")
+    mapping = _topology_mapping(document_root, extractor_name="passthrough")
     result = run_reextract_dead_letter(
         source_name="obsidian",
         db=db,
         bronze_root=bronze_root,
-        config_path=config_path,
+        config_mapping=mapping,
     )
     assert result.recovered == 1, f"only note-0 should recover; got {result}"
     assert result.skipped_source_unavailable == 1, (

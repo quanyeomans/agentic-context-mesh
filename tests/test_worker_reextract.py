@@ -4,6 +4,15 @@ dead-lettered items after a fixed extractor or new converter library ships.
 Drives the function in-process with a tmp_path-rooted DB + bronze + real
 Obsidian connector + passthrough extractor. Each test sabotage-proves by
 mutating production code (recorded inline) so the assertion has teeth.
+
+Task 5 (connector canonical-collapse): re-extract now reads the canonical
+``topology`` block (parsed from the overlay-aware MERGED mapping, injected
+via the ``config_mapping`` seam), NOT the legacy top-level
+``connectors:`` list. The connector entry is matched by **cc_pair name**
+(the dead_letter ``source_name`` routing key), the plugin resolves via the
+connector **kind**, and the extractor flows from the connector's extractor
+fields — the same kind/name/config/extractor split Task 4 established for
+the live sync path. ``_obsidian_topology_mapping`` builds that shape.
 """
 
 from __future__ import annotations
@@ -12,9 +21,9 @@ import io
 import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
-import yaml
 
 from kairix.core.connectors import DeadLetterStore, StreamingBronzeStore
 from kairix.core.db.schema import create_schema
@@ -46,23 +55,41 @@ def _seed_bronze_and_dead_letter(
     db.commit()
 
 
-def _write_obsidian_config(*, tmp_path: Path, vault_root: Path) -> Path:
-    config_path = tmp_path / "kairix.config.yaml"
-    config_path.write_text(
-        yaml.safe_dump(
-            {
-                "connectors": [
-                    {
-                        "name": "obsidian",
-                        "extractor": "passthrough",
-                        "config": {"vault_root": str(vault_root)},
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    return config_path
+def _obsidian_topology_mapping(
+    *,
+    vault_root: Path,
+    cc_pair_name: str = "obsidian",
+    extractor: str = "passthrough",
+) -> dict[str, Any]:
+    """Build a merged mapping with one obsidian connector + cc_pair.
+
+    Mirrors the canonical ``topology.connectors`` / ``topology.cc_pairs``
+    shape the setup wizard writes. The cc_pair ``name`` is the routing key
+    re-extract matches against ``source_name`` (and the dead_letter rows are
+    keyed on); the connector ``kind`` resolves the plugin; the connector's
+    ``extractor`` flows through to the re-extract extractor.
+    """
+    return {
+        "topology_v2": {
+            "connectors": [
+                {
+                    "id": "obsidian-conn",
+                    "kind": "obsidian",
+                    "name": "Personal Obsidian Vault",
+                    "extractor": extractor,
+                    "connector_specific_config": {"vault_root": str(vault_root)},
+                }
+            ],
+            "cc_pairs": [
+                {
+                    "id": "obsidian-pair",
+                    "connector": "obsidian-conn",
+                    "credential": None,
+                    "name": cc_pair_name,
+                }
+            ],
+        }
+    }
 
 
 def test_recovers_dead_lettered_item_clears_row_and_writes_chunks(tmp_path: Path) -> None:
@@ -91,13 +118,13 @@ def test_recovers_dead_lettered_item_clears_row_and_writes_chunks(tmp_path: Path
         raw_path=note,
     )
 
-    config_path = _write_obsidian_config(tmp_path=tmp_path, vault_root=vault)
+    mapping = _obsidian_topology_mapping(vault_root=vault)
 
     result = run_reextract_dead_letter(
         source_name="obsidian",
         db=db,
         bronze_root=bronze_root,
-        config_path=config_path,
+        config_mapping=mapping,
     )
 
     assert isinstance(result, ReextractResult)
@@ -118,13 +145,128 @@ def test_recovers_dead_lettered_item_clears_row_and_writes_chunks(tmp_path: Path
     db.close()
 
 
-def test_skipped_no_connector_when_source_not_in_config(tmp_path: Path) -> None:
-    """A dead_letter row whose ``source_name`` isn't in the loaded config
+def test_reextract_matches_cc_pair_name_and_resolves_plugin_via_kind(tmp_path: Path) -> None:
+    """Task 5 — re-extract reads the canonical topology entry split: it
+    matches the connector entry by **cc_pair name** (the dead_letter
+    routing key) while resolving the plugin via the connector **kind**.
+
+    The topology here gives the cc_pair a name (``vault-personal``) that is
+    DISTINCT from the connector kind (``obsidian``). Recovery succeeds only
+    if (1) the entry is matched on the cc_pair name passed as
+    ``source_name`` AND (2) the obsidian plugin is resolved via the
+    connector's ``kind`` — not via ``source_name`` (which would try to
+    resolve a non-existent ``vault-personal`` plugin). The recovered
+    documents land in the ``vault-personal`` collection (the cc_pair name),
+    proving the routing key flows through.
+
+    Sabotage proof (executed): in ``_build_reextract_components``, change
+    ``resolve_connector(entry["kind"])`` back to
+    ``resolve_connector(source_name)``; this test fails because
+    ``resolve_connector("vault-personal")`` raises (no such plugin) so
+    nothing recovers. Restored, it passes.
+    """
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    note = vault / "alpha.md"
+    note.write_text("# Alpha\n\nBody content for the split test.\n", encoding="utf-8")
+
+    db_path = tmp_path / "index.sqlite"
+    db = sqlite3.connect(str(db_path))
+    create_schema(db)
+    bronze_root = tmp_path / "bronze"
+    # dead_letter + bronze rows are keyed on the cc_pair name (source_name).
+    _seed_bronze_and_dead_letter(
+        db=db,
+        bronze_root=bronze_root,
+        source_name="vault-personal",
+        item_id="alpha.md",
+        raw_path=note,
+    )
+
+    # Connector kind=obsidian, cc_pair name=vault-personal (kind != name).
+    mapping = _obsidian_topology_mapping(vault_root=vault, cc_pair_name="vault-personal")
+
+    result = run_reextract_dead_letter(
+        source_name="vault-personal",
+        db=db,
+        bronze_root=bronze_root,
+        config_mapping=mapping,
+    )
+
+    assert result.recovered == 1, f"recovery must match the cc_pair name and resolve the plugin via kind; got {result}"
+    assert result.skipped_no_connector == 0
+
+    # Routing key flows through: recovered docs carry the cc_pair-name
+    # collection, NOT the connector kind 'obsidian'.
+    collections = {
+        row[0] for row in db.execute("SELECT DISTINCT collection FROM documents WHERE active = 1").fetchall()
+    }
+    assert collections == {"vault-personal"}, (
+        f"recovered docs must land in the cc_pair-name collection 'vault-personal' "
+        f"(the routing key), not the connector kind; got {collections}."
+    )
+
+    db.close()
+
+
+def test_reextract_threads_topology_extractor_through(tmp_path: Path) -> None:
+    """Task 5 — the connector's ``extractor`` field flows from the topology
+    entry into the re-extract extractor resolution.
+
+    The bronze row holds bytes that are NOT a valid PDF; the topology
+    connector declares ``extractor: pdf_fallback``. Re-extract must resolve
+    pdf_fallback (from the entry's extractor field) and fail to parse the
+    junk bytes → ``still_failing``. A passthrough extractor would have
+    "recovered" the junk bytes verbatim, so a green ``still_failing == 1``
+    proves the topology extractor field threaded through (not a default).
+
+    Sabotage proof (executed): in ``_load_connector_entry`` / the shared
+    builder, drop the ``"extractor"`` key from the entry dict; re-extract
+    falls back to passthrough, the junk bytes "recover", and this test
+    fails with ``recovered == 1``. Restored, it lands in still_failing.
+    """
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    junk = b"NOT A REAL PDF - a lure for the pdf_fallback extractor"
+    (vault / "broken.pdf").write_bytes(junk)
+
+    db = sqlite3.connect(":memory:")
+    create_schema(db)
+    StreamingBronzeStore(db).write("obsidian", "broken.pdf", junk, "application/pdf")
+    DeadLetterStore(db).record("obsidian", "broken.pdf", "first-pass failed")
+    db.commit()
+
+    mapping = _obsidian_topology_mapping(vault_root=vault, extractor="pdf_fallback")
+
+    result = run_reextract_dead_letter(
+        source_name="obsidian",
+        db=db,
+        bronze_root=tmp_path / "bronze",
+        config_mapping=mapping,
+    )
+
+    assert result.still_failing == 1, (
+        f"the topology extractor (pdf_fallback) must thread through and fail on junk PDF bytes; got {result}"
+    )
+    assert result.recovered == 0, (
+        f"a recovered==1 would mean passthrough ran — the topology extractor field did not thread through; got {result}"
+    )
+
+    db.close()
+
+
+def test_skipped_no_connector_when_source_not_in_topology(tmp_path: Path) -> None:
+    """A dead_letter row whose ``source_name`` matches no topology cc_pair
     counts as ``skipped_no_connector`` and the row is preserved.
 
-    Sabotage proof: replace the ``if entry is None`` early-return with
-    ``entry = entries[0]``; the test fails because the function blows up
-    resolving the missing connector. Restored, it passes.
+    Pins the Task-5 ``_load_connector_entry(...) is None`` path through the
+    public re-extract surface: the topology declares an ``obsidian`` cc_pair
+    only, so a ``ghost`` source has no matching entry.
+
+    Sabotage proof: in ``_load_connector_entry``, replace
+    ``e.get("name") == source_name`` with ``True`` (match the first entry);
+    the test fails because re-extract then resolves the obsidian connector
+    for the ghost rows instead of skipping. Restored, it passes.
     """
     vault = tmp_path / "vault"
     vault.mkdir()
@@ -134,19 +276,19 @@ def test_skipped_no_connector_when_source_not_in_config(tmp_path: Path) -> None:
     create_schema(db)
     bronze_root = tmp_path / "bronze"
 
-    # Seed a dead_letter row for "ghost" — no matching config entry.
+    # Seed a dead_letter row for "ghost" — no matching topology cc_pair.
     dead_letter = DeadLetterStore(db)
     dead_letter.record("ghost", "item-1", "stale row from removed connector")
     db.commit()
 
-    # Config only declares obsidian, not ghost.
-    config_path = _write_obsidian_config(tmp_path=tmp_path, vault_root=vault)
+    # Topology only declares an obsidian cc_pair, not ghost.
+    mapping = _obsidian_topology_mapping(vault_root=vault)
 
     result = run_reextract_dead_letter(
         source_name="ghost",
         db=db,
         bronze_root=bronze_root,
-        config_path=config_path,
+        config_mapping=mapping,
     )
 
     assert result.skipped_no_connector == 1
@@ -164,10 +306,18 @@ def test_skipped_no_connector_when_source_not_in_config(tmp_path: Path) -> None:
     db.close()
 
 
-def test_skipped_no_connector_when_config_path_is_none(tmp_path: Path) -> None:
-    """When the resolver returns no config at all, every dead_letter row
-    is skipped_no_connector. Pre-deploy boundary — operator runs reextract
-    against a fresh data dir before kairix.config.yaml is in place.
+def test_skipped_no_connector_when_mapping_has_no_topology(tmp_path: Path) -> None:
+    """When the merged mapping carries no topology connectors at all, every
+    dead_letter row is skipped_no_connector. Pre-deploy boundary — operator
+    runs reextract against a fresh data dir before the wizard has written a
+    ``topology`` block.
+
+    Injects an empty mapping through the ``config_mapping`` seam so the
+    skip is deterministic (no dependence on the host's resolved config).
+
+    Sabotage proof: change the ``if entry is None`` early-return body in
+    ``run_reextract_dead_letter`` to fall through; the function raises
+    resolving a connector from an empty entry. Restored, it skips.
     """
     db_path = tmp_path / "index.sqlite"
     db = sqlite3.connect(str(db_path))
@@ -182,15 +332,15 @@ def test_skipped_no_connector_when_config_path_is_none(tmp_path: Path) -> None:
         source_name="orphan",
         db=db,
         bronze_root=tmp_path / "bronze",
-        config_path=None,  # Simulates "no config" — but because we pass
-        # explicit None the default resolver kicks in. To force the no-config
-        # branch reliably we point at a file that doesn't exist instead.
+        config_mapping={},  # empty merged mapping (no topology connectors)
     )
-    # The default resolver may still find a config in the user's env, so
-    # we don't assert a specific shape here — just that the function runs
-    # without raising and returns a valid ReextractResult.
     assert isinstance(result, ReextractResult)
-    assert (result.skipped_no_connector + result.recovered + result.still_failing + result.skipped_no_bronze) >= 0
+    assert result.skipped_no_connector == 2, (
+        f"both orphan rows should skip when no topology connector matches; got {result}"
+    )
+    assert result.recovered == 0
+    assert result.still_failing == 0
+    assert result.skipped_no_bronze == 0
 
     db.close()
 
@@ -215,13 +365,13 @@ def test_skipped_no_bronze_when_bronze_row_missing(tmp_path: Path) -> None:
     dead_letter.record("obsidian", "lost.md", "bronze pruned")
     db.commit()
 
-    config_path = _write_obsidian_config(tmp_path=tmp_path, vault_root=vault)
+    mapping = _obsidian_topology_mapping(vault_root=vault)
 
     result = run_reextract_dead_letter(
         source_name="obsidian",
         db=db,
         bronze_root=tmp_path / "bronze",
-        config_path=config_path,
+        config_mapping=mapping,
     )
 
     assert result.skipped_no_bronze == 1, f"expected skipped_no_bronze=1, got {result}"
@@ -258,13 +408,13 @@ def test_dry_run_does_not_commit_or_clear(tmp_path: Path) -> None:
         raw_path=note,
     )
 
-    config_path = _write_obsidian_config(tmp_path=tmp_path, vault_root=vault)
+    mapping = _obsidian_topology_mapping(vault_root=vault)
 
     result = run_reextract_dead_letter(
         source_name="obsidian",
         db=db,
         bronze_root=bronze_root,
-        config_path=config_path,
+        config_mapping=mapping,
         dry_run=True,
     )
 
@@ -308,13 +458,13 @@ def test_limit_caps_processed_rows(tmp_path: Path) -> None:
         db=db, bronze_root=bronze_root, source_name="obsidian", item_id="beta.md", raw_path=note_b
     )
 
-    config_path = _write_obsidian_config(tmp_path=tmp_path, vault_root=vault)
+    mapping = _obsidian_topology_mapping(vault_root=vault)
 
     result = run_reextract_dead_letter(
         source_name="obsidian",
         db=db,
         bronze_root=bronze_root,
-        config_path=config_path,
+        config_mapping=mapping,
         limit=1,
     )
 

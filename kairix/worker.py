@@ -22,8 +22,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import yaml
-
 from kairix.paths import (
     connector_sync_disabled,
     data_dir,
@@ -335,24 +333,43 @@ class _SqliteEntityGraphSink:
         return staged
 
 
-def _load_connector_config_entries(mapping: dict[str, Any]) -> list[dict[str, Any]]:
-    """Enumerate ingestable connector entries from ``topology.connectors``.
+def _topology_entry_for_cc_pair(connector: Any, cc_pair: Any) -> dict[str, Any]:
+    """Build one canonical ingest entry dict from a connector + cc_pair.
 
-    Task 4 of the connector canonical-collapse refactor: ingest reads the
-    canonical ``topology`` block (parsed from the overlay-aware MERGED
-    operator mapping), NOT the legacy top-level ``connectors:`` list. This
-    is the wizard-onboarding fix — the setup wizard writes
-    ``topology.connectors`` and ingest now reads it from the same place.
-
-    The overloaded legacy ``entry["name"]`` splits into three canonical
-    values (D1/D2/D3):
+    Single source of truth for the kind/name/config/extractor split so the
+    live-sync reader (:func:`_load_connector_config_entries`, Task 4) and
+    the re-extract reader (:func:`_load_connector_entry`, Task 5) build
+    identical entry dicts. The overloaded legacy ``entry["name"]`` splits
+    into the canonical values (D1/D2/D3):
 
       * ``kind`` — the plugin resolution key (``ConnectorConfig.kind``,
         == entry-point name == ``connector_<kind>`` flag suffix);
       * ``name`` — the cc_pair routing key (chunk-writer collection name),
         from ``CCPairConfig.name``;
       * ``config`` — the connector_specific_config mapping, read back as a
-        dict at the per-connector boundary.
+        dict at the per-connector boundary;
+      * ``extractor`` / ``extractor_chain`` / ``extractor_config`` — the
+        extractor wiring (D1) consumed by ``build_extractor_from_entry``.
+    """
+    return {
+        "name": cc_pair.name,
+        "kind": connector.kind,
+        "config": dict(connector.connector_specific_config),
+        "extractor": connector.extractor,
+        "extractor_chain": list(connector.extractor_chain),
+        "extractor_config": dict(connector.extractor_config),
+    }
+
+
+def _parse_topology_entries(mapping: dict[str, Any]) -> list[dict[str, Any]]:
+    """Parse the merged mapping into one ingest entry per cc_pair.
+
+    Shared parse+split used by both connector readers (Task 4 sync + Task 5
+    re-extract). Reads the canonical ``topology`` block (parsed from the
+    overlay-aware MERGED operator mapping), NOT the legacy top-level
+    ``connectors:`` list — the wizard-onboarding fix: the setup wizard
+    writes ``topology.connectors`` and both readers now read it from the
+    same place.
 
     Yields **one entry per cc_pair** (D2): a topology connector referenced
     by N cc_pairs produces N entries (each cc_pair is the
@@ -361,7 +378,7 @@ def _load_connector_config_entries(mapping: dict[str, Any]) -> list[dict[str, An
     skipped with an INFO log.
 
     Returns ``[]`` when the mapping carries no parseable topology
-    connectors; the worker treats that as a no-op sync.
+    connectors; both readers treat that as "no connector".
     """
     from kairix.config.topology_v2 import parse_topology_v2
 
@@ -386,17 +403,19 @@ def _load_connector_config_entries(mapping: dict[str, Any]) -> list[dict[str, An
             )
             continue
         for cc_pair in pairs:
-            entries.append(
-                {
-                    "name": cc_pair.name,
-                    "kind": connector.kind,
-                    "config": dict(connector.connector_specific_config),
-                    "extractor": connector.extractor,
-                    "extractor_chain": list(connector.extractor_chain),
-                    "extractor_config": dict(connector.extractor_config),
-                }
-            )
+            entries.append(_topology_entry_for_cc_pair(connector, cc_pair))
     return entries
+
+
+def _load_connector_config_entries(mapping: dict[str, Any]) -> list[dict[str, Any]]:
+    """Enumerate ingestable connector entries from ``topology.connectors``.
+
+    Task 4 of the connector canonical-collapse refactor: the live-sync
+    enumeration delegates to the shared :func:`_parse_topology_entries`
+    parse+split so it stays byte-for-byte identical to the re-extract
+    reader (Task 5).
+    """
+    return _parse_topology_entries(mapping)
 
 
 def _run_one_connector_batch(
@@ -736,7 +755,7 @@ def run_reextract_dead_letter(
     source_name: str,
     db: sqlite3.Connection | None = None,
     bronze_root: Path | None = None,
-    config_path: Path | None = None,
+    config_mapping: dict[str, Any] | None = None,
     limit: int | None = None,
     dry_run: bool = False,
 ) -> ReextractResult:
@@ -750,10 +769,10 @@ def run_reextract_dead_letter(
     1. Looks up the ``bronze_records`` row for ``(source_name, item_id)``.
        Missing → skipped_no_bronze.
     2. Reads the raw bytes via ``bronze.read(ref)``.
-    3. Resolves the connector from the live config so
+    3. Resolves the connector from the canonical ``topology`` block so
        ``source_link(item_id)`` and ``sensitivity_for(item_id)`` come
        from the same connector instance that wrote bronze originally.
-       Missing connector entry → skipped_no_connector.
+       No matching cc_pair → skipped_no_connector.
     4. Runs ``extractor.extract(raw, mime)`` (whatever extractor is
        currently registered — picks up fixes like #322 markitdown
        extras). Failure → still_failing (row stays in dead_letter,
@@ -767,10 +786,20 @@ def run_reextract_dead_letter(
     logic but commits nothing — useful for sizing the recovery before
     committing to it. ``limit`` caps the number of items processed
     (None = all).
+
+    Task 5 (connector canonical-collapse): the connector entry is read
+    from the canonical ``topology`` block in the overlay-aware merged
+    operator mapping — the same place the live sync path reads — NOT the
+    legacy single-file ``connectors:`` list. ``config_mapping`` injects an
+    explicit merged mapping (tests pass the wizard-shaped topology dict);
+    when ``None`` it resolves via :func:`_load_merged_config_mapping_default`
+    (base + overlay).
     """
     from kairix.core.connectors import DeadLetterStore
     from kairix.core.db import open_db
     from kairix.core.db.schema import create_schema
+
+    mapping = config_mapping if config_mapping is not None else _load_merged_config_mapping_default()
 
     db_owned = False
     if db is None:
@@ -781,7 +810,7 @@ def run_reextract_dead_letter(
         bronze_root_resolved = bronze_root if bronze_root is not None else _bronze_root_default()
         dead_letter = DeadLetterStore(db)
 
-        entry = _load_connector_entry(source_name, config_path)
+        entry = _load_connector_entry(source_name, mapping)
         if entry is None:
             rows_no_conn = dead_letter.list(source_name)
             return ReextractResult(
@@ -797,7 +826,6 @@ def run_reextract_dead_letter(
         # on ref.raw_path. No bronze store is constructed at this level.
 
         connector, extractor, silver, chunk_writer, entity_graph_sink = _build_reextract_components(
-            source_name=source_name,
             entry=entry,
             db=db,
         )
@@ -821,21 +849,23 @@ def run_reextract_dead_letter(
             db.close()
 
 
-def _load_connector_entry(source_name: str, config_path: Path | None) -> dict[str, Any] | None:
-    """Load the YAML connector entry matching ``source_name``.
+def _load_connector_entry(source_name: str, mapping: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the canonical topology entry whose cc_pair name matches.
 
-    Returns ``None`` when the config file is absent or the named source
-    isn't declared — both shapes map to ``skipped_no_connector`` at the
-    caller, so the caller doesn't need to distinguish.
+    Task 5 of the connector canonical-collapse refactor: the re-extract
+    reader reads the canonical ``topology`` block from the overlay-aware
+    merged ``mapping`` — the SAME parse+split the live-sync reader uses
+    (:func:`_parse_topology_entries`) — and returns the entry whose ``name``
+    (the cc_pair routing key) matches ``source_name`` (the dead_letter
+    routing key). Sharing the builder guarantees the entry dict carries the
+    identical kind/name/config/extractor shape the sync path resolves.
+
+    Returns ``None`` when the mapping declares no topology connectors or no
+    cc_pair matches ``source_name`` — both shapes map to
+    ``skipped_no_connector`` at the caller, so the caller doesn't need to
+    distinguish.
     """
-    resolved = config_path if config_path is not None else _resolve_config_path_default()
-    if resolved is None:
-        return None
-    try:
-        cfg = yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
-    except Exception:  # pragma: no cover — defensive
-        return None
-    entries = cfg.get("connectors", []) if isinstance(cfg, dict) else []
+    entries = _parse_topology_entries(mapping)
     return next((e for e in entries if e.get("name") == source_name), None)
 
 
@@ -875,7 +905,6 @@ def resolve_collection_for_entry(entry: dict[str, Any]) -> str:
 
 def _build_reextract_components(
     *,
-    source_name: str,
     entry: dict[str, Any],
     db: sqlite3.Connection,
 ) -> tuple[Any, Any, Any, Any, Any]:
@@ -885,12 +914,19 @@ def _build_reextract_components(
     sees identical wiring to the original sync — including the
     ``documents.collection`` tagging invariant via
     :func:`resolve_collection_for_entry`.
+
+    Task 5 canonical-collapse split: the plugin is resolved via the
+    connector ``entry["kind"]`` (``ConnectorConfig.kind`` == entry-point
+    name) — the SAME key the live-sync path
+    (:func:`_run_one_connector_batch`) resolves on — NOT the cc_pair
+    routing name. ``entry["name"]`` keys the chunk-writer collection (via
+    :func:`resolve_collection_for_entry`).
     """
     from kairix.core.connectors import DefaultSilverProcessor, SqliteDocumentsMediaWriter, resolve_connector
     from kairix.core.connectors.collection_router import legacy_chunk_writer
     from kairix.core.connectors.registry import build_extractor_from_entry
 
-    connector = resolve_connector(source_name)(entry.get("config", {}))
+    connector = resolve_connector(entry["kind"])(entry.get("config", {}))
     # Builds either a single extractor or an EscalatingExtractor depending
     # on whether the entry sets ``extractor_chain: [...]`` or ``extractor: <name>``.
     extractor = build_extractor_from_entry(entry)

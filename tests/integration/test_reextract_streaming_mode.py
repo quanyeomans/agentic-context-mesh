@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
-import yaml
 
 from kairix.core.connectors import DeadLetterStore, StreamingBronzeStore
 from kairix.core.db.schema import create_schema
@@ -25,24 +25,34 @@ from kairix.worker import ReextractResult, run_reextract_dead_letter
 pytestmark = pytest.mark.integration
 
 
-def _write_streaming_obsidian_config(tmp_path: Path, vault: Path) -> Path:
-    cfg = tmp_path / "kairix.config.yaml"
-    cfg.write_text(
-        yaml.safe_dump(
-            {
-                "connectors": [
-                    {
-                        "name": "obsidian",
-                        "bronze_mode": "streaming",
-                        "extractor": "passthrough",
-                        "config": {"vault_root": str(vault)},
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    return cfg
+def _streaming_obsidian_mapping(vault: Path) -> dict[str, Any]:
+    """Canonical topology mapping for a streaming-bronze obsidian connector.
+
+    Task 5: re-extract reads ``topology`` (cc_pair name matches the
+    dead_letter ``source_name``; kind resolves the plugin), not the legacy
+    top-level ``connectors:`` list.
+    """
+    return {
+        "topology_v2": {
+            "connectors": [
+                {
+                    "id": "obsidian-conn",
+                    "kind": "obsidian",
+                    "name": "Personal Obsidian Vault",
+                    "extractor": "passthrough",
+                    "connector_specific_config": {"vault_root": str(vault)},
+                }
+            ],
+            "cc_pairs": [
+                {
+                    "id": "obsidian-pair",
+                    "connector": "obsidian-conn",
+                    "credential": None,
+                    "name": "obsidian",
+                }
+            ],
+        }
+    }
 
 
 def test_reextract_streaming_row_recovers_via_connector_fetch(tmp_path: Path) -> None:
@@ -66,12 +76,12 @@ def test_reextract_streaming_row_recovers_via_connector_fetch(tmp_path: Path) ->
     DeadLetterStore(db).record("obsidian", "alpha.md", "first-pass failed; should recover via re-fetch")
     db.commit()
 
-    config_path = _write_streaming_obsidian_config(tmp_path, vault)
+    mapping = _streaming_obsidian_mapping(vault)
     result = run_reextract_dead_letter(
         source_name="obsidian",
         db=db,
         bronze_root=tmp_path / "bronze",
-        config_path=config_path,
+        config_mapping=mapping,
     )
     assert isinstance(result, ReextractResult)
     assert result.recovered == 1, f"streaming-mode recovery via re-fetch should succeed; got {result}"
@@ -111,12 +121,12 @@ def test_reextract_streaming_row_with_source_deleted_routes_to_skipped(tmp_path:
     # Delete the source file so the connector can't re-fetch it
     note.unlink()
 
-    config_path = _write_streaming_obsidian_config(tmp_path, vault)
+    mapping = _streaming_obsidian_mapping(vault)
     result = run_reextract_dead_letter(
         source_name="obsidian",
         db=db,
         bronze_root=tmp_path / "bronze",
-        config_path=config_path,
+        config_mapping=mapping,
     )
     assert result.recovered == 0
     assert result.skipped_source_unavailable == 1, (
@@ -166,12 +176,12 @@ def test_reextract_mixed_streaming_and_filesystem_rows(tmp_path: Path) -> None:
     DeadLetterStore(db).record("obsidian", "filesystem-note.md", "first-pass failed")
     db.commit()
 
-    config_path = _write_streaming_obsidian_config(tmp_path, vault)
+    mapping = _streaming_obsidian_mapping(vault)
     result = run_reextract_dead_letter(
         source_name="obsidian",
         db=db,
         bronze_root=bronze_root,
-        config_path=config_path,
+        config_mapping=mapping,
     )
     assert result.recovered == 2, f"both mixed-mode rows should recover; got {result}"
     db.close()
