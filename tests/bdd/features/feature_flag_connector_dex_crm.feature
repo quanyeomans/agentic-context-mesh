@@ -1,24 +1,28 @@
 @feature_flag @connector_dex_crm
-Feature: Operator toggles the connector-dex-crm feature flag
-  As an operator running a kairix engagement container against a Dex CRM
-  I want to enable the Dex connector before it starts pulling Person and Org records
-  So that I can opt in deliberately and roll back safely if the integration misbehaves
+Feature: Operator toggles the Dex CRM connector feature flag
+  As an operator running a kairix container
+  I want to choose whether the Dex CRM connector is enabled
+  So that I can validate the new ingest path before cutting over and roll back safely if needed
 
-  The flag defaults off at the introduce stage. With the flag off the
-  Dex connector never polls the API; with the flag on the worker drives
-  it through the standard SourceConnector list_changes path. See
-  docs/architecture/feature-flag-architecture.md Wave 5.
+  The flag gates the connector inside the canonical connector-sync loop
+  (run_connector_sync_pipeline -> connector_enabled). When OFF the
+  dex crm entry is skipped before plugin resolution; a flagless sibling
+  connector in the same tick still runs. When ON the gate lets the
+  dex crm entry through to the batch runner. See
+  docs/architecture/feature-flag-architecture.md S7.
 
   @happy_path @off
-  Scenario: Flag OFF — the Dex CRM connector does not poll the Dex API
-    Given the operator has the connector-dex-crm flag set to false
-    When the worker dex crm sync tick runs
-    Then the dex crm connector branch is skipped
-    And no api call is made to the dex crm endpoint
+  Scenario: Flag OFF - the Dex CRM connector is gated off, the sibling still runs
+    Given the operator has the dex crm connector flag set to false
+    And a flagless sibling connector with two notes is configured alongside dex crm
+    When the worker connector sync tick runs for dex crm
+    Then the dex crm connector is gated off in the loop
+    And the flagless sibling connector still syncs its notes for dex crm
 
   @happy_path @on
-  Scenario: Flag ON — the Dex CRM connector polls the Dex API
-    Given the operator has the connector-dex-crm flag set to true
-    When the worker dex crm sync tick runs
-    Then the dex crm connector branch performs the sync pass
-    And the dex crm connector lists changes since the cursor
+  Scenario: Flag ON - the Dex CRM connector is let through the gate
+    Given the operator has the dex crm connector flag set to true
+    And a flagless sibling connector with two notes is configured alongside dex crm
+    When the worker connector sync tick runs for dex crm
+    Then the dex crm connector is not gated off in the loop
+    And the flagless sibling connector still syncs its notes for dex crm

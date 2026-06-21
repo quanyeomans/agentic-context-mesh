@@ -144,6 +144,166 @@ def test_empty_change_stream_is_a_no_op(tmp_path: Path) -> None:
         db.close()
 
 
+# ----------------------------------------------------------------------
+# Delete-dispatch (connector-architecture-refactor §3.3 primitive #1).
+#
+# Sabotage proof (executed by the agent, recorded for the reader):
+#   In ``kairix/core/connectors/pipeline.py`` ``_process_item``, delete
+#   the ``if op in _DELETE_OPS:`` branch. Re-run
+#   ``test_delete_op_calls_delete_by_source_uri_and_skips_fetch``: the
+#   item falls through to the fetch→upsert path, so ``chunk_writer.deletes``
+#   stays empty and ``connector.fetch_calls`` records the item — both
+#   assertions fail. Restore the branch; the test passes again.
+# ----------------------------------------------------------------------
+
+
+def _build_pipeline_with_writer(
+    db: sqlite3.Connection,
+) -> tuple[ConnectorPipeline, FakeChunkWriter]:
+    """Pipeline whose chunk writer is returned so deletes can be asserted."""
+    writer = FakeChunkWriter()
+    pipeline = ConnectorPipeline(
+        db=db,
+        bronze=StreamingBronzeStore(db),
+        silver=DefaultSilverProcessor(),
+        chunk_writer=writer,
+        entity_graph_sink=FakeEntityGraphSink(),
+        cursor_store=CursorStore(db),
+        dead_letter=DeadLetterStore(db),
+    )
+    return pipeline, writer
+
+
+@pytest.mark.parametrize("delete_op", ["deleted", "archived", "access_lost"])
+def test_delete_op_calls_delete_by_source_uri_and_skips_fetch(tmp_path: Path, delete_op: str) -> None:
+    """Every delete-op routes to delete_by_source_uri(source_link(item_id)) and skips fetch."""
+    db = _open_db(tmp_path)
+    try:
+        pipeline, writer = _build_pipeline_with_writer(db)
+        item_id = "gone.md"
+        connector = FakeSourceConnector(
+            name="fake-source",
+            events=[ChangeEvent(op=delete_op, item_id=item_id, modified_at="2026-06-21T10:00:00Z")],  # type: ignore[arg-type]  # F3-rationale: delete_op is a ChangeEvent.op literal member, parametrized for table coverage.
+            content={item_id: b"would-be-reindexed"},
+        )
+
+        result = pipeline.run_batch(connector, FakeExtractor())
+
+        # The delete branch fired: writer received exactly the item URI;
+        # fetch was skipped; nothing was upserted.
+        assert writer.deletes == [connector.source_link(item_id)]
+        assert connector.fetch_calls == []
+        assert writer.writes == []
+        # Outcome accounting: delete is not a processed upsert.
+        assert result.processed == 0
+        assert result.dead_lettered == 0
+        assert result.deleted == 1
+    finally:
+        db.close()
+
+
+def test_created_then_deleted_removes_chunk_and_does_not_reindex(tmp_path: Path) -> None:
+    """A created tick indexes the chunk; a deleted tick removes it (via the same writer).
+
+    Asserted through the writer's public surface: the create tick upserts
+    chunks for the URI; the delete tick calls ``delete_by_source_uri`` for
+    that same URI and skips fetch (no re-index).
+    """
+    db = _open_db(tmp_path)
+    try:
+        pipeline, writer = _build_pipeline_with_writer(db)
+        item_id = "note.md"
+
+        created = FakeSourceConnector(
+            name="fake-source",
+            events=[ChangeEvent(op="created", item_id=item_id, modified_at="2026-06-21T10:00:00Z")],
+            content={item_id: b"body content that becomes a chunk"},
+        )
+        create_result = pipeline.run_batch(created, FakeExtractor())
+        assert create_result.processed == 1
+        source_uri = created.source_link(item_id)
+        # The create tick upserted at least one chunk under this URI.
+        upserted_uris = {getattr(c, "source_uri", "") for batch in writer.writes for c in batch}
+        assert source_uri in upserted_uris
+
+        deleted = FakeSourceConnector(
+            name="fake-source",
+            events=[ChangeEvent(op="deleted", item_id=item_id, modified_at="2026-06-21T11:00:00Z")],
+            content={item_id: b"body content that becomes a chunk"},
+        )
+        delete_result = pipeline.run_batch(deleted, FakeExtractor())
+
+        assert delete_result.deleted == 1
+        assert delete_result.processed == 0
+        # The delete tick targeted the same URI the create tick wrote.
+        assert writer.deletes == [source_uri]
+        # The delete tick did not re-fetch / re-index.
+        assert deleted.fetch_calls == []
+    finally:
+        db.close()
+
+
+def test_created_and_deleted_in_one_batch_nets_to_removed(tmp_path: Path) -> None:
+    """Within a single batch a delete-op for a sibling item removes only that item.
+
+    Two created items + one deleted item: both created items index; the
+    deleted item routes to delete_by_source_uri without disturbing the
+    siblings (per-item dispatch, not batch-wide).
+    """
+    db = _open_db(tmp_path)
+    try:
+        pipeline, writer = _build_pipeline_with_writer(db)
+        events = [
+            ChangeEvent(op="created", item_id="a.md", modified_at="2026-06-21T10:00:00Z"),
+            ChangeEvent(op="deleted", item_id="b.md", modified_at="2026-06-21T10:01:00Z"),
+            ChangeEvent(op="created", item_id="c.md", modified_at="2026-06-21T10:02:00Z"),
+        ]
+        connector = FakeSourceConnector(
+            name="fake-source",
+            events=events,
+            content={"a.md": b"alpha body", "c.md": b"gamma body"},
+        )
+
+        result = pipeline.run_batch(connector, FakeExtractor())
+
+        assert result.processed == 2
+        assert result.deleted == 1
+        # Only b.md hit the delete path; a.md/c.md were fetched.
+        assert writer.deletes == [connector.source_link("b.md")]
+        assert sorted(connector.fetch_calls) == ["a.md", "c.md"]
+    finally:
+        db.close()
+
+
+def test_delete_op_source_link_failure_propagates_as_batch_rollback(tmp_path: Path) -> None:
+    """If source_link raises on a delete-op, the failure propagates (batch rollback).
+
+    F68-adjacent failure injection: the delete branch reads
+    ``connector.source_link(item_id)``. When that raises (the
+    ``raise_on_source_link`` seam) the exception is NOT swallowed into
+    dead-letter — it propagates to ``run_batch``'s except clause which
+    rolls back, matching the silver/writer/sink batch-level discipline.
+    """
+    db = _open_db(tmp_path)
+    try:
+        pipeline, writer = _build_pipeline_with_writer(db)
+        item_id = "boom.md"
+        connector = FakeSourceConnector(
+            name="fake-source",
+            events=[ChangeEvent(op="deleted", item_id=item_id, modified_at="2026-06-21T10:00:00Z")],
+            raise_on_source_link={item_id},
+        )
+
+        with pytest.raises(RuntimeError, match="source_link"):
+            pipeline.run_batch(connector, FakeExtractor())
+
+        # No delete was recorded (the failure happened before the call
+        # could land in a committed chunk).
+        assert writer.deletes == []
+    finally:
+        db.close()
+
+
 def test_fetch_failure_records_dead_letter(tmp_path: Path) -> None:
     """When ``connector.fetch`` raises, the item lands in dead_letter (fetch path)."""
     db = _open_db(tmp_path)

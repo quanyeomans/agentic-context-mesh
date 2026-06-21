@@ -1,7 +1,7 @@
 Feature: Per-collection retrieval overrides
   As an operator who knows my reference-library benefits from BM25-primary fusion
-  I want to declare that override in my kairix.config.yaml under the collection's
-  ``retrieval:`` block
+  I want to declare that override in my kairix.config.yaml under the topology
+  collection's ``retrieval:`` block
   So that searches against the reference-library use the right fusion strategy
   while my other collections continue using the global default.
 
@@ -34,3 +34,18 @@ Feature: Per-collection retrieval overrides
       | fusion_strategy   | bm25_primary  |
     When the resolver is asked for the retrieval config for collections "reference-library, knowledge-shared"
     Then the resolved fusion_strategy is "rrf"
+
+  Scenario: A topology collection's retrieval block drives the per-collection override
+    # Canonical-collapse: the override now flows from the canonical
+    # topology collection's ``retrieval:`` block rather than the legacy
+    # ``collections.shared`` block. Resolving a single topology collection
+    # applies its tuning over the global config via the topology-backed
+    # override producer.
+    Given a kairix config with a global retrieval default of "rrf"
+    And the topology declares a "retrieval" block on collection "reference-library":
+      | retrieval_field   | value         |
+      | fusion_strategy   | bm25_primary  |
+      | vec_limit         | 5             |
+    When the resolver is asked for the retrieval config for "reference-library"
+    Then the resolved fusion_strategy is "bm25_primary"
+    And the resolved vec_limit is 5

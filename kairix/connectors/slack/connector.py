@@ -649,9 +649,18 @@ class SlackConnector:
         for item_id in failed_item_ids:
             channel_id, ts = _split_item_id(item_id)
             try:
-                # Slack history `oldest` is exclusive — pass `ts` directly
-                # to get the message at or shortly after the failed ts.
-                for message in web.conversations_history(channel_id=channel_id, oldest=ts):
+                # Slack's ``conversations.history?oldest=`` is EXCLUSIVE by
+                # default: a message whose ``ts`` equals ``oldest`` is NOT
+                # returned. That exclusivity is what the legacy
+                # ``list_changes`` / ``_drain_channel`` advance path relies
+                # on (re-feed the high-water ``ts`` next tick without
+                # re-emitting the boundary message). The dead-letter replay
+                # wants the OPPOSITE — it targets the failed message's exact
+                # ``ts`` and filters ``message.ts == ts``, so it MUST request
+                # ``inclusive=True`` to make Slack include the boundary
+                # message. Without it the replay returns ZERO on the real
+                # wire (the in-memory fake ignores ``oldest`` and hid this).
+                for message in web.conversations_history(channel_id=channel_id, oldest=ts, inclusive=True):
                     if message.ts != ts:
                         continue
                     self._cache.remember_message(message)

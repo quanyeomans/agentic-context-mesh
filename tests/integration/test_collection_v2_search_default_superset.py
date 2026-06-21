@@ -12,8 +12,8 @@ Pins (per docs/architecture/collection-v2-implementation-plan.md):
   * Explicit ``collections=['reflib']`` retrieves the reflib doc.
   * Own-memory in default search; other-agent memory excluded.
   * Cross-agent explicit request → empty + F21-shaped error.
-  * Flag OFF → legacy DefaultCollectionResolver wired.
-  * Flag ON → TopologyV2CollectionResolver wired.
+  * The canonical TopologyV2CollectionResolver is always wired
+    (the legacy default-scope resolver has been retired).
 
 Scaffolding pattern: every test xfails with strict=False until the impl
 agent removes the decorator. F47-clean: every pipeline is constructed via

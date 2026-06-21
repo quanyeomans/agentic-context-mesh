@@ -319,6 +319,33 @@ class TestParseCollections:
         result = parse_collections({"collections": None})
         assert result is None
 
+    @pytest.mark.unit
+    def test_in_default_true_parses_onto_collection_def(self):
+        """An explicit ``in_default: true`` round-trips onto the CollectionDef."""
+        data = {"collections": {"shared": [{"name": "home", "path": "home", "in_default": True}]}}
+        result = parse_collections(data)
+        assert result is not None
+        assert result.shared[0].in_default is True
+
+    @pytest.mark.unit
+    def test_in_default_defaults_to_true_when_omitted(self):
+        """A collection without ``in_default`` keeps the back-compat default."""
+        data = {"collections": {"shared": [{"name": "home", "path": "home"}]}}
+        result = parse_collections(data)
+        assert result is not None
+        assert result.shared[0].in_default is True
+
+    @pytest.mark.unit
+    def test_non_bool_in_default_is_rejected_at_parse_time(self):
+        """A non-boolean ``in_default`` value raises ConfigValidationError
+        naming the offending key — ``_coerce_bool`` rejects the
+        ``"false"``-as-string footgun rather than silently coercing to
+        True (which would route the collection into the opposite scope).
+        """
+        data = {"collections": {"shared": [{"name": "archive", "path": "archive", "in_default": "false-as-string"}]}}
+        with pytest.raises(ConfigValidationError, match="in_default"):
+            parse_collections(data)
+
 
 @pytest.mark.unit
 class TestFusionStrategy:
@@ -600,3 +627,93 @@ class TestSourceTierBoostYaml:
         # Only the well-formed entry survived.
         assert len(cfg.source_tier_boost.per_intent_overrides) == 1
         assert cfg.source_tier_boost.per_intent_overrides[0][0] == "temporal"
+
+
+class TestTopologyBackedCollectionOverrides:
+    """Per-collection retrieval overrides now flow from the canonical
+    topology (``topology_v2.collections[*].retrieval``) rather than the
+    legacy ``collections.shared[*].retrieval`` block (canonical-collapse
+    T3). These probes drive ``resolve_retrieval_config`` with its
+    ``overrides_fn`` bound to the topology producer so the override is
+    proven to originate from a topology collection.
+    """
+
+    @pytest.mark.unit
+    def test_topology_override_merges_over_global_for_single_collection(self) -> None:
+        """A ``retrieval:`` block on a topology collection is merged over
+        the global config when a single-collection search names it."""
+        from kairix.core.factory import derive_collection_overrides
+        from kairix.core.search.config_loader import ResolveConfigDeps, resolve_retrieval_config
+
+        topology = {
+            "topology_v2": {
+                "collections": [
+                    {
+                        "name": "reflib",
+                        "sources": [{"cc_pair": "obs-cp", "path_filter": "*"}],
+                        "retrieval": {"fusion_strategy": "bm25_primary", "vec_limit": 5},
+                    }
+                ]
+            }
+        }
+        global_cfg = RetrievalConfig(fusion_strategy="rrf", vec_limit=20)
+
+        resolved = resolve_retrieval_config(
+            collection="reflib",
+            deps=ResolveConfigDeps(
+                config_fn=lambda: global_cfg,
+                overrides_fn=lambda: derive_collection_overrides(mapping=topology),
+            ),
+        )
+
+        # Topology override wins over the global config.
+        assert resolved.fusion_strategy == "bm25_primary"
+        assert resolved.vec_limit == 5
+
+    @pytest.mark.unit
+    def test_topology_override_absent_collection_keeps_global(self) -> None:
+        """A collection with no topology ``retrieval:`` block keeps the
+        global config — the override is keyed on the collection name."""
+        from kairix.core.factory import derive_collection_overrides
+        from kairix.core.search.config_loader import ResolveConfigDeps, resolve_retrieval_config
+
+        topology = {
+            "topology_v2": {
+                "collections": [
+                    {
+                        "name": "reflib",
+                        "sources": [{"cc_pair": "obs-cp", "path_filter": "*"}],
+                        "retrieval": {"fusion_strategy": "bm25_primary"},
+                    }
+                ]
+            }
+        }
+        global_cfg = RetrievalConfig(fusion_strategy="rrf")
+
+        resolved = resolve_retrieval_config(
+            collection="team-scratch",
+            deps=ResolveConfigDeps(
+                config_fn=lambda: global_cfg,
+                overrides_fn=lambda: derive_collection_overrides(mapping=topology),
+            ),
+        )
+
+        assert resolved.fusion_strategy == "rrf"
+
+    @pytest.mark.unit
+    def test_default_overrides_fn_binds_callable_returning_dict(self) -> None:
+        """The production ``ResolveConfigDeps`` default wires a working
+        topology-backed override producer — a callable that returns a dict
+        (the canonical-collapse producer is default-safe, so an empty
+        config yields ``{}`` rather than raising).
+
+        Sabotage proof: the retired legacy ``_get_collection_overrides``
+        loader is gone; the default factory now binds the topology
+        producer, which stays callable here.
+        """
+        from kairix.core.search.config_loader import ResolveConfigDeps
+
+        deps = ResolveConfigDeps()
+        assert callable(deps.overrides_fn)
+        result = deps.overrides_fn()
+        assert isinstance(result, dict)

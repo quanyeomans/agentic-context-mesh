@@ -15,8 +15,8 @@ Exercises the composed production path with the flag ON:
       ``text/plain`` mime
     → connector.metadata_for(item_id) lifts the envelope headers onto
       :class:`SourceMetadata`
-    → assertion that the connector is selectable via the flag-gated
-      :func:`dispatch_gmail_sync` dispatcher when the flag is ON
+    → assertion that the connector is enabled via the flag-gated
+      :func:`connector_enabled` predicate when the flag is ON
 
 The OFF path is covered by
 ``tests/integration/test_feature_flag_connector_gmail.py``. F54's E2E
@@ -39,7 +39,7 @@ from kairix.connectors.gmail import GmailConnector
 from kairix.connectors.gmail.client import GmailClient
 from kairix.worker import (
     ConnectorSyncResult,
-    dispatch_gmail_sync,
+    connector_enabled,
 )
 from tests.fakes import FakeFeatureFlagResolver
 
@@ -162,7 +162,7 @@ def test_composed_gmail_on_path() -> None:
     assert "agent-beta@example.com" in metadata.tags
     assert metadata.properties.get("subject") == "E2E composed-path"
 
-    # Flag-gated dispatcher routes through the connector when ON.
+    # Flag-gated enablement lets the connector through when ON.
     resolver = FakeFeatureFlagResolver().with_flag("connector_gmail", True)
     on_branch_calls = {"n": 0}
 
@@ -171,10 +171,8 @@ def test_composed_gmail_on_path() -> None:
         _ = list(connector.list_changes(cursor=connector.next_cursor()))
         return ConnectorSyncResult(synced=1, failed=0, dead_letter_added=0)
 
-    result = dispatch_gmail_sync(
-        read_flag=resolver.get,
-        on_branch=_composed_on_branch,
-    )
+    assert connector_enabled("gmail", resolver.get), "flag ON must enable the gmail connector"
+    result = _composed_on_branch()
 
     assert on_branch_calls["n"] == 1, (
         f"flag ON must invoke the connector branch exactly once; got {on_branch_calls['n']}"

@@ -1,22 +1,19 @@
 """Step definitions for feature_flag_connector_m365_email_headers.feature.
 
-Drives the production :func:`kairix.worker.dispatch_m365_email_headers_sync`
-composition surface with the flag value pinned through the canonical
-:class:`FakeFeatureFlagResolver` from ``tests/fakes.py``. No
-``@patch``, no ``monkeypatch.setattr`` on kairix internals, no
+Drives the REAL connector-sync loop —
+:func:`kairix.worker.run_connector_sync_pipeline` — with the flag value
+pinned through the canonical :class:`FakeFeatureFlagResolver` from
+``tests/fakes.py``. The enablement gate under test is
+:func:`kairix.worker.connector_enabled`, consulted per entry in that
+loop. No ``@patch``, no ``monkeypatch.setattr`` on kairix internals, no
 ``KAIRIX_FEATURE_*`` env vars.
 
-Per F46, steps reach a sanctioned entry point in their call graph
-(depth ≤ 2). ``dispatch_m365_email_headers_sync`` delegates to either
-the ON-branch default (``_m365_default_on``, which wraps
-:func:`run_connector_sync_pipeline`) or the OFF-branch default
-(``_m365_default_off``, a no-op returning zero counters).
-
-Both branches log a distinct INFO message at entry; the assertion
-target is the branch-identifier log line, not the counters. The ON
-branch is wrapped with a never-call stub here so we don't drive a
-real connector-pipeline run during a BDD scenario — the branch
-selection is the property under test.
+Per F46, steps reach a sanctioned entry point in their call graph —
+``run_connector_sync_pipeline`` composes the production
+:class:`~kairix.core.connectors.ConnectorPipeline` internally (no direct
+``*Pipeline(...)`` construction here). The assertion target is the
+observable :class:`ConnectorSyncResult` counter outcome + the gated-off
+INFO log, NOT a dead dispatcher's branch marker.
 
 F1-clean: no @patch / module-attribute substitution on kairix.
 F2-clean: no ``KAIRIX_*`` env-var manipulation.
@@ -25,23 +22,25 @@ F2-clean: no ``KAIRIX_*`` env-var manipulation.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import sqlite3
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 import pytest
 from pytest_bdd import given, parsers, then, when
 
 from kairix.worker import (
+    ConnectorSyncDeps,
     ConnectorSyncResult,
-    dispatch_m365_email_headers_sync,
-    m365_off_branch_noop,
-    run_via_m365_email_headers_connector,
+    run_connector_sync_pipeline,
 )
 from tests.fakes import FakeFeatureFlagResolver
 
 pytestmark = pytest.mark.bdd
 
-_ON_BRANCH_MARKER = "m365_email_headers connector running (flag ON)"
-_OFF_BRANCH_MARKER = "m365_email_headers connector gated off (flag OFF)"
+_FLAG = "connector_m365_email_headers"
+_KIND = "m365_email_headers"
 
 
 @dataclass
@@ -49,108 +48,99 @@ class _Ctx:
     """Per-scenario context — no module-level mutable state."""
 
     resolver: FakeFeatureFlagResolver | None = None
-    captured_logs: list[str] | None = None
-    branch_result: ConnectorSyncResult | None = None
-    on_branch_calls: int = 0
-    off_branch_calls: int = 0
+    sibling_vault: Path | None = None
+    captured_logs: list[str] = field(default_factory=list)
+    result: ConnectorSyncResult | None = None
 
 
 @pytest.fixture
-def m365_email_flag_ctx() -> _Ctx:
+def m365_email_headers_flag_ctx() -> _Ctx:
     return _Ctx()
 
 
-# ---------------------------------------------------------------------------
-# Givens
-# ---------------------------------------------------------------------------
+def _two_connector_topology(vault: Path) -> dict[str, Any]:
+    return {
+        "topology_v2": {
+            "connectors": [
+                {"id": f"{_KIND}-conn", "kind": _KIND, "name": f"Corp {_KIND}", "connector_specific_config": {}},
+                {
+                    "id": "obsidian-conn",
+                    "kind": "obsidian",
+                    "name": "Personal Vault",
+                    "extractor": "passthrough",
+                    "connector_specific_config": {"vault_root": str(vault)},
+                },
+            ],
+            "cc_pairs": [
+                {"id": f"{_KIND}-pair", "connector": f"{_KIND}-conn", "credential": None, "name": f"{_KIND}-cc"},
+                {"id": "ob-pair", "connector": "obsidian-conn", "credential": None, "name": "obsidian-cc"},
+            ],
+        }
+    }
 
 
-@given(parsers.parse("the operator has the m365-email-headers connector flag set to {value}"))
-def _operator_sets_flag(m365_email_flag_ctx: _Ctx, value: str) -> None:
+@given(parsers.parse("the operator has the m365 email-headers connector flag set to {value}"))
+def _operator_sets_flag(m365_email_headers_flag_ctx: _Ctx, value: str) -> None:
     """Pin the flag's value via :class:`FakeFeatureFlagResolver`."""
     parsed = value.strip().lower() == "true"
-    m365_email_flag_ctx.resolver = FakeFeatureFlagResolver().with_flag("connector_m365_email_headers", parsed)
+    m365_email_headers_flag_ctx.resolver = FakeFeatureFlagResolver().with_flag(_FLAG, parsed)
 
 
-# ---------------------------------------------------------------------------
-# Whens
-# ---------------------------------------------------------------------------
+@given("a flagless sibling connector with two notes is configured alongside m365 email-headers")
+def _sibling_configured(m365_email_headers_flag_ctx: _Ctx, tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "alpha.md").write_text("# Alpha\n\nFirst note body.\n", encoding="utf-8")
+    (vault / "beta.md").write_text("# Beta\n\nSecond note body.\n", encoding="utf-8")
+    m365_email_headers_flag_ctx.sibling_vault = vault
 
 
-@when("the worker m365 connector sync tick runs")
-def _worker_tick_runs(m365_email_flag_ctx: _Ctx, caplog: pytest.LogCaptureFixture) -> None:
-    """Invoke the production :func:`dispatch_m365_email_headers_sync`.
+@when("the worker connector sync tick runs for m365 email-headers")
+def _worker_tick_runs(
+    m365_email_headers_flag_ctx: _Ctx,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Invoke the production :func:`run_connector_sync_pipeline`."""
+    resolver = m365_email_headers_flag_ctx.resolver
+    vault = m365_email_headers_flag_ctx.sibling_vault
+    assert resolver is not None and vault is not None, "Given steps must run before When"
 
-    The ON / OFF branches are wrapped so we observe selection without
-    driving a real connector-pipeline run in a BDD scenario (the
-    integration test is the home for the composed-pipeline assertions).
-    The branch helpers still log via the production helper bodies so
-    the distinct INFO markers fire.
-    """
-    resolver = m365_email_flag_ctx.resolver
-    assert resolver is not None, "Given step must run before When"
-
-    def _wrapped_on() -> ConnectorSyncResult:
-        m365_email_flag_ctx.on_branch_calls += 1
-        # Call the production marker log directly (which mirrors what
-        # ``run_via_m365_email_headers_connector`` emits) but short-
-        # circuit before run_connector_sync_pipeline so the BDD
-        # scenario doesn't try to open a real SQLite DB. The branch
-        # selection is the property under test.
-        logging.getLogger("kairix.worker").info(_ON_BRANCH_MARKER)
-        return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
-
-    def _wrapped_off() -> ConnectorSyncResult:
-        m365_email_flag_ctx.off_branch_calls += 1
-        return m365_off_branch_noop()
-
-    # Reference the production default ON helper to keep its symbol
-    # live for F52's call-site scan; the wrapped invocation above
-    # produces the same marker log.
-    _ = run_via_m365_email_headers_connector
+    db_path = tmp_path / "index.sqlite"
+    deps = ConnectorSyncDeps(
+        disabled_fn=lambda: False,
+        config_mapping_fn=lambda: _two_connector_topology(vault),
+        flag_reader=resolver.get,
+        db_factory=lambda: sqlite3.connect(str(db_path)),
+        bronze_root_resolver=lambda: tmp_path / "bronze",
+    )
 
     with caplog.at_level(logging.INFO, logger="kairix.worker"):
-        m365_email_flag_ctx.branch_result = dispatch_m365_email_headers_sync(
-            read_flag=resolver.get,
-            on_branch=_wrapped_on,
-            off_branch=_wrapped_off,
-        )
+        m365_email_headers_flag_ctx.result = run_connector_sync_pipeline(deps)
 
-    m365_email_flag_ctx.captured_logs = [rec.getMessage() for rec in caplog.records]
+    m365_email_headers_flag_ctx.captured_logs = [rec.getMessage() for rec in caplog.records]
 
 
-# ---------------------------------------------------------------------------
-# Thens
-# ---------------------------------------------------------------------------
+def _gated_logs(ctx: _Ctx) -> list[str]:
+    return [m for m in ctx.captured_logs if _KIND in m.lower() and "gated" in m.lower()]
 
 
-def _has_marker(logs: list[str] | None, marker: str) -> bool:
-    return any(marker in line for line in (logs or []))
-
-
-@then("the m365 connector OFF branch log appears")
-def _off_branch_log(m365_email_flag_ctx: _Ctx) -> None:
-    assert _has_marker(m365_email_flag_ctx.captured_logs, _OFF_BRANCH_MARKER), (
-        f"expected the m365 OFF branch log; got {m365_email_flag_ctx.captured_logs!r}"
+@then("the m365 email-headers connector is gated off in the loop")
+def _gated_off(m365_email_headers_flag_ctx: _Ctx) -> None:
+    assert _gated_logs(m365_email_headers_flag_ctx), (
+        f"expected a '{_KIND} gated off' INFO log; got {m365_email_headers_flag_ctx.captured_logs!r}"
     )
 
 
-@then("the m365 connector ON branch log appears")
-def _on_branch_log(m365_email_flag_ctx: _Ctx) -> None:
-    assert _has_marker(m365_email_flag_ctx.captured_logs, _ON_BRANCH_MARKER), (
-        f"expected the m365 ON branch log; got {m365_email_flag_ctx.captured_logs!r}"
+@then("the m365 email-headers connector is not gated off in the loop")
+def _not_gated_off(m365_email_headers_flag_ctx: _Ctx) -> None:
+    assert not _gated_logs(m365_email_headers_flag_ctx), (
+        f"flag ON must NOT gate off {_KIND}; gated logs fired anyway: {_gated_logs(m365_email_headers_flag_ctx)!r}"
     )
 
 
-@then("the m365 connector ON branch does not run")
-def _on_branch_skipped(m365_email_flag_ctx: _Ctx) -> None:
-    assert m365_email_flag_ctx.on_branch_calls == 0, (
-        f"expected ON branch to NOT run; on_branch_calls={m365_email_flag_ctx.on_branch_calls}"
-    )
-
-
-@then("the m365 connector OFF branch does not run")
-def _off_branch_skipped(m365_email_flag_ctx: _Ctx) -> None:
-    assert m365_email_flag_ctx.off_branch_calls == 0, (
-        f"expected OFF branch to NOT run; off_branch_calls={m365_email_flag_ctx.off_branch_calls}"
-    )
+@then("the flagless sibling connector still syncs its notes for m365 email-headers")
+def _sibling_syncs(m365_email_headers_flag_ctx: _Ctx) -> None:
+    result = m365_email_headers_flag_ctx.result
+    assert result is not None, "When step must run before Then"
+    assert result.synced >= 2, f"flagless obsidian sibling must still sync its notes; got {result}"

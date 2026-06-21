@@ -317,6 +317,60 @@ def test_collection_tier_parses() -> None:
     assert col.tier == "reference"
 
 
+def test_collection_retrieval_overrides_default_to_none() -> None:
+    """A collection without a ``retrieval`` key parses to
+    ``retrieval_overrides=None``.
+
+    Canonical-collapse — per-collection retrieval tuning is sourced from
+    the topology collection's ``retrieval:`` block at resolution time.
+    Absent ``retrieval`` means "no per-collection override" (None) so the
+    resolver falls back to the global retrieval config.
+    """
+    config = parse_topology_v2(
+        {
+            "topology_v2": {
+                "collections": [{"name": "obsidian-all", "sources": [{"cc_pair": "obs-cp", "path_filter": "*"}]}]
+            }
+        }
+    )
+    assert config.collections[0].retrieval_overrides is None
+
+
+def test_collection_retrieval_overrides_parse() -> None:
+    """A collection declaring a ``retrieval:`` block carries the raw nested
+    dict onto ``CollectionConfig.retrieval_overrides``.
+
+    Canonical-collapse — the override dict is consumed verbatim by
+    ``merge_retrieval_config`` (the same shape the legacy
+    ``collections.shared[*].retrieval`` block produced), so the resolver
+    can apply reflib-style tuning sourced from topology.
+    """
+    config = parse_topology_v2(
+        {
+            "topology_v2": {
+                "collections": [
+                    {
+                        "name": "reflib",
+                        "sources": [{"cc_pair": "obs-cp", "path_filter": "*"}],
+                        "retrieval": {
+                            "fusion_strategy": "bm25_primary",
+                            "bm25_limit": 20,
+                            "vec_limit": 5,
+                        },
+                    }
+                ]
+            }
+        }
+    )
+    col = config.collections[0]
+    assert isinstance(col, CollectionConfig)
+    assert col.retrieval_overrides == {
+        "fusion_strategy": "bm25_primary",
+        "bm25_limit": 20,
+        "vec_limit": 5,
+    }
+
+
 def test_scope_profile_parses() -> None:
     """A scope_profile with two entries parses into the frozen aggregator."""
     config = parse_topology_v2(

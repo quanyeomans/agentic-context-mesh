@@ -20,8 +20,9 @@ Scenario: composes the full production path:
 Flag dispatch path:
 
   flag-resolver pins connector_skills=True
-    → dispatch_skills_sync routes to the production ON branch helper
-    → branch helper wraps the pipeline run
+    → connector_enabled("skills", resolver.get) returns True (the gate
+      lets the connector through)
+    → the composed branch runs the pipeline
 
 The OFF path is covered by the integration tests at
 ``tests/integration/test_feature_flag_connector_skills.py``. F54's E2E
@@ -50,7 +51,7 @@ from kairix.core.db.schema import create_schema
 from kairix.core.factory import build_connector_pipeline
 from kairix.worker import (
     ConnectorSyncResult,
-    dispatch_skills_sync,
+    connector_enabled,
 )
 from tests.fakes import FakeFeatureFlagResolver
 
@@ -113,10 +114,8 @@ def test_composed_skills_capability_path(tmp_path: Path) -> None:
             dead_letter_added=result.dead_lettered,
         )
 
-    sync_result = dispatch_skills_sync(
-        read_flag=resolver.get,
-        on_branch=_on_branch,
-    )
+    assert connector_enabled("skills", resolver.get), "flag ON must enable the skills connector"
+    sync_result = _on_branch()
     assert sync_result.synced >= 1, (
         f"composed path must index the seeded skill; got {sync_result}. "
         "Sabotage hint: check that SkillsConnector walked the tmp tree and the "

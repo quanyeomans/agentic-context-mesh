@@ -23,10 +23,12 @@ kind-prefixed ``item_id`` (``skill:brainstorming``, ``command:feature-dev``,
 Graceful degrade (design §3.4 / §7): where ``~/.claude`` is absent — the
 production VM — the connector finds nothing and the corpus stays
 kairix-caps-only. A missing tree is a warn-and-continue, NEVER an error.
-The connector is gated by the ``connector_skills`` feature flag at the
-worker-dispatch boundary (:func:`kairix.worker.dispatch_skills_sync`);
-when OFF the connector slot is a no-op and this constructor is never
-called.
+The connector is gated by the ``connector_skills`` feature flag in the
+canonical connector-sync loop
+(:func:`kairix.worker.run_connector_sync_pipeline`), which consults
+:func:`kairix.worker.connector_enabled` per configured entry; when OFF
+the skills entry is skipped before plugin resolution and this
+constructor is never called.
 
 Default sensitivity tier is ``internal`` — local dev-tooling metadata,
 not secret (design §3.4). Per F35 this module imports only stdlib +
@@ -147,10 +149,11 @@ class SkillsConnector:
         ``internal``.
       * ``per_tick_max_items`` — F66 per-tick budget.
 
-    Flag gating happens at the worker-dispatch boundary
-    (:func:`kairix.worker.dispatch_skills_sync`) — when ``connector_skills``
-    is OFF the connector slot is a no-op and this constructor is never
-    called.
+    Flag gating happens in the canonical connector-sync loop
+    (:func:`kairix.worker.run_connector_sync_pipeline`), which consults
+    :func:`kairix.worker.connector_enabled` per configured entry — when
+    ``connector_skills`` is OFF the skills entry is skipped before plugin
+    resolution and this constructor is never called.
     """
 
     name: str = CONNECTOR_NAME
