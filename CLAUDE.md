@@ -2,6 +2,16 @@
 
 Shared knowledge layer for human-agent teams. See [README.md](README.md) for product context.
 
+## 🛑 Canonical standards — read before touching CI, gates, fitness functions, coverage, mutation, or governance
+
+These already exist and are detailed. **Do NOT re-derive them.** Converge *up* to them; if something
+is missing or weak, propose the change *into* the canonical home — never fork a parallel standard.
+
+- **Canonical index:** [`tc-pipelines/governance/STANDARDS.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md)
+- **Requirements / OKRs / Waves:** Build & Release Health initiative (Linear) — incl. the `<60s` local loop
+- **Fitness-function spec (F-series, tiered execution):** [kairix#499](https://github.com/three-cubes/kairix/issues/499)
+- **Canonical homes:** `tc-fitness` (gate engine) · `tc-pipelines` (reusable CI + governance templates)
+
 ## How to commit
 
 Use `bash scripts/safe-commit.sh "message"` for every commit. It runs lint, format, mypy, tests, security checks, and the Sonar per-file ratchet. Loop on failures until green. See [CONSTRAINTS.md](CONSTRAINTS.md) for what blocks a commit.
