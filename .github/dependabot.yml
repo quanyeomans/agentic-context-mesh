@@ -43,6 +43,35 @@ updates:
           - "minor"
           - "patch"
 
+  # Go modules — the two services/<name>/go.mod modules gated by
+  # go-quality.yml. Without these entries Dependabot never raised a Go
+  # update PR (broken targeting, not the OFF toggle): the pip + actions
+  # ecosystems below only cover the repo root, so the Go module tree was
+  # invisible to version + security updates. `directories:` (glob) targets
+  # both modules with one entry and auto-covers any future services/* module.
+  - package-ecosystem: gomod
+    directories:
+      - "/services/*"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: "Australia/Sydney"
+    open-pull-requests-limit: 3
+    reviewers:
+      - quanyeomans
+    labels:
+      - dependency
+      - automated
+      - go
+    commit-message:
+      prefix: "chore(deps)"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 7
+
   # GitHub Actions
   - package-ecosystem: github-actions
     directory: /
