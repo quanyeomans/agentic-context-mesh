@@ -1,6 +1,6 @@
 # ADR-022 — Container-level secret readiness gate (replaces kairix.service systemd unit)
 
-**Status:** Proposed 2026-05-28 — implementation deferred until Wave F completes
+**Status:** Accepted 2026-05-28 — readiness-gate decision implemented; the *application-layer* MCP readiness gate shipped in `kairix/agents/mcp/readiness.py` (`ReadinessGate` Protocol + `EventReadinessGate`), wired through `kairix/agents/mcp/cold_start.py` and surfaced via `/healthz` + the cold-start envelope (introduced v2026.5.18 — see `docs/upgrades/v2026.5.18.md`, contract in `docs/operations/MCP-DEPLOYMENT.md`). The *container-entrypoint secret-wait* sub-decision below (the `scripts/docker-entrypoint.sh` shell gate that deletes `kairix.service`) has **not** shipped and remains deferred — see "Implementation status" below.
 **Issues:** #333 (logged 2026-05-28); 2026-05-27 evening saturation incident
 **Related:** #332 (Option A: fixed-shape systemd unit landed in `f365cf70` — interim solution); ADR-019 (resource governance — orthogonal but pairs because it bounds blast radius if this gate misbehaves)
 
@@ -56,6 +56,23 @@ Dockerfile change: `ENTRYPOINT ["/opt/kairix/bin/docker-entrypoint.sh"]` precede
 
 `docker-compose.yml` remains identical. `kairix.service` systemd unit is **deleted from the repo**. Operations docs updated to drop the install step.
 
+### Implementation status
+
+**Shipped — the readiness-gate decision (application layer).** The core decision — refuse to serve before the stack is ready rather than serve in degraded mode — shipped as an *in-application* MCP readiness gate, not the container-entrypoint shell script originally sketched above:
+
+- `kairix/agents/mcp/readiness.py` — `ReadinessGate` Protocol (`is_ready()` / `mark_ready()`) + `EventReadinessGate` thread-safe boolean adapter; `/healthz` reflects `{"ready": …, "uptime_s": …}`.
+- `kairix/agents/mcp/cold_start.py` — `require_ready(...)` short-circuits tool calls before warm-up with a retryable cold-start envelope; `warm_retrieval_stack()` pays the init cost once before advertising readiness. The end-to-end three-layer contract (HTTP 503 + Retry-After at the transport, the application envelope, structured startup-log events) is documented in `docs/operations/MCP-DEPLOYMENT.md`; introduced in v2026.5.18 (`docs/upgrades/v2026.5.18.md`).
+
+This delivers the ADR's intent (clear, mechanical not-ready signalling instead of silent degradation, per Alternative C) for the MCP serving path.
+
+**Deferred — the container-entrypoint secret-wait sub-decision.** The specific shell-script gate that replaces the systemd unit (`scripts/docker-entrypoint.sh`, the Dockerfile `ENTRYPOINT`, deleting `kairix.service.example`, and the `container_secret_readiness_gate.feature` BDD suite) has **not** been built. As of v2026.6.18:
+
+- `scripts/docker-entrypoint.sh` does not exist.
+- `scripts/install/kairix.service.example` still exists (still in its #332 Option A `Type=oneshot` shape) and is still the boot-ordering mechanism.
+- `tests/bdd/features/container_secret_readiness_gate.feature` does not exist.
+
+The boot-ordering problem this sub-decision targets (container starting before Key Vault secrets are hydrated) is therefore still handled by the interim `kairix.service` unit, not by an entrypoint wait. See the Acceptance criteria and Migration sections below for the remaining work.
+
 ### What stays
 
 - **`kairix-fetch-secrets.service`** remains — its job (synchronously fetch secrets from Azure Key Vault at boot + write `/run/secrets/kairix.env`) is unchanged. Its `[Install]` section changes to `WantedBy=multi-user.target` instead of being chained to `kairix.service`.
@@ -93,6 +110,8 @@ Out of scope. Docker Compose's `secrets:` works for swarm + cluster shapes but a
 
 ## Acceptance criteria
 
+These criteria scope the **deferred** container-entrypoint secret-wait sub-decision (the application-layer readiness gate that shipped is tracked by its own tests under `tests/` for `kairix/agents/mcp/`). All remain open as of v2026.6.18:
+
 - [ ] `scripts/docker-entrypoint.sh` created with the wait logic above. Configurable via `KAIRIX_SECRETS_WAIT_SECONDS` env (default 60).
 - [ ] `Dockerfile` updated: `ENTRYPOINT ["/opt/kairix/bin/docker-entrypoint.sh"]` precedes the existing `CMD`.
 - [ ] `scripts/install/kairix.service.example` deleted.
@@ -127,8 +146,8 @@ This ADR is **independent** of ADR-019 and ADR-020. It addresses host-side compl
 
 ## Migration
 
-**Phase 1 (now, shipped already in v2026.5.28)**: `kairix.service` in `Type=oneshot` shape per ADR-022's predecessor #332 Option A. Interim safety net.
+**Phase 1 (shipped v2026.5.28, still current as of v2026.6.18)**: `kairix.service` in `Type=oneshot` shape per ADR-022's predecessor #332 Option A. This remains the active boot-ordering mechanism — `scripts/install/kairix.service.example` is still present. Interim safety net.
 
-**Phase 2 (next release after Wave F)**: ship the new entrypoint + delete the unit. Upgrade notes call out the migration steps.
+**Phase 2 (not yet started)**: ship the new entrypoint (`scripts/docker-entrypoint.sh` + Dockerfile `ENTRYPOINT`) + delete the unit. Upgrade notes call out the migration steps. The application-layer MCP readiness gate (v2026.5.18) is independent of this phase and is already live; Phase 2 is purely about retiring the host-side systemd dependency.
 
 **Phase 3 (release after Phase 2)**: drop the migration documentation; new operators only see the entrypoint-gated story.

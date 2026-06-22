@@ -1,11 +1,31 @@
 # ADR-028 — Per-type chunking strategy + chunking quality evaluation
 
-**Status:** Proposed
-**Date:** 2026-05-30
+**Status:** Accepted — partially implemented (Track 1 plugins + Track 2 eval scaffolding shipped; production registry-dispatch wiring, the PDF plugin, and Track 3 re-chunk-sweep / contextual-prepend remain — see [Implementation status](#implementation-status))
+**Date:** 2026-05-30 (accepted), updated 2026-06-22
 **Supersedes:** none
 **Superseded by:** none
-**Tracking:** GH #353 (implementation tracking issue created alongside this ADR)
+**Tracking:** GH #353 (CLOSED — Wave G.1 plugins + Track 2 eval scaffolding landed; the remaining scope listed under [Implementation status](#implementation-status) is tracked in Linear, not on this closed issue)
 **Related:** ADR-024 (test pyramid), ADR-027 (entity enrichment — chunking quality improves entity-extraction recall), ADR-021 (per-source metadata normalisation), [`fitness-functions.md`](./fitness-functions.md) F55 (chunker version threading)
+
+## Implementation status
+
+ADR-028 is **Accepted and partially shipped** as of 2026-06-22. Tracking issue #353 is CLOSED. The Decision below stands; this section records what landed against each track so readers don't treat shipped behaviour as still-to-design.
+
+**Shipped:**
+
+* **Track 1 — per-type chunker plugins (most of them).** Eight structural chunkers ship under [`kairix/chunkers/`](../../kairix/chunkers/): `MarkdownStructuralChunker`, `SlideChunker`, `SheetRowChunker`, `DocxHeadingChunker`, `ThreadChunker` (Slack), `EmailThreadChunker`, `CalendarEventChunker`, and `CodeChunker` (Python/Go/TypeScript). The registry factory [`build_default_registry()`](../../kairix/core/connectors/chunker_registry.py) (alias `build_default_chunker_registry`) wires the `(kind, mime) → chunker` registrations across active connectors (Obsidian, Notion, GitHub, SharePoint, Google Drive, Slack, M365/Google/Apple calendar, Gmail/M365 email).
+* **F55 chunker-version threading is live.** Every shipped plugin declares `version: str` and every emitted `Chunk` carries `chunker_version=self.version`; F55 enforces this per-commit.
+* **Track 2 — chunking quality evaluation scaffolding.** Per-source-type recall@k / NDCG@k slicing and boundary-spanning canary aggregation ship in [`kairix/quality/benchmark/per_type_slicing.py`](../../kairix/quality/benchmark/per_type_slicing.py); chunk-size distribution metrics ship in [`kairix/quality/eval/chunk_stats.py`](../../kairix/quality/eval/chunk_stats.py) (surfaced via `kairix eval chunk-stats`). The boundary-spanning canary suite ships packaged at [`kairix/data/suites/per-type-canary-suite.yaml`](../../kairix/data/suites/per-type-canary-suite.yaml) (12 canaries: 3 each for slide / row / event / message atomic units).
+
+**Not yet shipped (remaining scope — tracked in Linear):**
+
+* **Production registry-dispatch wiring.** The Silver path (`kairix/core/connectors/silver.py`) still chunks via `_chunk_markdown` / `_chunk_pages` (the paragraph fallback); it does not yet dispatch through `ChunkerRegistry`. The plugins and registry exist but are not on the live ingest path until Silver is plumbed to call `registry.dispatch(...)`. This swap is a cutover and goes through a feature flag per the [feature-flag architecture](./feature-flag-architecture.md).
+* **`PdfLayoutChunker`.** No PDF plugin ships yet; PDF still routes through the page-aware fallback. (Born-digital and OCR branches in the spec below are the design target.)
+* **Track 3 — re-chunk-sweep tick + status surface.** No worker re-chunk-sweep tick, no `kairix chunkers status` CLI subcommand, no `tool_chunkers_status` MCP tool, and no `chunker_telemetry` table ship yet.
+* **Contextual prepending layer** (`ContextualPrependLayer` / `contextual_retrieval.enabled` flag) is not built — it remains the optional future layer described under [Cross-cutting techniques](#contextual-retrieval-anthropic-sep-2024).
+* **Per-type reflib corpus fixtures** (the PPTX/PDF/DOCX/XLSX/Slack/email/calendar fixture additions) are not yet folded into the standing reflib gold suite; the canary suite is the shipped Track 2 surface.
+
+The [Definition of done](#definition-of-done) and [Sequencing](#sequencing) tables below carry a status column reflecting this split.
 
 ## Context
 
@@ -15,9 +35,9 @@ The only per-type differentiation is page-awareness: extractors for paginated fo
 
 The chunker registry is dispatch-shaped (`(kind, mime, section_kind) → chunker`) but the registry table is empty at launch — everything falls through to the default. F55 enforces `chunker_version` plumbing through to `documents_media.chunker_version` so the *infrastructure* is ready; the *plugins* aren't. There is no re-chunk-sweep mechanism if a chunker bumps version.
 
-The evaluation surface has the same shape. F55 / F38 tests verify the architecture (chunking is centralised, version is threaded). BDD features verify generic structural invariants (chunks carry `source_uri`, `sensitivity`, `page` numbers). The recall benchmark reports `NDCG@10 = 0.8385` across six query categories but **does not slice by document source type or extractor**. The reflib benchmark corpus is markdown-only — it has never exercised PDF/DOCX/XLSX/Slack chunking quality through the retrieval path. There are no golden-file tests of the shape "this PPTX should produce N slide-bounded chunks averaging X chars", no chunk-size distribution metrics, no boundary-spanning canary suite.
+The evaluation surface has the same shape. F55 / F38 tests verify the architecture (chunking is centralised, version is threaded). BDD features verify generic structural invariants (chunks carry `source_uri`, `sensitivity`, `page` numbers). The recall benchmark reports `NDCG@10 = 0.884` (242-case `reflib` suite, v2026.6.9 measurement; weighted-total 0.808) across six query categories (recall / temporal / entity / conceptual / multi_hop / procedural) but **did not slice by document source type or extractor** at the time this ADR was written. The reflib benchmark corpus is markdown-only — it has never exercised PDF/DOCX/XLSX/Slack chunking quality through the retrieval path. At ADR-authoring time there were no golden-file tests of the shape "this PPTX should produce N slide-bounded chunks averaging X chars", no chunk-size distribution metrics, and no boundary-spanning canary suite. (Track 2 has since shipped the per-source-type slicing, chunk-size distribution metrics, and the canary suite — see [Implementation status](#implementation-status).)
 
-**Net consequence:** we ship per-type extractors (PDF / DOCX / PPTX / XLSX-aware) into a single-strategy chunker and have no way to measure whether the result is good for any specific type. Wave F was scheduled to land per-type plugins but stalled — this ADR consolidates Wave F + the evaluation gap into one coherent plan.
+**Net consequence (at ADR-authoring time):** we shipped per-type extractors (PDF / DOCX / PPTX / XLSX-aware) into a single-strategy chunker and had no way to measure whether the result is good for any specific type. Wave F was scheduled to land per-type plugins but stalled — this ADR consolidates Wave F + the evaluation gap into one coherent plan. (The Wave G.1 plugins and the Track 2 measurement surface have since shipped; the production registry-dispatch swap is the remaining gap that keeps the single-strategy chunker on the live ingest path — see [Implementation status](#implementation-status).)
 
 ## Decision
 
@@ -163,26 +183,27 @@ Source: synthetic + the reflib reference library (no real client / personal cont
 
 ### Registry dispatch
 
-The existing `chunker_registry.py` already supports `(kind, mime, section_kind) → Chunker` dispatch. This ADR populates the registry:
+The existing `chunker_registry.py` supports `(kind, mime)` dispatch with `section_kind` forwarded to the chosen chunker as a routing hint. The shipped [`build_default_registry()`](../../kairix/core/connectors/chunker_registry.py) factory populates the registry across active connectors. A representative subset (see the factory for the full set, which also wires Google Drive, Google/Apple calendar, Gmail, and Go/TypeScript code):
 
 ```python
-register(("obsidian", "text/markdown", None), MarkdownStructuralChunker())
-register(("notion", "text/markdown", None), MarkdownStructuralChunker())
-register(("sharepoint", "application/pdf", "born_digital"), PdfLayoutChunker(branch="layout"))
-register(("sharepoint", "application/pdf", "scanned"), PdfLayoutChunker(branch="ocr"))
-register(("sharepoint", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", None), DocxHeadingChunker())
-register(("sharepoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation", None), SlideChunker())
-register(("sharepoint", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", None), SheetRowChunker())
-register(("sharepoint", "application/vnd.ms-excel", None), SheetRowChunker())  # legacy .xls via xlrd
-register(("slack", "text/plain", None), ThreadChunker())
-register(("github", "text/markdown", None), MarkdownStructuralChunker())
-register(("github", "text/x-python", None), CodeChunker(language="python"))
-register(("m365_email_headers", "message/rfc822", None), EmailThreadChunker())
-register(("m365_calendar", "text/calendar", None), CalendarEventChunker())
+registry.register(kind="obsidian", mime="text/markdown", chunker=markdown_chunker)
+registry.register(kind="notion", mime="text/markdown", chunker=markdown_chunker)
+registry.register(kind="github", mime="text/markdown", chunker=markdown_chunker)
+registry.register(kind="sharepoint", mime=DOCX_MIME, chunker=docx_heading_chunker)
+registry.register(kind="sharepoint", mime=PPTX_MIME, chunker=slide_chunker)
+registry.register(kind="sharepoint", mime=XLSX_MIME, chunker=sheet_row_chunker)
+registry.register(kind="sharepoint", mime=LEGACY_XLS_MIME, chunker=sheet_row_chunker)  # legacy .xls via xlrd
+registry.register(kind="slack", mime="application/json", chunker=thread_chunker)
+registry.register(kind="slack", mime="text/plain", chunker=thread_chunker)
+registry.register(kind="github", mime="text/x-python", chunker=python_code_chunker)
+registry.register(kind="m365_email_headers", mime="message/rfc822", chunker=email_chunker)
+registry.register(kind="m365_calendar", mime="text/calendar", chunker=calendar_chunker)
 # fallback stays as ParagraphFallbackChunker for unregistered (kind, mime) pairs
 ```
 
-`section_kind` discrimination (e.g. PDF born-digital vs OCR) is set by the extractor when it builds `extracted.pages` based on character density / OCR confidence; the chunker sees it as a routing hint.
+> **PDF not yet registered.** The factory does not register `application/pdf` because `PdfLayoutChunker` has not shipped (see [Implementation status](#implementation-status)); PDF currently routes through the page-aware fallback. The born-digital / OCR design below is the target for that plugin.
+
+`section_kind` discrimination (e.g. PDF born-digital vs OCR) is intended to be set by the extractor when it builds `extracted.pages` based on character density / OCR confidence; the chunker sees it as a routing hint. **Wiring caveat:** the registry is constructed by the factory but is not yet consumed by the production Silver path — see [Implementation status](#implementation-status).
 
 ### `chunker_version` threading + re-chunk-sweep tick
 
@@ -202,7 +223,7 @@ A separate `ContextualPrependLayer` decorator wraps any structural chunker. Read
 * Prepend to the chunk text before embedding; store the raw chunk separately for display.
 * Cache by `(document_hash, chunker_version)` so re-chunk-sweep doesn't pay the LLM cost twice per document.
 
-Flag-gated via `FlagGatedCapability` (ADR-026 Track C — depends on #346).
+Flag-gated via `FlagGatedCapability` (ADR-026 Track C — #346, now CLOSED, so the gating mechanism is available; the contextual-prepend layer itself is still unbuilt).
 
 ## Fitness functions this work will trip
 
@@ -225,19 +246,19 @@ Per the existing fitness-function catalogue, the implementation will tip several
 
 ## Definition of done
 
-| # | Criterion | Verification |
-|---|---|---|
-| 1 | `kairix/chunkers/` directory exists with the 6 plugins above | Imports + F43 contract tests |
-| 2 | Chunker registry populated for every `(kind, mime)` pair across active connectors | Integration test confirms no registered connector falls through to `ParagraphFallbackChunker` |
-| 3 | `chunker_version` on `documents_media` reflects the actual plugin version used | F55 + spot-check SQL query |
-| 4 | Re-chunk-sweep tick wired into worker with F66 budget declarations | F66 green; sweep tick observed in worker log on freshly-bumped version |
-| 5 | `kairix chunkers status` CLI + F45/F30/F53 tests | All four green |
-| 6 | Reflib corpus extended with the per-type fixtures listed above | Eval suite runs end-to-end against extended corpus |
-| 7 | Per-type Recall@10 + NDCG@10 slices in the benchmark output | Eval report includes per-source-type breakdown table |
-| 8 | Boundary-spanning canary suite with at least 3 queries per atomic unit type (slide, row, event, message) | Each canary fails when chunker is sabotaged to split the unit |
-| 9 | Chunk-size distribution telemetry (`chunker_telemetry` table + sweep-tick emit) | F70 green; SQL query returns per-source p50/p95/p99 |
-| 10 | Contextual prepending available as opt-in `FlagGatedCapability` (depends on #346 Track C) | F54/F78 green; OFF + ON paths both tested |
-| 11 | `docs/architecture/chunking-strategy-per-source.md` operator-facing doc | Doc exists; links from `docs/architecture/ENGINEERING.md` and `docs/evaluation/EVALUATION.md` |
+| # | Criterion | Verification | Status |
+|---|---|---|---|
+| 1 | `kairix/chunkers/` directory exists with the per-type plugins | Imports + F43 contract tests | **Shipped** — 8 plugins (markdown / slide / sheet_row / docx / thread / email / calendar / code); `PdfLayoutChunker` not yet shipped |
+| 2 | Chunker registry populated for every `(kind, mime)` pair across active connectors | Integration test confirms no registered connector falls through to `ParagraphFallbackChunker` | **Partial** — `build_default_registry()` wires the registrations, but the production Silver path does not yet dispatch through the registry (still uses the paragraph fallback) |
+| 3 | `chunker_version` on `documents_media` reflects the actual plugin version used | F55 + spot-check SQL query | **Partial** — F55 threading is live; plugins set their version, but until Silver dispatches through the registry the live rows carry the fallback version |
+| 4 | Re-chunk-sweep tick wired into worker with F66 budget declarations | F66 green; sweep tick observed in worker log on freshly-bumped version | **Not started** |
+| 5 | `kairix chunkers status` CLI + F45/F30/F53 tests | All four green | **Not started** |
+| 6 | Reflib corpus extended with the per-type fixtures listed above | Eval suite runs end-to-end against extended corpus | **Not started** — the canary suite ships, but the PPTX/PDF/DOCX/XLSX/Slack/email/calendar fixtures are not yet folded into the standing reflib gold suite |
+| 7 | Per-type Recall@10 + NDCG@10 slices in the benchmark output | Eval report includes per-source-type breakdown table | **Shipped** — `kairix/quality/benchmark/per_type_slicing.py` (`aggregate_per_source_type`) |
+| 8 | Boundary-spanning canary suite with at least 3 queries per atomic unit type (slide, row, event, message) | Each canary fails when chunker is sabotaged to split the unit | **Shipped** — `kairix/data/suites/per-type-canary-suite.yaml` (3 per unit) + `aggregate_canary` |
+| 9 | Chunk-size distribution telemetry (`chunker_telemetry` table + sweep-tick emit) | F70 green; SQL query returns per-source p50/p95/p99 | **Partial** — chunk-size distribution metrics ship in `kairix/quality/eval/chunk_stats.py` (eval-time); the `chunker_telemetry` table + sweep-tick emit are not started |
+| 10 | Contextual prepending available as opt-in `FlagGatedCapability` (depends on #346 Track C) | F54/F78 green; OFF + ON paths both tested | **Not started** — #346 is closed (the gating mechanism is available) but the layer is unbuilt |
+| 11 | `docs/architecture/chunking-strategy-per-source.md` operator-facing doc | Doc exists; links from `docs/architecture/ENGINEERING.md` and `docs/evaluation/EVALUATION.md` | **Not started** |
 
 ## Open decisions
 
@@ -250,18 +271,18 @@ Per the existing fitness-function catalogue, the implementation will tip several
 
 ## Sequencing
 
-This is multi-wave platform work. Proposed phasing:
+This is multi-wave platform work. Phasing and current status:
 
-| Wave | Scope | Estimated duration |
-|---|---|---|
-| **F.0** | Chunker registry hardening: ship contract test scaffolding; populate registry with current `ParagraphFallbackChunker` as default for every connector kind explicitly (no behaviour change). Land the per-type fixture additions to the reflib corpus. | 1 week |
-| **F.1** | Ship `MarkdownStructuralChunker` + `SlideChunker` + `SheetRowChunker` (highest-impact three: covers Obsidian + Notion + every SharePoint deck + every spreadsheet). Includes BDD + integration + golden-file tests per plugin. | 2 weeks |
-| **F.2** | Ship `DocxHeadingChunker` + `PdfLayoutChunker` (born-digital + OCR branches) + `EmailThreadChunker` + `CalendarEventChunker` + `ThreadChunker` + `CodeChunker`. | 2 weeks |
-| **F.3** | Eval harness: per-source-type Recall@10 + NDCG@10 slices, boundary-spanning canary suite, chunk-size telemetry, sweep-tick observability. | 1 week |
-| **F.4** | Re-chunk-sweep tick + `kairix chunkers status` CLI + MCP `tool_chunkers_status`. | 1 week |
-| **F.5** | Contextual prepending as optional `FlagGatedCapability` layer (depends on ADR-026 Track C → #346 merged). | 2 weeks |
+| Wave | Scope | Estimated duration | Status |
+|---|---|---|---|
+| **F.0** | Chunker registry hardening: ship contract test scaffolding; populate registry with current `ParagraphFallbackChunker` as default for every connector kind explicitly (no behaviour change). Land the per-type fixture additions to the reflib corpus. | 1 week | **Partial** — registry + fallback + contract scaffolding shipped; reflib per-type fixture additions not yet folded into the gold suite |
+| **F.1** | Ship `MarkdownStructuralChunker` + `SlideChunker` + `SheetRowChunker` (highest-impact three: covers Obsidian + Notion + every SharePoint deck + every spreadsheet). Includes BDD + integration + golden-file tests per plugin. | 2 weeks | **Shipped** |
+| **F.2** | Ship `DocxHeadingChunker` + `PdfLayoutChunker` (born-digital + OCR branches) + `EmailThreadChunker` + `CalendarEventChunker` + `ThreadChunker` + `CodeChunker`. | 2 weeks | **Mostly shipped** — DOCX / Email / Calendar / Thread / Code landed; `PdfLayoutChunker` not yet shipped |
+| **F.3** | Eval harness: per-source-type Recall@10 + NDCG@10 slices, boundary-spanning canary suite, chunk-size telemetry, sweep-tick observability. | 1 week | **Partial** — per-source-type slicing, canary suite, and eval-time chunk-size metrics shipped; sweep-tick observability not started |
+| **F.4** | Re-chunk-sweep tick + `kairix chunkers status` CLI + MCP `tool_chunkers_status` + production registry-dispatch cutover (feature-flagged) on the Silver path. | 1 week | **Not started** |
+| **F.5** | Contextual prepending as optional `FlagGatedCapability` layer (depends on ADR-026 Track C → #346 merged). | 2 weeks | **Not started** (#346 closed; the gating mechanism is available) |
 
-Total: 9 weeks of focused work. F.0 + F.1 + F.3 form a viable v1 release (4 weeks); F.2 + F.4 + F.5 are follow-ups.
+Originally estimated at 9 weeks of focused work. F.1 + most of F.2 + the Track 2 half of F.3 have shipped; the remaining scope (PDF plugin, the F.0 corpus fixtures, the production registry-dispatch cutover, F.4 sweep/status, F.5 contextual prepend) is tracked in Linear, not on the now-closed #353.
 
 ## Related work
 

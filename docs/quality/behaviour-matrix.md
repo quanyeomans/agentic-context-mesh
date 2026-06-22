@@ -60,7 +60,17 @@ is the value — coverage of behaviours is the contract, not coverage of lines.
 
 ## Honest snapshot
 
-Generated against repo commit **`37964593`** on **2026-05-23**.
+> **Snapshot is stale — pending regeneration.** The counts and per-cell pins below
+> are a point-in-time capture generated against repo commit **`37964593`** on
+> **2026-05-23**. They predate the v2026.6.8, v2026.6.9, and v2026.6.18 releases
+> (v2026.6.18 is the latest stable), so the `MISSING:` count has almost certainly
+> moved (per the F49-style per-release paydown gate, it should only ever decrease or
+> hold). **Do not treat the numbers below as current.** Regenerate against today's
+> HEAD before relying on the totals — see
+> [Regenerating this snapshot](#regenerating-this-snapshot) — then refresh the
+> `As of the … capture` line and the counts.
+
+As of the **2026-05-23** capture (commit **`37964593`**):
 
 - Total rows: **135** (76 CLI rows, 38 MCP rows, 21 connector round-trip rows)
 - Total cells: **675** (5 columns × 135 rows)
@@ -68,13 +78,40 @@ Generated against repo commit **`37964593`** on **2026-05-23**.
 - **MISSING: 209** (31.0%)
 - **EXEMPT: 238** (35.3%)
 
-The 31% `MISSING:` rate is the honest baseline at Phase 1 landing. The high `EXEMPT:`
+The 31% `MISSING:` rate was the honest baseline at Phase 1 landing. The high `EXEMPT:`
 rate reflects the cell-by-cell discipline of refusing to demand a test where no
 contract is owed (e.g. error paths covered at the integration outcome layer do not
 also owe a contract-layer test; tuning-knob flags like `--limit` do not owe an E2E).
 Phase 3 paydown work brings the `MISSING:` count down by authoring the missing tests,
 prioritising operator-visible capabilities first (CLI flag variants, MCP input shapes,
 connector round-trips).
+
+## Regenerating this snapshot
+
+This matrix is a per-release paydown artefact: the `MISSING:` cell count must
+monotonically decrease per release tag (or hold at zero), mirroring F49's
+per-file-baseline paydown shape. Regenerate it against current HEAD so the totals and
+per-cell pins reflect today's test surface, then update the `Generated against` line
+and the [Honest snapshot](#honest-snapshot) counts:
+
+1. Re-enumerate the rows against the live surfaces — every entry in
+   `kairix/cli.py:COMMANDS` × meaningful flag combos (CLI rows), every `@server.tool()`
+   in `kairix/agents/mcp/server.py` plus the modular tools under
+   `kairix/agents/mcp/tools/` (MCP rows), and every shipped connector × reader path
+   (connector round-trip rows).
+2. For each cell, re-resolve the pin / `MISSING:` / `EXEMPT:` state against the current
+   `tests/` tree.
+3. Recount Pinned / `MISSING:` / `EXEMPT:`, update the snapshot block — the
+   `As of the … capture` line, the capture commit, and the
+   Pinned / `MISSING:` / `EXEMPT:` totals — and drop the pending-regeneration
+   callout once the body matches HEAD.
+
+> **Regeneration target.** The current default-branch HEAD as of this edit is
+> commit **`fe1d98de`** (latest stable release **v2026.6.18**). Regenerate the body
+> against that HEAD (or newer) and update both the [Honest snapshot](#honest-snapshot)
+> capture line and the counts to match. This edit refreshes only the
+> stale-snapshot flag and this pointer; the per-cell pins and totals below remain the
+> 2026-05-23 capture and have NOT been re-measured.
 
 ## CLI subcommands
 

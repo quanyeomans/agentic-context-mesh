@@ -1,9 +1,21 @@
 # Capability Recommender — MVP Design (Spec A)
 
-**Status:** Design (awaiting review)
+**Status:** Shipped (v2026.6.18 line) — PRs [#569](https://github.com/three-cubes/kairix/pull/569)
+(MVP) + [#570](https://github.com/three-cubes/kairix/pull/570) (review follow-ups),
+both MERGED 2026-06-20. The shipped surface: `kairix/use_cases/recommend.py`
+(`run_recommend` + `main`), `kairix/knowledge/capabilities/builder.py`
+(`CapabilityCatalogueBuilder` + `build_capability_corpus`), the
+`recommend_capabilities` MCP tool + `tool_recommend` adapter
+(`kairix/agents/mcp/server.py`), the `kairix recommend` CLI subcommand
+(`kairix/cli.py`), the `skills` connector (`kairix/connectors/skills/`), the
+gold eval set (`kairix/data/suites/recommender.yaml`), and the `recommender` +
+`connector_skills` flags (`kairix/core/features/registry.py`). This document is
+retained as the design substrate Spec B builds on; the code sections below are
+described in the original design tense and are accurate to the shipped surface
+except where a "Shipped as:" note records a deviation.
 **Scope:** Unified capability corpus + hot-path recommender. The cold-path
-affordance-improvement loop is Spec B (`affordance-loop-design.md`), built after
-this ships.
+affordance-improvement loop is Spec B (`affordance-loop-design.md`, not yet
+authored), built on top of this.
 
 ---
 
@@ -84,6 +96,11 @@ version) travels via the per-source metadata channel
 ready-to-call invocation without re-parsing the content.
 
 ### 3.3 Feeder 1 — kairix's own surface (`CapabilityCatalogueBuilder`)
+
+> **Shipped as:** `kairix/knowledge/capabilities/builder.py`
+> (`CapabilityCatalogueBuilder` + `build_capability_corpus` +
+> `build_capability_chunk`). The §11 file map's placeholder
+> `kairix/core/<…>/capability_catalogue.py` was resolved to this path.
 
 A plain builder (not a connector — it introspects the running process, not an
 external source). It unifies the three in-repo capability surfaces:
@@ -217,7 +234,8 @@ search pipeline). No LLM call.
 `correlation_id` is included now so the data shape is stable; Spec B builds the
 `recommend_log` table + outcome capture + offline analysis keyed on it. Spec A
 does **not** create the log table (no reader exists yet — that's deliberately a
-Spec B concern so the schema reflects this real output shape).
+Spec B concern so the schema reflects this real output shape). It is the join
+key Spec B uses to correlate against the eval-feedback-loop EPIC #465 call-logs.
 
 ### 4.2 Adapters (one use case, two thin adapters)
 
@@ -317,7 +335,8 @@ fixtures using generic names — F32). No real `~/.claude` reads in tests.
 - The `recommend_log` table, the `recommend_feedback` MCP tool, and the outcome
   signal (`invoked` / `useful`).
 - The offline LLM analysis job and the `affordance-report` surface.
-- Correlation with EPIC #464's downstream call-logs.
+- Correlation with the eval-feedback-loop EPIC #465's downstream call-logs
+  (#465 and its layers #538–#542 have since shipped; Spec B is the consumer).
 
 Spec A only emits the stable output shape (incl. `correlation_id`) those build
 on.
@@ -340,14 +359,14 @@ on.
 |---|---|---|
 | `kairix/connectors/skills/connector.py` | Feeder 2 — walk `~/.claude/**`, parse frontmatter, dedup, degrade | new |
 | `kairix/connectors/skills/{__init__.py,fs.py,render.py,py.typed,README.md,DEPENDENCIES.md}` | connector package (Obsidian-clone shape) | new |
-| `kairix/core/<…>/capability_catalogue.py` | Feeder 1 — `CapabilityCatalogueBuilder` + `build_capability_corpus` | new |
+| `kairix/knowledge/capabilities/builder.py` | Feeder 1 — `CapabilityCatalogueBuilder` + `build_capability_corpus` | new |
 | `kairix/agents/mcp/server.py` | extend `_cap(...)` with `when_to_use`; add `tool_recommend` + `recommend_capabilities`; add recommender `_cap` row | modify |
 | `kairix/use_cases/recommend.py` | `run_recommend`, dataclasses, envelope | new |
 | `kairix/cli.py` | `recommend` in `COMMANDS` + docstring | modify |
 | `pyproject.toml` | `kairix.connectors` entry-point `skills` | modify |
-| `kairix/core/feature_flags.py` (REGISTRY) | `recommender`, `connector_skills` flags | modify |
+| `kairix/core/features/registry.py` (REGISTRY) | `recommender`, `connector_skills` flags | modify |
 | `kairix/data/suites/recommender.yaml` | gold task→capability eval set | new |
 | `tests/bdd/features/*`, `tests/integration/*`, `tests/e2e/*`, `tests/contracts/*` | per §8 | new |
 
-(Exact module home for `capability_catalogue.py` and the flag REGISTRY path are
-pinned in the implementation plan against the live tree.)
+(As shipped: Feeder 1 lives at `kairix/knowledge/capabilities/builder.py` and the
+flag REGISTRY at `kairix/core/features/registry.py`.)

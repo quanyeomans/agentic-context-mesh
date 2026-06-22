@@ -345,7 +345,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.12'
-        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           files: coverage.xml
           flags: unit
@@ -401,7 +401,7 @@ jobs:
         with:
           name: coverage-data
 
-      - uses: py-cov-action/python-coverage-comment-action@b5c9b343bf45af753a29486e9a793d9baf246936 # v3
+      - uses: py-cov-action/python-coverage-comment-action@78c938b53befa55f59091c6a5b8cf12f38ad6484 # v3
         with:
           GITHUB_TOKEN: ${{ github.token }}
           MINIMUM_GREEN: 80
@@ -497,7 +497,7 @@ jobs:
           retention-days: 7
 
       - name: Upload integration coverage to Codecov
-        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           files: coverage-integration.xml
           flags: integration

@@ -2,9 +2,9 @@
 
 `kairix eval` generates benchmark suites, enriches existing suites, monitors retrieval quality, and reports on trends — all automated with gpt-4o-mini as relevance judge.
 
-For the methodology and research basis, see [evaluation-methodology.md](evaluation-methodology.md).
+For the methodology and research basis, see [evaluation-methodology.md](../evaluation/evaluation-methodology.md).
 
-> **Current baseline (v2026.4.27):** weighted 0.8171, NDCG@10 0.8385.
+> **Standing baseline (v2026.6.9 measurement):** weighted-total 0.808 · NDCG@10 0.884 · Hit@5 0.913 on the 242-case `reflib` suite. This is the latest published full sweep (no newer full sweep has been run against v2026.6.18). See [EVALUATION.md](../evaluation/EVALUATION.md) for the per-category breakdown and methodology — the headline figures are single-sourced there.
 
 ---
 
@@ -19,6 +19,8 @@ For the methodology and research basis, see [evaluation-methodology.md](evaluati
 ---
 
 ## Quickstart: Generate Your First Suite
+
+> **Where suites live:** the shipped reference suites (`example.yaml`, `reflib-gold-v3.yaml`, `per-type-canary-suite.yaml`, …) ship packaged inside the wheel at `kairix/data/suites/` — there is no top-level `suites/` directory in an install. The `--output suites/…` paths below are just an example user-chosen output directory; generate into wherever you keep your own suites. The eval and benchmark CLIs resolve the deployment's index automatically when you omit `--db` ([#552](https://github.com/three-cubes/kairix/issues/552)).
 
 ```bash
 # Generate 100 cases from your document corpus

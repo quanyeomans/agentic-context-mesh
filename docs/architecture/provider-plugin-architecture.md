@@ -1,16 +1,22 @@
 # Provider plugin architecture — three-layer split
 
-> **Status**: proposed (awaiting orchestrator-led implementation). Names
-> the architectural split that separates kairix's retrieval / memory /
-> worker domain from the universal endpoint concerns (pool, retry,
-> coalesce, cache) and the per-provider plugins (Azure Foundry / OpenAI /
-> Bedrock / Ollama / LiteLLM-proxy / Anthropic). Settles plugin discovery
-> on Python entry points and locks the separation with four new fitness
-> functions (F26–F29). Performance instrumentation stays singular —
-> `kairix/quality/probe/` measures every layer through one uniform
-> timing contract, runnable both as a PVT release gate and as a
-> post-deploy `kairix probe-config` health check end users invoke
-> against their own setup.
+> **Status**: Implemented. The three-layer split shipped and is in
+> production: `kairix/core/`, `kairix/transport/` (auth / pool / coalesce
+> / cache / retry / timeout / telemetry + `embed_service.py`), and
+> `kairix/providers/` (all seven plugins — azure_foundry, azure_legacy,
+> openai, bedrock, ollama, litellm_proxy, anthropic — registered on the
+> `kairix.providers` entry-point group in `pyproject.toml`). The separation
+> is mechanically locked by fitness functions **F26–F29** (live in
+> `scripts/checks/_rule_catalogue.py`). Plugin discovery resolves on Python
+> entry points via `EntryPointRegistry` in `kairix/providers/_base.py`.
+> Performance instrumentation stays singular — `kairix/quality/probe/`
+> measures every layer through one uniform timing contract, runnable both
+> as a PVT release gate and as the post-deploy `kairix probe-config`
+> health check (`kairix/quality/probe/config_cli.py`) end users invoke
+> against their own setup. This document names the architectural split that
+> separates kairix's retrieval / memory / worker domain from the universal
+> endpoint concerns (pool, retry, coalesce, cache) and the per-provider
+> plugins.
 
 ## Context
 
@@ -158,8 +164,10 @@ def get_provider(name: str) -> Provider:
 
 This is sub-10 ms on Python 3.10+ for name-filtered lookups, costs
 nothing for unused providers, and surfaces a typed
-`ProviderNotRegistered(name, available=[...])` error when an operator
-typo's the env var.
+`ProviderNotRegistered(name, available=[...])` error when the configured
+`provider:` field is unset or names a missing plugin. The shipped
+implementation lives in `kairix/providers/_base.py` (`EntryPointRegistry`
++ `get_provider`).
 
 The closest production analogue is **datasette's plugin model**; we
 explicitly reject the LangChain partner-package style (direct module
@@ -183,9 +191,9 @@ row, not a copy-paste duplication. F28 (below) makes this mechanical.
 
 `kairix/quality/probe/` stays where it is. It does NOT know which
 provider is loaded; it measures through one uniform timing hook
-exposed by every layer. Today that hook is the
+exposed by every layer. That hook started as the
 `timings: dict[str, float]` kwarg on `VectorSearchBackend.search`;
-this ADR generalises it.
+this split generalised it across the transport and provider layers.
 
 **Uniform stage keys** the probe collects:
 
@@ -258,30 +266,33 @@ From the code survey (sub-agent `a0a453815356cd66b`):
    its `AzureEmbedProvider`/`OpenAIEmbedProvider` impls retire; their
    logic merges into the per-provider plugin's `embed_batch` method.
 
-## Migration plan
+## Migration plan (delivered)
 
-Phased, each phase a separate worktree-dispatched wave landing as
-green-on-`main` cherry-picks.
+The phased rollout below has landed. Every wave shipped as
+worktree-dispatched, green-on-`main` cherry-picks; the table is retained
+as the delivery record.
 
-| Wave | Work items | Parallel? | Depends on |
-|---|---|---|---|
-| **0** | This ADR | foreground | nothing |
-| **1 (scaffold)** | SK-1 transport/ skeleton + shims · SK-2 providers/ skeleton + Protocol · SK-3 transport BDD scenarios · SK-4 provider BDD scenarios · SK-5 E2E journey BDD · SK-6 F26–F29 fitness checks · SK-7 probe-config BDD + JSON schema | yes (7 worktrees) | ADR |
-| **2 (extract)** | IM-1 client_pool with TLS-handshake fix · IM-2 coalescer move · IM-3 cache move · IM-4 azure_foundry plugin from `_azure.py` · IM-5 openai plugin (proves the contract) · IM-6 transport step impls · IM-7 provider step impls · IM-8 E2E step impls · IM-9 `kairix probe-config` CLI | yes (9 worktrees) | Wave 1 |
-| **3 (verify)** | Deploy + probe at conc=10; measure embed_http with TLS-handshake fix in place; confirm provider switch works; CHANGELOG entry; runbook for end-user probe-config | sequential | Wave 2 |
-| **4 (follow-up #247)** | bedrock/ ollama/ litellm_proxy/ anthropic/ plugins | yes (N worktrees) | Wave 3 |
+| Wave | Work items | Status |
+|---|---|---|
+| **0** | This ADR | Shipped |
+| **1 (scaffold)** | SK-1 transport/ skeleton + shims · SK-2 providers/ skeleton + Protocol · SK-3 transport BDD scenarios · SK-4 provider BDD scenarios · SK-5 E2E journey BDD · SK-6 F26–F29 fitness checks · SK-7 probe-config BDD + JSON schema | Shipped |
+| **2 (extract)** | IM-1 client_pool with TLS-handshake fix · IM-2 coalescer move · IM-3 cache move · IM-4 azure_foundry plugin from `_azure.py` · IM-5 openai plugin (proves the contract) · IM-6 transport step impls · IM-7 provider step impls · IM-8 E2E step impls · IM-9 `kairix probe-config` CLI | Shipped |
+| **3 (verify)** | Deploy + probe at conc=10; measure embed_http with TLS-handshake fix in place; confirm provider switch works; CHANGELOG entry; runbook for end-user probe-config | Shipped |
+| **4 (follow-up #247)** | bedrock/ ollama/ litellm_proxy/ anthropic/ plugins | Shipped — all four plugins present under `kairix/providers/` and registered on the entry-point group |
 
-Wave 1 + Wave 2 are the heavy parallelism. Wave 3 is the measurement
-gate that proves the architecture didn't regress real workloads.
-Wave 4 is additive — each new provider lands as its own commit
-against the now-stable plugin contract.
+Wave 1 + Wave 2 carried the heavy parallelism. Wave 3 was the
+measurement gate that proved the architecture didn't regress real
+workloads. Wave 4 was additive — each new provider landed as its own
+commit against the now-stable plugin contract.
 
-## Open questions
+## Forward-looking items
 
-None blocking. Items deferred to Wave 4:
+Not part of the shipped split; carried as additive follow-ups:
 
 - Per-provider rate-limit awareness (each plugin reports a recommended
-  pool size from its known SLA — feeds the `probe-config` tuner).
+  pool size from its known SLA — feeds the `probe-config` tuner). F64
+  already mandates a 429/Retry-After test for any plugin importing an
+  HTTP client.
 - Streaming chat responses (current Provider contract returns `str`;
   AsyncIterator is a v2 addition).
 - Multi-region failover (a Provider could front N endpoints; out of

@@ -18,18 +18,20 @@ Kairix is the alternative: a private, on-infrastructure retrieval layer that bot
 
 ---
 
-## Current state — v2026.6.9 (released 2026-06-09)
+## Current state — v2026.6.18 (released 2026-06-18)
 
-**Weighted total 0.808 · NDCG@10 0.884 · Hit@5 0.913** measured on the production deployment against the 242-case `reflib` suite (entity / temporal / multi_hop / conceptual / procedural / recall categories). The Phase B expansion shipped in this release (#453) lifted the entity category from a 1-case measurement to 15 cases — the headline entity-category NDCG of 0.800 is now a meaningful figure rather than a single-question artefact.
+**Standing retrieval baseline: weighted total 0.808 · NDCG@10 0.884 · Hit@5 0.913 · MRR@10 0.831**, measured on the production deployment against the 242-case `reflib` suite (recall / temporal / entity / conceptual / multi_hop / procedural categories). This is the v2026.6.9 measurement — the standing baseline carried forward, as no newer full sweep has been published. The Phase B expansion (#453) lifted the entity category from a 1-case measurement to 15 cases, so the entity-category NDCG of 0.800 is a meaningful figure rather than a single-question artefact.
 
 The benchmark uses strict NDCG@10 scoring with graded relevance (0/1/2). See [EVALUATION.md](EVALUATION.md) for methodology and scoring interpretation.
 
-**This release's headline themes:**
+**v2026.6.18 headline — "Set up kairix in your browser":**
 
-1. **Entity-aware retrieval surface** (ADR-036) — synthetic `entity-summaries` collection that projects Neo4j entity descriptions into first-pass BM25 + vector search. Default OFF; activates via `entity_summary_indexing_enabled: true` per the [cutover runbook](../operations/runbooks/entity-summary-cutover.md). Production VM cutover landed 2026-06-09; soak-validation in progress.
-2. **Retrieval-quality knobs end-to-end** — source-tier ranking (#432), canonical-filename allowlist + per-intent overrides, content-quality boost (#458), fact-layer floor + cross-layer dedup (#455), canonical entity seeding (#431).
-3. **Operator confidence wave** — MCP warm-state self-heal (#425), prep envelope consistency (#433), contradict scoring honesty (#434), CLI snippet-width control (#385).
-4. **Benchmark realism** — 42 new operator-curated entity/temporal/multi-hop queries grounded in shipped reference content (#453).
+1. **Browser setup wizard** — a guided in-browser flow walks a new operator from a fresh install to a working knowledge store: provider configuration, connector selection, and a first index, without hand-editing YAML.
+2. **Sign-in for connectors** — OAuth sign-in for Slack, GitHub, and Google so operators connect a source by signing in rather than pasting API keys.
+3. **In-product usage guide** — the agent usage guide ships inside the image and is reachable in-product, so agents get guidance instead of an error envelope (closes the production `UsageGuideNotFound` gap, #466).
+4. **Agent memory write** — agents can persist a memory directly (`kairix remember` / `memory_write`), saving a dated markdown note that is indexed for BM25 retrieval immediately.
+
+Earlier in this release line, the eval-feedback loop (EPIC #465) and the capability/skill recommender (`kairix recommend`) also shipped. See the [Recently shipped](#recently-shipped) section.
 
 | Capability | Status | Notes |
 |---|---|---|
@@ -64,16 +66,21 @@ The benchmark uses strict NDCG@10 scoring with graded relevance (0/1/2). See [EV
 | Content-quality boost | ✅ Shipped v2026.6.9 | length / structure / recency signals; opt-in via config |
 | Canonical entity seeding | ✅ Shipped v2026.6.9 | `canonical_entities:` YAML block + worker-boot seeder |
 | MCP warm-state self-heal | ✅ Shipped v2026.6.9 | Detects in-process vs persisted state divergence + auto-recovers |
+| Browser setup wizard | ✅ Shipped v2026.6.18 | Guided in-browser flow: provider config → connector selection → first index, no YAML hand-editing |
+| Connector sign-in (OAuth) | ✅ Shipped v2026.6.18 | OAuth sign-in for Slack, GitHub, Google — connect a source by signing in, not pasting keys |
+| In-product usage guide | ✅ Shipped v2026.6.18 | `kairix usage-guide` CLI + in-product agent guide shipped in the image (#466) |
+| Agent memory write | ✅ Shipped v2026.6.18 | `kairix remember` / `memory_write` — dated markdown note, immediate BM25 index |
+| Capability / skill recommender | ✅ Shipped | `kairix recommend` — ranks the kairix tool or local skill that fits a described task (PR #569/#570) |
+| Per-call observability | ✅ Shipped | `kairix mcp-calls` — per-tool/agent/intent latency + outcome analytics over `mcp_call_log` (#465 Layer 2/5) |
+| Agent-feedback eval loop | ✅ Shipped | Real failed queries → proposed eval cases → release-gate integration (EPIC [#465](https://github.com/three-cubes/kairix/issues/465), Layers [#538](https://github.com/three-cubes/kairix/issues/538)–[#542](https://github.com/three-cubes/kairix/issues/542)) |
 | Incremental file watcher | 🔲 Planned | `watchfiles`-based daemon; sub-60s document store sync latency |
-| Observability dashboard | 🟡 In design ([#464](https://github.com/three-cubes/kairix/issues/464) Layer 5) | Per-tool/agent/intent latency + failure analytics over `mcp_call_log` |
-| Agent-feedback eval loop | 🟡 In design ([#464](https://github.com/three-cubes/kairix/issues/464)) | Real failed queries → proposed eval cases → release-gate integration |
 | Multi-user isolation | 🔲 Planned | Per-agent Neo4j namespace, collection-level access control |
 | Streaming search response | 🔲 Planned | Server-sent events for MCP and REST consumers |
 | Webhook / push indexing | 🔲 Planned | HTTP endpoint to trigger incremental embed on external write events |
 | Local/offline embedding | 🔲 Planned | `EmbedProvider` abstraction; Ollama + sentence-transformers adapters |
 | REST API server mode | 🔲 Planned | FastAPI server mode exposing search, entity, and briefing as HTTP endpoints |
 
-**Benchmark category breakdown (242-case `reflib` suite, NDCG@10 — measured on production VM 2026-06-09, pre-flip baseline):**
+**Benchmark category breakdown (242-case `reflib` suite, NDCG@10 — standing baseline, measured on the production VM 2026-06-09; no newer full sweep published):**
 
 | Category | NDCG@10 | n | Weight | Notes |
 |---|---|---|---|---|
@@ -95,7 +102,7 @@ Kairix lets you tune retrieval per collection so each gets the strategy that sui
 
 **The shipped reference library (≈6,000 open-source engineering docs) runs through a standard 200-query benchmark every release.** This is the single most useful number we publish: it shows what kairix actually delivers on a corpus you have access to and can re-run yourself.
 
-Latest sweep (2026-05-08, post eval-pipeline standardisation, against `suites/reflib-gold-v3.yaml`):
+This clean reference-library sweep is a separate upper-bound measurement — distinct from the 242-case production baseline above, not a re-measurement of it. Latest sweep (2026-05-08, post eval-pipeline standardisation, against the packaged `reflib-gold-v3.yaml` suite — suites ship inside the wheel under `kairix/data/suites/`):
 
 | Strategy | What it does | NDCG@10 | Hit@5 | MRR@10 |
 |---|---|---|---|---|
@@ -132,9 +139,9 @@ The reference library is dense, technical, structured, with consistent terminolo
 **How to tune for your own knowledge**
 
 1. Build a small gold suite from your corpus — typically 30–50 questions with the documents you'd want returned. `kairix eval auto-gold` generates a starter suite from your indexed content.
-2. Run a sweep against it: `kairix eval hybrid-sweep --suite suites/your-gold.yaml --collection your-collection`. Takes ~10–15 minutes for 200 queries × 8 configs.
+2. Run a sweep against it: `kairix eval hybrid-sweep --suite your-gold.yaml --collection your-collection` (point `--suite` at your own gold file; the bundled reference suites ship inside the wheel under `kairix/data/suites/`). Takes ~10–15 minutes for 200 queries × 8 configs.
 3. Look at the top config's `weighted_total` and `NDCG@10`. Set the matching `retrieval:` block on that collection in `kairix.config.yaml`.
-4. Re-run periodically. Recent kairix work standardised the eval pipeline (issue [#143](https://github.com/three-cubes/kairix/issues/143)) so the same benchmark machinery, gold-builder, and judge are now used consistently across the reference library, the bundled examples, and your own knowledge — meaning the numbers compare cleanly across releases and across corpora.
+4. Re-run periodically. The eval pipeline is standardised (shipped), so the same benchmark machinery, gold-builder, and judge are used consistently across the reference library, the bundled examples, and your own knowledge — meaning the numbers compare cleanly across releases and across corpora.
 
 The reference-library numbers above are the upper bound for clean, well-curated content. Yours will likely be lower in absolute terms but the *shape* of the sweep (which strategy wins for which content) is the actionable signal.
 
@@ -142,8 +149,12 @@ The reference-library numbers above are the upper bound for clean, well-curated 
 
 ## Recently shipped
 
-Behind default-off feature flags — reversible until each cutover soak validates parity. See [`how-to-upgrade-kairix`](../operations/runbooks/how-to-upgrade-kairix.md) for the operator recipe.
+Newest first. Connector and retrieval cutovers land behind default-off feature flags — reversible until each cutover soak validates parity. See [`how-to-upgrade-kairix`](../operations/runbooks/how-to-upgrade-kairix.md) for the operator recipe.
 
+- **v2026.6.18 — "Set up kairix in your browser."** A guided browser setup wizard takes a new operator from a fresh install to a working knowledge store; OAuth sign-in for Slack, GitHub, and Google replaces pasting API keys; the agent usage guide ships inside the image and is reachable in-product (closes #466); and agents can persist a memory directly via `kairix remember` / `memory_write` (dated markdown note, immediate BM25 index). [Release notes](https://github.com/three-cubes/kairix/releases/tag/v2026.6.18).
+- **Eval-feedback loop (EPIC [#465](https://github.com/three-cubes/kairix/issues/465)).** Every kairix call is instrumented into an enriched `mcp_call_log`, surfaced via `kairix mcp-calls` analytics + failing-queries, clustered into proposed eval cases (`kairix eval generate --from-call-log`), and folded into a per-release gate — so real agent failures become release gates without manual curation. Shipped as five layers ([#542](https://github.com/three-cubes/kairix/issues/542) Layer 1 enrich + `record_quality`, [#538](https://github.com/three-cubes/kairix/issues/538) Layer 2 analytics, [#539](https://github.com/three-cubes/kairix/issues/539) Layer 3 proposer, [#540](https://github.com/three-cubes/kairix/issues/540) Layer 4 release-gate, [#541](https://github.com/three-cubes/kairix/issues/541) Layer 5 dashboard).
+- **Capability / skill recommender** (`kairix recommend`, PR #569/#570) — give it a plain-English task and it ranks the kairix tool or local skill that fits, so agents reach for the right surface first.
+- **CLI / MCP feature parity ([#168](https://github.com/three-cubes/kairix/issues/168)).** Every operation is exposed via both the CLI and the MCP server with uniform UX — shared use cases in `kairix/use_cases/`, with CLI and MCP as thin adapters over the same parameter names, defaults, output shapes, and help text.
 - **v2026.6.9 — Retrieval quality v2 + entity-summary indexing.** The ADR-036 entity-summary indexing surface (Slices A–D: Protocol + projector + worker dispatch + operator surface), source-tier ranking with canonical-filename allowlist + per-intent overrides (#432), content-quality boost knobs (#458), fact-layer score floor + cross-layer dedup (#455), canonical entity seeding at worker boot (#431), MCP warm-state self-heal (#425), CLI search readability + snippet-width tuning (#385), prep envelope consistency (#433), contradict scoring honesty (#434), 42-case Phase B benchmark expansion (#453). [Release notes](https://github.com/three-cubes/kairix/releases/tag/v2026.6.9).
 - **Topology v2 operator-config surface** — declare connectors / credentials / cc_pairs / collections / scope profiles / skills in `kairix.config.yaml` instead of code. Gated by `topology_v2_config`.
 - **SharePoint, Slack, GitHub, and Notion connectors** — each shipped behind its own `connector_<name>` flag with a matching `topology_v2_<name>` per-source-unit Container pilot (per-drive, per-channel, per-repo, per-page-tree).
@@ -152,28 +163,23 @@ Behind default-off feature flags — reversible until each cutover soak validate
 - **Configurable agent-knowledge layout** — `paths.agent_knowledge_dir` + `paths.agent_memory_glob` let operators tell the `agent_knowledge_populated` onboard check where their memory files live and what shape they take.
 - **Streaming bronze** — fetched bytes are extracted in-memory and discarded; `bronze_records` holds metadata only. Disk usage drops ~6000× vs the v2026.5.18 on-disk model. Recovery uses `connector.fetch(item_id)` to re-pull on demand.
 
-Next milestone in this thread is **Wave F (chunker plugins)** — each connector picks its chunker by config rather than baked-in choice. Plus the per-connector cutover soak that promotes each `topology_v2_<name>` flag from introduce → cutover → retire over the next several releases.
+**SharePoint per-drive path filtering.** Operators can now scope a SharePoint drive by include / exclude paths instead of indexing the whole drive (shipped v2026.5.24a4). See [`docs/architecture/sharepoint-path-filtering.md`](../architecture/sharepoint-path-filtering.md).
 
-**KFEAT-022 — guided configuration for connectors.** Three new CLI subcommands per connector (`discover`, `configure`, `status`) so operators (and agents) pick what to index from a plain-English list instead of pasting raw IDs into YAML. Adds pre-ingest volumetric estimates (file count, disk impact, expected ingest time) so a 1 TB SharePoint pick surfaces its cost before the worker starts; adds during-ingest progress so the operator sees when kairix is fully operationalised on the new collection. SharePoint pilot lands first behind `guided_configuration_sharepoint`; Slack / GitHub / Notion inherit the pattern. See [`docs/architecture/guided-configuration.md`](../architecture/guided-configuration.md).
-
-**SharePoint per-drive path filtering.** Operators can now scope a SharePoint drive by include / exclude paths instead of indexing the whole drive (shipped v2026.5.24a4). Prerequisite for KFEAT-022's discovery surface walking one level deeper than drives. See [`docs/architecture/sharepoint-path-filtering.md`](../architecture/sharepoint-path-filtering.md).
+The connector framework continues to evolve — guided per-connector configuration (`discover` / `configure` / `status` with pre-ingest volumetric estimates and during-ingest progress), config-driven chunker selection, and the introduce → cutover → retire soak for each `topology_v2_<name>` flag. The live, detailed sequencing for connector work is tracked in Linear (Core Platform) and on GitHub; see [`docs/architecture/connector-ingestion-architecture.md`](../architecture/connector-ingestion-architecture.md) and [`docs/architecture/guided-configuration.md`](../architecture/guided-configuration.md) for the design.
 
 ---
 
 ## Near-term
 
-- **EPIC: agent-call instrumentation + eval-feedback loop** ([#464](https://github.com/three-cubes/kairix/issues/464)) — *triggered by 2026-06-09 v2026.6.9 dogfood feedback.* Five-layer build: (1) per-call classification + quality-signal capture into `mcp_call_log` (intent, agent_caller, result_shape, outcome_signal, optional agent-self-reported quality 1–5); (2) analytics CLI / MCP surface (`kairix mcp-calls analytics`, `kairix mcp-calls failing-queries`); (3) periodic eval-feedback loop that clusters failed queries → proposes new suite entries via `kairix eval generate --from-call-log`; (4) release-gate integration where auto-generated cases become per-release gates after operator review; (5) optional operator dashboard. The shape mirrors what's worked elsewhere in kairix — F49 mechanises test-discipline paydown, ADR-036 mechanises cutover, this EPIC mechanises retrieval-quality paydown. Real agent failures become release gates without manual curation. Foundation for the "agent-facing operating layer" Shape verdict identified as the next adoption unlock. **Top priority for next session.**
-- **P0 — install the kairix usage guide in production images** ([#465](https://github.com/three-cubes/kairix/issues/465)) — `mcp-kairix__usage_guide` currently returns `UsageGuideNotFound` on production. The guide should ship in the image at build time, not require an operator `kairix onboard guide` step. Agents that call the guide get an error envelope instead of guidance, falling back to hand-written memory rules.
-- **P1 — research MCP tool accepts agent-supplied evidence** ([#466](https://github.com/three-cubes/kairix/issues/466)) — `tool_research` today synthesises from vault only. Add an `additional_evidence: list[{source, content, retrieved_at}]` parameter so agents can hand external context (web fetches, current conversation transcript) to research for combined synthesis. Closest existing surface to the "Researcher Agent" pattern; needs this to be useful as the agent-adoption layer.
-- **P2 — contradict envelope refinement** ([#467](https://github.com/three-cubes/kairix/issues/467)) — separate `contradicts` / `unsupported` / `not_found` categories with per-category confidence; `has_contradictions` only fires on active disagreement. Refines closed #434.
-- **P2 — canonical entity consistency for self** ([#468](https://github.com/three-cubes/kairix/issues/468)) — `facts_about('Kairix')` returns nothing despite `entity_summary_indexing_enabled=true`. Ship a default `canonical_entities:` seed that includes Kairix itself, OR have `facts_about` fall back to entity-summaries when no canonical match.
-- **P1 — latency tail investigation** ([#436](https://github.com/three-cubes/kairix/issues/436)) — production agent measured p95 ~10s at concurrency 2 (vs. 640ms baseline). Investigate vector / BM25 / rerank hotspots. The reliability story is solid now; performance is the next blocker for "Kairix first, every task" adoption.
-- **CLI / MCP feature parity** ([#168](https://github.com/three-cubes/kairix/issues/168)) — every kairix feature exposed via both the CLI and the MCP server with uniform UX. One use case per operation in `kairix/use_cases/`; CLI and MCP become thin adapters with shared parameter names, defaults, output shapes, and help text. Closes the timeline code-path divergence ([#163](https://github.com/three-cubes/kairix/issues/163)) by collapsing it onto the same use case both surfaces consume; subsumes the MCP error envelope shape gap ([#165](https://github.com/three-cubes/kairix/issues/165)) by pushing error-envelope construction into the use case. 8 surface-parity gaps identified (entity suggest/validate missing on MCP; entity get missing on CLI; prep, research, brief, usage_guide each missing on one side). Phased: Phase 1 timeline (template + #163 fix), Phase 2 UX parity audit on already-converged tools, Phase 3 fill missing surfaces in operator-priority order, Phase 4 uniformity polish + help-text single source of truth. See [cli-mcp-feature-parity.md](../architecture/cli-mcp-feature-parity.md). **Targeted for next sprint.**
-- **Eval-module rectification** ([#143](https://github.com/three-cubes/kairix/issues/143)) — fix accumulated structural debt across `kairix/quality/eval/`: 6 silent bugs (4 silently-skipped tests, procedural-pattern filter applied to titles, inverted credential-merge logic, DB-leak in gold_builder), 2 BLOCKER S2083 vulnerabilities + prompt-injection vectors, 11+ `*_fn=None` test-substitution kwargs (eliminated via `LLMJudge` / `QueryGenerator` / `Retriever` / `ChatBackend` protocols + fakes + DI), `_call_llm` private-symbol cross-module import, raw-SQL FTS access in gold_builder (moved onto `DocumentRepository`), missing BDD + integration coverage for the gold-builder / judge / generator pipelines. `generate.py` (876 lines) split into 3 modules. Phased: Phase 0 bug fixes, Phase 0b security pass, Phase 1 protocols + fakes (foundation), Phase 2a owner-led judge refactor, Phase 2b parallel agent fan-out (file-isolated: sweep, gold_builder, generate), Phase 3 cli.py integration + deprecated-kwarg removal, Phase 4 VM deploy, Phase 5 reference-library benchmark validation against v2026.4.27 baseline (R10 0.8171, NDCG@10 0.8385). See [eval-module-refactor.md](../architecture/eval-module-refactor.md).
-- **Configurable default search scope** — operators control which collections participate in default search scopes from `kairix.config.yaml` via a per-collection `in_default: bool` flag, replacing the hardcoded `_RESERVED_COLLECTIONS = {"reference-library"}` carve-out. Includes a `DefaultCollectionResolver` refactor that consolidates today's 5-branch elif chain into a `match` dispatch with predicates owned by `CollectionsConfig` / `AgentDef` rather than the resolver. **Phase 2** (composable named scopes — `scopes.research`, `scopes.with-history`) is design-tracked but uncommitted; held until a second concrete use case lands. **Phase 3** lifts the parallel `reference-library` retrieval-config hardcode in `config_loader.py:384` into per-collection `retrieval:` overrides. See [configurable-default-scope.md](../architecture/configurable-default-scope.md).
+The live, prioritised plan is tracked in Linear (Core Platform) and on GitHub Issues. The items below are the public summary of what's next; for the detailed sequencing follow the linked issues.
+
+- **Latency tail investigation** ([#436](https://github.com/three-cubes/kairix/issues/436)) — post-warm search p95 (~640ms) exceeds the 500ms benchmark threshold. Investigate the BM25 / vector / rerank dispatch hot path. The reliability story is solid; latency is the next blocker for "kairix first, every task" adoption.
+- **Canonical entity consistency for self** ([#467](https://github.com/three-cubes/kairix/issues/467)) — `facts_about('Kairix')` returns nothing despite `entity_summary_indexing_enabled=true`. Ship a default `canonical_entities:` seed that includes Kairix itself, or have `facts_about` fall back to entity-summaries when no canonical match exists.
+- **Contradict tool category refinement** ([#468](https://github.com/three-cubes/kairix/issues/468)) — separate `contradiction` / `unsupported` / `not found` categories with per-category confidence, so the overstatement signal stops firing on the mere absence of evidence. Refines closed #434.
+- **Configurable default search scope** — operators control which collections participate in default search scopes from `kairix.config.yaml` via a per-collection `in_default: bool` flag, replacing the hardcoded `_RESERVED_COLLECTIONS = {"reference-library"}` carve-out. Includes a `DefaultCollectionResolver` refactor that consolidates today's 5-branch elif chain into a `match` dispatch with predicates owned by `CollectionsConfig` / `AgentDef`. Composable named scopes (`scopes.research`, `scopes.with-history`) and per-collection `retrieval:` overrides are design-tracked. See [configurable-default-scope.md](../architecture/configurable-default-scope.md).
 - **Pre-release container registry** — CI builds and pushes alpha Docker images to GHCR on green `main` builds (`ghcr.io/three-cubes/kairix:2026.5.1a1`). VM deploys via `docker compose pull` instead of building from source. Tests the exact same image end users will get. Stable tags pushed on merge to `main`.
 - **File watcher** — `watchfiles`-based daemon replacing the 60-second embed cron. Document store changes embedded within seconds of write, reducing lag for session-prep queries against recently-added content.
-- **Observability dashboard** — structured JSON log output (`LOG_LEVEL=json`) parsed by a lightweight dashboard. Per-query latency, intent distribution, entity hit rate, RRF score distributions surfaced without third-party tooling.
+- **Structured-log observability** — structured JSON log output (`LOG_LEVEL=json`) parsed by a lightweight dashboard for per-query latency, intent distribution, entity hit rate, and RRF score distributions without third-party tooling. Complements the shipped `kairix mcp-calls` per-call analytics over `mcp_call_log`.
 - **Local/offline embedding** — `EmbedProvider` abstraction; Ollama and sentence-transformers adapters (removes Azure OpenAI as hard dependency for non-Azure deployments).
 - **REST API** — FastAPI server mode exposing search, entity, and briefing as local HTTP endpoints.
 

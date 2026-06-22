@@ -1,10 +1,43 @@
 # Kairix Management Console — JTBD, Customer Success, and First-20-Minute Onboarding
 
-**Status:** Draft v0.2 (2026-06-01) — onboarding pattern revised from local-default to provider-first per research review
+**Status:** Partially implemented — the first-run guided onboarding journey (AHA-1) shipped as the web setup wizard; the steady-state console jobs (AHA-4..AHA-7, the multi-page IA) remain forward-looking design.
+**Shipped:** Web setup wizard (Starlette routes under `kairix/platform/setup/web/`; orchestration in `kairix/platform/setup/wizard.py`; cloud-source OAuth in `kairix/platform/setup/source_oauth.py`), gated by the `setup_wizard_web` feature flag, mounted at `/setup` on the MCP transport. Onboarding fixes landed in PR #481 (v2026.6.11 fresh-install wave); the in-wizard capability tour + agent-connect step landed in the v2026.6.18 "Set up kairix in your browser" release.
 **Companion to:** `dashboard-spec.md` (information architecture + entity model + Status home spec)
 **Purpose:** Anchor the dashboard's design in the actual jobs agents + human teams hire kairix to do, define what "value delivered" means for each, and specify the **first 20 minutes** as a guided journey that produces the first "aha" before the operator has had to learn any kairix-specific vocabulary.
 
 The previous spec answered "what does the dashboard look like in steady state?" This spec answers "what does the dashboard do to deliver value, and in what order?"
+
+> **What is realised today vs. still-to-design.** The AHA-1 first-run journey (§5) is **shipped** as the web setup wizard — read §0 below for the as-built flow before treating the §5 step descriptions as a to-build spec. The steady-state console jobs (§6 AHA-4..AHA-7, the §7 multi-page IA, the §10 open decisions) remain **forward-looking**: there is no Status home, no Sources/Agents/Collections pages, and no adoption tray in the product yet. Don't read shipped behaviour as still-to-build, or forward-looking design as shipped.
+
+---
+
+## 0. What shipped (web setup wizard) vs. what remains design
+
+The first-20-minute onboarding journey this doc specified is **shipped** as the **web setup wizard** — a Starlette + Jinja2 + HTMX app under `kairix/platform/setup/web/` (`routes.py`), gated by the `setup_wizard_web` feature flag and mounted at `/setup` on the same port as the MCP transport (no second service). The backend sits behind the `SetupService` Protocol (`kairix/platform/setup/service.py`); cloud-source OAuth lives in `kairix/platform/setup/source_oauth.py`; the multi-step orchestration is in `kairix/platform/setup/wizard.py` (these two sit one level up from `web/`, beside `service.py`).
+
+**As-built wizard flow (7 steps, `_TOTAL_STEPS = 7`):**
+
+`welcome → provider → key → folder → indexing → tour → connect-agent → done`, with a branch for connecting cloud sources over OAuth (`source → source/picker → source/connect → source/wait → source/saved` + the `/setup/oauth/callback` redirect).
+
+| This doc's design | What actually shipped |
+|---|---|
+| §5.4 Step 1 Welcome with an "I want local-only models instead" fork to Ollama | Welcome ships, but with **no local-only fork** — `welcome.html` is a single "Get started" CTA and frames setup as "about 5 minutes". The Ollama-as-secondary-path branch was not built. |
+| §5.4 Step 2 rich provider **card grid** (cost-per-500-docs, get-key deep links, "Anthropic recommended" badge, signup-time annotations) | Provider step ships as a **simple radio grid** of "bring your own key" provider cards (`provider.html`); the cost estimates, get-key deep links, and recommended badge were **not** built. |
+| §5.4 Step 3 paste-key with sub-second validation | **Shipped** — `key.html` + `/setup/key/validate` HTMX validation against the provider. |
+| §5.4 Step 4 folder picker + live scan; Step 5 live indexing progress | **Shipped** — `folder.html` + `/setup/folder/scan`, `indexing.html` + `/setup/indexing/progress` (HTMX-polled). |
+| §5.4 Step 6 "first three generated queries" first-search screen | **Replaced** by the **capability tour** (`tour.html`, #490/#488): five real runs against the just-indexed corpus, each card naming the tool an agent calls — `search`, `prep` (context pack), `memory_write` ("remember"), `brief`, `timeline`. The legacy `/setup/first-search` path stays routable as a redirect. |
+| (not in this doc) connect-an-agent step | **New shipped step** — `connect_agent.html`: shows the MCP URL, per-client connect snippets, and a "verify connection" handshake so the operator wires an MCP agent before finishing. |
+| §6.1 AHA-2 "add a second source" via `kairix connect <kind>` surfaced as a wizard step | **Shipped in-wizard** — the source branch (`source_oauth.py`) runs OAuth for Slack, GitHub, Google Drive, Gmail, and Google Calendar from inside the wizard, with a unit picker for Slack channels / GitHub repos. Sign-in OAuth for Slack/GitHub/Google landed in v2026.6.18. |
+
+**What remains forward-looking (NOT shipped):**
+
+- The `kairix/providers/console_urls.py` deep-link registry (§5.7, §8.2) — not built; the wizard uses bring-your-own-key without per-provider get-key deep links.
+- The cost estimator (§5.4 cost transparency, §8.3) and the per-provider cost cards.
+- The steady-state **Status home** and the §7 multi-page IA (Sources / Agents / Collections pages, the adoption tray).
+- AHA-4 (memory recall surface) through AHA-7 (invite teammate) in §6 — these are console surfaces, and the console past AHA-3 is unbuilt.
+- The §10 stakeholder decisions are largely **settled by what shipped**: provider-first onboarding landed (no local default), the stack is FastAPI/Starlette + Jinja2 + HTMX + Pico.css, and the first-search step became a capability tour rather than three generated queries.
+
+The rest of this doc is the **original design spec**, preserved as the substrate the wizard was built from. Read the §5 step descriptions as design intent, reconciled against the as-built flow in the table above.
 
 ---
 
@@ -95,6 +128,8 @@ The dashboard should not just *enable* these moments — it should **deliberatel
 ---
 
 ## 5. The first-10-minute journey (the AHA-1 path)
+
+> **Shipped.** This journey is realised as the web setup wizard — see §0 for the as-built 7-step flow and where it diverges from the design below (notably: no local-only welcome fork, a simple BYO-key provider grid rather than the rich cost-card grid, and a capability tour in place of the three-generated-queries first-search screen). The §5 text below is the design intent the wizard was built from.
 
 This is the most important journey in the product. Everything else compounds on it.
 
@@ -349,15 +384,19 @@ This registry is the single source of truth for: wizard "Get key" buttons, the p
 
 ## 6. After AHA-1: the customer success checklist
 
+> **Mixed status.** AHA-2 (multi-source) is **partially shipped** — the setup wizard runs in-wizard OAuth for cloud sources (Slack, GitHub, Google Drive, Gmail, Google Calendar; see §0 and `source_oauth.py`), but the cross-source demo-query framing in §6.1 is design intent, not built. AHA-3 through AHA-7 (§6.2–§6.6) are **forward-looking**: they assume a steady-state console (Status home, agent detail, banners, adoption tray) that does not exist yet, so the system-nudge / banner framing below describes target behaviour, not the product today.
+
 Each subsequent AHA has its own short wizard, triggered by either operator action (clicked "add a source") or system nudge (banner on Home: "You've used kairix daily this week. Ready to connect a second source?"). The wizards live behind the Status home from the v1 spec.
 
 ### 6.1 AHA-2 — multi-source retrieval (≤ 60 min after AHA-1)
+
+> **Partially shipped.** The source-connect branch of the setup wizard realises steps 1–3 below: a source picker, in-wizard OAuth for Slack / GitHub / Google Drive / Gmail / Google Calendar (`source_oauth.py`, sign-in OAuth landed v2026.6.18), a unit picker for Slack channels / GitHub repos, and ingest. The cross-source **demo-query** framing in steps 4–5 (the generated query designed to surface a cross-source hit, and the source-attributed result screen) is design intent, not yet built.
 
 **Goal:** Demonstrate retrieval that visibly spans two sources.
 
 **Wizard shape:**
 1. **Pick a second source** — same UI as v1's Add-a-source wizard, but with copy framing: "What other content would you like kairix to find?" Suggest Gmail / Obsidian / SharePoint / Slack / GitHub based on cards.
-2. **Per-source setup** — for cloud sources, hand off to the `kairix connect <kind>` flow (now surfaced as a wizard step, not a separate CLI command). For local sources, same folder picker as before.
+2. **Per-source setup** — for cloud sources, the wizard runs OAuth in-line (now a wizard step, not a separate `kairix connect <kind>` CLI command). For local sources, same folder picker as before.
 3. **Wait for ingest + embed** — same live progress as Step 4 of AHA-1.
 4. **AHA-2 prompt screen** — _generated_ query that's specifically designed to surface a cross-source result:
 
@@ -442,6 +481,8 @@ The retrieval graph is a deferred future-release — for AHA-5 the activity feed
 
 ## 7. How the v1 dashboard spec changes
 
+> **Forward-looking.** The steady-state multi-page console described here and in `dashboard-spec.md` (Status home, Sources / Agents / Collections pages, the adoption tray) is **not shipped**. What shipped is the standalone setup wizard (§0), which owns the viewport during first-run and then hands the operator to their MCP agent — it does not transition into a steady-state console because that console does not exist yet. Treat this section as the integration plan for when the console is built.
+
 The v1 spec (`dashboard-spec.md`) covered the steady-state console. Updates to integrate this doc:
 
 1. **Onboarding mode is a distinct UI state**, not part of the steady-state navigation. The onboarding wizard owns the entire viewport until AHA-1 is hit, then transitions to the v1 Status home.
@@ -487,18 +528,20 @@ This trims ~500 MB from the image and removes the need to support sentence-trans
 
 ## 10. Decision points for stakeholder review
 
-Before this spec is handed to designer + Replit, four decisions still open:
+> **Mostly settled by what shipped.** The wizard build resolved most of these in flight. Decision 1 (provider grid copy) was settled by simplification — the shipped picker is a plain BYO-key radio grid with no recommended badge and no cost cards. Decisions 2–3 (AHA sequence + adoption tray) are **moot until the steady-state console exists**, since the console past AHA-3 is unbuilt. Decision 4 (Ollama card) shipped without a dedicated local-only fork; Ollama is a provider choice, not a separate path.
 
-1. **Confirm "Anthropic recommended for new users."** This positioning shapes the provider-picker grid. Justification: fastest signup, free credit, no Azure/AWS subscription required. Alternatives: "OpenAI recommended" (lowest cost), "no recommendation badge" (let the user decide). The "recommended" badge nudges ~60% of indifferent first-time users (per general dev-tool onboarding research) so the choice matters.
-2. **Confirm the AHA sequence order.** A2→A3→A4 is my recommendation based on value-per-effort, but reasonable people might put memory (A4) before scope (A3). Worth one explicit "yes, this order" before designing each wizard.
-3. **Confirm we surface AHA progress to the operator.** Some products hide their adoption funnel (feels patronising). Others surface it ("you've hit 4 of 7 milestones!"). I'd recommend a subtle, dismissible tray — visible but not pushy.
-4. **Confirm the Ollama (local) card stays in the provider picker.** Including it honours the privacy-required / air-gapped operator. Excluding it makes the picker cleaner and avoids "easy choice for the wrong reasons" risk. I'd recommend keeping it with explicit framing: "Choose this only if you need on-prem operation."
+The original open decisions, for the record:
 
-Closed decisions:
-- ~~North-star time-to-AHA-1~~ → **10 min** (median first-time-key persona)
-- ~~Local embedder default~~ → **No.** Provider-first onboarding; Ollama is one card among many.
-- ~~Stack~~ → FastAPI + Jinja2 + HTMX + Pico.css.
-- ~~Auth~~ → OIDC against operator's existing IdP; no kairix-managed passwords.
+1. **"Anthropic recommended for new users."** — **Not applied.** The shipped provider step is a plain BYO-key grid with no recommended badge and no cost-per-500-docs cards; the rich card grid in §5.4 was simplified away.
+2. **The AHA sequence order.** — **Deferred.** A2→A3→A4 remains the design recommendation; moot until the steady-state console wizards (AHA-3+) are built.
+3. **Surfacing AHA progress to the operator.** — **Deferred.** No adoption tray shipped; the wizard ends at "Finish setup" rather than transitioning into a progress-tracked console.
+4. **The Ollama (local) card.** — **Partially applied.** Ollama is a selectable provider, but there is no "I want local-only" welcome fork and no on-prem framing copy; it is one card among many.
+
+Closed decisions (confirmed by the shipped wizard except where noted):
+- ~~North-star time-to-AHA-1~~ → **10 min** design target; the shipped welcome screen states "about 5 minutes" for the first-run flow.
+- ~~Local embedder default~~ → **No.** Provider-first onboarding; Ollama is one provider choice among many.
+- ~~Stack~~ → **Starlette + Jinja2 + HTMX + Pico.css** (the wizard mounts on the MCP transport's ASGI app rather than a standalone FastAPI service).
+- ~~Auth~~ → the shipped wizard uses an **operator-token grant** (loopback skips the token; non-loopback proves the `kairix-infra-operator-token` secret via header, signed cookie, or one-time tokened URL — see `routes.py`), **not** OIDC. The OIDC-against-IdP decision was for the deferred steady-state console, not this first-run wizard.
 
 ---
 
@@ -506,12 +549,22 @@ Closed decisions:
 
 ### A. Concrete kairix files / surfaces this spec depends on
 
-- `kairix.providers.local` — new (deferred); local sentence-transformers embedder
-- `kairix.connectors.local_folder` — new (deferred); a filesystem connector with no obsidian-specific assumptions
-- `kairix.platform.bootstrap.first_launch` — new (deferred); auto-creates default cc_pair / collection / agent on first folder pick
-- `kairix.platform.sample_queries` — new (deferred); generates 3 starter queries from a corpus
-- `dashboard-spec.md` §7 (Status home) — what users land on after AHA-1
-- `kairix/connect/cli.py` — the existing OAuth flow; the AHA-2 wizard's per-cloud-source step wraps this
+Shipped (what the wizard is built on):
+
+- `kairix/platform/setup/web/routes.py` — **shipped**; the wizard's Starlette routes + Jinja2/HTMX screens, mounted at `/setup` behind the `setup_wizard_web` flag
+- `kairix/platform/setup/wizard.py` — **shipped**; multi-step wizard orchestration
+- `kairix/platform/setup/service.py` — **shipped**; the `SetupService` Protocol every wizard side effect runs behind
+- `kairix/platform/setup/source_oauth.py` — **shipped**; in-wizard OAuth for Slack / GitHub / Google Drive / Gmail / Google Calendar (the AHA-2 per-cloud-source step)
+- `kairix/connect/cli.py` — **shipped**; the standalone `kairix connect` OAuth flow the wizard's source step now reuses below the `SetupService` boundary
+
+Not built as designed / still deferred:
+
+- `kairix.providers.console_urls` (§5.7) — **not built**; the wizard uses bring-your-own-key without per-provider get-key deep links
+- `kairix.providers.local` — deferred; local sentence-transformers embedder (Ollama is a provider choice, not bundled)
+- `kairix.connectors.local_folder` — the folder picker reuses the obsidian-style filesystem walk; no separate `local_folder` connector module
+- `kairix.platform.bootstrap.first_launch` — auto-bootstrap of default cc_pair / collection / agent on first folder pick (deferred shape)
+- `kairix.platform.sample_queries` — superseded: the first-search "three generated queries" screen became the capability tour (`tour.html`), which runs real tool calls rather than generating sample queries
+- `dashboard-spec.md` §7 (Status home) — **forward-looking**; the steady-state console operators would land on after AHA-1 is not built
 
 ### B. Anti-patterns to avoid
 

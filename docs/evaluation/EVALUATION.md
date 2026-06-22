@@ -4,36 +4,40 @@ Kairix is evaluated against a curated real-world benchmark derived from actual a
 
 ---
 
-## Current Performance — v2026.4.27
+## Current Performance — v2026.6.9 measurement (standing baseline)
 
-**R10: 0.8171 · NDCG@10: 0.8385 · Hit@5: 0.9629 · MRR@10: 0.7614**
+**Weighted total: 0.808 · NDCG@10: 0.884 · Hit@5: 0.913 · MRR@10: 0.831**
 
-Evaluated on a 160-query reference library gold suite across six query types.
+This is the standing benchmark — the v2026.6.9 measurement against the 242-case `reflib` production suite. No newer full sweep has been published; the latest release is v2026.6.18.
 
-| Query type | NDCG@10 | What this means |
-|---|---|---|
-| Keyword / proper noun | **0.775** | Version strings, error codes, specific document names resolve accurately via hybrid BM25 + vector |
-| Entity lookups | **0.8626** | Named entities (people, organisations, concepts) surface canonical stub plus related documents; see note below |
-| Procedural queries | **0.8716** | How-to questions and runbook lookups return step-relevant documents ahead of tangentially related content |
-| Temporal queries | **0.7930** | "What happened last week", "decisions in March" route to date-scoped results |
-| Multi-hop queries | **0.721** | Questions spanning multiple entities or topics decompose into sub-queries and fuse results |
-| Semantic queries | **0.842** | Abstract conceptual questions retrieve relevant documents without exact term overlap |
+Evaluated on a 242-case reference library gold suite across six query categories. (The #453 Phase B expansion grew the harder categories — entity to 15, temporal to 20, multi-hop to 15 — which is why temporal now scores well below its old number on the tougher suite.)
 
-A relevant document appears in the top 5 results for **96% of queries**.
+| Query category | NDCG@10 | n | Weight | What this means |
+|---|---|---|---|---|
+| Recall | **0.916** | 54 | 25% | "What happened with X" / find-the-document queries surface the right notes via hybrid BM25 + vector |
+| Temporal | **0.558** | 20 | 20% | "What happened last week", "decisions in March" route to date-scoped results — **weakest category** on the expanded suite |
+| Entity | **0.800** | 15 | 20% | Named entities (people, organisations, concepts) surface canonical stub plus related documents; see note below |
+| Conceptual | **0.917** | 75 | 15% | Abstract conceptual questions retrieve relevant documents without exact term overlap |
+| Multi-hop | **0.724** | 15 | 10% | Questions spanning multiple entities or topics decompose into sub-queries and fuse results |
+| Procedural | **0.977** | 63 | 10% | How-to questions and runbook lookups return step-relevant documents ahead of tangentially related content |
 
-> **Entity NDCG note:** The entity score reflects knowledge base composition at the time of evaluation. Scores are expected to improve as the Neo4j entity graph densifies. Entity NDCG optimisation is on the roadmap.
+A relevant document appears in the top 5 results for **91% of queries** (Hit@5 0.913 on this suite).
+
+> **Temporal note:** Temporal is the weakest category at 0.558 — the #453 Phase B expansion quadrupled the temporal case count (5 → 20) with harder date-scoped queries, and improving temporal retrieval is the active focus. Don't treat it as solved.
+
+> **Entity NDCG note:** Entity-summary indexing (ADR-036, flag `entity_summary_indexing_enabled`) shipped in v2026.6.9 and lifts entity retrieval by indexing each entity's curated summary alongside its documents. Entity scores 0.800 on the 15 expanded entity cases; further gains are expected as the Neo4j entity graph densifies.
 
 ## What good retrieval enables
 
 The benchmark categories map directly to the use cases Kairix is built for:
 
-**Entity-aware preparation** — "Tell me about Acme Corp" or "What has TechCorp been working on" returns the entity's curated stub, relationship context (who works there, what projects are active), and ranked documents. The entity score reflects this working reliably on real queries; score improvements are expected as the Neo4j graph densifies.
+**Entity-aware preparation** — "Tell me about Acme Corp" or "What has TechCorp been working on" returns the entity's curated stub, relationship context (who works there, what projects are active), and ranked documents. Entity scores 0.800 with entity-summary indexing (ADR-036) live; further gains are expected as the Neo4j graph densifies.
 
-**Meeting and session prep** — temporal and multi-hop retrieval together cover queries like "what decisions were made last month about the platform architecture" or "what's the current status of the Azure connector and why was it chosen." These require date-scoped retrieval and multi-document reasoning — both categories score above 0.75.
+**Meeting and session prep** — temporal and multi-hop retrieval together cover queries like "what decisions were made last month about the platform architecture" or "what's the current status of the Azure connector and why was it chosen." These require date-scoped retrieval and multi-document reasoning. Multi-hop holds at 0.724, but temporal is the weakest category at 0.558 on the expanded suite — date-scoped retrieval is the active improvement focus.
 
-**Procedural knowledge** — agents querying runbooks, standards, and how-to guides get step-relevant content ranked above generic background material. The 0.872 procedural score reflects path-weighted re-ranking working as intended.
+**Procedural knowledge** — agents querying runbooks, standards, and how-to guides get step-relevant content ranked above generic background material. The 0.977 procedural score reflects path-weighted re-ranking working as intended — the strongest category on the suite.
 
-**Keyword accuracy** — error codes, version strings, file paths, and proper nouns return precise results. The hybrid search design (BM25 + vector in parallel for all intents) delivers keyword NDCG of 0.848.
+**Recall and conceptual accuracy** — find-the-document recall queries (0.916) and abstract conceptual questions (0.917) both retrieve relevant documents without exact term overlap. The hybrid search design (BM25 + vector in parallel for all intents) drives these top scores.
 
 ---
 
@@ -53,7 +57,7 @@ This design means the benchmark measures retrieval quality rather than path accu
 
 ### Suite format
 
-Cases are defined in `suites/example.yaml`. Each specifies a query, the expected relevant documents by title, and a graded relevance score:
+Cases are defined in the packaged suite `kairix/data/suites/example.yaml` (suites ship inside the wheel; there is no top-level `suites/` directory). Each specifies a query, the expected relevant documents by title, and a graded relevance score:
 
 ```yaml
 - id: E-01
@@ -89,8 +93,10 @@ Suites that pre-date the title-based format use `gold_paths` (filesystem paths) 
 ### Running the benchmark
 
 ```bash
-kairix benchmark run --suite suites/example.yaml
+kairix benchmark run --suite kairix/data/suites/example.yaml
 ```
+
+`kairix benchmark` runs a suite and reports scores (it also folds in the former `kairix probe` / `kairix soak` latency and soak modes). The richer eval surface — gold-suite build, LLM-judge, sweep, monitor, and phase gate — lives under `kairix eval`; that CLI resolves the packaged suite and the deployment's index automatically (`kairix/quality/eval/cli.py`, #552), so you usually don't pass a `--suite` path or DB path by hand.
 
 The CLI output reports both the **weighted total** (category-weighted average used for phase gates) and **NDCG@10** (the standard IR metric, computed per-case and averaged across all `ndcg`-scored cases):
 
@@ -98,13 +104,16 @@ The CLI output reports both the **weighted total** (category-weighted average us
 ============================================================
 BENCHMARK RESULTS
 ============================================================
-Weighted total: 0.8171  [Strong]
-NDCG@10:       0.8385  (Hit@5: 0.9629  MRR@10: 0.7614)
+Weighted total: 0.808   [Strong]
+NDCG@10:       0.884   (Hit@5: 0.913  MRR@10: 0.831)
 
 Category breakdown:
-  temporal     0.7930  (weight 10%, n=8)  ...
-  entity       0.8626  (weight 20%, n=12) ...
-  ...
+  recall       0.916  (weight 25%, n=54)  ...
+  temporal     0.558  (weight 20%, n=20)  ...
+  entity       0.800  (weight 20%, n=15)  ...
+  conceptual   0.917  (weight 15%, n=75)  ...
+  multi_hop    0.724  (weight 10%, n=15)  ...
+  procedural   0.977  (weight 10%, n=63)  ...
 
 Per source type:
   markdown    NDCG@10=0.850  MRR@10=0.830  Hit@10=0.920  (queries=42)
@@ -124,7 +133,9 @@ Boundary-spanning canaries: 12/12 passed (100%)
 
 NDCG@10 is the number to report and track across releases. The weighted total drives phase gate pass/fail.
 
-The public example suite (`suites/example.yaml`) contains anonymised, domain-neutral cases. The real-world scores above were measured against a private vault-specific suite that cannot be published.
+The public example suite (`kairix/data/suites/example.yaml`) contains anonymised, domain-neutral cases. The real-world scores above were measured against the 242-case private `reflib` suite that cannot be published.
+
+> **Clean reference-library upper bound.** A separate clean reference-library sweep (`kairix/data/suites/reflib-gold-v3.yaml`, run 2026-05-08) reports hybrid-RRF **NDCG@10 0.949 / Hit@5 0.965**. That is an upper bound on a purpose-built clean corpus — keep it distinct from the 242-case production baseline above; the two are not the same measurement and should not be conflated.
 
 ---
 
@@ -140,9 +151,9 @@ A query asking about a `.pptx` deck contributes to the `pptx` slice; a query ask
 
 ### Boundary-spanning canary suite
 
-`suites/per-type-canary-suite.yaml` ships 12 canary queries — three per atomic unit type (slide, row, event, message). Each canary's gold answer deliberately crosses two chunks of one atomic unit (a slide pair, a row pair, an event series, a message thread). A chunker regression that splits the atomic unit drops the canary below the NDCG@10 ≥ 0.5 pass threshold and the canary block fails loudly.
+`kairix/data/suites/per-type-canary-suite.yaml` ships 12 canary queries — three per atomic unit type (slide, row, event, message). Each canary's gold answer deliberately crosses two chunks of one atomic unit (a slide pair, a row pair, an event series, a message thread). A chunker regression that splits the atomic unit drops the canary below the NDCG@10 ≥ 0.5 pass threshold and the canary block fails loudly.
 
-To add a new canary: append a case to `suites/per-type-canary-suite.yaml` with `canary: true`, `canary_unit: <slide|row|event|message>`, and gold titles that span two chunks of the relevant atomic unit. The canary aggregator picks up new entries automatically; no code change needed.
+To add a new canary: append a case to `kairix/data/suites/per-type-canary-suite.yaml` with `canary: true`, `canary_unit: <slide|row|event|message>`, and gold titles that span two chunks of the relevant atomic unit. The canary aggregator picks up new entries automatically; no code change needed.
 
 ### Chunk-size distribution telemetry
 
