@@ -1,12 +1,18 @@
 # Feature flag architecture — cutover pattern with mechanical retirement
 
-> **Status**: proposed (awaiting implementation). Establishes feature flags as a first-class architectural component for every cutover that swaps production behaviour — connector swaps, ranker swaps, schema migrations, ingest-pipeline changes. Recurring need; one-off flags per cutover is the antipattern.
+> **Status**: Implemented. Feature flags are a first-class architectural component for every cutover that swaps production behaviour — connector swaps, ranker swaps, schema migrations, ingest-pipeline changes. Recurring need; one-off flags per cutover is the antipattern.
 >
-> Companion to: `connector-ingestion-architecture.md` (Wave 5+ uses this pattern), `test-discipline-hardening.md` (the both-branch-tested requirement extends the F46/F47/F48 principles).
+> **Shipped surface (this spec is the canonical reference for it):**
+> - `kairix/core/features/` — `registry.py` (the populated `REGISTRY` + `FeatureFlag` value object), `resolver.py` (env → config → default resolution), `observability.py` (first-activation logging), `cli.py` (`kairix features status`), `__init__.py` (the `flag(name)` surface). Plus `capability.py` and `topology_v2_status.py` for the diagnostics variants.
+> - `tool_features_status` MCP tool in `kairix/agents/mcp/server.py`.
+> - Fitness functions **F51** (retirement deadline), **F52** (call-site reference integrity), **F53** (operator surface required), and **F54** (both-branch tested) are all live in `scripts/checks/` and enforced per-commit + in CI Stage 0; baselines at `.architecture/baseline/f51-files.txt` / `f52-files.txt` / `f54-files.txt` (F53 is a presence check with no per-file baseline).
+> - Cutover tooling: `scripts/cutover/capture_baseline.py` + `scripts/cutover/diff_baseline.py`.
+>
+> Companion to: `connector-ingestion-architecture.md` (the connector waves use this pattern), `test-discipline-hardening.md` (the both-branch-tested requirement extends the F46/F47/F48 principles).
 
 ## 1. Why this exists
 
-Every wave in this codebase eventually hits a moment where new production behaviour replaces old. IM-6 (Obsidian connector replaces `DocumentScanner`) is the immediate trigger. Wave 5 (M365 + Dex connectors come online) is next. Wave 6 (SharePoint), Wave 7 (vision-enhanced extraction), and every future ranker / chunker / schema-version change will all face the same structural question: *how do we cut over without breaking what's working today?*
+Every wave in this codebase eventually hits a moment where new production behaviour replaces old. The original trigger was IM-6 (Obsidian connector replaces `DocumentScanner`); the connector waves (M365, Dex, SharePoint, and the rest), vision-enhanced extraction, and every ranker / chunker / schema-version change face the same structural question: *how do we cut over without breaking what's working today?*
 
 Hand-rolling a one-off boolean per cutover ("`obsidian_connector_primary: true` in `kairix.config.yaml`") buys the immediate deploy but creates the predictable failure modes:
 
@@ -93,23 +99,25 @@ class FeatureFlag:
     related_spec: str | None = None    # path to spec doc or tracking issue
 ```
 
-The registry is a single Python dict in `registry.py`:
+The registry is a single Python dict in `registry.py`. Example entry shape (the live registry holds the connector / search-pipeline / onboarding flags — read `kairix/core/features/registry.py` for the current set):
 
 ```python
 REGISTRY: dict[str, FeatureFlag] = {
-    "obsidian_connector_primary": FeatureFlag(
-        name="obsidian_connector_primary",
+    "connector_dex_crm": FeatureFlag(
+        name="connector_dex_crm",
         default=False,
-        description="Route document indexing through kairix.connectors.obsidian instead of the legacy DocumentScanner.",
+        description="Enable the Dex CRM connector — pulls Person/Org entity signals from the Dex API into the entity_signals staging table.",
         stage="introduce",
         introduced_in="v2026.5.23",
-        target_retire_in="v2026.7.23",  # 2 months; F51 enforces
+        target_retire_in="v2026.7.23",  # F51 enforces the SCM+6mo ceiling
         owner="connector-framework",
         related_spec="docs/architecture/connector-ingestion-architecture.md",
     ),
-    # ... future flags
+    # ... the rest of the live registry
 }
 ```
+
+> The original running example in this spec — `obsidian_connector_primary`, plus the `topology_v2_*` family — has since completed its lifecycle and been **retired** post-cutover (the gated call sites were inlined to the post-cutover behaviour and the OFF-branch shims removed). It survives in this doc only as an illustration of the introduce → cutover → retire arc; do not expect to find it in `REGISTRY`.
 
 ### 3.3 Consumer surface — `flag(name)`
 
@@ -144,8 +152,8 @@ Operator config example:
 ```yaml
 # kairix.config.yaml
 features:
-  obsidian_connector_primary: true   # dogfood VM opts in for UAT
-  connector_dex_crm: false           # not yet wired
+  connector_dex_crm: true            # production instance opts in for UAT
+  connector_m365_calendar: false     # not yet wired
 ```
 
 ### 3.5 Operator surface
@@ -155,14 +163,14 @@ Two CLI commands + one MCP tool, all exercising the same status envelope so the 
 ```bash
 $ kairix features status
 NAME                              DEFAULT  EFFECTIVE  STAGE       RETIRE-BY
-obsidian_connector_primary        false    true       introduce   v2026.7.23
-connector_dex_crm                 false    false      introduce   v2026.7.23
+connector_dex_crm                 false    true       introduce   v2026.7.23
 connector_m365_email_headers      false    false      introduce   v2026.7.23
+connector_m365_calendar           false    false      introduce   v2026.7.23
 
 $ kairix features status --json
 {
   "flags": [
-    {"name": "obsidian_connector_primary", "default": false, "effective": true, "stage": "introduce", ...},
+    {"name": "connector_dex_crm", "default": false, "effective": true, "stage": "introduce", ...},
     ...
   ]
 }
@@ -195,13 +203,13 @@ Mechanical script: `scripts/cutover/capture_baseline.py --flag <name> --out /tmp
 - **State digest**: per the affected surface (documents table snapshot for ingest flags; usearch index size for embed flags; etc).
 - **Eval scores**: the eval-suite scores that touch the affected surface (`reflib`, `LoCoMo`, whatever the spec entry's `related_spec` says).
 - **Performance**: probe latency P50/P95 against the affected surface.
-- **Sample journey**: 10 canonical queries / workflows the dogfood agents use; capture top-N results.
+- **Sample journey**: 10 canonical queries / workflows the production agents use; capture top-N results.
 
 The script's output is a structured baseline JSON that the post-flip script consumes.
 
 #### Step 2 — Flip the flag
 
-Operator-side change. For dogfood VM: edit `kairix.config.yaml` overlay, restart the worker stack. For registry default change: PR.
+Operator-side change. For the production instance: edit `kairix.config.yaml` overlay, restart the worker stack. For registry default change: PR.
 
 #### Step 3 — Soak window
 
@@ -293,7 +301,7 @@ def test_obsidian_connector_primary_on_full_pipeline(tmp_path):
 
 Action-marked failure per F21: `fix: add tests/bdd/features/feature_flag_<name>.feature with OFF + ON scenarios; add tests/integration/test_feature_flag_<name>.py exercising both branches. next: see docs/architecture/feature-flag-architecture.md §5.`
 
-Baseline at `.architecture/baseline/f54-files.txt`; empty at landing (forward-only — every new flag from now on satisfies both-branch).
+Baseline at `.architecture/baseline/f54-files.txt`. The rule landed forward-only with an empty baseline, and every flag added since satisfies both-branch coverage at landing.
 
 ## 6. The other fitness functions (F51 / F52 / F53)
 
@@ -370,22 +378,22 @@ One operational flag also lands in Wave E: `maintenance_loop` enables the backgr
 
 `extractor_vision_enabled` (vision LLM cost-gated) and `connector_teams_transcripts`. Same shape.
 
-### IM-6 — DocumentScanner retirement, recast
+### IM-6 — DocumentScanner cutover (completed)
 
-The original IM-6 plan ("swap DocumentScanner → Obsidian connector on dogfood VM, prove parity, delete legacy") becomes:
+The original IM-6 plan ("swap DocumentScanner → Obsidian connector on the production instance, prove parity, delete legacy") ran the full lifecycle through this pattern and is **done**. It is preserved here as the worked example of the arc:
 
-1. **Lands now (this PR pattern)**: registry entry for `obsidian_connector_primary` at introduce stage (default off). Worker's `_default_connector_sync` branches on the flag. Legacy DocumentScanner path stays untouched.
-2. **Lands when dogfood VM operator opts in**: `kairix.config.yaml` overlay sets `obsidian_connector_primary: true`. UAT begins. Cutover protocol (§4.2) runs — baseline capture, soak, post-flip eval/perf, hard gates.
-3. **Lands after 4 weeks of validation**: registry PR moves stage to `cutover` and default to `True`. Escape hatch remains.
-4. **Lands after 4+ more weeks of cutover-stage soak with no rollbacks**: registry PR retires the flag and deletes `kairix/core/db/scanner.py`. The legacy scanner is gone.
+1. **Introduce**: registry entry for `obsidian_connector_primary` at introduce stage (default off). The worker branched on the flag; the legacy DocumentScanner path stayed untouched.
+2. **Operator opt-in**: `kairix.config.yaml` overlay set `obsidian_connector_primary: true`. UAT began; the cutover protocol (§4.2) ran — baseline capture, soak, post-flip eval/perf, hard gates.
+3. **Cutover**: registry change moved the stage to `cutover` and default to `True`, escape hatch retained.
+4. **Retire**: with the production worker logging `source='config' effective=True` for the whole `obsidian_connector_primary` + `topology_v2_*` family (task #132), the flags were retired from `REGISTRY` and the gated call sites inlined to the post-cutover behaviour. The flags are gone; the connector path is the only path.
 
-Each transition is reviewable, reversible until step 4, and mechanically gated by F51 + F54.
+Each transition was reviewable, reversible until retirement, and mechanically gated by F51 + F54.
 
 ## 8. CLAUDE.md integration
 
-Three additions:
+All three additions below are live in `CLAUDE.md` today (the §"Cutover patterns" section, the F51–F54 rows in the fitness-function canon, and the docs-resolver row). They are reproduced here as the record of what this spec contributed.
 
-### 8.1 New §"Cutover patterns" section
+### 8.1 §"Cutover patterns" section
 
 ```markdown
 ## Cutover patterns
@@ -410,9 +418,9 @@ min) → post-flip captures → hard gates (state/eval/latency/sample-journey
 deltas) → promote to cutover stage or rollback.
 ```
 
-### 8.2 F51 / F52 / F53 / F54 added to the F-rule canon
+### 8.2 F51 / F52 / F53 / F54 in the F-rule canon
 
-Same shape as the existing F1–F50 enumeration.
+Carried in the F-rule enumeration alongside the rest of the catalogue (see `scripts/checks/_rule_catalogue.py` and `docs/architecture/fitness-functions.md`).
 
 ### 8.3 Docs-resolver row
 
@@ -420,24 +428,22 @@ Same shape as the existing F1–F50 enumeration.
 | Cut over from old behaviour to new behaviour without breaking operators | **[`docs/architecture/feature-flag-architecture.md`](docs/architecture/feature-flag-architecture.md)** — F51..F54, the cutover protocol, both-branch test requirement |
 ```
 
-## 9. Implementation plan
+## 9. Implementation history (delivered)
 
-Sequenced; each step lands as a PR on `main`:
+The pattern shipped in the sequence below; all steps are on `main`:
 
-1. **PR-1: This doc on `main`** (foreground) — the spec everyone references.
-2. **PR-2: `kairix/core/features/` implementation** — registry, resolver, `flag()` surface, observability hook, MCP tool, CLI subcommand. Includes the `FakeFeatureFlagResolver` in `tests/fakes.py`. Empty registry at landing (no flags declared yet).
-3. **PR-3: F51 + F52 + F53 + F54 fitness functions** — four check scripts + wrappers + baselines + unit tests. Empty baselines at landing.
-4. **PR-4: Cutover tooling** — `scripts/cutover/capture_baseline.py` + `scripts/cutover/diff_baseline.py` + the report shape per §4.2. Run-once tested against a synthetic state.
-5. **PR-5: CLAUDE.md edits** (§8) — once PR-1 through PR-4 are on main.
-6. **PR-6: IM-6 recast** — registry entry for `obsidian_connector_primary` + worker branch + BDD + integration + E2E (F54-clean from day one). Dogfood VM cutover follows §4.2 once this is on `main`.
-7. **PR-7+: Wave 5 dispatch** — three connectors, each with their own flag registry entry, BDD, integration, E2E. Dispatchable in parallel worktrees once PRs 1–4 land.
-
-Estimated wall-clock from PR-1 to PR-7 dispatch: 3–4 days with the established subagent playbook.
+1. **This spec** — the canonical reference for the surface.
+2. **`kairix/core/features/` implementation** — registry, resolver, `flag()` surface, observability hook, MCP tool, CLI subcommand, plus the fake resolver in `tests/fakes.py`. Landed with an empty registry; the connector / search-pipeline / onboarding flags were added by their own waves.
+3. **F51 + F52 + F53 + F54 fitness functions** — the four check scripts under `scripts/checks/`, with baselines (`f51-files.txt` / `f52-files.txt` / `f54-files.txt`) and unit tests. They landed forward-only with empty baselines.
+4. **Cutover tooling** — `scripts/cutover/capture_baseline.py` + `scripts/cutover/diff_baseline.py` + the report shape per §4.2.
+5. **CLAUDE.md edits** (§8) — the Cutover patterns section, the F51–F54 canon rows, and the docs-resolver row.
+6. **IM-6 cutover** — the `obsidian_connector_primary` flag ran the full introduce → cutover → retire arc (§7) and is now retired.
+7. **Connector waves** — each connector (Dex CRM, M365 email-headers / calendar, SharePoint, Notion, GitHub, Slack, Linear, skills, Gmail) lands behind its own `connector_<name>` flag with BDD + integration + E2E coverage; see the live `REGISTRY` for the current set and stages.
 
 ## 10. References
 
 - `docs/architecture/connector-ingestion-architecture.md` — wave plan that consumes this pattern
 - `docs/architecture/test-discipline-hardening.md` — F45–F50 + the composition / real-path / new-capability principles that F54 extends
-- `docs/architecture/fitness-functions.md` — F-rule canon; F51–F54 land here in PR-3
+- `docs/architecture/fitness-functions.md` — F-rule canon; F51–F54 are catalogued here
 - Two-scope architecture: per-container scope means one flag set per container; LaunchDarkly-style multi-tenant rollout doesn't apply
 - `feedback_deployed_config_path` memory — config-layering pattern this resolver reuses

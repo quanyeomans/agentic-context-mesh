@@ -10,12 +10,12 @@ The discipline: **post-mortems must name which F-rule catches the defect's class
 |---|---|---|---|---|
 | Bug 1 | Connector cursor stuck on full-resync | 8,783 SharePoint items re-fetched every 15 min | scale + state-management | F62 (multi-tick idempotency test) |
 | Bug 2 | SharePoint 429 dead-lettered every item | Whole drive dead-lettered on rate-limit | failure-injection at HTTP boundary | **F68** (Protocol failure-injection contract — `unavailable` / `times_out` class) AND F64 (external HTTP rate-limit test) |
-| Bug 3 | Unbounded `_prune_orphans` LIMIT | Disk IO saturation at 2.1M-row scale | scale-bound iteration | F63 (LIMIT or rationale on `.fetchall()`) AND **F69** (10⁴-row variant on iteration tests — ADR-024 Bundle D, pending) |
+| Bug 3 | Unbounded `_prune_orphans` LIMIT | Disk IO saturation at 2.1M-row scale | scale-bound iteration | F63 (LIMIT or rationale on `.fetchall()`) AND **F69** (10⁴-row variant on iteration tests — ADR-024 Bundle D, shipped) |
 | [#335](https://github.com/three-cubes/kairix/issues/335) | Embed worker OOM at 1.27M vectors | Worker in 10-min restart loop | scale + resource ceiling | **F69** (10⁴-row variant) AND ADR-019 (cgroup ceilings) AND ADR-023 (vector-index write architecture) |
 | [#334](https://github.com/three-cubes/kairix/issues/334) | Neo4j entity-graph drain never built | 2.3M signals stuck across 4 years | schema-writer symmetry | **F67** (staging-table drain symmetry — landed this session) |
 | [#336](https://github.com/three-cubes/kairix/issues/336) | `documents_media` table never written | Per-extractor analytics blank since Wave 1 | schema-writer symmetry | **F70** (generalised schema-writer symmetry — ADR-024 Bundle B, landed) |
 | #334 / preflight masking | `_check_entity_signals_staging_not_stuck` reported count=1000 regardless of true scale | Operator never saw 2.3M backlog | preflight truthfulness | **F71** (preflight count == ground-truth COUNT(*) — ADR-024 Bundle C, landed) |
-| (SharePoint) | ~5,200 SP items in bronze-but-not-content limbo | Documents fetched + not chunked + not dead-lettered | cross-layer integrity | **F72** `bronze_coverage_parity` invariant (ADR-024 Bundle E, pending) |
+| (SharePoint) | ~5,200 SP items in bronze-but-not-content limbo | Documents fetched + not chunked + not dead-lettered | cross-layer integrity | **F72** `bronze_coverage_parity` invariant (ADR-024 Bundle E, shipped) |
 
 ## F-rule coverage status
 
@@ -28,16 +28,18 @@ The discipline: **post-mortems must name which F-rule catches the defect's class
 | **F68** | Shipped this session (Bundle A) | Protocol failure-injection coverage (Bug 2 — full) |
 | **F70** | Shipped this session (Bundle B) | Schema declared without writer (#336 + #338 + #339 sibling backlog) |
 | **F71** | Shipped this session (Bundle C) | Preflight masking (#334 LIMIT-1000 anti-pattern) |
-| **F72** | In flight (Bundle E) | Cross-layer integrity invariants (~5,200-limbo class) |
-| **F69** | In flight (Bundle D, after E + F) | Scale-bound iteration tests (Bug 3, #335) |
-| Soak tier | In flight (Bundle F) | Behaviour at production-scale fixtures (#335 OOM was unreproducible at fixture scale) |
+| **F72** | Shipped (Bundle E) | Cross-layer integrity invariants (~5,200-limbo class) — `tests/integrity_invariants/test_bronze_coverage_parity.py` + `tests/soak/test_bronze_coverage_parity_at_scale.py` |
+| **F69** | Shipped (Bundle D) | Scale-bound iteration tests (Bug 3, #335) — 10⁴-row variant enforced; soak sibling `tests/soak/test_drain_progress_at_10k.py` |
+| Soak tier | Shipped (Bundle F) | Behaviour at production-scale fixtures (#335 OOM was unreproducible at fixture scale) — `tests/soak/` + `.github/workflows/soak-suite.yml` (nightly `pytest -m soak`) |
 
 ## Proposed F-rules (no current rule covers these classes — escalate when a future defect surfaces)
 
+> Note on numbering: these two classes were sketched here under the placeholder labels "F73"/"F74", but those F-numbers were subsequently assigned to other shipped rules — **F73** is the private-infra-identifier token scanner and **F74** is the StageRunner-only-invocation observability rule (see [`scripts/checks/_rule_catalogue.py`](../../scripts/checks/_rule_catalogue.py)). F-numbers are permanent and never reused, so the classes below stay unnumbered until a real defect triggers adopting them under the next free F-number.
+
 | Proposed | Class | When to propose |
 |---|---|---|
-| F73 — alpha-deploy gate failure-mode classification | The alpha-deploy webhook currently fails on `chunk_date_populated` (a known-stale-data signal) and can't distinguish that from a real deploy regression. New rule: every check in `kairix onboard check` declares whether it's a "deploy blocker" (regression) or a "data quality signal" (operator backlog item). The alpha-deploy gate only blocks on the former. | If alpha gate fires on data-not-code issue more than once after this catalogue lands. |
-| F74 — operator runbook freshness | Runbooks reference specific code paths / files / env vars; when the code shape changes the runbook can rot silently. New rule: every `docs/operations/runbooks/*.md` whose body grep-matches `kairix/...py` or `KAIRIX_*` env var must have at least one mention of those paths still resolvable in the current source tree. | If a runbook is observed to be wrong because the underlying code changed without the runbook being updated. |
+| Alpha-deploy gate failure-mode classification | The alpha-deploy webhook currently fails on `chunk_date_populated` (a known-stale-data signal) and can't distinguish that from a real deploy regression. New rule: every check in `kairix onboard check` declares whether it's a "deploy blocker" (regression) or a "data quality signal" (operator backlog item). The alpha-deploy gate only blocks on the former. | If alpha gate fires on data-not-code issue more than once after this catalogue lands. |
+| Operator runbook freshness | Runbooks reference specific code paths / files / env vars; when the code shape changes the runbook can rot silently. New rule: every `docs/operations/runbooks/*.md` whose body grep-matches `kairix/...py` or `KAIRIX_*` env var must have at least one mention of those paths still resolvable in the current source tree. | If a runbook is observed to be wrong because the underlying code changed without the runbook being updated. |
 
 ## How to add a row when you ship a fix
 

@@ -110,7 +110,7 @@ jobs:
       - name: Open PR against main
         env:
           TAG: ${{ steps.tag.outputs.tag }}
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           branch: bot/reflib-history-${{ env.TAG }}
           base: main
