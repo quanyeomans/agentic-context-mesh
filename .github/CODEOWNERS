@@ -1,27 +1,13 @@
-# CODEOWNERS
-# Each line maps a path pattern to one or more owners (GitHub usernames or teams).
-# The last matching rule takes precedence.
-# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
-
-# Default owner for everything
-* @quanyeomans
-
-# Core retrieval modules — require maintainer review
-/kairix/embed/       @quanyeomans
-/kairix/search/      @quanyeomans
-/kairix/graph/       @quanyeomans
-
-# Schema and migrations — high-risk changes
-/kairix/embed/schema.py      @quanyeomans
-/kairix/db/schema.py         @quanyeomans
-
-# CI/CD and security configuration
-/.github/                       @quanyeomans
-/pyproject.toml                 @quanyeomans
-
-# Canon + security policy — lead-only; never self-approved by an agent.
-# Enforced by the main ruleset (.github/rulesets/main.json: require_code_owner_review).
-/SECURITY.md                    @quanyeomans
-/CONSTRAINTS.md                 @quanyeomans
-/CONTRIBUTING.md                @quanyeomans
-/scripts/checks/                @quanyeomans
+# Two-tier governance: autonomous work, HITL control plane (minimal).
+# Standard: https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md
+# Only the gate's OWN definition is owned (@three-cubes/maintainers must approve).
+# Everything else — src, tests, docs, coverage baselines, lockfiles — auto-merges on a green gate.
+/.github/                  @three-cubes/maintainers
+/CODEOWNERS                @three-cubes/maintainers
+/.github/CODEOWNERS        @three-cubes/maintainers
+/pyproject.toml            @three-cubes/maintainers
+/scripts/checks/           @three-cubes/maintainers
+/scripts/safe-commit.sh    @three-cubes/maintainers
+/.pre-commit-config.yaml   @three-cubes/maintainers
+/sonar-project.properties  @three-cubes/maintainers
+/.gitattributes            @three-cubes/maintainers
