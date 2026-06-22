@@ -18,7 +18,7 @@ historical context for the readiness gate introduction.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -142,25 +142,71 @@ def _resolve_warm_progress(source: Callable[[], WarmProgress | None] | None) -> 
     return get_warm_progress()
 
 
-def warm_retrieval_stack() -> dict[str, Any]:
+def _default_build_search_pipeline() -> Any:
+    """Production-default pipeline factory — lazy-imports the real builder.
+
+    Lazy so the cold_start module stays importable without the heavy
+    ``kairix.core.factory`` graph being loaded at transport-layer import
+    time (the transport imports cold_start at module top-level).
+    """
+    from kairix.core.factory import build_search_pipeline
+
+    return build_search_pipeline()
+
+
+@dataclass
+class WarmStackDeps:
+    """Injectable seam for :func:`warm_retrieval_stack`.
+
+    Canonical kairix Deps shape (F6-exempt — fields live on a ClassDef
+    with ``field(default=...)`` per CLAUDE.md's Deps-pattern rule; the
+    same shape as :class:`kairix.core.curator.drain.Neo4jDrainTickDeps`).
+    Production callers leave ``deps`` as ``None`` and the function binds
+    :func:`_default_build_search_pipeline`, which constructs the real
+    :class:`~kairix.core.search.pipeline.SearchPipeline`. Unit tests pass
+    a ``WarmStackDeps(pipeline_factory=lambda: FakeSearchPipeline(...))``
+    so the warm-up orchestration (build step record, read-only probe,
+    success / probe-failure / build-failure envelope assembly, and the
+    elapsed-time accounting) is exercised without provider secrets, a KV
+    mount, or a live retrieval backend — none of which exist in unit
+    scope. Replaces the rejected ``# pragma`` / E2E-only grandfather:
+    the orchestration is now F1-clean unit-reachable, not integration-
+    or memory-asserted.
+
+    Attributes:
+        pipeline_factory: zero-arg callable returning an object with a
+            ``search(query=, budget=, collections=)`` method. Defaults to
+            :func:`_default_build_search_pipeline`. A factory that raises
+            drives the build-failure branch; a returned pipeline whose
+            ``search`` raises drives the probe-failure branch.
+    """
+
+    pipeline_factory: Callable[[], Any] = field(default=_default_build_search_pipeline)
+
+
+def warm_retrieval_stack(deps: WarmStackDeps | None = None) -> dict[str, Any]:
     """Pay the expensive retrieval initialisation cost once.
 
     This function deliberately constructs the production search pipeline and runs
     a tiny read-only probe. It should be called by long-running HTTP deployments
     before advertising readiness, and can also be exposed as a manual ``warm``
     MCP tool.
+
+    ``deps`` is the public DI seam (default ``None`` → production
+    factories bind). Tests inject a :class:`WarmStackDeps` with a fake
+    ``pipeline_factory`` to exercise the success and probe-failure
+    orchestration branches at unit scope without provider config.
     """
 
     import time
 
+    resolved = deps or WarmStackDeps()
     started = time.perf_counter()
     steps: list[dict[str, Any]] = []
 
     try:
         step_started = time.perf_counter()
-        from kairix.core.factory import build_search_pipeline
-
-        pipeline = build_search_pipeline()
+        pipeline = resolved.pipeline_factory()
         steps.append(
             {
                 "name": "build_search_pipeline",

@@ -1,15 +1,3 @@
-# kairix/agents/mcp/cold_start.py — warm_retrieval_stack glues MCP to the
-# production SearchPipeline. Three uncovered branches all require a working
-# pipeline (build_search_pipeline + pipeline.search), which needs provider
-# config not present in unit test env. The integration suite (run with
-# KAIRIX_E2E=1 + KAIRIX_KV_NAME) exercises the success path end-to-end.
-# Two failure-path branches ARE covered by the existing unit tests in
-# tests/agents/mcp/test_cold_start.py (build_search_pipeline raises in
-# no-config test env, hitting lines 114-127). Lifting above the F7 floor
-# would require either a DI seam on warm_retrieval_stack (rejected — see
-# the encapsulation discussion at commit 71c12cf9) or test infrastructure
-# to construct a working SearchPipeline in unit context (heavy). Defer.
-kairix/agents/mcp/cold_start.py
 # kairix/worker.py — canonical Adapter per ADR-024 §"Repositioning F7".
 # The file's role is dispatch + dep wiring: every WorkerDeps field is a
 # Callable that gets injected by tests (see tests/test_worker.py — the
