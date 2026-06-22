@@ -117,7 +117,7 @@ jobs:
       # The arch-fitness-catalogue hook runs `uv run python3 …` so the
       # catalogue runner imports kairix + the shared three-cubes-fitness
       # package. Sync the venv (and put uv on PATH) before pre-commit runs.
-      - uses: three-cubes/ci-workflows/actions/setup-uv-cached@main
+      - uses: three-cubes/tc-pipelines/actions/setup-uv-cached@4a5fb3c4dead13a3dd0203bd4ce24c5855dfa08c # v1
         with:
           python-version: "3.12"
           sync-args: "--all-extras --all-groups"
@@ -145,20 +145,28 @@ jobs:
       # package (tc_fitness, in the [dev] group). Running them under the
       # bare system interpreter silently masks every import-dependent rule
       # as a vacuous pass (this is the F53 false-green #499 phase 4 closes).
-      # Sync the venv via the org-shared composite, then run-all.sh under it.
-      - uses: three-cubes/ci-workflows/actions/setup-uv-cached@main
+      # Sync the venv via the org-shared composite, then run the gate under it.
+      - uses: three-cubes/tc-pipelines/actions/setup-uv-cached@4a5fb3c4dead13a3dd0203bd4ce24c5855dfa08c # v1
         with:
           python-version: "3.12"
           sync-args: "--all-extras --all-groups"
 
-      - name: Run F1-F6 + F8 + F10-F23 + F26-F29 (no test runtime needed)
+      # The org-canonical Python gate: `tc-fitness run` reads kairix's
+      # [tool.tc_fitness] block (pyproject.toml) and dispatches the SAME
+      # ALL_ENTRIES catalogue run-all.sh / safe-commit.sh run locally — the
+      # convergence surface tc-agent-zone also runs (and what the reusable
+      # tc-pipelines/python-quality-gate.yml@v1 invokes). Any core:<module>
+      # row runs in-process with its [tool.tc_fitness.core_checks.<module>]
+      # config injected. Stage 0 stays its own job — Stage 1..5 (contracts /
+      # integration / e2e / soak) are untouched.
+      - name: Architecture fitness functions (tc-fitness run — full catalogue)
         env:
           # F73 loads private-infra patterns from this secret. Empty/unset
           # = detector no-ops (forks and external contributors still pass).
+          # The engine's subprocess dispatch inherits the job env, so F73's
+          # detector reads it exactly as it did under run-all.sh.
           PRIVATE_INFRA_PATTERNS: ${{ secrets.PRIVATE_INFRA_PATTERNS }}
-        # run-all.sh prefers `uv run` internally; the composite installed the
-        # synced .venv (with tc_fitness) so the runner resolves it.
-        run: bash scripts/checks/run-all.sh --skip-coverage
+        run: uv run tc-fitness run
 
   contracts:
     name: "Stage 1 -- Contracts"
@@ -172,14 +180,14 @@ jobs:
 
       # Org-shared uv install seam (#499 phase 4, PR1). Replaces the
       # actions/setup-python + `pip install -e ".[...]"` pair with the
-      # three-cubes/ci-workflows composite, which sets up uv (with cache)
+      # three-cubes/tc-pipelines composite, which sets up uv (with cache)
       # and runs `uv sync`. `--all-extras --all-groups` is the superset of
       # the previous extras set, so the [agents] extras (starlette via
       # mcp>=1.20) are still present and the MCP transport contract test
       # runs here rather than being skipped by `importorskip("starlette")`.
       # kairix is a single package (not a uv workspace) — do NOT pass
       # --all-packages. Pinned to @main until the action repo cuts tags.
-      - uses: three-cubes/ci-workflows/actions/setup-uv-cached@main
+      - uses: three-cubes/tc-pipelines/actions/setup-uv-cached@4a5fb3c4dead13a3dd0203bd4ce24c5855dfa08c # v1
         with:
           python-version: "3.12"
           sync-args: "--all-extras --all-groups"
@@ -611,7 +619,7 @@ jobs:
       # package (tc_fitness, in the [dev] group), so this job needs the
       # synced venv — not a bare interpreter. Sync via the org-shared
       # composite and run the floor check under `uv run`.
-      - uses: three-cubes/ci-workflows/actions/setup-uv-cached@main
+      - uses: three-cubes/tc-pipelines/actions/setup-uv-cached@4a5fb3c4dead13a3dd0203bd4ce24c5855dfa08c # v1
         with:
           python-version: "3.12"
           sync-args: "--all-extras --all-groups"

@@ -165,7 +165,7 @@ Kairix shares reusable GitHub Actions workflows (and composite actions) across r
   # Correct — caller passes the secret; the reusable workflow only names it
   jobs:
     quality:
-      uses: <org>/ci-workflows/.github/workflows/python-quality-gate.yml@<sha>
+      uses: <org>/tc-pipelines/.github/workflows/python-quality-gate.yml@<sha>
       secrets:
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 

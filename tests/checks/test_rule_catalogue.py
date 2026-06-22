@@ -48,22 +48,36 @@ def _existing_check_basenames() -> set[str]:
 
 def test_every_entry_references_a_real_check_or_is_proposed() -> None:
     """A catalogue entry whose ``check`` field is not ``"(proposed)"``
-    must resolve to ``scripts/checks/check_<check>.py``. Entries
-    marked ``status="proposed"`` are exempt — by definition the
-    check doesn't exist yet.
+    must resolve to EITHER a local ``scripts/checks/check_<check>.py``
+    file OR an engine CORE module via the ``core:<module>`` namespace
+    (``check="core:no_duplicate_string"`` →
+    ``tc_fitness.core_checks.no_duplicate_string``). Entries marked
+    ``status="proposed"`` are exempt — by definition the check doesn't
+    exist yet.
     """
+    from tc_fitness.catalogue import is_dispatchable  # noqa: F401  # import guard for engine availability
+    from tc_fitness.core_checks import CORE_CHECKS
+
     existing = _existing_check_basenames()
+    # CORE module names exposed by the engine (the part after ``core:``).
+    core_modules = {key.split(":", 1)[1] for key in CORE_CHECKS}
     missing: list[tuple[str, str]] = []
     for entry in ALL_ENTRIES:
         if entry.status == "proposed":
             continue
         if entry.check == "(proposed)":
             continue
+        if entry.check.startswith("core:"):
+            module = entry.check.split(":", 1)[1]
+            if module not in core_modules:
+                missing.append((entry.id, entry.check))
+            continue
         if entry.check not in existing:
             missing.append((entry.id, entry.check))
     assert not missing, (
         f"catalogue entries reference non-existent checks: {missing!r}. "
-        f"Either land the check script, or mark the entry status='proposed' with check='(proposed)'."
+        f"Either land the check script, bind an engine CORE module via check='core:<module>', "
+        f"or mark the entry status='proposed' with check='(proposed)'."
     )
 
 

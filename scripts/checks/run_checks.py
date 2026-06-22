@@ -51,6 +51,7 @@ from tc_fitness.catalogue import (  # noqa: F401  # is_dispatchable re-exported 
     is_dispatchable,
 )
 from tc_fitness.context import CheckContext
+from tc_fitness.gate_config import load_core_check_configs
 from tc_fitness.runner import (
     ConditionalCheck,
     RunnerConfig,
@@ -237,6 +238,18 @@ def _paved_road_footer(entry: RuleEntry) -> str | None:
 # ── shared injection-seam kwargs (one place; threaded into every dispatch) ───
 
 
+# ── CORE-check config (the [tool.tc_fitness.core_checks.*] blocks) ───────────
+#
+# A ``core:<module>`` catalogue row resolves to an engine CORE check that scans
+# kairix's tree with kairix's CONFIG (roots / extensions / thresholds), read
+# from pyproject.toml's [tool.tc_fitness.core_checks.<module>] block (mirrored in
+# scripts/checks/_core_bindings.py). Threading this through every dispatch keeps
+# ``run_checks.py`` IDENTICAL to ``tc-fitness run`` — without it a core: row would
+# fall back to its class-default roots () and scan the WHOLE repo instead of the
+# configured subtree.
+_CORE_CHECK_CONFIGS = load_core_check_configs(REPO_ROOT)
+
+
 def _seam_kwargs(*, skip_coverage: bool) -> dict[str, Any]:
     """The injection seams the shared runner consumes, as a kwargs dict — every
     one now an engine-built factory fed kairix's domain config."""
@@ -247,6 +260,7 @@ def _seam_kwargs(*, skip_coverage: bool) -> dict[str, Any]:
         "enumeration_narrower": _enumeration_narrower,
         "paved_road_footer": _paved_road_footer,
         "conditional_check": _make_conditional_check(skip_coverage=skip_coverage),
+        "core_check_configs": _CORE_CHECK_CONFIGS,
     }
 
 
@@ -374,6 +388,7 @@ def main(argv: list[str] | None = None) -> int:
         scope_resolver=_scope_resolver,
         enumeration_narrower=_enumeration_narrower,
         paved_road_footer=_paved_road_footer,
+        core_check_configs=_CORE_CHECK_CONFIGS,
         extra_flags=[("--skip-coverage", {"action": "store_true"})],
         post_parse=_post_parse,
     )

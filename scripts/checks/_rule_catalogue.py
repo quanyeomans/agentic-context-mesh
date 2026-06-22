@@ -324,7 +324,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
     RuleEntry(
         id="F11",
         gate="test-skip-rationale",
-        check="test_skip_rationale",
+        check="core:test_skip_rationale",
         category="test-discipline",
         scope="per-test",
         summary="every pytest.mark.skip/skipif/xfail/importorskip has a rationale comment",
@@ -1017,7 +1017,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
     RuleEntry(
         id="F16",
         gate="cognitive-complexity",
-        check="cognitive_complexity",
+        check="core:cognitive_complexity",
         category="agent-affordance",
         scope="per-method",
         summary="cognitive complexity ≤ 15 per function (Sonar S3776)",
@@ -1025,7 +1025,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
     RuleEntry(
         id="F17",
         gate="no-duplicate-string",
-        check="no_duplicate_string",
+        check="core:no_duplicate_string",
         category="agent-affordance",
         scope="per-file",
         summary="no string literal ≥10 chars duplicated ≥3 times in a module (Sonar S1192)",
@@ -1033,7 +1033,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
     RuleEntry(
         id="F18",
         gate="no-commented-out-code",
-        check="no_commented_out_code",
+        check="core:no_commented_out_code",
         category="agent-affordance",
         scope="per-file",
         summary="no commented-out code (Sonar S125)",
@@ -1041,7 +1041,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
     RuleEntry(
         id="F19",
         gate="unused-params-named",
-        check="unused_params_named",
+        check="core:unused_params_named",
         category="agent-affordance",
         scope="per-method",
         summary="unused function parameters must be _-prefixed (Sonar S1172)",
@@ -1049,7 +1049,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
     RuleEntry(
         id="F20",
         gate="empty-body-intent",
-        check="empty_body_intent",
+        check="core:empty_body_intent",
         category="agent-affordance",
         scope="per-method",
         summary="empty function bodies require docstring or # Intentionally empty — comment (Sonar S1186)",
@@ -1159,7 +1159,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
     RuleEntry(
         id="F24",
         gate="no-test-imports-in-prod",
-        check="no_test_imports_in_prod",
+        check="core:no_test_imports_in_prod",
         category="repo-hygiene",
         scope="per-file",
         summary="no `from tests.*` / `import tests` inside kairix/**/*.py — tests not shipped in wheel",

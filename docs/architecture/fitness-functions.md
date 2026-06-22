@@ -2906,7 +2906,7 @@ regressing.
 
 The runner machinery is no longer local to kairix. As of [EPIC #499](https://github.com/three-cubes/kairix/issues/499)
 (common-process convergence), kairix is a **pure consumer** of the shared
-[`three-cubes-fitness`](https://github.com/three-cubes/fitness-engine) package
+[`three-cubes-fitness`](https://github.com/three-cubes/tc-fitness) package
 (`tc_fitness`, pinned `@v0.4.1` in `pyproject.toml`). The split is **shared
 machinery, per-repo domain**:
 
@@ -2937,7 +2937,7 @@ were **deleted** — their `CheckContext`, staged-selection, and `gate()` /
 / `tc_fitness.staged` / `tc_fitness`. The migration was verified byte-identical
 (same verdicts + ledger text). The runner evolves via shared learning across
 consuming repos — the shared layer is `tc_fitness` (lib + ratchet + catalogue
-schema + context + staged + runner) plus `three-cubes/ci-workflows` (the
+schema + context + staged + runner) plus `three-cubes/tc-pipelines` (the
 `setup-uv-cached` composite + `python-quality-gate.yml` reusable workflow). The
 EPIC #499 convergence narrative is captured inline in the F81–F85 rule sections
 above. As of v0.4.1 BOTH consuming repos (kairix and the sibling repo) are pure
