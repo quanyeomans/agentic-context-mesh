@@ -88,11 +88,7 @@ def _cataloged_py_checks() -> set[str]:
     A ``core:<module>`` row resolves to an engine CORE module
     (``tc_fitness.core_checks.<module>``), not a local ``check_*.py`` file —
     so it names no local script and is excluded here."""
-    return {
-        f"check_{e.check}.py"
-        for e in ALL_ENTRIES
-        if e.check != "(proposed)" and not e.check.startswith("core:")
-    }
+    return {f"check_{e.check}.py" for e in ALL_ENTRIES if e.check != "(proposed)" and not e.check.startswith("core:")}
 
 
 def _cataloged_scripts() -> set[str]:
