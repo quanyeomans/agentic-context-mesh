@@ -201,7 +201,7 @@ dev = [
     # The python_version marker is required: the package pins >=3.12 but kairix
     # declares >=3.10 with a 3.10/3.11/3.12 matrix; without the marker uv's
     # universal resolver fails. The checks only run under the 3.12 venv.
-    "three-cubes-fitness @ git+https://github.com/three-cubes/fitness-engine.git@v0.6.1 ; python_version >= '3.12'",
+    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.6.1 ; python_version >= '3.12'",
 ]
 
 [project.scripts]
