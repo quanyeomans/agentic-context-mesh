@@ -1,11 +1,6 @@
-# kairix/worker.py — F9 union floor dipped after the Wave-2 connector
-# additions (gmail / google_drive / apple_caldav / google_calendar
-# dispatchers). The F7 (unit-only) baseline already carries worker.py
-# with the canonical Adapter rationale per ADR-024 §"Repositioning F7";
-# same rationale applies to F9. New parametrised unit tests in
-# tests/unit/test_worker_wave5_connector_dispatchers.py cover the new
-# dispatchers but the file is broader _default_* production-default
-# wrappers (per the F7 entry rationale) keep total under 85% on union.
-# Pay-down owner: per the F7 entry, extract each _default_* wrapper into
-# its own deps-injectable module (the run_default_drain_tick template).
-kairix/worker.py
+# kairix/worker.py — RATCHETED OFF (SGO-109, branch agent/sgo109-worker-coverage).
+# The _default_* production-default seams are now executed at unit scope (see the
+# F7 baseline note + tests/test_worker_default_seams.py). Because the union is a
+# per-line superset of the unit run, worker.py's union (F9) coverage is >= its
+# unit 94.52% — above the 90% floor — so the file no longer needs grandfathering
+# on the union gate either.
