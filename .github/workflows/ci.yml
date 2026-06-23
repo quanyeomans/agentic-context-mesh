@@ -247,12 +247,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # PR-time: only 3.12 (the project's pinned runtime). Push-to-main:
-        # full 3.10/3.11/3.12 matrix as the regression net. 3.10 + 3.11
-        # specific bugs are caught on the main push before any release tag.
-        # Saves ~1.3 min critical path on every PR (3.10 was the slowest
-        # at 7.3 min; dropping it leaves 3.12 at 6.5 min as the matrix max).
-        python-version: ${{ github.event_name == 'pull_request' && fromJSON('["3.12"]') || fromJSON('["3.10", "3.11", "3.12"]') }}
+        # 3.12 is the project's sole supported runtime (requires-python >=3.12;
+        # the tc-fitness gate engine itself requires 3.12+). PRs and push-to-main
+        # run the IDENTICAL matrix, so PR-green == main-green — no matrix skew.
+        python-version: ["3.12"]
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
