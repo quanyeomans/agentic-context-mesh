@@ -17,7 +17,7 @@ Three valid resolutions for any baseline entry:
 tech debt that surfaces as multiple baseline entries with the same root
 cause.
 
-## State (as of 2026-06-09, post-eb3b1c2a)
+## State (as of 2026-06-24, post-3c1e1372)
 
 Snapshot freshness is enforced by
 [`scripts/checks/check_paydown_doc_currency.py`](../../scripts/checks/check_paydown_doc_currency.py).
@@ -36,14 +36,14 @@ keep the prior cell unchanged.
 
 | Baseline | Count | Status | Next move |
 |---|---:|---|---|
-| `cognitive-complexity-files.txt` | 0 | 🟢 resolved | Wave A KFEAT-016 paydown — 34 → 0 via helper extraction + sabotage-prove. Canonical example: `_mark_existing_vec_hit` in `kairix/core/search/rrf.py`. |
-| `no-duplicate-string-files.txt` | 0 | 🟢 resolved | Wave A KFEAT-016 paydown — 38 → 0 via UPPER_SNAKE module-level constants. Canonical example: `_CONNECTOR_FRAMEWORK_OWNER` in `kairix/core/features/registry.py`. |
-| `empty-body-intent-files.txt` | 0 | 🟢 resolved | Subagent added `# Intentionally empty —` / docstrings to Protocol empty bodies. |
+| `cognitive-complexity-files.txt` | 10 | 🔴 open | **Regressed since the 2026-06-09 snapshot** (was 0 → now 10) — re-apply the prior paydown. Wave A KFEAT-016 paydown — 34 → 0 via helper extraction + sabotage-prove. Canonical example: `_mark_existing_vec_hit` in `kairix/core/search/rrf.py`. |
+| `no-duplicate-string-files.txt` | 10 | 🔴 open | **Regressed since the 2026-06-09 snapshot** (was 0 → now 10) — re-apply the prior paydown. Wave A KFEAT-016 paydown — 38 → 0 via UPPER_SNAKE module-level constants. Canonical example: `_CONNECTOR_FRAMEWORK_OWNER` in `kairix/core/features/registry.py`. |
+| `empty-body-intent-files.txt` | 10 | 🔴 open | **Regressed since the 2026-06-09 snapshot** (was 0 → now 10) — re-apply the prior paydown. Subagent added `# Intentionally empty —` / docstrings to Protocol empty bodies. |
 | `no-real-names-in-fixtures-files.txt` | 0 | 🟢 resolved | Test fixtures rewritten to generic names; `reference-library/**` exempted. |
 | `shellcheck-disable-with-reason-files.txt` | 0 | 🟢 resolved | `# rationale:` comments added to SC1090 disables. |
 | `f26-files.txt` | 0 | 🟢 resolved | `kairix/core/factory.py` exempted in rule as composition root. |
 | `f41-files.txt` | 0 | 🟢 resolved | `py.typed` added to all 7 provider packages. |
-| `f43-files.txt` | 0 | 🟢 resolved | Protocol contract tests authored across all plugin trees during v2026.5–6 sweep. |
+| `f43-files.txt` | 94 | 🔴 open | **Regressed since the 2026-06-09 snapshot** (was 0 → now 94) — re-apply the prior paydown. Protocol contract tests authored across all plugin trees during v2026.5–6 sweep. |
 | `no-internal-patches-files.txt` | 2 | 🟠 partial | 9 → 2 across v2026.6 series via Fake injection refactors (per `feedback_no_monkeypatch`). Two stragglers remain — replace `@patch("kairix.X.Y")` / `monkeypatch.setattr("kairix.X", ...)` with constructor injection of a `Fake*` from `tests/fakes.py`. |
 | `f42-files.txt` | 4 | 🔴 open | Replace `dict[str, Any]` / `list[dict]` Protocol return shapes with `@dataclass(frozen=True)` (or tuple thereof) per F42 spec. Canonical example: any new ExtractionResult shape under `kairix/core/protocols.py`. |
 | `no-env-monkeypatch-files.txt` | 5 | 🟠 partial | 8 → 5 across v2026.6 series. Remaining 5 config-loader tests need real refactor (production accepts `env` dict instead of reading `os.environ` directly). |
@@ -61,12 +61,12 @@ keep the prior cell unchanged.
 | `f76-pii-content-interpolation-files.txt` | 12 | 🔴 open | Replace f-string interpolation of content-like vars (`raw`/`body`/`payload`/`markdown`/…) in log/exception/dead-letter strings with structured key=value emit. Net-new baseline. |
 | `f52-files.txt` | 13 | 🔴 open | AST-scan flags `flag("<name>")` call sites referencing names not in `kairix/core/features/registry.py:REGISTRY`. Fix: register the flag or remove the dead call site. |
 | `f55-files.txt` | 13 | 🔴 open | Declare `version: str` at module level in each `kairix/chunkers/<name>/__init__.py`; thread `chunker_version=` kwarg into every `Chunk(...)` constructor call. Vacuous-green at landing; Wave C threads through Silver, Wave F lands the plugins. |
-| `unused-params-named-files.txt` | 14 | 🟠 partial | Was 5 at 2026-05-24 snapshot; grew to 14 as new connector + provider plugin code landed without `_`-prefix discipline. Re-run Wave A mechanical batch — rename to `_param` per F19. |
+| `unused-params-named-files.txt` | 10 | 🟠 partial | Was 5 at 2026-05-24 snapshot; peaked at 14, now 10 as new connector + provider plugin code landed without `_`-prefix discipline. Re-run Wave A mechanical batch — rename to `_param` per F19. |
 | `f51-files.txt` | 14 | 🔴 open | Each `FeatureFlag` in `REGISTRY` needs `target_retire_in` ≤ current setuptools-scm version + 6 months, OR a `# retire-extension: <reason>` rationale comment. Stops flags becoming permanent scaffolding. |
 | `f36-files.txt` | 15 | 🔴 open | Author `tests/bdd/features/connector_<name>.feature` / `extractor_<name>.feature` for each plugin AND wire it into the `tests/bdd/features/e2e_connector_sync.feature` Examples table (or `@<name>_no_<journey>` opt-out tag). |
 | `f64-external-api-rate-limit-files.txt` | 16 | 🔴 open | Ship a rate-limit test (429 / Retry-After handling) for every plugin importing an HTTP client. Net-new baseline; one test per plugin. |
 | `f71-preflight-truthfulness-files.txt` | 16 | 🔴 open | Author count-equals-ground-truth contract test for every preflight `_check_*` counting external state. Net-new baseline. |
-| `per-file-coverage-floor-union-files.txt` | 16 | 🔴 open | Was 8 at 2026-05-24 snapshot; doubled as net-new connector + topology code landed without integration coverage. Lift each file ≥ 90% on the union of unit + integration. Several depend on a working `SearchPipeline` in test env — needs an in-process integration fixture. |
+| `per-file-coverage-floor-union-files.txt` | 6 | 🔴 open | Was 8 at 2026-05-24 snapshot; peaked at 16, now down to 6 as integration coverage landed for net-new connector + topology code. Lift each file ≥ 90% on the union of unit + integration. Several depend on a working `SearchPipeline` in test env — needs an in-process integration fixture. |
 | `f54-files.txt` | 18 | 🔴 open | Each registry flag needs BDD scenarios for OFF and ON branches (`tests/bdd/features/feature_flag_<name>.feature` with ≥2 scenarios) plus integration tests exercising both branches; top-level capability flags also need an E2E composed-path test. |
 | `f70-schema-writer-symmetry-files.txt` | 22 | 🔴 open | Every `CREATE TABLE` needs a matching `INSERT INTO` site OR `# table-is-derived:` rationale. Net-new baseline. |
 | `f30-operator-outcome-tests-files.txt` | 23 | 🔴 open | Author CLI subprocess / MCP direct-handler outcome tests that assert on `.stdout`/`.stderr`/envelope content (not `returncode == 0` alone, not internal fake call-counts). Governed by F49 — must shrink ≥1 entry per release tag. |
@@ -76,13 +76,11 @@ keep the prior cell unchanged.
 | `f46-files.txt` | 29 | 🔴 open | Was 32 at 2026-05-24 snapshot — 3 paid down this cycle (F49 honoured). Refactor each BDD step file to route through `factory.build_*(paths=FakePaths(...))`. Canonical pattern: `tests/integration/test_vec_index_lifecycle.py`. Governed by F49 — must shrink ≥1 entry per release tag. |
 | `f47-integration-factory-files.txt` | 32 | 🔴 open | Was 35 at 2026-05-24 snapshot — 3 paid down this cycle (F49 honoured). Convert each integration test to construct via `kairix.core.factory.build_*` with `paths=FakePaths(...)`. Governed by F49 — must shrink ≥1 entry per release tag. |
 | `f69-scale-bound-tests-files.txt` | 32 | 🔴 open | Every integration test with `.fetchall()` / `list_changes()` needs a ≥10K-row variant. Net-new baseline; coordinate with F63 + F72 (overlapping touch surface). |
-| `per-file-coverage-floor-files.txt` | 47 | 🔴 open | Was 12 at 2026-05-24 snapshot; quadrupled as net-new code landed. Lift each file ≥ 90% unit coverage. Several depend on lightweight `SearchPipeline` fixtures; coordinate with `per-file-coverage-floor-union-files.txt` paydown. |
+| `per-file-coverage-floor-files.txt` | 23 | 🔴 open | Was 12 at 2026-05-24 snapshot; peaked at 47, now down to 23 as unit coverage landed for net-new code. Lift each file ≥ 90% unit coverage. Several depend on lightweight `SearchPipeline` fixtures; coordinate with `per-file-coverage-floor-union-files.txt` paydown. |
 | `test-only-kwargs-allow-files.txt` | 81 | 🔴 open | Was 71 at 2026-05-24 snapshot; grew by 10. Refactor production to take dependency as a default `Fake*` constructor argument (no `_fn=None` test-only kwarg in production); tests inject explicitly. |
 
-**Empty-but-retained baselines** (24): kept as canonical paydown records per the F50 test that walks `.architecture/baseline/`. These remain at zero entries to document that the rule has a baseline mechanism even though no offenders currently exist —
+**Empty-but-retained baselines** (25): kept as canonical paydown records per the F50 test that walks `.architecture/baseline/`. These remain at zero entries to document that the rule has a baseline mechanism even though no offenders currently exist —
 `bdd-no-implementation-leaks-files.txt`,
-`cognitive-complexity-files.txt`,
-`empty-body-intent-files.txt`,
 `env-reads-in-paths-files.txt`,
 `f26-files.txt`,
 `f27-files.txt`,
@@ -91,22 +89,17 @@ keep the prior cell unchanged.
 `f37-files.txt`,
 `f38-files.txt`,
 `f41-files.txt`,
-`f43-files.txt`,
 `f45-files.txt`,
 `f56-files.txt`,
 `f62-stateful-multi-tick-files.txt`,
 `f65-connector-metadata-files.txt`,
-`f68-protocol-failure-modes-files.txt`,
 `go-dependency-rationale-files.txt`,
 `go-logging-discipline-files.txt`,
 `go-no-panic-outside-main-files.txt`,
 `go-readme-coverage-files.txt`,
 `go-version-flag-files.txt`,
-`no-commented-out-code-files.txt`,
-`no-duplicate-string-files.txt`,
 `no-logging-secrets-files.txt`,
 `no-real-names-in-fixtures-files.txt`,
-`no-test-imports-in-prod-files.txt`,
 `no-test-only-kwargs-files.txt`,
 `path-naming-files.txt`,
 `readme-coverage-files.txt`,
