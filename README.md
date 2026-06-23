@@ -122,7 +122,7 @@ No GPU. No per-seat licensing. One VM serves your entire team of agents and huma
 
 Install it, set it up in your browser, and point your agent at it.
 
-**Prereqs:** Docker (or Python 3.10+) and a folder of documents. An AI provider key turns on the smarter search — but you can add it later; keyword search works straight away.
+**Prereqs:** Docker (or Python 3.12+) and a folder of documents. An AI provider key turns on the smarter search — but you can add it later; keyword search works straight away.
 
 ### 1. Install
 

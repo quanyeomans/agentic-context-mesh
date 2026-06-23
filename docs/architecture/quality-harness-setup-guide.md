@@ -111,7 +111,7 @@ Copy `.github/workflows/ci.yml`'s job structure. The pipeline runs five stages:
 |---|---|---|
 | **0** | `arch-fitness` | F1–F6, F8, F10–F13 (no test runtime needed) |
 | **1** | `contracts` | `pytest -m contract` |
-| **2** | `unit-and-type` (matrix py3.10/3.11/3.12) | mypy strict, ruff, `pytest -m "unit or bdd or contract" --cov`, F7 (3.12 only) |
+| **2** | `unit-and-type` (py3.12) | mypy strict, ruff, `pytest -m "unit or bdd or contract" --cov`, F7 |
 | **3** | `integration` | `pytest -m integration --cov` |
 | **4** | `security` | bandit, pip-audit, SonarCloud |
 | **5** | `union-coverage` | downloads .coverage from Stages 2 and 3, runs F9 on the union |
@@ -169,6 +169,8 @@ These are the specific failures encountered while standing up the harness on kai
 **Cause:** Setting `COVERAGE_FILE=.coverage.unit` *during* the pytest run looks like it should make pytest-cov write directly to that filename. In some pytest-cov configurations (notably when `--cov-fail-under=0` is also set), pytest-cov runs `coverage combine` at finalisation and the data file ends up in an unexpected place — or doesn't get written at all.
 
 **Fix:** Don't use `COVERAGE_FILE`. Run pytest with default `.coverage`, then copy after the run:
+
+> The matrix collapsed to `[3.12]` in v2026.6.x; the `matrix.python-version == '3.12'` guard is now always-true and can be removed.
 
 ```yaml
 - name: Run tests with coverage

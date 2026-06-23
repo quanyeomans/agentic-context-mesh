@@ -7,6 +7,8 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+> **Upgrading?** kairix now needs **Python 3.12 or newer**. Docker and Compose deployments are already covered — the image ships Python 3.12. If you installed kairix into your own Python environment (the systemd / host-venv path), recreate that environment on Python 3.12+ before you upgrade, or the install will refuse the new version. Your knowledge store, sources, and agents all carry over unchanged.
+
 ### For humans
 
 - **Connect your Linear workspace.** kairix can now pull your Linear roadmap and docs — initiatives, projects, issues, documents, and project updates — into your knowledge store, so you and your agents can search them alongside everything else. It's off until you turn it on: add your Linear API key, switch it on, and kairix starts indexing.

@@ -162,7 +162,7 @@ def get_provider(name: str) -> Provider:
     return factory()  # returns Provider instance
 ```
 
-This is sub-10 ms on Python 3.10+ for name-filtered lookups, costs
+This is sub-10 ms on Python 3.12+ for name-filtered lookups, costs
 nothing for unused providers, and surfaces a typed
 `ProviderNotRegistered(name, available=[...])` error when the configured
 `provider:` field is unset or names a missing plugin. The shipped

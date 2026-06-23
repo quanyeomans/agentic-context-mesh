@@ -68,13 +68,13 @@ push/PR
   │     pytest -m contract  → results-contracts.xml
   │     ↳ codecov/test-results-action (flag=contract)   [test analytics]
   │
-  ├── Stage 2: Unit + Type (2-3min)         ← runs on py3.10, 3.11, 3.12
+  ├── Stage 2: Unit + Type (2-3min)         ← runs on py3.12
   │     mypy --strict
   │     ruff check + format
   │     pytest -m "unit or bdd or contract" --cov  → coverage.xml + results-unit.xml
-  │     F7: per-file 85% coverage floor (3.12 only)
-  │     ↳ codecov/codecov-action (flag=unit, 3.12 only) [coverage]
-  │     ↳ codecov/test-results-action (flag=unit, 3.12 only) [test analytics]
+  │     F7: per-file coverage floor
+  │     ↳ codecov/codecov-action (flag=unit) [coverage]
+  │     ↳ codecov/test-results-action (flag=unit) [test analytics]
   │
   ├── Stage 3: Integration (5min)  ─┐
   │     pytest -m integration --cov  → coverage-integration.xml + results-integration.xml
@@ -142,7 +142,7 @@ If a gate must be bypassed:
      ├─────────┤
      │Contract │  ~7%  Interface agreements. Zero tolerance. <30s total.
      ├─────────┤
-     │  Unit   │  ~60%  Mocked externals. Fast. CI matrix (3.10/3.11/3.12).
+     │  Unit   │  ~60%  Mocked externals. Fast. Runs on py3.12.
      ├─────────┤
      │Eval/BDD │  ~27%  Benchmark, eval, reflib, BDD, and setup tests.
      └─────────┘
@@ -445,6 +445,7 @@ refactor/embed-staging-table   # internal restructure
 test/search-intent-classifier  # test additions
 docs/engineering-disciplines   # documentation
 chore/deps-bump-requests       # dependency updates
+agent/<short-desc>             # authored by the three-cubes-agent App (branch_naming-exempt)
 ```
 
 ### 7.2 Version discipline
@@ -474,13 +475,13 @@ Installing from a branch ref (`@main`, `@main`) rather than a pinned tag does no
 - If retrieval logic changed: before/after benchmark scores (at minimum recall and conceptual categories)
 - Any open questions or follow-up work
 
-**Merge strategy:** Squash merge only. PR title becomes commit message.
+**Merge strategy:** `--merge` only (never squash) — per-commit history is the audit trail. Green-gate PRs merge autonomously.
 
 ### 7.3 Review requirements
 
-- At least one maintainer approval
-- All CI stages green
-- No unresolved comments
+- Zero required review on routine work (autonomous-on-green); code-owner review required only when the diff touches control-plane files (`.github/`, `pyproject.toml`, `scripts/checks/`).
+- All CI stages green (non-bypassable ruleset).
+- No unresolved comments.
 
 ---
 
@@ -542,7 +543,7 @@ PRE-COMMIT
 
 CI GATES (all must be green)
 [ ] Stage 1: Contract tests pass
-[ ] Stage 2: mypy zero errors (py3.10/3.11/3.12)
+[ ] Stage 2: mypy zero errors (py3.12)
 [ ] Stage 2: ruff zero errors
 [ ] Stage 2: Unit tests 100% pass
 [ ] Stage 2: Coverage ≥ 80%
