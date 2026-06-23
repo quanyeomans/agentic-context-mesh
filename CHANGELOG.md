@@ -16,6 +16,15 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 - **Lead with what we know about a thing.** When someone asks "tell me about X" or "who is X", kairix can now put the short description of that person, team, or topic at the top of the results instead of buried below documents. It's off by default — turn it on once you've switched on entity descriptions, and you can switch it back off at any time.
 - **Turn on the Linear connector when you're ready.** It's off by default, so adding it changes nothing until you act. Put a Linear API key in your secret store, add the connector to your config, and switch it on — kairix then checks Linear for changes on a schedule and pulls only what's new.
 
+### Important when upgrading (operators)
+
+- **Python 3.12 is now the minimum.** kairix no longer supports Python 3.10 or 3.11 (`requires-python` is now `>=3.12`). Docker/Compose deployments are unaffected — the image already ships Python 3.12. **Host/systemd (non-Docker) installs must recreate their venv on Python 3.12+ before upgrading**, or `pip install --upgrade` will refuse the new version.
+
+### For contributors
+
+- **CI now runs a single Python (3.12).** The 3.10/3.11/3.12 test matrix collapsed to 3.12, so PRs and `main` run the identical Python.
+- **Autonomous-on-green merge governance.** Green-gate PRs merge with zero required review on routine work; code-owner review is required only on control-plane files (`.github/`, `pyproject.toml`, `scripts/checks/`). Agents author PRs as the three-cubes-agent App on `agent/*` branches.
+
 ## [2026.6.18] - 2026-06-18 — Set up kairix in your browser
 
 > **Upgrading?** Pull the new image and restart — your knowledge store, sources, and agents all carry over. New installs now open into a browser setup page; existing installs keep working exactly as they are.

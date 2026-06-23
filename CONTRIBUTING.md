@@ -52,7 +52,9 @@ Kairix is trunk-based on `main`. Routine work commits direct to `main` when `saf
 5. For docs/CHANGELOG-only edits, use `--fast` to skip the heavy test suite: `bash scripts/safe-commit.sh --fast "docs: …"`.
 6. Push to `main` once green.
 
-Open a PR (`feat/*` or `fix/*` branch) when you want grouped review, a release-stabilisation cycle, or cross-team sign-off. PRs gate on the same CI checks as direct push, plus mandatory branch-protection checks. Merge with `gh pr merge --merge` — never squash; per-commit history is the audit trail.
+Open a PR for any change you want recorded as a reviewable unit. kairix is **autonomous-on-green**: a PR whose CI gate is green merges itself with **zero required review** on routine work. A non-bypassable two-tier ruleset requires **code-owner review only when the diff touches control-plane files** (`.github/`, `pyproject.toml`, `scripts/checks/`, and the other paths in `CODEOWNERS`). Never merge over a red gate. Branches are `feat/*` / `fix/*` for humans; the three-cubes-agent App authors PRs on `agent/*`-prefixed branches (exempt from the branch_naming self-gate, which otherwise enforces on every PR). Merge with `gh pr merge --merge` — never squash; per-commit history is the audit trail.
+
+**Replay the exact CI gate locally before you push (canonical STANDARDS.md §5 inner-loop rule).** Run the same commands CI runs — `uv sync --all-extras --all-groups`, then `uv run pre-commit run --all-files` and `uv run tc-fitness run`. Never push or let a PR merge over a red gate; regenerate and stage any generated artifacts before committing. `safe-commit.sh` wraps this for the inner loop, but the gate above is the bar.
 
 ## Running tests
 
@@ -138,6 +140,7 @@ Trunk-based on `main`. The historical `develop` branch was retired in v2026.6.8.
 |---|---|
 | `main` | **Default branch.** All work lands here — direct push or PR. Release tags point at `main` SHAs. |
 | `feat/*`, `fix/*` | Optional feature branches for grouped commits, release stabilisation, or external review — PR targets `main`. |
+| `agent/*` | Branches authored by the three-cubes-agent GitHub App. Exempt from the branch_naming self-gate; PR targets `main`. |
 
 The `raw.githubusercontent.com/.../main/...` URLs in [README.md](README.md) and [docker-compose.yml](docker-compose.yml) point at `main`, which serves both as default and as the last-released compose source.
 
