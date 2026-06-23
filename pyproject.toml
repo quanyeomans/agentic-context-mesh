@@ -384,7 +384,7 @@ disallow_untyped_decorators = false
 # Engineering hub: "Linting / code quality: blocks merge"
 [tool.ruff]
 line-length = 120
-target-version = "py312"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = [
