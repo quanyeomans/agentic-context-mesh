@@ -21,7 +21,7 @@ dynamic = ["version"]
 description = "Self-contained knowledge retrieval engine — hybrid search, entity graph, temporal reasoning, session briefing"
 readme = "README.md"
 license = { text = "Apache-2.0" }
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "requests>=2.33.1,<3",
     "httpx>=0.27,<1",
