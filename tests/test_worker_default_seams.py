@@ -26,9 +26,15 @@ commit 651942cb). This is the test side of that already-extracted seam.
 
 Guardrails honoured (non-negotiable, see SGO-109):
   * **F1** — no ``patch("kairix...")`` / ``monkeypatch.setattr`` on any
-    kairix attribute. The only ``setenv`` calls target ``KAIRIX_*`` /
-    ``XDG_*`` env vars (the process boundary), which is the hermetic
-    isolation the rest of the suite already uses, not internal patching.
+    kairix attribute.
+  * **F2** — no ``monkeypatch.setenv/delenv("KAIRIX_*")``. The
+    ``isolated_worker_env`` fixture steers the paths boundary through the
+    production ``kairix.config.yaml`` ``paths:`` mechanism (resolved via
+    ``KairixPaths`` + ``kairix.paths.clear_cache``) under a tmp
+    ``XDG_CONFIG_HOME`` — ``XDG_*`` is not a KAIRIX_* var, the same
+    F2-clean redirect conftest's ``_hermetic_user_config`` uses. The two
+    ambient provider/graph secrets are scrubbed with a raw ``os.environ``
+    pop+restore at the process boundary, not ``monkeypatch.delenv``.
   * **F5** — no import of any ``_default_*`` private name. Every seam is
     reached through its public caller (``run_embed``, ``run_health_check``,
     ``run_neo4j_drain``, ``run_wal_checkpoint``, ``run_connector_sync``,
@@ -48,10 +54,13 @@ list the runner counted — never on a specific count.
 from __future__ import annotations
 
 import logging
+import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+import kairix.paths
 from kairix.worker import (
     CanonicalEntitySeedDeps,
     run_connector_sync,
@@ -65,34 +74,77 @@ from kairix.worker import (
 
 pytestmark = pytest.mark.unit
 
+# Provider / graph secret env vars whose ambient presence on a developer
+# machine would flip the degraded outcomes these tests pin. We scrub them
+# at the process boundary (raw ``os.environ`` pop + restore) rather than
+# via ``monkeypatch.delenv("KAIRIX_*")`` — F2 reserves KAIRIX_* env-var
+# mutation for the canonical boundary in tests/conftest.py.
+_SECRET_ENV_VARS = ("KAIRIX_PROVIDER_LLM_API_KEY", "KAIRIX_NEO4J_PASSWORD")
+
 
 @pytest.fixture
-def isolated_worker_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Point every host-touching default at a throwaway tmp tree.
+def isolated_worker_env(tmp_path: Path) -> Iterator[Path]:
+    """Point every host-touching default at a throwaway tmp tree — F2-clean.
 
     The ``_default_*`` seams open the real SQLite index, crawl the real
-    document root, and try the real Neo4j/provider config. Redirecting
-    the ``KAIRIX_*`` env vars to a fresh ``tmp_path`` keeps the executed
-    seam hermetic on a developer machine (CI's HOME is already clean):
-    the WAL checkpoint runs against a tmp DB, the entity-seed crawl walks
-    an empty directory, and no developer document folder is touched.
+    document root, and try the real Neo4j/provider config. To keep the
+    EXECUTED seam hermetic on a developer machine (CI's HOME is already
+    clean) without the forbidden ``monkeypatch.setenv("KAIRIX_*")``
+    (F2 / #139 boundary-only), we steer the paths boundary the way
+    production does — a ``kairix.config.yaml`` ``paths:`` block — and let
+    :func:`kairix.paths.document_root` / :func:`kairix.paths.db_path`
+    resolve it through ``KairixPaths``. The config lands under a tmp
+    ``XDG_CONFIG_HOME`` (``XDG_*`` is NOT a KAIRIX_* var, so this is the
+    same F2-clean redirect conftest's ``_hermetic_user_config`` already
+    uses), and :func:`kairix.paths.clear_cache` invalidates the cached
+    resolution so the test's config wins.
 
-    These are env-var redirects (the process boundary), not kairix
-    attribute patches — F1-clean, the same shape as conftest's
-    ``_hermetic_user_config``.
+    Result: the WAL checkpoint runs against the tmp DB, the entity-seed
+    crawl walks an empty directory, and no developer document folder is
+    touched — all through the production path-resolution boundary, no
+    KAIRIX_* process-env mutation, no kairix attribute patching (F1/F2-clean).
     """
     data_dir = tmp_path / "data"
     docs_dir = tmp_path / "docs"
+    config_dir = tmp_path / "xdg-config" / "kairix"
     data_dir.mkdir()
     docs_dir.mkdir()
-    monkeypatch.setenv("KAIRIX_DATA_DIR", str(data_dir))
-    monkeypatch.setenv("KAIRIX_DOCUMENT_ROOT", str(docs_dir))
-    monkeypatch.setenv("KAIRIX_DB_PATH", str(data_dir / "kairix.db"))
+    config_dir.mkdir(parents=True)
+
+    # Production path-resolution boundary: a kairix.config.yaml paths block,
+    # read through KairixPaths (the #139 boundary), steers document_root +
+    # db_path at the tmp tree without any KAIRIX_* env mutation.
+    db_file = data_dir / "kairix.db"
+    (config_dir / "kairix.config.yaml").write_text(
+        f"paths:\n  document_root: {docs_dir}\n  db_path: {db_file}\n",
+        encoding="utf-8",
+    )
+    # XDG_CONFIG_HOME is NOT a KAIRIX_* var — F2-clean, the conftest pattern.
+    # We set it directly (and restore) so the layered config loader resolves
+    # the test config at $XDG_CONFIG_HOME/kairix/kairix.config.yaml.
+    prev_xdg = os.environ.get("XDG_CONFIG_HOME")
+    os.environ["XDG_CONFIG_HOME"] = str(tmp_path / "xdg-config")
+
     # Guarantee no ambient provider / graph secret leaks in and flips the
-    # degraded outcome these tests pin.
-    monkeypatch.delenv("KAIRIX_PROVIDER_LLM_API_KEY", raising=False)
-    monkeypatch.delenv("KAIRIX_NEO4J_PASSWORD", raising=False)
-    return tmp_path
+    # degraded outcome these tests pin. Raw os.environ scrub at the process
+    # boundary (not monkeypatch.delenv("KAIRIX_*"), which F2 forbids), with
+    # restore on teardown so isolation matches monkeypatch's semantics.
+    saved_secrets = {k: os.environ.pop(k, None) for k in _SECRET_ENV_VARS}
+
+    # Invalidate the cached path resolution so the test config is read.
+    kairix.paths.clear_cache()
+    try:
+        yield tmp_path
+    finally:
+        # Restore env exactly and drop the test config from the cache.
+        if prev_xdg is None:
+            os.environ.pop("XDG_CONFIG_HOME", None)
+        else:
+            os.environ["XDG_CONFIG_HOME"] = prev_xdg
+        for key, value in saved_secrets.items():
+            if value is not None:
+                os.environ[key] = value
+        kairix.paths.clear_cache()
 
 
 def test_default_embed_seam_executes_and_returns_false_without_provider(
