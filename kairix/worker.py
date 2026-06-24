@@ -510,18 +510,50 @@ def _run_one_connector_batch(
     # legacy_chunk_writer remains the fallback when no cc_pair has been
     # registered for the entry.
     chunk_writer = resolve_chunk_writer_for_entry(db, name, cc_pair_id=cc_pair_id)
+    silver = DefaultSilverProcessor(documents_media_writer=SqliteDocumentsMediaWriter(db))
     pipeline = ConnectorPipeline(
         db=db,
         bronze=bronze_store,
-        silver=DefaultSilverProcessor(documents_media_writer=SqliteDocumentsMediaWriter(db)),
+        silver=silver,
         chunk_writer=chunk_writer,
         entity_graph_sink=_SqliteEntityGraphSink(db),
         cursor_store=CursorStore(db),
         dead_letter=DeadLetterStore(db),
     )
     result = pipeline.run_batch(connector, extractor)
+    # PR-4: auto-drain permanently-unprocessable dead-letters for this
+    # connector AFTER the batch — the pre-extract compat gate has already
+    # kept this tick's own unsupported items out of the queue, so the drain
+    # only mops up the historical poisoned backlog. Keyed on connector.name
+    # (the connector KIND — the value every dead-letter write used), NOT the
+    # cc_pair routing name. Best-effort: a drain failure never fails the sync.
+    _auto_drain_connector(db, connector_name=connector.name, silver=silver)
     del _legacy_chunk_writer
     return result.processed, result.dead_lettered, cc_pair_id
+
+
+def _auto_drain_connector(
+    db: sqlite3.Connection,
+    *,
+    connector_name: str,
+    silver: Any,
+) -> None:
+    """Run the PR-4 dead-letter auto-drain pass for one connector.
+
+    Thin worker-side seam over
+    :func:`kairix.core.connectors.deadletter_drain.drain_connector_deadletters`.
+    Best-effort: any drain-pass failure is logged and swallowed so a drain
+    problem never aborts the surrounding sync tick (the drain itself is
+    per-row best-effort; this guard covers a catastrophic enumeration
+    failure). The pass is a cheap no-op when the connector's dead-letter
+    queue holds no eligible rows.
+    """
+    from kairix.core.connectors.deadletter_drain import drain_connector_deadletters
+
+    try:
+        drain_connector_deadletters(db, connector_name=connector_name, silver=silver)
+    except Exception as exc:  # drain must never fail the sync
+        logger.warning("auto-drain: pass failed for connector=%s — %s", connector_name, exc)
 
 
 def resolve_chunk_writer_for_entry(
