@@ -80,6 +80,40 @@ def _bump_cc_pair_total_docs_indexed(
         logger.warning("worker: connector %s — failed to bump total_docs_indexed: %s", name, exc)
 
 
+def _stamp_cc_pair_last_poll(
+    db: sqlite3.Connection,
+    name: str | None,
+    cc_pair_id: int | None,
+) -> None:
+    """SYNC-OBS blind-spot fix — stamp a per-source "successful poll" heartbeat.
+
+    The doc-count bump (:func:`_bump_cc_pair_total_docs_indexed`) is the ONLY
+    sync-path writer of ``topology_cc_pairs.updated_at`` and it short-circuits
+    when ``indexed == 0``. So a connector that polled successfully, advanced
+    its cursor, but surfaced zero new docs left ``updated_at`` frozen at the
+    last doc-producing tick — byte-identical on ``kairix cc-pair list`` to a
+    connector whose worker died days ago.
+
+    This stamps ``last_successful_index_time`` AND ``updated_at`` on EVERY
+    non-erroring batch (callers invoke it only after the batch returned without
+    raising), regardless of doc count, so a healthy-quiet source shows a fresh
+    ``updated`` while a dead one stays stale. Best-effort: a stamp failure logs
+    and continues so the remaining connectors this tick are unaffected. Runs in
+    its own transaction, like the doc-count bump.
+    """
+    if cc_pair_id is None:
+        return
+    try:
+        now_iso = _now_iso()
+        db.execute(
+            "UPDATE topology_cc_pairs SET last_successful_index_time = ?, updated_at = ? WHERE id = ?",
+            (now_iso, now_iso, cc_pair_id),
+        )
+        db.commit()
+    except Exception as exc:
+        logger.warning("worker: connector %s — failed to stamp last poll heartbeat: %s", name, exc)
+
+
 # #224 phase 4 — pause-flag polling cadence.
 # When the worker is in PAUSED phase, it sleeps this long between flag
 # re-checks. Short enough that operators see resumption quickly (CLI tells
@@ -220,6 +254,45 @@ class ConnectorSyncResult:
     synced: int = 0
     failed: int = 0
     dead_letter_added: int = 0
+    # SYNC-OBS — quiet-vs-dead aggregate fields (purely additive; defaults
+    # keep every existing ``ConnectorSyncResult(...)`` construction valid).
+    #
+    # * ``connectors_polled`` — how many connectors were actually driven
+    #   through a batch this tick (excludes gated-off / failed-to-construct
+    #   entries). A non-zero value with ``synced == 0`` is the canonical
+    #   "polled OK, nothing new" signal that a dead worker can't produce.
+    # * ``quiet`` — connectors that polled successfully but surfaced zero
+    #   items (``items_seen == 0``). The healthy-and-idle bucket.
+    # * ``poisoned_skipped`` / ``skipped_low_disk`` — rolled up from the
+    #   per-batch results that the 3-tuple return used to discard, so a
+    #   disk-blocked or all-poisoned source is no longer indistinguishable
+    #   from a clean quiet tick.
+    connectors_polled: int = 0
+    quiet: int = 0
+    poisoned_skipped: int = 0
+    skipped_low_disk: int = 0
+
+
+@dataclass(frozen=True)
+class _ConnectorBatchOutcome:
+    """SYNC-OBS — the rich per-connector batch outcome the worker keeps.
+
+    ``_run_one_connector_batch`` previously collapsed the pipeline's
+    :class:`~kairix.core.connectors.pipeline.BatchResult` to a
+    ``(processed, dead_lettered, cc_pair_id)`` 3-tuple, dropping
+    ``items_seen`` / ``cursor_advanced`` / ``poisoned_skipped`` /
+    ``skipped_low_disk`` on the floor. This carries them through so the
+    sync loop can log a per-source one-line summary and roll them up into
+    :class:`ConnectorSyncResult`. Frozen per F42.
+    """
+
+    indexed: int
+    dead_lettered: int
+    cc_pair_id: int | None
+    items_seen: int = 0
+    poisoned_skipped: int = 0
+    cursor_advanced: bool = True
+    skipped_low_disk: bool = False
 
 
 class _SqliteChunkWriter:
@@ -469,10 +542,13 @@ def _run_one_connector_batch(
     db: sqlite3.Connection,
     entry: dict[str, Any],
     bronze_root: Path,
-) -> tuple[int, int, int | None]:
+) -> _ConnectorBatchOutcome:
     """Wire one connector entry through the :class:`ConnectorPipeline`.
 
-    Returns ``(items_indexed, items_dead_lettered, cc_pair_id)``. The
+    Returns a :class:`_ConnectorBatchOutcome` carrying ``items_indexed``,
+    ``items_dead_lettered``, the resolved ``cc_pair_id`` AND the SYNC-OBS
+    fields (``items_seen`` / ``poisoned_skipped`` / ``cursor_advanced`` /
+    ``skipped_low_disk``) that the old 3-tuple return dropped. The
     ``cc_pair_id`` is the ``topology_cc_pairs.id`` the entry routes on
     (``None`` when the entry has no registered cc_pair — the legacy
     single-collection writer path); the caller uses it to increment the
@@ -540,7 +616,15 @@ def _run_one_connector_batch(
     # cc_pair routing name. Best-effort: a drain failure never fails the sync.
     _auto_drain_connector(db, connector_name=connector.name, silver=silver)
     del _legacy_chunk_writer
-    return result.processed, result.dead_lettered, cc_pair_id
+    return _ConnectorBatchOutcome(
+        indexed=result.processed,
+        dead_lettered=result.dead_lettered,
+        cc_pair_id=cc_pair_id,
+        items_seen=result.items_seen,
+        poisoned_skipped=result.poisoned_skipped,
+        cursor_advanced=result.cursor_advanced,
+        skipped_low_disk=result.skipped_low_disk,
+    )
 
 
 def _auto_drain_connector(
@@ -716,6 +800,100 @@ class ConnectorSyncDeps:
     bronze_root_resolver: Callable[[], Path] = field(default_factory=lambda: _bronze_root_default)
 
 
+@dataclass
+class _SyncAccumulator:
+    """SYNC-OBS — mutable per-tick rollup folded into a :class:`ConnectorSyncResult`.
+
+    Keeps :func:`run_connector_sync_pipeline`'s loop body flat (one helper
+    call per entry) so its cognitive complexity stays well under the F16
+    ceiling. Every per-connector batch outcome is folded in via
+    :meth:`fold`; :meth:`to_result` freezes the final aggregate.
+    """
+
+    synced: int = 0
+    failed: int = 0
+    dead_letter_added: int = 0
+    connectors_polled: int = 0
+    quiet: int = 0
+    poisoned_skipped: int = 0
+    skipped_low_disk: int = 0
+
+    def fold(self, outcome: _ConnectorBatchOutcome) -> None:
+        self.synced += outcome.indexed
+        self.failed += outcome.dead_lettered
+        self.dead_letter_added += outcome.dead_lettered
+        self.connectors_polled += 1
+        self.poisoned_skipped += outcome.poisoned_skipped
+        if outcome.skipped_low_disk:
+            self.skipped_low_disk += 1
+        elif outcome.items_seen == 0:
+            self.quiet += 1
+
+    def to_result(self) -> ConnectorSyncResult:
+        return ConnectorSyncResult(
+            synced=self.synced,
+            failed=self.failed,
+            dead_letter_added=self.dead_letter_added,
+            connectors_polled=self.connectors_polled,
+            quiet=self.quiet,
+            poisoned_skipped=self.poisoned_skipped,
+            skipped_low_disk=self.skipped_low_disk,
+        )
+
+
+def _log_sync_source_summary(name: str | None, outcome: _ConnectorBatchOutcome) -> None:
+    """SYNC-OBS — one structured line PER source PER tick (quiet ≠ dead).
+
+    Emits e.g. ``sync source=sharepoint attempted=1 items_seen=0
+    processed=0 dead_lettered=0 poisoned_skipped=0 cursor_advanced=false
+    skipped_low_disk=false`` so an operator can tell, from a single line,
+    that the source WAS reached this tick even when it surfaced nothing.
+    """
+    logger.info(
+        "sync source=%s attempted=1 items_seen=%d processed=%d dead_lettered=%d "
+        "poisoned_skipped=%d cursor_advanced=%s skipped_low_disk=%s",
+        name,
+        outcome.items_seen,
+        outcome.indexed,
+        outcome.dead_lettered,
+        outcome.poisoned_skipped,
+        str(outcome.cursor_advanced).lower(),
+        str(outcome.skipped_low_disk).lower(),
+    )
+
+
+def _process_sync_entry(
+    db: sqlite3.Connection,
+    entry: dict[str, Any],
+    bronze_root: Path,
+    acc: _SyncAccumulator,
+) -> None:
+    """Run one connector batch, fold its outcome into ``acc``, stamp counters.
+
+    A per-connector failure (registry miss, plugin raise, pipeline
+    rollback) is logged and swallowed so a single misconfigured connector
+    does not halt sibling sync work — the same isolation the inline loop
+    had before SYNC-OBS extracted it.
+    """
+    try:
+        outcome = _run_one_connector_batch(db, entry, bronze_root)
+    except Exception as exc:
+        logger.warning("worker: connector %s failed — %s", entry.get("name"), exc)
+        return
+    acc.fold(outcome)
+    _log_sync_source_summary(entry.get("name"), outcome)
+    name = entry.get("name")
+    # Wire the operator-facing counter: increment (not recompute) the
+    # cc_pair's lifetime total_docs_indexed so `kairix cc-pair list` stops
+    # reporting docs=0. ``outcome.indexed`` already excludes deleted +
+    # dead-lettered items. The bump short-circuits on indexed==0.
+    _bump_cc_pair_total_docs_indexed(db, name, outcome.cc_pair_id, outcome.indexed)
+    # SYNC-OBS blind-spot fix: stamp the per-source heartbeat on EVERY
+    # non-erroring batch (even a zero-doc poll) so a quiet source shows a
+    # fresh ``updated`` on ``cc-pair list`` instead of looking dead.
+    _stamp_cc_pair_last_poll(db, name, outcome.cc_pair_id)
+
+
 def run_connector_sync_pipeline(deps: ConnectorSyncDeps | None = None) -> ConnectorSyncResult:
     """Drive one tick across every configured connector.
 
@@ -760,9 +938,7 @@ def run_connector_sync_pipeline(deps: ConnectorSyncDeps | None = None) -> Connec
     db = deps.db_factory()
     try:
         create_schema(db)
-        synced = 0
-        failed = 0
-        dead_letter_added = 0
+        acc = _SyncAccumulator()
         for entry in entries:
             # D3: enablement keys on connector KIND (``connector_<kind>``).
             # A registered-and-OFF kind is skipped (logged); a flagless kind
@@ -770,23 +946,8 @@ def run_connector_sync_pipeline(deps: ConnectorSyncDeps | None = None) -> Connec
             if not connector_enabled(entry["kind"], deps.flag_reader):
                 logger.info("worker: connector %s gated off (flag connector_%s OFF)", entry["kind"], entry["kind"])
                 continue
-            try:
-                indexed, dead_lettered, cc_pair_id = _run_one_connector_batch(db, entry, bronze_root)
-            except Exception as exc:
-                logger.warning("worker: connector %s failed — %s", entry.get("name"), exc)
-                continue
-            synced += indexed
-            failed += dead_lettered
-            dead_letter_added += dead_lettered
-            # Wire the operator-facing counter: increment (not recompute) the
-            # cc_pair's lifetime total_docs_indexed so `kairix cc-pair list`
-            # stops reporting docs=0. result.processed already excludes
-            # deleted + dead-lettered items. The bump runs in its own
-            # transaction (committed after the chunk writes) and is guarded
-            # inside the helper, so a counter failure never abandons the
-            # remaining connectors this tick. See _bump_cc_pair_total_docs_indexed.
-            _bump_cc_pair_total_docs_indexed(db, entry.get("name"), cc_pair_id, indexed)
-        return ConnectorSyncResult(synced=synced, failed=failed, dead_letter_added=dead_letter_added)
+            _process_sync_entry(db, entry, bronze_root, acc)
+        return acc.to_result()
     finally:
         db.close()
 
@@ -1955,7 +2116,7 @@ def run_health_check(deps: WorkerDeps | None = None) -> None:
         logger.warning("worker: health check raised — %s", exc)
 
 
-def run_connector_sync(deps: WorkerDeps | None = None) -> None:
+def run_connector_sync(deps: WorkerDeps | None = None) -> ConnectorSyncResult | None:
     """Drive one connector-framework sync tick (SC-6 seam).
 
     Wave 1 wires this as a no-op-friendly dispatch slot: the default
@@ -1973,6 +2134,12 @@ def run_connector_sync(deps: WorkerDeps | None = None) -> None:
     surfaced via the structured ``ConnectorSyncResult`` on the next
     successful tick.
 
+    SYNC-OBS — returns the :class:`ConnectorSyncResult` on a successful
+    tick (``None`` when the slot was a no-op / raised) so
+    :func:`maybe_run_connector_sync_tick` can fold the counters into
+    ``WorkerState``. The return value is additive: the previous callers
+    ignored it and still may.
+
     Args:
         deps: Injectable worker dependencies. Tests construct
               ``WorkerDeps(connector_sync_fn=fake)``; production omits
@@ -1983,12 +2150,21 @@ def run_connector_sync(deps: WorkerDeps | None = None) -> None:
     try:
         logger.info("worker: starting connector sync")
         result = deps.connector_sync_fn()
+        # SYNC-OBS — the aggregate one-liner now carries the quiet-vs-dead
+        # rollup so an operator can see "polled N connectors, M quiet" on a
+        # zero-doc tick instead of an indistinguishable "synced=0".
         logger.info(
-            "worker: connector sync complete — synced=%d failed=%d dead_letter_added=%d",
+            "worker: connector sync complete — connectors_polled=%d synced=%d quiet=%d "
+            "failed=%d dead_letter_added=%d poisoned_skipped=%d skipped_low_disk=%d",
+            result.connectors_polled,
             result.synced,
+            result.quiet,
             result.failed,
             result.dead_letter_added,
+            result.poisoned_skipped,
+            result.skipped_low_disk,
         )
+        return result
     except NotImplementedError:
         # Wave 1: the default raises this. The slot is wired but the
         # body is not yet implemented. Log once-per-tick so operators
@@ -1998,6 +2174,7 @@ def run_connector_sync(deps: WorkerDeps | None = None) -> None:
         logger.warning("worker: connector sync not yet implemented (Wave 2)")
     except (Exception, SystemExit) as exc:
         logger.warning("worker: connector sync raised — %s", exc)
+    return None
 
 
 def run_neo4j_drain(deps: WorkerDeps | None = None) -> None:
@@ -2476,6 +2653,24 @@ def _apply_embed_outcome(state: WorkerState, outcome: EmbedRunOutcome, consecuti
     return new_streak
 
 
+def _apply_connector_sync_outcome(state: WorkerState, result: ConnectorSyncResult) -> None:
+    """SYNC-OBS — fold a connector-sync tick into worker state (quiet ≠ dead).
+
+    Mirrors :func:`_apply_embed_outcome`. ``syncs_attempted`` increments on
+    EVERY tick the sync ran (regardless of yield) so ``kairix worker status``
+    proves the worker is still polling even when no docs flowed.
+    ``last_connector_tick_yielded`` is True iff this tick surfaced any new
+    items — the per-tick quiet/active signal an operator reads to tell a
+    healthy-idle source from a dead one.
+    """
+    state.syncs_attempted += 1
+    state.last_connector_sync_at = time.time()
+    state.last_connector_tick_yielded = result.synced > 0
+    state.last_connector_synced = result.synced
+    state.last_connector_dead_letter_added = result.dead_letter_added
+    state.last_connector_connectors_polled = result.connectors_polled
+
+
 def _check_paused(deps: WorkerDeps, transition: Callable[[WorkerPhase], None], previously_paused: bool) -> bool:
     """Handle the operator-pause flag. Returns the new ``previously_paused`` value.
 
@@ -2534,6 +2729,43 @@ def _run_maintenance_task(
     transition(WorkerPhase.IDLE)
 
 
+def maybe_run_connector_sync_tick(
+    *,
+    deps: WorkerDeps,
+    transition: Callable[[WorkerPhase], None],
+    state: WorkerState,
+    state_path: Path,
+    write_state_fn: Callable[[WorkerState, Path], None],
+) -> ConnectorSyncResult | None:
+    """SYNC-OBS — run one connector-sync tick and fold it into worker state.
+
+    Mirrors :func:`maybe_run_maintenance_loop_tick`: runs the existing
+    :func:`run_connector_sync` (with the same MAINTENANCE→IDLE phase
+    transitions :func:`_run_maintenance_task` applied before), then folds
+    the returned :class:`ConnectorSyncResult` into ``state`` and persists
+    it via ``write_state_fn`` so ``kairix worker status`` reflects the
+    latest tick. ``state`` is passed explicitly (NOT read off ``deps``)
+    because :func:`_boot_state` may hand the loop a restored-from-disk
+    state object distinct from ``deps.state`` — the same discipline
+    :func:`maybe_run_maintenance_loop_tick` uses.
+
+    Returns the result (``None`` when the sync was a no-op / raised) so
+    callers / tests can assert on it. Cadence is decided by the caller —
+    this fires unconditionally when invoked, so a quiet tick still bumps
+    ``syncs_attempted`` (the whole point). Control flow is otherwise
+    identical to the previous
+    ``_run_maintenance_task(deps, transition, run_connector_sync)`` call
+    that discarded the result — purely additive state capture.
+    """
+    transition(WorkerPhase.MAINTENANCE)
+    result = run_connector_sync(deps)
+    transition(WorkerPhase.IDLE)
+    if result is not None:
+        _apply_connector_sync_outcome(state, result)
+        write_state_fn(state, state_path)
+    return result
+
+
 def _maybe_run_maintenance_cycle(
     *,
     deps: WorkerDeps,
@@ -2548,6 +2780,7 @@ def _maybe_run_maintenance_cycle(
     last_wal_checkpoint: float,
     last_deadletter_sweep: float,
     schedule: _Schedule,
+    state: WorkerState,
 ) -> tuple[float, float, float, float, float, float, float]:
     """Run any maintenance task whose interval has elapsed; return updated timestamps.
 
@@ -2586,7 +2819,17 @@ def _maybe_run_maintenance_cycle(
 
     new_connector_sync = last_connector_sync
     if now - last_connector_sync >= schedule.connector_sync:
-        _run_maintenance_task(deps, transition, run_connector_sync)
+        # SYNC-OBS — fold the tick's ConnectorSyncResult into worker state
+        # (syncs_attempted / last_connector_*) so a quiet source is visible
+        # on ``kairix worker status``. Same MAINTENANCE→IDLE transitions as
+        # the prior _run_maintenance_task call; only the result capture is new.
+        maybe_run_connector_sync_tick(
+            deps=deps,
+            transition=transition,
+            state=state,
+            state_path=deps.state_path,
+            write_state_fn=deps.write_state_fn,
+        )
         new_connector_sync = now
 
     new_neo4j_drain = last_neo4j_drain
@@ -2825,6 +3068,7 @@ def main(
             last_wal_checkpoint=last_wal_checkpoint,
             last_deadletter_sweep=last_deadletter_sweep,
             schedule=schedule,
+            state=state,
         )
 
         # KFEAT-021 — maintenance-loop tick after the sync cycle. The

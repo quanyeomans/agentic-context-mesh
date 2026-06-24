@@ -94,6 +94,20 @@ class _BatchTotals:
     dead_lettered: int = 0
     poisoned_skipped: int = 0
     deleted: int = 0
+    # SYNC-OBS — survives across chunk resets (the per-chunk accumulator
+    # is reset every flush, so the newest-seen timestamp is folded up here
+    # at flush time and reported once on the terminal ``BatchResult``).
+    latest_modified_at: str | None = None
+    # SYNC-OBS — False once any flush observes ``next_cursor() is None``,
+    # so a source that never advances its cursor is visible on the result.
+    cursor_advanced: bool = True
+    # SYNC-OBS — guards the cursor-None WARN so it fires at most ONCE per
+    # sync tick. ``_commit_and_flush`` runs per chunk (every ``chunk_size``
+    # items) plus the terminal drain, so an all-None-cursor multi-chunk
+    # batch would otherwise log the identical WARN ceil(N/chunk_size)+1
+    # times. The state effect (``cursor_advanced = False``) still applies on
+    # EVERY flush; only the log line is de-duplicated.
+    cursor_lock_warned: bool = False
 
 
 @dataclass
@@ -166,6 +180,23 @@ class BatchResult:
     skipped_low_disk: bool = False
     budget_yielded: bool = False
     deleted: int = 0
+    # SYNC-OBS — per-tick observability fields (purely additive; default
+    # values keep every existing ``BatchResult(...)`` construction valid).
+    #
+    # * ``items_seen`` — count of change events the connector surfaced this
+    #   tick (any outcome). ``items_seen == 0`` is the "quiet poll" signal —
+    #   the source was reached, the cursor was read, zero items came back.
+    # * ``cursor_advanced`` — False when ``next_cursor()`` returned ``None``
+    #   for the terminal flush, so a previously-persisted cursor was NOT
+    #   re-written. A source stuck returning ``None`` forever re-scans the
+    #   same window every tick; this flag makes that visible (see the
+    #   cursor-lock WARN in :meth:`_commit_and_flush`).
+    # * ``latest_modified_at`` — newest ``modified_at`` observed across the
+    #   items processed this tick (``None`` on a zero-item tick). Lets an
+    #   operator see how fresh the surfaced items were without grepping logs.
+    items_seen: int = 0
+    cursor_advanced: bool = True
+    latest_modified_at: str | None = None
 
 
 _BUDGET_EXHAUSTED_SENTINEL = "F66:budget_exhausted"
@@ -179,6 +210,25 @@ class _BudgetExhaustedError(Exception):
     ``budget_yielded=True`` result. The exception is NEVER surfaced to
     callers — it is a control-flow signal local to the pipeline.
     """
+
+
+def _warn_if_all_poisoned(name: str, totals: _BatchTotals, items_seen: int) -> None:
+    """SYNC-OBS silent-stall site (c) — every surfaced item was poisoned.
+
+    When a tick surfaced items but EVERY one was already at
+    ``failure_count >= threshold`` (so it was skipped before fetch and the
+    cursor advanced past it), the batch returns ``processed=0`` and looks
+    identical to a clean zero-new-docs tick on every operator surface.
+    Emit a WARN with the skipped count so an operator can see the source is
+    advancing past a wall of poison, not quietly idle. Control flow is
+    unchanged — this is a read-only check on the already-computed totals.
+    """
+    if items_seen > 0 and totals.poisoned_skipped == items_seen:
+        logger.warning(
+            "all_items_poisoned name=%s poisoned_skipped=%d — cursor advanced past items that were never processed",
+            name,
+            totals.poisoned_skipped,
+        )
 
 
 def _default_disk_free_resolver() -> int:
@@ -291,8 +341,13 @@ class ConnectorPipeline:
         if watermark is not None:
             free_bytes = self._disk_free_resolver()
             if free_bytes < watermark:
-                logger.info(
-                    "watermark_skip name=%s free=%d min=%d",
+                # SYNC-OBS silent-stall site (b): a disk-blocked source
+                # was previously an INFO line only — it read as "quiet" to
+                # every operator surface. Promote to WARN (control flow
+                # unchanged — we still return the same skipped_low_disk
+                # result) so an operator sees the source is blocked, not idle.
+                logger.warning(
+                    "watermark_skip name=%s free=%d min=%d — sync skipped because free disk fell below the watermark",
                     connector.name,
                     free_bytes,
                     watermark,
@@ -302,6 +357,12 @@ class ConnectorPipeline:
                     dead_lettered=0,
                     poisoned_skipped=0,
                     skipped_low_disk=True,
+                    # SYNC-OBS — the watermark skip returns BEFORE the cursor
+                    # is ever read or written, so the cursor was NOT advanced
+                    # this tick. ``cursor_advanced`` defaults to True, which
+                    # would falsely report progress on a disk-blocked source
+                    # and defeat the quiet-vs-dead signal; pin it False.
+                    cursor_advanced=False,
                 )
         cursor = self._cursor_store.read(connector.name)
         return self._process_batch(connector, extractor, cursor)
@@ -367,12 +428,16 @@ class ConnectorPipeline:
             # connector's next_cursor() persists even on a zero-event
             # tick where the server-side delta cursor moved forward.
             self._commit_and_flush(connector, totals, chunk)
+        _warn_if_all_poisoned(connector.name, totals, items_seen)
         return BatchResult(
             processed=totals.processed,
             dead_lettered=totals.dead_lettered,
             poisoned_skipped=totals.poisoned_skipped,
             budget_yielded=budget_yielded,
             deleted=totals.deleted,
+            items_seen=items_seen,
+            cursor_advanced=totals.cursor_advanced,
+            latest_modified_at=totals.latest_modified_at,
         )
 
     def _process_change(
@@ -413,10 +478,32 @@ class ConnectorPipeline:
         next_cursor_token = connector.next_cursor()
         if next_cursor_token is not None:
             self._cursor_store.write(connector.name, next_cursor_token)
+        else:
+            # SYNC-OBS silent-stall site (a): the connector returned no
+            # cursor token, so a previously-persisted cursor is left as-is
+            # and the next tick re-reads the SAME window. Harmless for a
+            # genuinely quiet source, but a source stuck here forever
+            # re-scans on every tick and never makes progress — previously
+            # invisible. WARN (control flow unchanged — we still skip the
+            # write exactly as before) with a frozen/expired-cursor hint.
+            totals.cursor_advanced = False
+            # Log the WARN at most once per tick — the state effect above
+            # runs on every flush, but a multi-chunk all-None batch would
+            # otherwise repeat the identical line per chunk + the terminal
+            # drain. One WARN per tick is enough signal; more is spam.
+            if not totals.cursor_lock_warned:
+                totals.cursor_lock_warned = True
+                logger.warning(
+                    "cursor_not_advanced name=%s — next_cursor() returned None; "
+                    "cursor may be frozen or the delta token expired",
+                    connector.name,
+                )
         self._db.commit()
         totals.processed += chunk.processed
         totals.dead_lettered += chunk.dead_lettered
         totals.deleted += chunk.deleted
+        if chunk.latest_modified_at is not None:
+            totals.latest_modified_at = chunk.latest_modified_at
         chunk.reset()
 
     def _process_item(

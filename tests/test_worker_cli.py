@@ -115,6 +115,40 @@ def test_format_status_renders_never_for_unset_timestamps() -> None:
 
 
 @pytest.mark.unit
+def test_format_status_surfaces_connector_sync_fields() -> None:
+    """SYNC-OBS: ``kairix worker status`` shows the connector-sync heartbeat.
+
+    A recent ``last_connector_sync_at`` with ``last_connector_tick_yielded``
+    False is the quiet-vs-dead signal — the source IS being polled but had
+    no new docs. The renderer must surface that, plus ``syncs_attempted``.
+
+    Sabotage proof: drop the ``Last connector sync:`` line from
+    ``format_status`` and the ``"Last connector sync"`` assertion fails.
+    """
+    state = WorkerState(
+        syncs_attempted=7,
+        last_connector_sync_at=1000.0,
+        last_connector_tick_yielded=False,
+        last_connector_synced=0,
+        last_connector_connectors_polled=3,
+    )
+    rendered = format_status(state, now=1060.0)  # 60s after the last sync
+    assert "Last connector sync" in rendered
+    assert "yielded last tick: False" in rendered
+    assert "Syncs attempted: 7" in rendered
+    assert "Connectors polled last tick: 3" in rendered
+
+
+@pytest.mark.unit
+def test_format_status_connector_sync_never_when_unset() -> None:
+    """A worker that has not yet run a sync shows ``never`` for the heartbeat."""
+    state = WorkerState()
+    rendered = format_status(state, now=1000.0)
+    assert "Last connector sync: never" in rendered
+    assert "Syncs attempted: 0" in rendered
+
+
+@pytest.mark.unit
 def test_main_dispatches_status_subcommand(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """``kairix worker status`` returns the status exit code through main().
 
