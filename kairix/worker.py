@@ -124,6 +124,17 @@ NEO4J_DRAIN_INTERVAL = 600  # 10 minutes
 # so both DB-maintenance ticks share the same operational rhythm.
 WAL_CHECKPOINT_INTERVAL = 600  # 10 minutes
 
+# PR-5 — orphaned-source dead-letter sweep cadence. The per-connector
+# auto-drain (run after each connector batch) only drains CURRENTLY-ACTIVE
+# connectors; dead-letters from a source whose connector was removed never
+# drain through that path. This periodic sweep walks EVERY distinct
+# source_name in connector_deadletter and drains the orphaned backlog over
+# time. 3600s (1 hour) is deliberately slower than CONNECTOR_SYNC_INTERVAL
+# (900s) so the per-connector drain almost always runs first; the sweep is
+# the cheap, idempotent backstop for the orphaned remainder. Cheap when
+# clean — an empty table is a single GROUP BY read.
+DEADLETTER_SWEEP_INTERVAL = 3600  # 1 hour
+
 # Idle backoff (#224): when embed runs find no work to do, the next-embed
 # wait extends exponentially. Cap at 4 hours so we don't go totally silent
 # on a long-idle vault but also don't churn CPU/IO every hour for nothing.
@@ -1298,6 +1309,38 @@ def _default_wal_checkpoint() -> dict[str, int]:
     return {"busy": busy, "log_pages": log_pages, "checkpointed": checkpointed}
 
 
+def _default_deadletter_sweep() -> tuple[Any, ...]:
+    """Worker-loop dispatch slot for the orphaned-source dead-letter sweep (PR-5).
+
+    Opens the kairix index DB and runs
+    :func:`kairix.core.connectors.deadletter_drain.drain_all_source_deadletters`
+    over EVERY distinct ``source_name`` — including ORPHANED sources whose
+    connector is no longer active, which the per-connector auto-drain never
+    reaches. Returns the per-source :class:`DrainSummary` tuple so the
+    worker can log a structured outcome.
+
+    Reuses the EXISTING narrow eligibility (corrupt_zip OR known-unsupported
+    MIME) and the per-source best-effort / idempotent core verbatim — this
+    slot adds reach across sources, never broadened eligibility. Cheap when
+    clean: an empty table enumerates to zero sources.
+
+    Tests inject a substitute via ``WorkerDeps(deadletter_sweep_fn=fake)``;
+    production omits and gets this default.
+    """
+    import sqlite3
+
+    from kairix.core.connectors.deadletter_drain import drain_all_source_deadletters
+    from kairix.core.connectors.silver import DefaultSilverProcessor, SqliteDocumentsMediaWriter
+    from kairix.paths import db_path
+
+    conn = sqlite3.connect(str(db_path()), timeout=30.0)
+    try:
+        silver = DefaultSilverProcessor(documents_media_writer=SqliteDocumentsMediaWriter(conn))
+        return drain_all_source_deadletters(conn, silver=silver)
+    finally:
+        conn.close()
+
+
 def _default_connector_sync() -> ConnectorSyncResult:
     """Worker-loop dispatch slot for the connector-sync maintenance task.
 
@@ -1662,6 +1705,14 @@ class WorkerDeps:
     # production omits and gets ``_default_wal_checkpoint`` which opens
     # the kairix index DB and runs PRAGMA wal_checkpoint(TRUNCATE).
     wal_checkpoint_fn: Callable[[], Any] = field(default_factory=lambda: _default_wal_checkpoint)
+    # PR-5 — orphaned-source dead-letter sweep dispatch slot. Same F6-clean
+    # default_factory shape as ``wal_checkpoint_fn``. Tests pass a Fake;
+    # production omits and gets ``_default_deadletter_sweep`` which opens
+    # the kairix index DB and drains every distinct source's permanently-
+    # unprocessable backlog — orphaned (no-longer-active) sources included.
+    # Returns the per-source DrainSummary tuple (typed Any so the import
+    # stays in the function body, keeping worker boot lazy).
+    deadletter_sweep_fn: Callable[[], Any] = field(default_factory=lambda: _default_deadletter_sweep)
     sleep: Callable[[float], None] = field(default_factory=lambda: time.sleep)
     # #224 phase 4-5 combined — observable state + pause flag.
     # ``state`` is the in-memory dataclass the loop mutates on phase changes.
@@ -2012,6 +2063,36 @@ def run_wal_checkpoint(deps: WorkerDeps | None = None) -> None:
         logger.warning("worker: wal checkpoint raised — %s", exc)
 
 
+def run_deadletter_sweep(deps: WorkerDeps | None = None) -> None:
+    """PR-5 — drive one orphaned-source dead-letter sweep tick.
+
+    Invokes ``deps.deadletter_sweep_fn`` (default
+    :func:`_default_deadletter_sweep`) which drains the permanently-
+    unprocessable backlog for EVERY distinct source — including ORPHANED
+    sources whose connector is no longer active, the gap the
+    per-connector auto-drain leaves open. Logs an aggregate
+    sources/drained line from the returned :class:`DrainSummary` tuple.
+
+    Mirrors the ``(Exception, SystemExit)`` discipline of every other
+    worker maintenance helper — a sweep failure must never bring the
+    worker process down. The per-source core is itself best-effort +
+    idempotent, so a re-run is always safe.
+
+    Tests construct ``WorkerDeps(deadletter_sweep_fn=fake)``; production
+    omits the kwarg and the default factory wires
+    :func:`_default_deadletter_sweep`.
+    """
+    deps = deps if deps is not None else WorkerDeps()
+    try:
+        summaries = deps.deadletter_sweep_fn()
+        rows = tuple(summaries) if summaries is not None else ()
+        drained = sum(int(getattr(s, "drained", 0)) for s in rows)
+        if drained:
+            logger.info("worker: deadletter sweep complete — sources=%d drained=%d", len(rows), drained)
+    except (Exception, SystemExit) as exc:
+        logger.warning("worker: deadletter sweep raised — %s", exc)
+
+
 @dataclass
 class _Schedule:
     """Worker task interval config — bundles the cadence ints.
@@ -2030,6 +2111,7 @@ class _Schedule:
     connector_sync: int
     neo4j_drain: int
     wal_checkpoint: int
+    deadletter_sweep: int
 
 
 def _resolve_schedule(
@@ -2040,6 +2122,7 @@ def _resolve_schedule(
     connector_sync_interval: int | None,
     neo4j_drain_interval: int | None = None,
     wal_checkpoint_interval: int | None = None,
+    deadletter_sweep_interval: int | None = None,
 ) -> _Schedule:
     """Fold kwargs + module defaults into a single ``_Schedule``."""
     return _Schedule(
@@ -2050,6 +2133,9 @@ def _resolve_schedule(
         connector_sync=connector_sync_interval if connector_sync_interval is not None else CONNECTOR_SYNC_INTERVAL,
         neo4j_drain=neo4j_drain_interval if neo4j_drain_interval is not None else NEO4J_DRAIN_INTERVAL,
         wal_checkpoint=(wal_checkpoint_interval if wal_checkpoint_interval is not None else WAL_CHECKPOINT_INTERVAL),
+        deadletter_sweep=(
+            deadletter_sweep_interval if deadletter_sweep_interval is not None else DEADLETTER_SWEEP_INTERVAL
+        ),
     )
 
 
@@ -2460,8 +2546,9 @@ def _maybe_run_maintenance_cycle(
     last_connector_sync: float,
     last_neo4j_drain: float,
     last_wal_checkpoint: float,
+    last_deadletter_sweep: float,
     schedule: _Schedule,
-) -> tuple[float, float, float, float, float, float]:
+) -> tuple[float, float, float, float, float, float, float]:
     """Run any maintenance task whose interval has elapsed; return updated timestamps.
 
     Two buckets (#312):
@@ -2471,11 +2558,13 @@ def _maybe_run_maintenance_cycle(
       enough to set the embed-noop streak above the threshold, none of
       these have anything to do and the maintenance scan is wasted work.
 
-    * **External-source-discovery** (connector_sync) AND **Curator
-      coupling boundary** (neo4j_drain, GH #334) — ALWAYS run on their
-      intervals regardless of ``maintenance_active``. A quiet local
-      vault does NOT imply quiet upstream sources or a drained
-      ``entity_signals`` queue.
+    * **External-source-discovery** (connector_sync), **Curator coupling
+      boundary** (neo4j_drain, GH #334), **DB maintenance**
+      (wal_checkpoint) AND the **orphaned-source dead-letter sweep**
+      (deadletter_sweep, PR-5) — ALWAYS run on their intervals regardless
+      of ``maintenance_active``. A quiet local vault does NOT imply quiet
+      upstream sources, a drained ``entity_signals`` queue, or a drained
+      orphaned-source dead-letter backlog.
     """
     new_entity, new_health, new_wikilinks = last_entity, last_health, last_wikilinks
     if maintenance_active:
@@ -2510,6 +2599,11 @@ def _maybe_run_maintenance_cycle(
         _run_maintenance_task(deps, transition, run_wal_checkpoint)
         new_wal_checkpoint = now
 
+    new_deadletter_sweep = last_deadletter_sweep
+    if now - last_deadletter_sweep >= schedule.deadletter_sweep:
+        _run_maintenance_task(deps, transition, run_deadletter_sweep)
+        new_deadletter_sweep = now
+
     return (
         new_entity,
         new_health,
@@ -2517,6 +2611,7 @@ def _maybe_run_maintenance_cycle(
         new_connector_sync,
         new_neo4j_drain,
         new_wal_checkpoint,
+        new_deadletter_sweep,
     )
 
 
@@ -2529,6 +2624,7 @@ def main(
     wikilinks_interval: int | None = None,
     connector_sync_interval: int | None = None,
     neo4j_drain_interval: int | None = None,
+    deadletter_sweep_interval: int | None = None,
 ) -> None:
     """Run the worker loop.
 
@@ -2559,6 +2655,7 @@ def main(
         wikilinks_interval,
         connector_sync_interval,
         neo4j_drain_interval,
+        deadletter_sweep_interval=deadletter_sweep_interval,
     )
 
     logger.info(
@@ -2634,6 +2731,10 @@ def main(
     # first post-boot iteration truncates the WAL immediately (catches
     # any inherited bloat from before the previous shutdown).
     last_wal_checkpoint = 0.0
+    # PR-5 — last orphaned-source dead-letter sweep. Same 0.0 bootstrap so
+    # the first post-boot iteration sweeps immediately, clearing any
+    # orphaned backlog inherited from before the previous shutdown.
+    last_deadletter_sweep = 0.0
     # KFEAT-021 — last maintenance tick. Carried in WorkerState across
     # restarts so the cadence survives a container bounce; mirror it
     # into a local for the in-loop is_tick_due comparison.
@@ -2710,6 +2811,7 @@ def main(
             last_connector_sync,
             last_neo4j_drain,
             last_wal_checkpoint,
+            last_deadletter_sweep,
         ) = _maybe_run_maintenance_cycle(
             deps=deps,
             transition=_transition,
@@ -2721,6 +2823,7 @@ def main(
             last_connector_sync=last_connector_sync,
             last_neo4j_drain=last_neo4j_drain,
             last_wal_checkpoint=last_wal_checkpoint,
+            last_deadletter_sweep=last_deadletter_sweep,
             schedule=schedule,
         )
 

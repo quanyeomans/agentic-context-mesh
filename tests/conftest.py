@@ -199,6 +199,8 @@ pytest_plugins = [
     # Dead-letter triage surface (kairix dead-letter status CLI +
     # tool_dead_letter_status MCP). See GH #337 / #351.
     "tests.bdd.steps.cli_dead_letter_steps",
+    # PR-5 — orphaned-source dead-letter drain verb (kairix dead-letter drain).
+    "tests.bdd.steps.cli_dead_letter_drain_steps",
     "tests.bdd.steps.mcp_dead_letter_status_steps",
     # Wave 5 KP-1 — Dex CRM connector flag at introduce stage. F54.
     "tests.bdd.steps.feature_flag_connector_dex_crm_steps",
