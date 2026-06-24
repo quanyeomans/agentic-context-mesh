@@ -1883,6 +1883,159 @@ def test_run_wal_checkpoint_handles_non_dict_return() -> None:
 
 
 # ---------------------------------------------------------------------------
+# run_deadletter_sweep() tests (PR-5)
+# ---------------------------------------------------------------------------
+
+
+def test_run_deadletter_sweep_invokes_fn_and_logs() -> None:
+    """run_deadletter_sweep delegates to deps.deadletter_sweep_fn."""
+    from kairix.core.connectors.deadletter_drain import DrainSummary
+    from kairix.worker import run_deadletter_sweep
+
+    calls: list[bool] = []
+
+    def _fake_sweep() -> tuple[DrainSummary, ...]:
+        calls.append(True)
+        return (DrainSummary("removed-sharepoint", drained=2, corrupt_zip=1, unsupported_mime=1, left=0),)
+
+    run_deadletter_sweep(deps=WorkerDeps(deadletter_sweep_fn=_fake_sweep))
+    assert calls == [True], "deadletter_sweep_fn must be invoked once"
+
+
+def test_run_deadletter_sweep_catches_exceptions() -> None:
+    """A raised sweep must not crash the worker loop."""
+    import sqlite3
+
+    from kairix.worker import run_deadletter_sweep
+
+    def _raising_sweep() -> tuple:
+        raise sqlite3.OperationalError("database is locked")
+
+    # Must not raise — the (Exception, SystemExit) catch keeps the worker alive.
+    run_deadletter_sweep(deps=WorkerDeps(deadletter_sweep_fn=_raising_sweep))
+
+
+def test_run_deadletter_sweep_handles_none_return() -> None:
+    """A misbehaving fn returning None must not crash the aggregate log."""
+    from kairix.worker import run_deadletter_sweep
+
+    def _returns_none() -> None:
+        return None
+
+    # A () -> None callable is assignable to the Callable[[], Any] slot; this
+    # pins the run_deadletter_sweep aggregate-log tolerance for an empty/None return.
+    run_deadletter_sweep(deps=WorkerDeps(deadletter_sweep_fn=_returns_none))
+
+
+@pytest.mark.unit
+def test_main_loop_calls_deadletter_sweep_at_interval(tmp_path: Path) -> None:
+    """When ``deadletter_sweep_interval`` has elapsed, ``main()`` drives the
+    injected ``deadletter_sweep_fn`` from the dispatch loop — the periodic
+    orphaned-source sweep is actually wired into the worker tick.
+
+    Sabotage proof: remove the ``deadletter_sweep`` dispatch block in
+    ``_maybe_run_maintenance_cycle`` → ``sweep_calls['n'] == 0`` and this
+    assertion fails. Restored, it passes — proving the slot is live.
+    """
+    import os
+
+    from kairix.core.connectors.deadletter_drain import DrainSummary
+
+    embed_calls = {"n": 0}
+    sweep_calls = {"n": 0}
+
+    def _embed_then_shutdown() -> None:
+        embed_calls["n"] += 1
+        if embed_calls["n"] >= 2:
+            os.kill(os.getpid(), signal.SIGTERM)  # NOSONAR — self-signal to terminate loop in test.
+
+    def _sweep() -> tuple[DrainSummary, ...]:
+        sweep_calls["n"] += 1
+        return ()
+
+    main(
+        deps=WorkerDeps(
+            embed=_embed_then_shutdown,
+            entity_seed=lambda: None,
+            health_check=lambda: [],
+            wikilinks=lambda: None,
+            connector_sync_fn=lambda: ConnectorSyncResult(),
+            deadletter_sweep_fn=_sweep,
+            sleep=lambda _s: None,
+            state_path=tmp_path / "worker-state.json",
+            write_state_fn=lambda *_: None,
+        ),
+        embed_interval=0,
+        entity_seed_interval=999999,
+        health_check_interval=999999,
+        wikilinks_interval=999999,
+        connector_sync_interval=999999,
+        deadletter_sweep_interval=0,
+    )
+
+    assert sweep_calls["n"] >= 1, (
+        f"expected deadletter_sweep to fire at least once on interval=0; got {sweep_calls['n']}"
+    )
+
+
+@pytest.mark.unit
+def test_main_loop_runs_deadletter_sweep_above_maintenance_threshold(tmp_path: Path) -> None:
+    """The sweep MUST run regardless of the embed-noop streak.
+
+    A quiet local vault does not imply a drained orphaned-source
+    dead-letter backlog — the sweep is in the always-run bucket alongside
+    connector_sync / neo4j_drain.
+
+    Sabotage proof: move the sweep dispatch inside the
+    ``if maintenance_active:`` block → with the high streak ``sweep_calls``
+    drops to 0 and this fails.
+    """
+    import os
+
+    from kairix.core.connectors.deadletter_drain import DrainSummary
+    from kairix.worker import MAINTENANCE_SKIP_NOOP_THRESHOLD
+
+    embed_calls = {"n": 0}
+    sweep_calls = {"n": 0}
+
+    def _embed_noop_then_shutdown() -> None:
+        embed_calls["n"] += 1
+        if embed_calls["n"] >= 2:
+            os.kill(os.getpid(), signal.SIGTERM)  # NOSONAR — self-signal so the loop exits.
+
+    def _sweep() -> tuple[DrainSummary, ...]:
+        sweep_calls["n"] += 1
+        return ()
+
+    seed_streak = MAINTENANCE_SKIP_NOOP_THRESHOLD + 1
+    main(
+        deps=WorkerDeps(
+            embed=_embed_noop_then_shutdown,
+            entity_seed=lambda: None,
+            health_check=lambda: [],
+            wikilinks=lambda: None,
+            connector_sync_fn=lambda: ConnectorSyncResult(),
+            deadletter_sweep_fn=_sweep,
+            sleep=lambda _s: None,
+            state=WorkerState(consecutive_embed_noops=seed_streak),
+            state_path=tmp_path / "worker-state.json",
+            write_state_fn=lambda *_: None,
+        ),
+        embed_interval=0,
+        entity_seed_interval=0,
+        health_check_interval=0,
+        wikilinks_interval=0,
+        connector_sync_interval=999999,
+        deadletter_sweep_interval=0,
+    )
+
+    assert sweep_calls["n"] >= 1, (
+        f"deadletter sweep MUST still run even when streak ({seed_streak}+) >= threshold "
+        f"({MAINTENANCE_SKIP_NOOP_THRESHOLD}); got {sweep_calls['n']} call(s)"
+    )
+
+
+# ---------------------------------------------------------------------------
 # connector_enabled() — same-module behaviour-pin (mutation parity).
 #
 # The full predicate matrix lives in

@@ -15,6 +15,17 @@ the historical backlog). For each eligible row it writes a
 ``skipped_unsupported`` ``documents_media`` outcome (operator visibility,
 best-effort) and then :meth:`DeadLetterStore.clear`\\ s the row.
 
+The per-connector pass only ever drains CURRENTLY-ACTIVE connectors (it
+keys on the active ``connector.name``), so dead-letters left behind by a
+source whose connector was removed — an ORPHANED source — never drain.
+:func:`drain_source_deadletters` is the connector-agnostic per-source core
+(no active connector instance required), and
+:func:`drain_all_source_deadletters` sweeps EVERY distinct ``source_name``
+in ``connector_deadletter`` — orphaned sources included — so those
+backlogs auto-drain over time (periodic worker sweep) or on demand
+(``kairix dead-letter drain``). The eligibility rule is unchanged: the
+sweep reuses :func:`is_drain_eligible` verbatim.
+
 Eligibility is deliberately narrow — see :func:`is_drain_eligible`. The
 load-bearing rule: drain ONLY items that are genuinely, permanently
 unprocessable — a ``corrupt_zip`` archive, or a MIME that is positively
@@ -33,8 +44,8 @@ The pass is:
   (:meth:`DeadLetterStore.clear` returns ``False`` on the second pass);
 * **best-effort** — a failure draining one row logs and continues; the
   drain (and the surrounding sync) never aborts because of one bad row;
-* **cheap when clean** — a single ``DeadLetterStore.list`` read short-
-  circuits the whole pass when the queue holds no rows for the source.
+* **cheap when clean** — a single bounded ``connector_deadletter`` read
+  short-circuits the whole pass when the queue holds no rows for the source.
 
 The key on which dead-letter / bronze rows are queried is the connector
 KIND (``connector.name`` — a class constant like ``"sharepoint"``), NOT
@@ -49,7 +60,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from kairix.core.connectors.compat import known_unsupported_mime
-from kairix.core.connectors.dead_letter import DeadLetterEntry, DeadLetterStore
+from kairix.core.connectors.dead_letter import DeadLetterStore
 from kairix.core.connectors.silver import DefaultSilverProcessor
 from kairix.core.observability.dead_letter_status import classify_error
 from kairix.core.protocols import BronzeRef
@@ -76,10 +87,11 @@ _FAILURE_CLASS_CORRUPT_ZIP = "corrupt_zip"
 # reference a single literal rather than repeating it across the module.
 _BUCKET_UNSUPPORTED_MIME = "unsupported_mime"
 
-# Per-tick cap on rows scanned. ``DeadLetterStore.list`` is unbounded
-# (operator-triage surface, F63 note); the drain runs inside the tick loop
-# so it must bound its own work. A generous ceiling — the backlog drains
-# over a few ticks rather than one giant pass that could stall a tick.
+# Per-tick cap on rows scanned. The drain runs inside the tick loop, so
+# ``_load_candidates`` pushes this ``LIMIT ?`` down into SQL (F63) rather
+# than fetching the whole backlog and slicing — the per-tick scan is
+# bounded regardless of queue depth. A generous ceiling: the backlog
+# drains over a few ticks rather than one giant pass that could stall one.
 _DEFAULT_PER_TICK_MAX_ITEMS = 500
 
 
@@ -103,15 +115,20 @@ class _DrainCandidate:
 
 @dataclass(frozen=True)
 class DrainSummary:
-    """Per-connector-per-tick drain tally, returned for logging + tests.
+    """Per-source-per-tick drain tally, returned for logging + tests.
 
-    ``left`` is the TRUE post-drain queue depth for the connector —
+    ``left`` is the TRUE post-drain queue depth for the source —
     ``SELECT COUNT(*) FROM connector_deadletter WHERE source_name = ?``
     AFTER the drain — NOT ``scanned - drained``. The scan is capped at
     ``max_items`` so a ``scanned - drained`` figure would understate the
     real backlog whenever the queue is deeper than the per-tick cap; this
     field reflects everything still queued (drainable-but-uncapped rows on
     a later tick, plus every row left for retry).
+
+    ``connector_name`` is the ``source_name`` string the row was written
+    under (a connector KIND like ``"sharepoint"``). For a ``dry_run`` pass
+    ``drained`` / ``corrupt_zip`` / ``unsupported_mime`` count what WOULD
+    drain and ``left`` is the CURRENT (unmutated) depth.
     """
 
     connector_name: str
@@ -152,6 +169,39 @@ def is_drain_eligible(mime: str | None, failure_class: str) -> bool:
     return known_unsupported_mime(mime or "")
 
 
+def _candidate_from_row(
+    db: sqlite3.Connection,
+    connector_name: str,
+    item_id: str,
+    last_error: str,
+) -> _DrainCandidate:
+    """Build one :class:`_DrainCandidate`, joining bronze for the MIME fields.
+
+    Derives ``failure_class`` from ``last_error`` via :func:`classify_error`
+    and looks up the bronze MIME / content_hash / raw_path / fetched_at by
+    ``(source_name, item_id)`` — the same key every dead-letter write used.
+    The bronze row is absent for fetch-failure dead-letters (never reach
+    the bronze write), so every joined field is ``None`` in that case.
+    """
+    bronze = db.execute(
+        "SELECT mime, content_hash, raw_path, fetched_at FROM bronze_records WHERE source_name = ? AND item_id = ?",
+        (connector_name, item_id),
+    ).fetchone()
+    mime = str(bronze[0]) if bronze is not None and bronze[0] is not None else None
+    content_hash = str(bronze[1]) if bronze is not None and bronze[1] is not None else None
+    raw_path = str(bronze[2]) if bronze is not None and bronze[2] is not None else None
+    fetched_at = str(bronze[3]) if bronze is not None and bronze[3] is not None else None
+    return _DrainCandidate(
+        item_id=item_id,
+        last_error=last_error,
+        failure_class=classify_error(last_error),
+        mime=mime,
+        content_hash=content_hash,
+        raw_path=raw_path,
+        fetched_at=fetched_at,
+    )
+
+
 def _load_candidates(
     db: sqlite3.Connection,
     connector_name: str,
@@ -161,34 +211,29 @@ def _load_candidates(
     """Enumerate dead-letter rows for ``connector_name`` joined to bronze.
 
     Keys on ``connector_name`` (the connector KIND) for BOTH the
-    dead-letter list and the bronze join — the same value every
-    dead-letter write used. Capped at ``max_items`` so the per-tick scan
-    is bounded even when ``DeadLetterStore.list`` returns a large backlog.
+    dead-letter scan and the bronze join — the same value every
+    dead-letter write used. The per-tick cap is pushed DOWN into SQL
+    (``LIMIT ?``) rather than fetched whole and sliced in Python, so the
+    scan touches at most ``max_items`` rows even when the source's backlog
+    is huge — the only unbounded path the tick loop could have hit. Order
+    matches ``DeadLetterStore.list``'s ``last_attempt ASC`` (oldest first).
     """
-    store = DeadLetterStore(db)
-    entries: tuple[DeadLetterEntry, ...] = store.list(connector_name)
-    candidates: list[_DrainCandidate] = []
-    for entry in entries[:max_items]:
-        bronze = db.execute(
-            "SELECT mime, content_hash, raw_path, fetched_at FROM bronze_records WHERE source_name = ? AND item_id = ?",
-            (connector_name, entry.item_id),
-        ).fetchone()
-        mime = str(bronze[0]) if bronze is not None and bronze[0] is not None else None
-        content_hash = str(bronze[1]) if bronze is not None and bronze[1] is not None else None
-        raw_path = str(bronze[2]) if bronze is not None and bronze[2] is not None else None
-        fetched_at = str(bronze[3]) if bronze is not None and bronze[3] is not None else None
-        candidates.append(
-            _DrainCandidate(
-                item_id=entry.item_id,
-                last_error=entry.last_error,
-                failure_class=classify_error(entry.last_error),
-                mime=mime,
-                content_hash=content_hash,
-                raw_path=raw_path,
-                fetched_at=fetched_at,
-            )
+    # F63-bounded: LIMIT ? caps the per-tick scan.
+    rows = db.execute(
+        "SELECT item_id, failure_count, last_error, last_attempt "
+        "FROM connector_deadletter WHERE source_name = ? "
+        "ORDER BY last_attempt ASC LIMIT ?",
+        (connector_name, max_items),
+    ).fetchall()
+    return tuple(
+        _candidate_from_row(
+            db,
+            connector_name,
+            str(row[0]),
+            str(row[2]) if row[2] is not None else "",
         )
-    return tuple(candidates)
+        for row in rows
+    )
 
 
 def _bucket_for(candidate: _DrainCandidate) -> str:
@@ -282,50 +327,83 @@ def _remaining_deadletter_count(db: sqlite3.Connection, connector_name: str) -> 
     return int(row[0]) if row is not None else 0
 
 
-def drain_connector_deadletters(
+def _tally_drain(
     db: sqlite3.Connection,
     *,
-    connector_name: str,
+    source_name: str,
     silver: DefaultSilverProcessor,
-    max_items: int = _DEFAULT_PER_TICK_MAX_ITEMS,
-) -> DrainSummary:
-    """Drain permanently-unprocessable dead-letters for one connector.
+    candidates: tuple[_DrainCandidate, ...],
+    dry_run: bool,
+) -> tuple[int, dict[str, int]]:
+    """Walk the candidates, draining (or counting) every eligible row.
 
-    Runs once per connector per sync tick. Enumerates the connector's
-    dead-letter backlog (keyed on ``connector_name`` — the connector
-    KIND), drains every :func:`is_drain_eligible` row (outcome-write +
-    clear + per-row commit), and leaves every other row for retry. Emits
-    a single summary log line and returns the tally.
-
-    ``DrainSummary.left`` is the TRUE post-drain queue depth (a direct
-    ``COUNT(*)``), so it stays accurate even when the backlog exceeds the
-    per-tick ``max_items`` scan cap.
-
-    Cheap-when-clean guard: an empty backlog short-circuits to a zero
-    :class:`DrainSummary` without any per-row work.
+    Returns ``(drained, bucket_tally)``. When ``dry_run`` is set the
+    eligible rows are COUNTED only — no outcome-write, no ``clear``, no
+    ``commit`` — so the pass mutates nothing. The narrow
+    :func:`is_drain_eligible` predicate is applied identically in both
+    modes, so a dry-run preview matches exactly what a live pass clears.
     """
-    candidates = _load_candidates(db, connector_name, max_items=max_items)
-    if not candidates:
-        return DrainSummary(connector_name, drained=0, corrupt_zip=0, unsupported_mime=0, left=0)
-
     dead_letter = DeadLetterStore(db)
     tally = {_FAILURE_CLASS_CORRUPT_ZIP: 0, _BUCKET_UNSUPPORTED_MIME: 0}
     drained = 0
     for candidate in candidates:
         if not is_drain_eligible(candidate.mime, candidate.failure_class):
             continue
-        if _drain_one(db, connector_name=connector_name, candidate=candidate, silver=silver, dead_letter=dead_letter):
+        if dry_run:
             drained += 1
             tally[_bucket_for(candidate)] += 1
+            continue
+        if _drain_one(db, connector_name=source_name, candidate=candidate, silver=silver, dead_letter=dead_letter):
+            drained += 1
+            tally[_bucket_for(candidate)] += 1
+    return drained, tally
 
+
+def drain_source_deadletters(
+    db: sqlite3.Connection,
+    *,
+    source_name: str,
+    silver: DefaultSilverProcessor,
+    dry_run: bool = False,
+    max_items: int = _DEFAULT_PER_TICK_MAX_ITEMS,
+) -> DrainSummary:
+    """Drain permanently-unprocessable dead-letters for ONE source.
+
+    The reusable per-source core. ``source_name`` is the value every
+    dead-letter write keyed on (a connector KIND like ``"sharepoint"``) —
+    NO active connector instance is required, so this drains an ORPHANED
+    source whose connector is no longer registered just as well as an
+    active one. Enumerates the source's backlog (capped at ``max_items``),
+    drains every :func:`is_drain_eligible` row (outcome-write + clear +
+    per-row commit), and leaves every other row for retry. Eligibility is
+    the EXISTING narrow rule (corrupt_zip OR known-unsupported MIME) — this
+    core never broadens it.
+
+    ``dry_run`` reports what WOULD drain (the ``drained`` /
+    ``corrupt_zip`` / ``unsupported_mime`` counts) WITHOUT mutating: no
+    ``clear``, no ``commit``, no outcome rows. ``DrainSummary.left`` is the
+    CURRENT depth in that case.
+
+    ``DrainSummary.left`` is otherwise the TRUE post-drain queue depth (a
+    direct ``COUNT(*)``), so it stays accurate even when the backlog
+    exceeds the per-tick ``max_items`` scan cap.
+
+    Cheap-when-clean guard: an empty backlog short-circuits to a zero
+    :class:`DrainSummary` without any per-row work.
+    """
+    candidates = _load_candidates(db, source_name, max_items=max_items)
+    if not candidates:
+        return DrainSummary(source_name, drained=0, corrupt_zip=0, unsupported_mime=0, left=0)
+
+    drained, tally = _tally_drain(db, source_name=source_name, silver=silver, candidates=candidates, dry_run=dry_run)
     summary = DrainSummary(
-        connector_name=connector_name,
+        connector_name=source_name,
         drained=drained,
         corrupt_zip=tally[_FAILURE_CLASS_CORRUPT_ZIP],
         unsupported_mime=tally[_BUCKET_UNSUPPORTED_MIME],
-        left=_remaining_deadletter_count(db, connector_name),
+        left=_remaining_deadletter_count(db, source_name),
     )
-    if drained:
+    if drained and not dry_run:
         logger.info(
             "auto-drain: connector=%s drained=%d (corrupt_zip=%d, unsupported_mime=%d) left_total=%d",
             summary.connector_name,
@@ -335,3 +413,89 @@ def drain_connector_deadletters(
             summary.left,
         )
     return summary
+
+
+def drain_connector_deadletters(
+    db: sqlite3.Connection,
+    *,
+    connector_name: str,
+    silver: DefaultSilverProcessor,
+    max_items: int = _DEFAULT_PER_TICK_MAX_ITEMS,
+) -> DrainSummary:
+    """Drain permanently-unprocessable dead-letters for one ACTIVE connector.
+
+    Thin alias over :func:`drain_source_deadletters` keyed on the active
+    ``connector_name`` (the connector KIND). The per-active-connector
+    auto-drain at ``kairix.worker._run_one_connector_batch`` calls THIS;
+    behaviour is byte-for-byte unchanged from the pre-sweep core (the
+    sweep simply renamed the body to ``drain_source_deadletters`` and
+    threaded a ``dry_run`` flag that defaults False here).
+    """
+    return drain_source_deadletters(db, source_name=connector_name, silver=silver, max_items=max_items)
+
+
+def distinct_deadletter_sources(db: sqlite3.Connection) -> tuple[str, ...]:
+    """Every distinct ``source_name`` present in ``connector_deadletter``.
+
+    The canonical enumeration shared with the operator triage surface
+    (:mod:`kairix.core.observability.dead_letter_status`). Source-name
+    cardinality is tiny — one per registered (or formerly-registered)
+    connector — so the ``LIMIT 1000`` is an F63 safety bound, never a real
+    truncation. Crucially this includes ORPHANED sources whose connector
+    is no longer active: those rows still carry their original
+    ``source_name`` and surface here so the sweep can drain them.
+    """
+    rows = db.execute(
+        "SELECT source_name FROM connector_deadletter GROUP BY source_name ORDER BY source_name ASC LIMIT 1000"
+    ).fetchall()
+    return tuple(str(r[0]) for r in rows)
+
+
+def drain_all_source_deadletters(
+    db: sqlite3.Connection,
+    *,
+    silver: DefaultSilverProcessor,
+    skip_sources: frozenset[str] = frozenset(),
+    dry_run: bool = False,
+    max_items: int = _DEFAULT_PER_TICK_MAX_ITEMS,
+) -> tuple[DrainSummary, ...]:
+    """Drain (or preview) EVERY distinct source's dead-letter backlog.
+
+    Enumerates :func:`distinct_deadletter_sources` and runs the per-source
+    :func:`drain_source_deadletters` core against each — including ORPHANED
+    sources whose connector is no longer active (the gap the
+    per-active-connector auto-drain leaves open). ``skip_sources`` lets a
+    caller (e.g. a sync pass that already drained the active connectors
+    this tick) avoid the redundant re-scan; the per-source drain is
+    idempotent anyway, so a skip is an optimisation, not a correctness
+    requirement.
+
+    Best-effort per source: one source raising is logged and the sweep
+    continues to the next, so a single wedged source never starves the
+    rest. Cheap-when-clean: an empty table enumerates to zero sources and
+    the whole sweep is a single ``GROUP BY`` read.
+
+    Returns one :class:`DrainSummary` per source actually processed (the
+    skipped ones are absent). ``dry_run`` previews without mutating.
+    """
+    summaries: list[DrainSummary] = []
+    drained_total = 0
+    for source_name in distinct_deadletter_sources(db):
+        if source_name in skip_sources:
+            continue
+        try:
+            summary = drain_source_deadletters(
+                db, source_name=source_name, silver=silver, dry_run=dry_run, max_items=max_items
+            )
+        except Exception as exc:  # one source must not starve the sweep
+            logger.warning("deadletter-sweep: source=%s failed — %s", source_name, exc)
+            continue
+        summaries.append(summary)
+        drained_total += summary.drained
+    logger.info(
+        "deadletter-sweep: sources=%d drained=%d dry_run=%s",
+        len(summaries),
+        drained_total,
+        dry_run,
+    )
+    return tuple(summaries)
