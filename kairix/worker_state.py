@@ -79,6 +79,21 @@ class WorkerState:
     last_entity_summary_updated: int = 0
     last_entity_summary_skipped: int = 0
     last_entity_summary_failed: int = 0
+    # SYNC-OBS — connector-sync tick observability cluster. The #1 blind
+    # spot is that a quiet source (polled OK, zero new docs) looked
+    # identical to a dead one. ``syncs_attempted`` increments on EVERY
+    # connector-sync tick regardless of yield, so ``kairix worker status``
+    # proves the worker is still polling even on a zero-doc tick.
+    # ``last_connector_tick_yielded`` records whether the last tick
+    # surfaced any items (False == quiet, True == items flowed); the rest
+    # mirror the ``last_maintenance_*`` / ``last_entity_summary_*`` clusters
+    # above so the same persist/restore + status-render path applies.
+    syncs_attempted: int = 0
+    last_connector_sync_at: float = 0.0
+    last_connector_tick_yielded: bool = False
+    last_connector_synced: int = 0
+    last_connector_dead_letter_added: int = 0
+    last_connector_connectors_polled: int = 0
 
     def to_dict(self) -> dict[str, object]:
         """JSON-safe dict. Enum values export as strings via the ``str`` mixin."""

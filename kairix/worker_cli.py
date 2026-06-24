@@ -75,6 +75,12 @@ def format_status(state: WorkerState, now: float | None = None) -> str:
     now = now if now is not None else time.time()
     last_embed = _format_age(now - state.last_embed_run_at) if state.last_embed_run_at > 0 else "never"
     uptime = _format_age(now - state.started_at) if state.started_at > 0 else "unknown"
+    # SYNC-OBS — the connector-sync heartbeat. ``Last connector sync`` is
+    # the quiet-vs-dead signal: a recent age here with ``yielded last tick:
+    # False`` means the source IS being polled but had no new docs (healthy
+    # quiet), whereas ``never`` / a stale age means the sync loop isn't
+    # running (dead). ``Syncs attempted`` proves forward progress across ticks.
+    last_sync = _format_age(now - state.last_connector_sync_at) if state.last_connector_sync_at > 0 else "never"
     lines = [
         f"Phase: {state.current_phase.value.upper()}",
         f"Last embed: {last_embed} (did work: {state.last_embed_did_work})",
@@ -83,6 +89,10 @@ def format_status(state: WorkerState, now: float | None = None) -> str:
         f"Recall alerts: {state.recall_alerts_total}",
         f"Consecutive no-ops: {state.consecutive_embed_noops}",
         f"Restart count: {state.restart_count}",
+        f"Last connector sync: {last_sync} (yielded last tick: {state.last_connector_tick_yielded})",
+        f"Syncs attempted: {state.syncs_attempted}",
+        f"Connectors polled last tick: {state.last_connector_connectors_polled}",
+        f"Synced last tick: {state.last_connector_synced}",
         f"Uptime: {uptime}",
     ]
     return "\n".join(lines)

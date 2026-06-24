@@ -132,3 +132,31 @@ def test_write_then_read_round_trip(tmp_path: Path) -> None:
     assert restored.consecutive_embed_noops == 12
     assert restored.restart_count == 3
     assert restored.recall_alerts_total == 2
+
+
+@pytest.mark.unit
+def test_worker_state_round_trip_preserves_connector_sync_fields() -> None:
+    """SYNC-OBS: the connector-sync cluster survives the JSON round-trip.
+
+    The fields persist across worker restarts (mirroring the
+    ``last_maintenance_*`` cluster) so ``kairix worker status`` reports the
+    last-known sync heartbeat even immediately after a container bounce.
+
+    Sabotage proof: drop ``syncs_attempted`` from the dataclass and the
+    ``from_dict`` filter discards it → the assertion fails.
+    """
+    original = WorkerState(
+        syncs_attempted=11,
+        last_connector_sync_at=1234.5,
+        last_connector_tick_yielded=True,
+        last_connector_synced=6,
+        last_connector_dead_letter_added=2,
+        last_connector_connectors_polled=4,
+    )
+    restored = WorkerState.from_dict(original.to_dict())
+    assert restored.syncs_attempted == 11
+    assert restored.last_connector_sync_at == 1234.5
+    assert restored.last_connector_tick_yielded is True
+    assert restored.last_connector_synced == 6
+    assert restored.last_connector_dead_letter_added == 2
+    assert restored.last_connector_connectors_polled == 4
