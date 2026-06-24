@@ -172,6 +172,9 @@ pytest_plugins = [
     "tests.bdd.steps.extractor_docx_steps",
     # Wave-4 OF-3 xlsx extractor — openpyxl sheet-as-document.
     "tests.bdd.steps.extractor_xlsx_steps",
+    # PR-3 gotenberg conversion tier — Office/ODF/Visio/RTF → PDF →
+    # pdf_fallback re-entry.
+    "tests.bdd.steps.extractor_gotenberg_steps",
     # Connector plugin BDD step modules — Wave 2 IM-5 lands the first
     # connector (obsidian). Future connectors (sharepoint, dex_crm, ...)
     # append a sibling entry per F36.

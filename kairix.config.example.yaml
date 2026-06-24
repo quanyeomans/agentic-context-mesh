@@ -221,6 +221,39 @@ topology_v2:
       kind: sharepoint
       name: "Corporate SharePoint Document Library"
       default_sensitivity: internal
+      # ── Extraction escalation chain (optional) ─────────────────────
+      # By default each connector uses a single ``extractor`` (markitdown
+      # for rich documents). Set ``extractor_chain`` instead to opt into
+      # the escalation chain: each tier is tried in order, falling through
+      # to the next when a tier declines the mime or its ``quality_ok``
+      # gate fails. The ``gotenberg`` tier converts the formats neither
+      # markitdown nor pdf_fallback recover natively — legacy .doc / .xls
+      # / .ppt, the OpenDocument family, Visio, Publisher, and RTF — to
+      # PDF via the gotenberg HTTP service, then re-enters pdf_fallback.
+      # NOTE: modern OOXML (.docx / .pptx / .xlsx) is handled IN-PROCESS by
+      # the markitdown / pptx / docx / xlsx tiers and does NOT need
+      # gotenberg — the gotenberg tier deliberately refuses those mimes so
+      # it never shadows a working in-process extractor.
+      # A gotenberg outage RAISES so the chain escalates to ocr (and, if
+      # every tier fails, the item dead-letters for retry) rather than
+      # silently skipping. Requires a reachable gotenberg service — run it
+      # as a separately-managed service reachable at http://gotenberg:3000
+      # (e.g. the deployment compose, or locally via
+      # ``docker compose -f docker-compose.yml -f docker-compose.gotenberg.yml up``).
+      #
+      # extractor_chain: [markitdown, pdf_fallback, gotenberg, ocr]
+      # extractor_chain_configs:
+      #   gotenberg:
+      #     # Per-member kwargs are passed to make_extractor(**kwargs).
+      #     # The gotenberg factory takes a single ``config`` mapping;
+      #     # unset fields fall back to the KAIRIX_GOTENBERG_* env vars
+      #     # (KAIRIX_GOTENBERG_URL / _TIMEOUT_S / _MAX_FILE_SIZE_MB) and
+      #     # then to the built-in defaults.
+      #     config:
+      #       gotenberg_url: "http://gotenberg:3000"  # compose service DNS name
+      #       timeout_s: 60.0
+      #       max_file_size_mb: 256
+      #
       # For SharePoint: the Graph drive id. Until ``kairix sharepoint
       # discover`` lands (KFEAT-022), enumerate drives via
       # ``az rest --method get --url 'https://graph.microsoft.com/v1.0/sites?search=*'``

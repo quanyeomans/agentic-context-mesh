@@ -262,6 +262,7 @@ ocr          = "kairix.extractors.ocr:make_extractor"
 pptx         = "kairix.extractors.pptx:make_extractor"
 docx         = "kairix.extractors.docx:make_extractor"
 xlsx         = "kairix.extractors.xlsx:make_extractor"
+gotenberg    = "kairix.extractors.gotenberg:make_extractor"
 
 # Chunker plugin discovery — same name-filtered Python entry-points
 # shape as kairix.extractors above. Per-(kind, mime) plugins live under
