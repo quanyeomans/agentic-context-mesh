@@ -94,9 +94,7 @@ def test_collection_path_empty_string_is_rejected() -> None:
     same operator mistake as omitting the key entirely.
     """
     errors = validate_config({"collections": {"shared": [{"name": "docs", "path": ""}]}})
-    assert any("missing required 'path'" in e or "empty 'path'" in e for e in errors), (
-        f"expected an empty-path error, got: {errors}"
-    )
+    assert any("missing required 'path'" in e for e in errors), f"expected an empty-path error, got: {errors}"
 
 
 def test_duplicate_collection_names_reported_with_name() -> None:
