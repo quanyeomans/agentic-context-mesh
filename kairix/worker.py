@@ -44,6 +44,42 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _now_iso() -> str:
+    """ISO-8601 UTC timestamp string (matches every other topology table).
+
+    Mirrors :func:`kairix.core.connectors.cc_pair._now` so the worker's
+    ``topology_*`` writes carry the identical timestamp shape.
+    """
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _bump_cc_pair_total_docs_indexed(
+    db: sqlite3.Connection,
+    name: str | None,
+    cc_pair_id: int | None,
+    indexed: int,
+) -> None:
+    """Best-effort increment of ``topology_cc_pairs.total_docs_indexed``.
+
+    Runs in its own transaction, committed AFTER ``pipeline.run_batch()`` has
+    already committed the chunk writes (a separate transaction). Guarded so a
+    counter failure logs and continues rather than abandoning every subsequent
+    connector this tick. No-ops when nothing was indexed or the entry has no
+    resolved cc_pair (``cc_pair_id is None``).
+    """
+    if indexed <= 0 or cc_pair_id is None:
+        return
+    try:
+        db.execute(
+            "UPDATE topology_cc_pairs SET total_docs_indexed = total_docs_indexed + ?, updated_at = ? WHERE id = ?",
+            (indexed, _now_iso(), cc_pair_id),
+        )
+        db.commit()
+    except Exception as exc:
+        logger.warning("worker: connector %s — failed to bump total_docs_indexed: %s", name, exc)
+
+
 # #224 phase 4 — pause-flag polling cadence.
 # When the worker is in PAUSED phase, it sleeps this long between flag
 # re-checks. Short enough that operators see resumption quickly (CLI tells
@@ -211,7 +247,7 @@ class _SqliteChunkWriter:
         Does NOT commit.
         """
         written = 0
-        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        now = _now_iso()
         for seq, chunk in enumerate(chunks):
             path = f"{chunk.source_uri}#{seq}"
             # Use UPSERT (ON CONFLICT DO UPDATE) rather than INSERT OR REPLACE.
@@ -422,10 +458,14 @@ def _run_one_connector_batch(
     db: sqlite3.Connection,
     entry: dict[str, Any],
     bronze_root: Path,
-) -> tuple[int, int]:
+) -> tuple[int, int, int | None]:
     """Wire one connector entry through the :class:`ConnectorPipeline`.
 
-    Returns ``(items_indexed, items_dead_lettered)``. Raises on
+    Returns ``(items_indexed, items_dead_lettered, cc_pair_id)``. The
+    ``cc_pair_id`` is the ``topology_cc_pairs.id`` the entry routes on
+    (``None`` when the entry has no registered cc_pair — the legacy
+    single-collection writer path); the caller uses it to increment the
+    cc_pair's lifetime ``total_docs_indexed`` counter. Raises on
     registry / pipeline construction failures so the caller's per-entry
     try/except logs them and continues to the next connector.
 
@@ -459,10 +499,17 @@ def _run_one_connector_batch(
     connector = connector_factory(entry.get("config", {}))
     extractor = build_extractor_from_entry(entry)
     bronze_store = build_bronze_from_entry(entry, db=db)
+    # N3: resolve the cc_pair id ONCE here and thread it through both the
+    # chunk-writer resolution and the caller's return — the name→id lookup
+    # is otherwise paid twice per entry (once inside the writer resolver,
+    # once below). The id is None when the entry routes through the legacy
+    # writer (no registered cc_pair) — the counter is a cc_pair concept, so
+    # a legacy entry simply has nothing to bump.
+    cc_pair_id = _lookup_cc_pair_id_by_name(db, name)
     # Route through CollectionRouter when a cc_pair exists for `name`;
     # legacy_chunk_writer remains the fallback when no cc_pair has been
     # registered for the entry.
-    chunk_writer = resolve_chunk_writer_for_entry(db, name)
+    chunk_writer = resolve_chunk_writer_for_entry(db, name, cc_pair_id=cc_pair_id)
     pipeline = ConnectorPipeline(
         db=db,
         bronze=bronze_store,
@@ -474,12 +521,13 @@ def _run_one_connector_batch(
     )
     result = pipeline.run_batch(connector, extractor)
     del _legacy_chunk_writer
-    return result.processed, result.dead_lettered
+    return result.processed, result.dead_lettered, cc_pair_id
 
 
 def resolve_chunk_writer_for_entry(
     db: sqlite3.Connection,
     name: str,
+    cc_pair_id: int | None = None,
 ) -> Any:
     """Resolve the chunk-writer for ``name``.
 
@@ -489,6 +537,11 @@ def resolve_chunk_writer_for_entry(
     legacy writer — guarantees bit-for-bit behaviour parity for entries
     operator config hasn't yet registered.
 
+    ``cc_pair_id`` is an optional pre-resolved id (N3): callers that have
+    already looked it up (``_run_one_connector_batch``) pass it to avoid a
+    second name→id query. When omitted (or ``None``) the id is resolved
+    here from ``name`` — preserving the standalone-call behaviour.
+
     Returns ``Any`` because the union of ``_SqliteChunkWriter`` and
     ``_CollectionRouterChunkWriter`` is satisfied via duck-typing on
     the ``.upsert(chunks) -> int`` ChunkWriter Protocol shape; both
@@ -496,7 +549,8 @@ def resolve_chunk_writer_for_entry(
     """
     from kairix.core.connectors.collection_router import CollectionRouter, legacy_chunk_writer
 
-    cc_pair_id = _lookup_cc_pair_id_by_name(db, name)
+    if cc_pair_id is None:
+        cc_pair_id = _lookup_cc_pair_id_by_name(db, name)
     if cc_pair_id is None:
         return legacy_chunk_writer(db, collection=name)
     router = CollectionRouter(db, cc_pair_id)
@@ -674,13 +728,21 @@ def run_connector_sync_pipeline(deps: ConnectorSyncDeps | None = None) -> Connec
                 logger.info("worker: connector %s gated off (flag connector_%s OFF)", entry["kind"], entry["kind"])
                 continue
             try:
-                indexed, dead_lettered = _run_one_connector_batch(db, entry, bronze_root)
+                indexed, dead_lettered, cc_pair_id = _run_one_connector_batch(db, entry, bronze_root)
             except Exception as exc:
                 logger.warning("worker: connector %s failed — %s", entry.get("name"), exc)
                 continue
             synced += indexed
             failed += dead_lettered
             dead_letter_added += dead_lettered
+            # Wire the operator-facing counter: increment (not recompute) the
+            # cc_pair's lifetime total_docs_indexed so `kairix cc-pair list`
+            # stops reporting docs=0. result.processed already excludes
+            # deleted + dead-lettered items. The bump runs in its own
+            # transaction (committed after the chunk writes) and is guarded
+            # inside the helper, so a counter failure never abandons the
+            # remaining connectors this tick. See _bump_cc_pair_total_docs_indexed.
+            _bump_cc_pair_total_docs_indexed(db, entry.get("name"), cc_pair_id, indexed)
         return ConnectorSyncResult(synced=synced, failed=failed, dead_letter_added=dead_letter_added)
     finally:
         db.close()

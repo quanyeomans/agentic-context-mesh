@@ -39,13 +39,79 @@ from typing import Any
 
 import pytest
 
+from kairix.core.connectors.cc_pair import create_cc_pair
+from kairix.core.db.schema import create_schema
 from kairix.worker import (
     ConnectorSyncDeps,
     ConnectorSyncResult,
     run_connector_sync_pipeline,
 )
 
-pytestmark = pytest.mark.unit
+# NOTE: no module-level ``pytestmark`` — a module-level ``pytest.mark.unit``
+# STACKS with the per-function ``@pytest.mark.integration`` markers below,
+# so the real-SQLite / real-connector integration tests would wrongly also
+# carry the unit marker and run in the unit gate. Each test instead declares
+# its own marker individually: pure-logic tests are ``@pytest.mark.unit``;
+# tests that drive a real SQLite DB + real connector pipeline are
+# ``@pytest.mark.integration`` ONLY.
+
+
+def _seed_cc_pair_row(db_path: Path, *, cc_pair_name: str) -> None:
+    """Pre-register a ``topology_cc_pairs`` row (connector + cc_pair) so the
+    worker's name→id lookup resolves and the lifetime counter can be bumped.
+
+    Mirrors the real flow: the operator applies their topology (which lands a
+    ``topology_cc_pairs`` row) BEFORE the worker syncs. ``run_connector_sync_pipeline``
+    itself does not persist config cc_pairs into the table — that's the
+    topology applier's job — so the test seeds the row directly.
+    """
+    db = sqlite3.connect(str(db_path))
+    try:
+        create_schema(db)
+        now = "2026-06-22T00:00:00Z"
+        cur = db.execute(
+            "INSERT INTO topology_connectors "
+            "(kind, name, connector_specific_config, default_sensitivity, created_at, updated_at) "
+            "VALUES ('obsidian', 'seed-connector', '{}', 'internal', ?, ?)",
+            (now, now),
+        )
+        connector_id = cur.lastrowid
+        assert connector_id is not None
+        create_cc_pair(db, connector_id=int(connector_id), credential_id=None, name=cc_pair_name)
+        db.commit()
+    finally:
+        db.close()
+
+
+def _total_docs_indexed(db_path: Path, *, cc_pair_name: str) -> int:
+    db = sqlite3.connect(str(db_path))
+    try:
+        row = db.execute(
+            "SELECT total_docs_indexed FROM topology_cc_pairs WHERE name = ?",
+            (cc_pair_name,),
+        ).fetchone()
+    finally:
+        db.close()
+    assert row is not None, f"no topology_cc_pairs row for {cc_pair_name!r}"
+    return int(row[0])
+
+
+def _reset_connector_cursor(db_path: Path) -> None:
+    """Clear persisted connector cursors so the next sync is a cold reconcile.
+
+    Obsidian's cursor is an ISO mtime high-water-mark; a second short-lived
+    run within the same wall-clock window would otherwise surface zero events
+    (no live watchdog observer ran between the two batches). Clearing the
+    cursor forces the reconciler to re-emit the vault as a cold start, which
+    deterministically re-processes the notes so the increment behaviour can
+    be asserted without depending on filesystem-event timing.
+    """
+    db = sqlite3.connect(str(db_path))
+    try:
+        db.execute("DELETE FROM connector_cursors")
+        db.commit()
+    finally:
+        db.close()
 
 
 def _no_db_factory() -> sqlite3.Connection:
@@ -174,6 +240,56 @@ def test_runs_configured_obsidian_pipeline(tmp_path: Path) -> None:
     assert collections == {"obsidian-personal"}, (
         "chunks must land in the cc_pair-named collection (routing keys on cc_pair name, "
         f"not connector kind 'obsidian'); got {collections}."
+    )
+
+
+@pytest.mark.integration
+def test_connector_sync_increments_cc_pair_total_docs_indexed(tmp_path: Path) -> None:
+    """A successful batch bumps ``topology_cc_pairs.total_docs_indexed`` by the
+    number of items processed — and a SECOND batch INCREMENTS (not overwrites).
+
+    Wires the operator-facing counter that previously stayed at 0 forever, so
+    ``kairix cc-pair list`` reports docs=0. The cc_pair row is pre-seeded (the
+    operator applies topology before the worker syncs); each tick indexes new
+    notes and the lifetime counter accrues.
+
+    Proves increment (N then N+M) rather than recompute: the second batch's
+    delta is ADDED to the first, not used to replace it.
+
+    Sabotage proof: drop the ``total_docs_indexed = total_docs_indexed + ?``
+    UPDATE in ``run_connector_sync_pipeline``'s loop → the counter stays 0 and
+    the first assertion (``== 2``) fails. Restored, the counter accrues.
+    """
+    cc_pair_name = "obsidian-personal"
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "alpha.md").write_text("# Alpha\n\nFirst note body content.\n", encoding="utf-8")
+    (vault / "beta.md").write_text("# Beta\n\nSecond note body content.\n", encoding="utf-8")
+
+    db_path = tmp_path / "index.sqlite"
+    _seed_cc_pair_row(db_path, cc_pair_name=cc_pair_name)
+
+    deps = ConnectorSyncDeps(
+        disabled_fn=lambda: False,
+        config_mapping_fn=lambda: _obsidian_topology(vault, cc_pair_name=cc_pair_name),
+        db_factory=lambda: sqlite3.connect(str(db_path)),
+        bronze_root_resolver=lambda: tmp_path / "bronze",
+    )
+
+    # First batch: indexes alpha + beta → counter = 2.
+    first = run_connector_sync_pipeline(deps)
+    assert first.synced == 2, f"expected both notes indexed in the first batch; got {first}"
+    assert _total_docs_indexed(db_path, cc_pair_name=cc_pair_name) == 2
+
+    # Second batch: reset the cursor so the reconciler re-emits the vault as a
+    # cold start → the same two notes flow through again (processed == 2). The
+    # lifetime counter must accrue to 4, proving INCREMENT rather than
+    # recompute/overwrite (an overwrite would leave it at 2).
+    _reset_connector_cursor(db_path)
+    second = run_connector_sync_pipeline(deps)
+    assert second.synced == 2, f"expected both notes re-processed on the second batch; got {second}"
+    assert _total_docs_indexed(db_path, cc_pair_name=cc_pair_name) == 4, (
+        "the counter must INCREMENT (2 + 2 = 4), not be overwritten by the second batch's delta"
     )
 
 
@@ -449,4 +565,94 @@ def test_multi_cc_pair_connector_yields_one_entry_per_pair(
     assert failed_pairs == {"pair-a-cc", "pair-b-cc"}, (
         "each cc_pair must produce its own ingest entry (one entry per cc_pair, D2); "
         f"only these cc_pair names reached the per-entry loop: {failed_pairs}."
+    )
+
+
+# Marker substring identifying the operator-facing counter bump
+# (``UPDATE topology_cc_pairs SET total_docs_indexed = ... WHERE id = ?``).
+# Used by _CounterFailingConnection to fail ONLY that statement while every
+# other write (bronze, silver, chunk-writer, cursor) commits normally.
+_COUNTER_UPDATE_MARKER = "total_docs_indexed = total_docs_indexed + ?"
+
+
+class _CounterFailingConnection(sqlite3.Connection):
+    """A real ``sqlite3.Connection`` that raises on the counter-bump UPDATE only.
+
+    Subclassing the real connection keeps the entire production pipeline
+    (bronze store, silver processor, chunk writer, cursor store, dead-letter
+    store) running against a live SQLite DB — F47-clean, no fakes at the
+    storage seam. The ONLY divergence is that the ``total_docs_indexed``
+    increment raises ``sqlite3.OperationalError``, so the public
+    ``run_connector_sync_pipeline`` exercises the helper's best-effort
+    ``except`` branch without any test reaching into a private name (F5).
+    """
+
+    def execute(self, sql: str, *args: Any) -> sqlite3.Cursor:
+        if _COUNTER_UPDATE_MARKER in sql:
+            raise sqlite3.OperationalError("simulated: topology_cc_pairs counter write failed")
+        return super().execute(sql, *args)
+
+
+@pytest.mark.integration
+def test_counter_bump_db_failure_is_swallowed_and_loop_completes(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """C1 robustness through the public surface: a failure in the lifetime
+    ``total_docs_indexed`` counter UPDATE must NOT abandon the sync.
+
+    The counter bump runs in its own transaction AFTER the chunk writes have
+    already committed; a failure there is best-effort — it logs a warning and
+    the pipeline reports its real synced counters. A real batch indexes both
+    notes (so the bump path is reached with ``indexed > 0`` and a resolved
+    cc_pair id), but the connection raises on the counter UPDATE only. The
+    aggregate result must still report ``synced == 2`` and ``failed == 0``,
+    and a warning naming ``total_docs_indexed`` must be logged.
+
+    Drives the helper's ``except Exception`` branch entirely through the
+    public ``run_connector_sync_pipeline`` (no private-name import — F5).
+
+    Sabotage proof: remove the ``try/except`` in
+    ``_bump_cc_pair_total_docs_indexed`` (issue ``db.execute(...)`` bare); the
+    ``OperationalError`` propagates out of ``run_connector_sync_pipeline`` and
+    this test fails with an unhandled error. Restored, the bump failure is
+    swallowed, the warning is logged, and ``synced == 2`` holds.
+    """
+    cc_pair_name = "obsidian-personal"
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "alpha.md").write_text("# Alpha\n\nFirst note body content.\n", encoding="utf-8")
+    (vault / "beta.md").write_text("# Beta\n\nSecond note body content.\n", encoding="utf-8")
+
+    db_path = tmp_path / "index.sqlite"
+    _seed_cc_pair_row(db_path, cc_pair_name=cc_pair_name)
+
+    deps = ConnectorSyncDeps(
+        disabled_fn=lambda: False,
+        config_mapping_fn=lambda: _obsidian_topology(vault, cc_pair_name=cc_pair_name),
+        db_factory=lambda: sqlite3.connect(str(db_path), factory=_CounterFailingConnection),
+        bronze_root_resolver=lambda: tmp_path / "bronze",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="kairix.worker"):
+        result = run_connector_sync_pipeline(deps)
+
+    # The batch succeeded; only the (best-effort) counter bump failed. The
+    # pipeline must report its true synced counters and never propagate.
+    assert result.synced == 2, (
+        f"the batch indexed both notes; a counter-bump failure must not change synced. got {result}"
+    )
+    assert result.failed == 0, "a best-effort counter failure must not count as a connector failure"
+
+    # The counter UPDATE failed, so the persisted value stays at its seeded 0.
+    assert _total_docs_indexed(db_path, cc_pair_name=cc_pair_name) == 0
+
+    warnings = [
+        rec.getMessage()
+        for rec in caplog.records
+        if rec.levelno == logging.WARNING and "total_docs_indexed" in rec.getMessage()
+    ]
+    assert warnings, (
+        "a counter-bump failure must emit a WARNING naming total_docs_indexed; "
+        f"got {[r.getMessage() for r in caplog.records]}"
     )

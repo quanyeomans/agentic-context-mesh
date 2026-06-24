@@ -44,6 +44,46 @@ def test_collection_missing_path_reports_error() -> None:
 
 
 @pytest.mark.unit
+def test_entity_summaries_missing_path_is_allowed() -> None:
+    """ADR-036: synthetic projector-fed collections carry no filesystem path.
+
+    'entity-summaries' is on the synthetic allow-list, so a missing path is
+    accepted (the validator has no warning tier — any error string = exit 1).
+    """
+    data = {"collections": {"shared": [{"name": "entity-summaries", "tier": "reference"}]}}
+    assert validate_config(data) == []
+
+
+@pytest.mark.unit
+def test_missing_path_exemption_is_name_scoped_not_tier_scoped() -> None:
+    """The synthetic-collection path exemption keys on NAME, not tier.
+
+    Regression guard: an ordinary collection that happens to carry
+    ``tier: "reference"`` is NOT on the synthetic allow-list
+    (``_SYNTHETIC_COLLECTION_NAMES``), so a missing path MUST still be
+    rejected. This pins the exemption to the collection NAME and guards
+    against anyone later re-introducing a tier-based exemption (which
+    would silently let any reference-tier collection skip its path).
+    """
+    data = {"collections": {"shared": [{"name": "ordinary-docs", "tier": "reference"}]}}
+    errors = validate_config(data)
+    assert any("missing required 'path'" in e for e in errors), (
+        "a reference-tier collection with no path must still be rejected — the "
+        f"exemption is name-scoped (entity-summaries only), not tier-scoped; got: {errors}"
+    )
+
+
+@pytest.mark.unit
+def test_reference_library_with_relative_path_is_accepted() -> None:
+    """The relative 'path: reference-library' form is auto-corrected at runtime
+    by harmonise_reference_library(), so the validator accepts it (no
+    missing-path error)."""
+    data = {"collections": {"shared": [{"name": "reference-library", "path": "reference-library"}]}}
+    errors = validate_config(data)
+    assert not any("missing required 'path'" in e for e in errors)
+
+
+@pytest.mark.unit
 def test_duplicate_collection_name_reports_error() -> None:
     data = {"collections": {"shared": [{"name": "docs", "path": "a"}, {"name": "docs", "path": "b"}]}}
     errors = validate_config(data)

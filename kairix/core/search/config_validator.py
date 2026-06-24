@@ -42,6 +42,15 @@ _VALID_OVERRIDE_KEYS = frozenset(
 # validator. Hoisted so a future rename has a single edit site.
 _COLLECTIONS_KEY = "collections"
 
+# Synthetic collections fed by projectors (no filesystem path). ADR-036.
+_SYNTHETIC_COLLECTION_NAMES: frozenset[str] = frozenset({"entity-summaries"})
+
+# F17: the reference-library collection name appears in several validator
+# branches (path auto-correction hint + the relative-path harmoniser accept).
+# Hoisted so the literal has a single edit site and the module stays under the
+# no_duplicate_string ceiling (S1192).
+_REFERENCE_LIBRARY_NAME = "reference-library"
+
 # reference_library.index modes valid in kairix.config.yaml (#475). Kept as a
 # literal tuple (mirrors _VALID_OVERRIDE_KEYS) so validation doesn't drag the
 # config_loader dataclasses in as a runtime dependency.
@@ -177,7 +186,7 @@ def _check_one_collection_path(
     # Reference-library auto-correction: if the declared path doesn't
     # resolve but $KAIRIX_REFLIB_ROOT does, return the actionable hint
     # that points operators at the canonical path.
-    if name == "reference-library" and reflib_root and reflib_root.is_dir():
+    if name == _REFERENCE_LIBRARY_NAME and reflib_root and reflib_root.is_dir():
         return (
             f"{common}; the scanner auto-corrects this to {reflib_root} at runtime. "
             f"fix: change `path: {raw_path}` to `path: {reflib_root}` in your kairix.config.yaml. "
@@ -288,7 +297,14 @@ def _validate_shared_collection_item(prefix: str, item: Any, seen_names: set[str
     if name in seen_names:
         errs.append(f"{prefix}: duplicate collection name {name!r}")
     seen_names.add(name)
-    if not item.get("path"):
+    path_val = item.get("path")
+    # ADR-036: synthetic projector-fed collections (e.g. entity-summaries)
+    # carry no filesystem path. The reference-library relative form
+    # (path == "reference-library") is auto-corrected at runtime by
+    # harmonise_reference_library(), so accept it here too.
+    is_synthetic = name in _SYNTHETIC_COLLECTION_NAMES
+    path_auto_harmonised = name == _REFERENCE_LIBRARY_NAME and path_val == _REFERENCE_LIBRARY_NAME
+    if not path_val and not is_synthetic and not path_auto_harmonised:
         errs.append(f"{prefix} ({name}): missing required 'path'")
     errs.extend(_validate_collection_overrides(prefix, name, item.get("retrieval")))
     return errs
