@@ -197,6 +197,29 @@ def _extension(name: str) -> str:
     return name[dot:].lower()
 
 
+def known_unsupported_mime(mime: str) -> bool:
+    """Mime-only ``KNOWN_UNSUPPORTED`` predicate — no bytes required.
+
+    Returns ``True`` when ``mime`` (case-insensitively) is one of the
+    positively-identified no-extractor formats: the legacy-binary-Office /
+    executable / MS-Publisher exact set (:data:`_KNOWN_UNSUPPORTED_MIMES`)
+    or the Visio / ODF prefix family (:data:`_KNOWN_UNSUPPORTED_MIME_PREFIXES`).
+
+    This is the mime-only slice of :func:`classify_compat`'s MIME branch,
+    factored out so consumers that have a MIME but NOT the raw bytes (the
+    dead-letter auto-drain pass — the bytes are long gone) can make the
+    same KNOWN_UNSUPPORTED-by-MIME decision against a single source of
+    truth. It deliberately does NOT treat ``application/octet-stream`` or
+    any other unrecognised MIME as unsupported — those are ``UNKNOWN`` by
+    design (the recoverable mislabeled-OOXML universe the compat gate
+    rescues), so this returns ``False`` for them.
+    """
+    normalised = (mime or "").strip().lower()
+    if normalised in _KNOWN_UNSUPPORTED_MIMES:
+        return True
+    return any(normalised.startswith(prefix) for prefix in _KNOWN_UNSUPPORTED_MIME_PREFIXES)
+
+
 def classify_compat(mime: str, name: str, data: bytes) -> CompatResult:
     """Classify an item's processability BEFORE extraction.
 
@@ -248,9 +271,7 @@ def classify_compat(mime: str, name: str, data: bytes) -> CompatResult:
         return CompatResult(Compat.SUPPORTED, mime)
     if normalised_mime in _SUPPORTED_MIMES:
         return CompatResult(Compat.SUPPORTED, mime)
-    if normalised_mime in _KNOWN_UNSUPPORTED_MIMES:
-        return CompatResult(Compat.KNOWN_UNSUPPORTED, mime)
-    if any(normalised_mime.startswith(prefix) for prefix in _KNOWN_UNSUPPORTED_MIME_PREFIXES):
+    if known_unsupported_mime(normalised_mime):
         return CompatResult(Compat.KNOWN_UNSUPPORTED, mime)
 
     # 3. Extension — TIEBREAK only; can demote to KNOWN_UNSUPPORTED but
