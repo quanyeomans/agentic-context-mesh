@@ -49,10 +49,11 @@ import logging
 import shutil
 import sqlite3
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from kairix.core.connectors.compat import Compat, classify_compat
 from kairix.core.connectors.cursor_store import CursorStore
 from kairix.core.connectors.dead_letter import DeadLetterStore
 from kairix.core.protocols import (
@@ -479,8 +480,41 @@ class ConnectorPipeline:
             self._dead_letter.record(connector.name, item_id, f"fetch: {exc}")
             return _OUTCOME_DEAD_LETTERED
         ref = self._bronze.write(connector.name, item_id, raw.raw, raw.mime)
+        # PR-2 — pre-extract compatibility gate. Classify the item from
+        # the full bytes already fetched BEFORE attempting extraction so
+        # that (a) genuinely-unprocessable binaries are skipped instead
+        # of dead-lettered, and (b) Office docs that arrive with a
+        # stripped/generic Content-Type get their MIME corrected and
+        # reach the right extractor. ``item_name`` (with extension) is a
+        # tiebreak signal surfaced on ChangeEvent.metadata by the
+        # SharePoint connector; absent for connectors that don't set it
+        # (then the classifier relies on magic bytes + MIME only).
+        item_name = _change_item_name(change)
+        compat_result = classify_compat(raw.mime, item_name, raw.raw)
+        if compat_result.compat is Compat.KNOWN_UNSUPPORTED:
+            # Known-unsupported format: record the outcome (best-effort,
+            # never escalates) and consume the change WITHOUT running the
+            # extractor and WITHOUT recording a dead-letter — so the item
+            # never poisons the queue and the cursor advances normally.
+            # ``skipped_unsupported`` (NOT ``unsupported``) marks that NO
+            # extract ran and ZERO chunks landed (see the constant docs).
+            _safe_outcome_write(
+                self._silver,
+                ref=ref,
+                source_modified_at=modified_at,
+                extractor=extractor,
+                extraction_status=_EXTRACTION_STATUS_SKIPPED_UNSUPPORTED,
+            )
+            return _OUTCOME_PROCESSED
+        # OOXML disambiguation: when the classifier recognised a docx /
+        # pptx / xlsx ZIP that was mislabeled (e.g. application/zip or
+        # octet-stream), route extraction with the corrected MIME so the
+        # format-specific extractor claims it. For every other case
+        # ``effective_mime == raw.mime`` — non-SharePoint / already-
+        # correct items are byte-for-byte unaffected.
+        extract_mime = compat_result.effective_mime
         try:
-            doc = extractor.extract(raw.raw, raw.mime)
+            doc = extractor.extract(raw.raw, extract_mime)
         except Exception as exc:
             # GH #336 — record the failure on documents_media so the
             # dashboard sees it, then dead-letter for retry as before.
@@ -499,7 +533,10 @@ class ConnectorPipeline:
         # never fatal — silver falls back to the legacy single-source
         # shape via the connector_metadata / extractor_metadata defaults.
         connector_metadata = _safe_connector_metadata(connector, item_id)
-        extractor_metadata = _safe_extractor_metadata(extractor, raw.raw, raw.mime)
+        # Use the compat-corrected MIME so the extractor's metadata_for
+        # sees the same MIME it extracted with (matters for the OOXML
+        # disambiguation path; a no-op when effective_mime == raw.mime).
+        extractor_metadata = _safe_extractor_metadata(extractor, raw.raw, extract_mime)
         extractor_name = getattr(extractor, "name", None)
         extractor_version = getattr(extractor, "version", None)
         # GH #336 — derive extraction_status from quality_ok: when the
@@ -536,6 +573,31 @@ class ConnectorPipeline:
 _EXTRACTION_STATUS_OK = "ok"
 _EXTRACTION_STATUS_FAILED = "failed"
 _EXTRACTION_STATUS_UNSUPPORTED = "unsupported"
+# Pre-extract skip status (PR-2 / compat gate). Distinct from
+# ``unsupported``: ``unsupported`` means an extractor DID run, returned a
+# doc, but quality_ok was False — chunks still landed. ``skipped_unsupported``
+# means the compat classifier (:mod:`kairix.core.connectors.compat`)
+# positively identified a known-unsupported format BEFORE extraction was
+# attempted — NO extract ran and ZERO chunks landed. Kept in sync with
+# the same constant + ``_ALLOWED_EXTRACTION_STATUSES`` in silver.py.
+_EXTRACTION_STATUS_SKIPPED_UNSUPPORTED = "skipped_unsupported"
+
+
+def _change_item_name(change: object) -> str:
+    """Return the item filename (with extension) from ``ChangeEvent.metadata``.
+
+    PR-2 — the SharePoint connector surfaces the drive-item name on
+    ``ChangeEvent.metadata["name"]`` (with its extension), which the
+    compat classifier uses as a tiebreak signal. Connectors that don't
+    populate ``metadata["name"]`` (or whose ``metadata`` is absent /
+    not a mapping) yield ``""`` — the classifier then relies on magic
+    bytes + MIME only, so those connectors are unaffected.
+    """
+    metadata = getattr(change, "metadata", None)
+    if not isinstance(metadata, Mapping):
+        return ""
+    name = metadata.get("name")
+    return name if isinstance(name, str) else ""
 
 
 def _safe_quality_ok(extractor: Extractor, doc: object) -> bool:

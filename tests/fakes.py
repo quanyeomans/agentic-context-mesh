@@ -2425,7 +2425,9 @@ class FakeSourceConnector:
     Constructor takes events to emit and an optional ``fail_on_fetch``
     set — item_ids in that set raise ``RuntimeError`` from ``fetch``.
     ``content`` maps item_id to the raw bytes ``fetch`` returns; absent
-    entries return empty bytes.
+    entries return empty bytes. ``mime_overrides`` maps item_id to the
+    MIME ``fetch`` reports; absent entries fall back to the legacy
+    ``.md → text/markdown, else text/plain`` rule.
 
     Used by ``tests/integration/test_connector_pipeline.py`` to drive
     the per-batch orchestration through the real Bronze + Silver + Cursor
@@ -2459,6 +2461,7 @@ class FakeSourceConnector:
         per_tick_max_items: int = 500,
         disk_watermark_min_free_bytes: int | None = None,
         metadata: dict[str, Any] | None = None,
+        mime_overrides: dict[str, str] | None = None,
     ) -> None:
         from kairix.core.protocols import ChangeEvent  # local import — avoids reordering top-of-file
 
@@ -2495,6 +2498,12 @@ class FakeSourceConnector:
         # Missing entries return an empty SourceMetadata so tests that
         # don't care about envelope metadata stay terse.
         self._metadata: dict[str, Any] = dict(metadata) if metadata is not None else {}
+        # PR-2 (compat gate): per-item MIME override keyed by item_id.
+        # Absent entries fall back to the legacy ``.md → text/markdown,
+        # else text/plain`` rule, so existing tests are unaffected. Set
+        # an override to drive the MIME-driven skip path (e.g. an
+        # ``application/msword`` item with no recognizable magic bytes).
+        self._mime_overrides: dict[str, str] = dict(mime_overrides) if mime_overrides is not None else {}
         # next_cursor() shapes:
         #   - cursor_token=<str>: returned verbatim (opaque-token shape;
         #     mirrors SharePoint/Graph/Slack deltaLink behaviour).
@@ -2531,7 +2540,9 @@ class FakeSourceConnector:
         if item_id in self._fail_on_fetch:
             raise RuntimeError(f"fake-source: simulated fetch failure for {item_id!r}")
         raw = self._content.get(item_id, b"")
-        mime = "text/markdown" if item_id.endswith(".md") else "text/plain"
+        mime = self._mime_overrides.get(item_id)
+        if mime is None:
+            mime = "text/markdown" if item_id.endswith(".md") else "text/plain"
         fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         return RawArtefact(raw=raw, mime=mime, fetched_at=fetched_at)
 
