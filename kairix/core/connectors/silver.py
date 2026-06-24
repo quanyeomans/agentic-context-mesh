@@ -57,12 +57,29 @@ from kairix.core.protocols import (
 # (per ADR-024 Bundle B / GH #336) — set by the pipeline when no
 # extractor in the escalation chain claimed the format via
 # ``can_extract`` or when ``quality_ok`` was False across the chain.
+#
+# ``skipped_unsupported`` (new) is set by the pre-extract compatibility
+# gate (:mod:`kairix.core.connectors.compat`) when an item is positively
+# identified as a known-unsupported format BEFORE extraction is even
+# attempted — zero chunks land and no extract runs. This is distinct
+# from ``unsupported``, which means "an extractor DID run, produced a
+# doc, but quality_ok was False (chunks still landed)". ``skipped_*``
+# = never attempted; ``unsupported`` = attempted-but-low-quality.
+#
+# The column is plain free-text TEXT (no CHECK / enum) so adding a value
+# needs only this Python-side allow-list edit — no SQL migration.
 _EXTRACTION_STATUS_OK = "ok"
 _EXTRACTION_STATUS_FAILED = "failed"
 _EXTRACTION_STATUS_UNSUPPORTED = "unsupported"
+_EXTRACTION_STATUS_SKIPPED_UNSUPPORTED = "skipped_unsupported"
 
 _ALLOWED_EXTRACTION_STATUSES: frozenset[str] = frozenset(
-    {_EXTRACTION_STATUS_OK, _EXTRACTION_STATUS_FAILED, _EXTRACTION_STATUS_UNSUPPORTED}
+    {
+        _EXTRACTION_STATUS_OK,
+        _EXTRACTION_STATUS_FAILED,
+        _EXTRACTION_STATUS_UNSUPPORTED,
+        _EXTRACTION_STATUS_SKIPPED_UNSUPPORTED,
+    }
 )
 
 # Target chunk size at paragraph boundaries (characters). Smaller than
@@ -319,7 +336,7 @@ class SqliteDocumentsMediaWriter:
             raise ValueError(
                 f"extraction_status must be one of {sorted(_ALLOWED_EXTRACTION_STATUSES)!r}; "
                 f"got {extraction_status!r}. "
-                "fix: pass 'ok' / 'failed' / 'unsupported' from the orchestrator. "
+                "fix: pass 'ok' / 'failed' / 'unsupported' / 'skipped_unsupported' from the orchestrator. "
                 "run: bash scripts/safe-commit.sh"
             )
         self._db.execute(
