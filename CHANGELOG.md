@@ -7,6 +7,15 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+### For operators
+
+- **SharePoint stops choking on files it can't read.** Documents kairix can't extract — Office binaries, Visio drawings, corrupt archives, and other unsupported formats — are now recognised up front and recorded as "skipped (unsupported)" instead of failing over and over and clogging the dead-letter queue. Office documents that arrive without a proper file type (a common SharePoint quirk) are now detected by their content and indexed instead of dropped.
+- **The stuck-file backlog cleans itself up.** On each sync, kairix automatically clears dead-letter entries that can never succeed — corrupt archives and known-unsupported formats — recording them as skipped. Recoverable items (anything that might index once a converter or extractor is in place) are deliberately left for retry.
+- **Optional: convert legacy and uncommon Office formats.** kairix can now convert legacy Office (`.doc`/`.ppt`/`.xls`), Visio, OpenDocument, Publisher, and RTF to PDF and index them, via a Gotenberg conversion service. It's off by default — add the `gotenberg` tier to a connector's `extractor_chain` and point it at your Gotenberg service to turn it on. Modern `.docx`/`.pptx`/`.xlsx` continue to be handled in-process, unchanged.
+- **Cleaner operator signals.** `kairix config validate` no longer reports false errors for synthetic collections (such as `entity-summaries`) or the auto-corrected `reference-library` path, so real config problems stand out. And `kairix cc-pair list` now shows the true number of documents indexed per source instead of always reporting zero.
+
+## [2026.6.24] - 2026-06-24
+
 > **Upgrading?** kairix now needs **Python 3.12 or newer**. Docker and Compose deployments are already covered — the image ships Python 3.12. If you installed kairix into your own Python environment (the systemd / host-venv path), recreate that environment on Python 3.12+ before you upgrade, or the install will refuse the new version. Your knowledge store, sources, and agents all carry over unchanged.
 
 ### For humans
