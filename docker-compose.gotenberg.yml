@@ -1,0 +1,50 @@
+# Kairix — optional gotenberg document-conversion override.
+#
+# The base docker-compose.yml is an intentional 2-service shape (kairix +
+# neo4j). gotenberg is a SEPARATELY-MANAGED deployment concern, so it lives
+# here as an override you layer on only when you want the conversion tier
+# locally:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gotenberg.yml up -d
+#
+# In a VM deployment, gotenberg typically runs from the deployment compose
+# (its own managed service) rather than this file.
+#
+# The ``gotenberg`` extractor tier POSTs Office/ODF/Visio/Publisher/RTF
+# files here to convert them to PDF, then re-enters pdf_fallback — making
+# those legacy/uncommon formats indexable instead of dead-lettering. Modern
+# OOXML (.docx / .pptx / .xlsx) is handled in-process by markitdown / pptx /
+# docx / xlsx and does NOT need gotenberg. Wire the tier via a connector's
+# ``extractor_chain: [markitdown, pdf_fallback, gotenberg, ocr]`` (see
+# kairix.config.example.yaml).
+#
+# IMPORTANT: kairix deliberately does NOT ``depends_on`` gotenberg. The
+# extractor degrades gracefully — when gotenberg is absent or unhealthy it
+# RAISES and the escalation chain falls through to ocr / dead-letters for
+# retry — so a fresh ``docker compose up`` (base file only) reaches a healthy
+# kairix /healthz without blocking on this optional service.
+#
+# Other compose services reach it by its DNS name (http://gotenberg:3000).
+
+services:
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    # Pin a digest for production reproducibility.
+    restart: unless-stopped
+    # Bound to localhost only by default — gotenberg has no auth. Other
+    # compose services reach it by its DNS name (http://gotenberg:3000);
+    # this published port is for host-side debugging only.
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    # Conversion is CPU + memory bursty (LibreOffice spawns per request);
+    # cap it so a pathological document can't OOM the host.
+    deploy:
+      resources:
+        limits:
+          memory: 2g

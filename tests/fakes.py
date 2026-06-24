@@ -2166,6 +2166,110 @@ class FakeXlsxExtractor:
         return SourceMetadata()
 
 
+class FakeGotenbergExtractor:
+    """Canonical fake for the gotenberg conversion-tier extractor (F43 contract layer).
+
+    Implements the :class:`kairix.extractors.Extractor` Protocol without
+    reaching the real gotenberg HTTP service. Claims the
+    legacy-Office/ODF/Visio/Publisher/RTF mimes the real tier converts,
+    and — crucially, mirroring the real ``can_extract`` — REFUSES
+    ``application/pdf`` / ``text/*`` / ``application/octet-stream`` AND the
+    modern OOXML mimes (.docx / .pptx / .xlsx, owned by the in-process
+    markitdown / pptx / docx / xlsx tiers) so the tier never shadows
+    ``pdf_fallback`` / ``passthrough`` or an in-process extractor.
+    ``extract`` returns a scripted converted-then-extracted document (one
+    text-bearing page) sized to clear the production ``>=100 char`` floor.
+
+    Used by ``tests/contracts/test_gotenberg_protocol.py`` to prove the
+    real :class:`GotenbergExtractor` satisfies the same Protocol surface a
+    downstream consumer would expect.
+    """
+
+    def __init__(
+        self,
+        *,
+        version: str = "1.0.0",
+        scripted_markdown: str | None = None,
+        scripted_page_text: str | None = None,
+    ) -> None:
+        from kairix.extractors import (
+            DocMetadata,
+            ExtractedDocument,
+            MimeType,
+            Page,
+        )
+
+        self.name = "gotenberg"
+        self.version = version
+        self.scripted_markdown = scripted_markdown or (
+            "Recovered Office content via the gotenberg conversion tier.\n"
+            + ("Line of body text from the converted PDF page one.\n" * 6)
+        )
+        self.scripted_page_text = scripted_page_text or "Recovered converted-PDF page text from the gotenberg tier."
+        self._DocMetadata = DocMetadata
+        self._ExtractedDocument = ExtractedDocument
+        self._MimeType = MimeType
+        self._Page = Page
+        # Mirror the real tier's mime allow-list (a representative subset
+        # — the contract test exercises a legacy-Office mime as the
+        # canonical case; the full set is unit-tested in test_gotenberg.py).
+        # Modern OOXML (.docx / .pptx / .xlsx) is deliberately ABSENT — the
+        # real tier refuses it (the in-process markitdown / pptx / docx /
+        # xlsx extractors own those), so the fake must too.
+        self._claimed_mimes = frozenset(
+            {
+                "application/msword",
+                "application/vnd.ms-excel",
+                "application/vnd.ms-powerpoint",
+                "application/vnd.oasis.opendocument.text",
+                "application/vnd.oasis.opendocument.spreadsheet",
+                "application/vnd.oasis.opendocument.presentation",
+                "application/vnd.oasis.opendocument.graphics",
+                "application/vnd.ms-visio.drawing",
+                "application/vnd.ms-visio.drawing.macroenabled.12",
+                "application/vnd.visio",
+                "application/x-mspublisher",
+                "application/rtf",
+                "text/rtf",
+            }
+        )
+
+    def can_extract(self, mime: str, magic_bytes: bytes) -> bool:
+        del magic_bytes
+        return isinstance(mime, str) and mime in self._claimed_mimes
+
+    def extract(self, raw: bytes, mime: str) -> Any:
+        del mime
+        markdown = self.scripted_markdown
+        page = self._Page(page_number=1, text=self.scripted_page_text, has_images=False)
+        confidence = min(len(markdown) / max(len(raw), 1), 1.0) if raw else 0.0
+        return self._ExtractedDocument(
+            markdown=markdown,
+            pages=(page,),
+            images=(),
+            metadata=self._DocMetadata(
+                title="fixture",
+                author=None,
+                created_date=None,
+                language=None,
+                page_count=1,
+            ),
+            confidence=confidence,
+        )
+
+    def quality_ok(self, doc: Any) -> bool:
+        if len(doc.markdown) < 100:
+            return False
+        return any(page.text.strip() for page in doc.pages)
+
+    def metadata_for(self, raw: bytes, mime: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only)."""
+        del raw, mime
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
+
+
 class FakeEmbeddingCache:
     """In-memory ``EmbeddingCache``-compatible fake for unit tests.
 

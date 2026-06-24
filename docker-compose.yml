@@ -28,6 +28,16 @@
 #            shows 2 services (was 3) — `kairix-worker` is gone; its workload
 #            and memory budget folded into the unified `kairix` service.
 #   neo4j  — knowledge graph for people / company / relationship queries.
+#
+# This base file is an INTENTIONAL 2-service shape (kairix + neo4j). The
+# optional document-conversion service (gotenberg) is a separately-managed
+# deployment concern — it lives in docker-compose.gotenberg.yml as an
+# override so the base stack stays minimal and a fresh `docker compose up`
+# never blocks on it. The gotenberg extractor tier degrades gracefully when
+# the service is absent (it RAISES and the escalation chain falls through to
+# ocr / dead-letters for retry). To run it for local dev, layer the override:
+#   docker compose -f docker-compose.yml -f docker-compose.gotenberg.yml up -d
+# (or run gotenberg via the deployment compose). See kairix.config.example.yaml.
 
 services:
   kairix:

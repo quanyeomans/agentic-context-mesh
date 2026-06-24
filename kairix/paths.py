@@ -802,6 +802,33 @@ def read_float_env(name: str, *, default: float) -> float:
         return default
 
 
+def gotenberg_extractor_config() -> Any:
+    """Resolve the gotenberg extractor config from the ``KAIRIX_GOTENBERG_*`` env.
+
+    F4 boundary: the gotenberg extractor (``kairix/extractors/gotenberg``)
+    must not read ``os.environ`` directly, so its env defaults are
+    composed here and returned as a frozen
+    :class:`~kairix.extractors.gotenberg.GotenbergExtractorConfig`.
+    Unset vars fall back to the dataclass literals; malformed numeric
+    values log a warning and fall back too (via :func:`read_float_env`
+    / :func:`read_int_env`). The import is local so ``kairix.paths``
+    stays free of an extractor-package import at module load.
+
+    Env vars:
+      * ``KAIRIX_GOTENBERG_URL`` — conversion service base URL.
+      * ``KAIRIX_GOTENBERG_TIMEOUT_S`` — per-convert deadline (float, seconds).
+      * ``KAIRIX_GOTENBERG_MAX_FILE_SIZE_MB`` — pre-HTTP size ceiling (int, MiB).
+    """
+    from kairix.extractors.gotenberg import GotenbergExtractorConfig
+
+    defaults = GotenbergExtractorConfig()
+    return GotenbergExtractorConfig(
+        gotenberg_url=os.environ.get("KAIRIX_GOTENBERG_URL", defaults.gotenberg_url),
+        timeout_s=read_float_env("KAIRIX_GOTENBERG_TIMEOUT_S", default=defaults.timeout_s),
+        max_file_size_mb=read_int_env("KAIRIX_GOTENBERG_MAX_FILE_SIZE_MB", default=defaults.max_file_size_mb),
+    )
+
+
 def embed_vector_dims(default: int = 1536) -> int:
     """Embedding vector dimensions — configurable via ``KAIRIX_EMBED_DIMS``.
 
