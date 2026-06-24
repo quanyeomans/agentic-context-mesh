@@ -27,3 +27,10 @@ Feature: SharePoint connector pulls document library binaries via Microsoft Grap
     When the operator runs the sharepoint connector list_changes with no cursor
     Then the connector exposes a non-empty next cursor
     And the next cursor encodes a per-drive delta link map
+
+  @site_discovery
+  Scenario: A configured site auto-discovers its document libraries
+    Given a stubbed Microsoft Graph site that lists two drives each with one pdf envelope
+    When the operator runs the sharepoint connector list_changes with no cursor for the discovered site
+    Then two created change events are emitted one per discovered drive
+    And the next cursor records a delta link for each discovered drive

@@ -120,6 +120,55 @@ def test_list_drives_yields_drive_refs_for_site() -> None:
     assert drives[0].site_id == "site-1"
 
 
+def test_resolve_site_by_path_returns_site_ref_from_single_object() -> None:
+    """``resolve_site_by_path`` parses the SINGLE-object /sites/{host}:/{path} reply.
+
+    Unlike the ``/sites?search=*`` collection, this endpoint returns one
+    site object (no ``value`` wrapper), so the client must parse the body
+    directly — a regression that routed it through the collection parser
+    would yield no SiteRef and this test would fail.
+    """
+    seen: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response_for(request)
+        if token is not None:
+            return token
+        seen.append(str(request.url))
+        return httpx.Response(
+            200,
+            json={
+                "id": "contoso.sharepoint.com,site-guid,web-guid",
+                "displayName": "Marketing",
+                "webUrl": "https://contoso.sharepoint.com/sites/marketing",
+            },
+        )
+
+    _, client = _auth_and_client(_handler)
+    site = client.resolve_site_by_path("contoso.sharepoint.com", "/sites/marketing")
+    assert site.site_id == "contoso.sharepoint.com,site-guid,web-guid"
+    assert site.display_name == "Marketing"
+    assert any("/sites/contoso.sharepoint.com:/sites/marketing" in u for u in seen), (
+        f"resolve must hit the /sites/{{host}}:/{{path}} endpoint; saw {seen!r}"
+    )
+
+
+def test_resolve_site_by_path_normalises_missing_leading_slash() -> None:
+    """A server-relative path without a leading slash is normalised."""
+    seen: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response_for(request)
+        if token is not None:
+            return token
+        seen.append(str(request.url))
+        return httpx.Response(200, json={"id": "s", "displayName": "S", "webUrl": "https://x/s"})
+
+    _, client = _auth_and_client(_handler)
+    client.resolve_site_by_path("contoso.sharepoint.com", "sites/eng")
+    assert any("contoso.sharepoint.com:/sites/eng" in u for u in seen), f"path must be normalised; saw {seen!r}"
+
+
 def test_iter_drive_items_walks_pagination_and_records_delta_link() -> None:
     page_calls = {"n": 0}
 

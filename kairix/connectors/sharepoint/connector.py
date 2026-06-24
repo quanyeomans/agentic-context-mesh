@@ -48,6 +48,7 @@ from typing import Any, cast
 
 from kairix.connectors.sharepoint.graph_client import (
     DriveItemRef,
+    DriveRef,
     SharePointGraphClient,
 )
 from kairix.core.protocols import (
@@ -124,7 +125,9 @@ class SharePointDriveSpec:
     ``GET /sites?search=*`` enumeration call exposed by
     :meth:`SharePointGraphClient.list_sites`) and pins it in
     ``kairix.config.yaml``. Pinning by id (not by URL) makes the sync
-    deterministic across site renames.
+    deterministic across site renames. To avoid pinning each drive by
+    hand, name a SITE instead via :class:`SiteDiscoverySpec` and kairix
+    auto-discovers every drive on that site at sync time.
 
     ``include_paths`` and ``exclude_paths`` scope which folders within
     the drive get indexed. Empty include_paths = whole drive. See
@@ -135,6 +138,44 @@ class SharePointDriveSpec:
     drive_id: str
     site_id: str | None = None
     display_name: str | None = None
+    include_paths: tuple[str, ...] = ()
+    exclude_paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class SiteDiscoverySpec:
+    """One configured SITE the connector should auto-discover drives from.
+
+    Frozen per F42 (F42 — guided-config wizard / KFEAT-022 self-discovery
+    foundation). A site discovery entry names a SharePoint site instead of
+    a single drive; at SYNC time the connector enumerates every document
+    library on that site (via
+    :meth:`SharePointGraphClient.list_drives`) and syncs each one as if it
+    had been declared explicitly. This restores the self-discovery the
+    connector lost when it began requiring an explicit ``drive_id`` per
+    drive — operators can now point at a site and let kairix find its
+    libraries (including libraries added after the connector was first
+    configured, because discovery re-runs every tick).
+
+    Exactly one of ``site_id`` / ``site_url`` is required:
+
+      * ``site_id`` — the Graph composite id
+        (``<hostname>,<site-guid>,<web-guid>``). Deterministic across
+        site renames; the preferred form.
+      * ``site_url`` — a friendly site URL (e.g.
+        ``https://contoso.sharepoint.com/sites/marketing``). Resolved to a
+        ``site_id`` at sync time via
+        :meth:`SharePointGraphClient.resolve_site_by_path`. Convenient for
+        operators who don't have the composite id to hand.
+
+    ``include_paths`` / ``exclude_paths`` are inherited by EVERY drive
+    discovered under the site — the same path-filter semantics as
+    :class:`SharePointDriveSpec` (segment-boundary prefix match, exclude
+    wins, case-insensitive). Empty = whole drive.
+    """
+
+    site_id: str | None = None
+    site_url: str | None = None
     include_paths: tuple[str, ...] = ()
     exclude_paths: tuple[str, ...] = ()
 
@@ -190,21 +231,28 @@ class SharePointConnector:
         self,
         drives: list[SharePointDriveSpec],
         *,
+        site_discovery: list[SiteDiscoverySpec] | None = None,
         credentials: SharePointCredentials | None = None,
         client_builder: Callable[[OAuth2ClientCredsAuth], SharePointGraphClient] | None = None,
         auth: OAuth2ClientCredsAuth | None = None,
         default_sensitivity: Sensitivity = DEFAULT_SENSITIVITY,
         secrets: SecretsResolver | None = None,
     ) -> None:
-        if not drives:
+        site_specs = tuple(site_discovery or ())
+        if not drives and not site_specs:
             raise ValueError(
                 "sharepoint: drives list is empty. "
-                "fix: declare at least one drive_id under the sharepoint connector block. "
+                "fix: declare at least one drive_id, or a site (site_id) to "
+                "auto-discover its drives, under the sharepoint connector block. "
                 "next: see docs/architecture/connector-ingestion-architecture.md §8 "
                 "for the SharePoint connector config shape."
             )
-        self._drives: tuple[SharePointDriveSpec, ...] = tuple(drives)
-        self._spec_by_drive_id: dict[str, SharePointDriveSpec] = {spec.drive_id: spec for spec in self._drives}
+        # Explicit drive specs the operator pinned by id. Site-discovery
+        # specs are expanded LAZILY at sync time (each tick, so newly
+        # added libraries are picked up) — never here, so construction
+        # stays I/O-free and one site's transient failure can't crash init.
+        self._explicit_drives: tuple[SharePointDriveSpec, ...] = tuple(drives)
+        self._site_specs: tuple[SiteDiscoverySpec, ...] = site_specs
         self._default_sensitivity: Sensitivity = default_sensitivity
 
         self._secrets: SecretsResolver = secrets if secrets is not None else SecretsLoader()
@@ -230,34 +278,235 @@ class SharePointConnector:
         # so :meth:`fetch` can resolve drive id, web URL, and mime
         # without a second Graph call.
         self._cache: dict[str, DriveItemRef] = {}
+        # Per-TICK resolved-drive-spec cache — explicit drives + every
+        # drive discovered from configured sites, keyed by drive id.
+        # Site discovery (``GET /sites/{id}/drives``) is expensive (one
+        # Graph call per site); resolving it ONCE per tick and reusing the
+        # map keeps a deployment with N drives + M sites at M discovery
+        # calls per tick instead of NxM. ``None`` means "not yet resolved
+        # this tick" — the tick entry points (:meth:`list_changes`,
+        # :meth:`iter_containers`, :meth:`load_hierarchy`) refresh it so a
+        # newly-added library is still picked up each tick; the
+        # per-container lookups read it without re-running discovery.
+        self._resolved_spec_map: dict[str, SharePointDriveSpec] | None = None
         # Next-tick cursor — populated after :meth:`list_changes` drains
         # every configured drive. Serialised as a JSON map
         # ``drive_id -> deltaLink`` so a single opaque string round-trips
         # through the orchestrator's cursor_store.
         self._next_cursor: str | None = None
 
-        # Probe each include_path against the live drive at startup so
-        # missing folders surface proactively (not silently, the first
-        # time a tick rejects every item). One-shot per process; transient
-        # Graph errors don't kill init.
+        # Probe each EXPLICIT include_path against the live drive at
+        # startup so missing folders surface proactively (not silently,
+        # the first time a tick rejects every item). One-shot per process;
+        # transient Graph errors don't kill init. Site-discovery specs are
+        # NOT probed here — their drives aren't resolved until the first
+        # sync (lazy discovery), so probing them would force a Graph call
+        # at construction time.
         self._probe_include_paths()
+
+    # ------------------------------------------------------------------
+    # Drive-spec resolution — explicit + lazily-discovered site drives
+    # ------------------------------------------------------------------
+
+    @property
+    def _drives(self) -> tuple[SharePointDriveSpec, ...]:
+        """Explicit operator-pinned drive specs (back-compat accessor).
+
+        Site-discovery drives are intentionally NOT included here — they
+        resolve lazily at sync time via :meth:`_resolve_drive_specs`. The
+        startup probe and any code that must avoid a Graph call read this
+        property; the sync paths read the resolved set instead.
+        """
+        return self._explicit_drives
+
+    def _resolve_drive_specs(self) -> tuple[SharePointDriveSpec, ...]:
+        """Resolve explicit drives + discovered site drives ONCE per tick.
+
+        Site discovery (``GET /sites/{id}/drives``) is expensive — one
+        Graph call per configured site. This method runs discovery
+        exactly once per tick and memoises the result on
+        :attr:`_resolved_spec_map`; the per-container lookups
+        (:meth:`_spec_for_drive_id`) read that map instead of re-running
+        discovery, so a deployment with N drives + M sites makes M
+        discovery calls per tick, not NxM.
+
+        The tick entry points (:meth:`list_changes`,
+        :meth:`iter_containers`, :meth:`load_hierarchy`) call
+        :meth:`_refresh_resolved_specs` to invalidate the cache at the
+        start of each tick, so libraries added to a site after the
+        connector was configured are still picked up automatically. The
+        per-container Wave-E paths that may be entered without a fresh
+        tick boundary fall through to a lazy one-shot resolve here.
+
+        Each :class:`SiteDiscoverySpec` is expanded independently with
+        per-site fault isolation — a site that fails to resolve (not
+        found / auth / throttle / empty) is logged and skipped WITHOUT
+        affecting the explicit drives or the other sites (per-site fault
+        isolation, F42 robustness).
+        """
+        if self._resolved_spec_map is not None:
+            return tuple(self._resolved_spec_map.values())
+        return self._refresh_resolved_specs()
+
+    def _refresh_resolved_specs(self) -> tuple[SharePointDriveSpec, ...]:
+        """Re-run site discovery and rebuild the per-tick resolved-spec map.
+
+        Called at the start of each tick entry point so newly-added
+        libraries are picked up; populates :attr:`_resolved_spec_map`
+        (keyed by drive id) so the per-container lookups in the same tick
+        reuse it instead of re-running discovery (NxM → M calls/tick).
+        """
+        resolved: dict[str, SharePointDriveSpec] = {}
+        for spec in self._explicit_drives:
+            resolved.setdefault(spec.drive_id, spec)
+        for site_spec in self._site_specs:
+            for discovered in self._discover_site_drives(site_spec):
+                resolved.setdefault(discovered.drive_id, discovered)
+        self._resolved_spec_map = resolved
+        return tuple(resolved.values())
+
+    def _spec_for_drive_id(self, drive_id: str) -> SharePointDriveSpec | None:
+        """Return the resolved spec for ``drive_id`` (explicit or discovered).
+
+        Used by the per-container paths whose ``container_id`` may name a
+        drive discovered from a site, so the container inherits the
+        site's path filters. Reads the per-tick resolved-spec map (built
+        once per tick by :meth:`_resolve_drive_specs`) so a per-container
+        lookup never re-runs site discovery. Returns ``None`` when no
+        resolved spec matches (e.g. the site that produced the drive
+        failed discovery this tick) — the caller then drains the drive
+        unfiltered.
+        """
+        if self._resolved_spec_map is None:
+            self._resolve_drive_specs()
+        assert self._resolved_spec_map is not None  # populated by the resolve above
+        return self._resolved_spec_map.get(drive_id)
+
+    def _discover_site_drives(self, site_spec: SiteDiscoverySpec) -> list[SharePointDriveSpec]:
+        """Discover one site's drives, applying the site's path filters.
+
+        Robust by contract: any failure resolving the site id, listing
+        its drives, or an empty drive set is logged as a structured WARN
+        naming the site and an empty list is returned so the caller skips
+        that site this tick. Never raises — one site's outage must not
+        crash the connector or freeze unrelated cursors.
+        """
+        site_label = site_spec.site_id or site_spec.site_url or "<unknown>"
+        try:
+            site_id = self._resolve_site_id(site_spec)
+            if site_id is None:
+                return []
+            drives = [
+                self._drive_spec_from_ref(ref, site_spec=site_spec)
+                for ref in self._graph.list_drives(site_id)
+                if ref.drive_id
+            ]
+        except Exception as exc:
+            logger.warning(
+                "event=sharepoint_discover_error site=%s error=%s "
+                "(this site skipped this tick; explicit drives + other sites still sync; "
+                "next tick will retry)",
+                site_label,
+                exc,
+            )
+            return []
+        if not drives:
+            logger.warning(
+                "event=sharepoint_discover_no_drives site=%s. "
+                "fix: confirm the site has at least one document library the app can read "
+                "(Sites.Read.All + Files.Read.All), or pin explicit drive_ids instead. "
+                "next: the connector retries discovery on the next tick.",
+                site_label,
+            )
+        return drives
+
+    def _resolve_site_id(self, site_spec: SiteDiscoverySpec) -> str | None:
+        """Resolve a site spec to a Graph composite site id.
+
+        Prefers an explicit ``site_id``; otherwise resolves ``site_url``
+        via :meth:`SharePointGraphClient.resolve_site_by_path`. Returns
+        ``None`` (after a structured WARN) when neither yields a usable
+        id so the caller skips the site this tick.
+        """
+        if site_spec.site_id:
+            return site_spec.site_id
+        if site_spec.site_url:
+            return self._resolve_site_id_from_url(site_spec.site_url)
+        return None
+
+    def _resolve_site_id_from_url(self, site_url: str) -> str | None:
+        """Resolve a friendly ``site_url`` to a Graph composite site id.
+
+        Two skip-with-WARN paths, both isolated so the site is dropped
+        this tick rather than producing a bad/empty site id downstream:
+
+          * the URL has no host or server-relative path
+            (:func:`_split_site_url` returns ``(None, None)``) — WARN
+            ``sharepoint_discover_site_url_unparseable``;
+          * the URL parses but Graph resolves it to an empty/None site id
+            (deleted site, permission gap) — WARN
+            ``sharepoint_discover_site_unresolved``. Previously this empty
+            resolution was swallowed silently, leaking a falsy site id
+            into discovery.
+        """
+        hostname, server_relative_path = _split_site_url(site_url)
+        if hostname is None or server_relative_path is None:
+            logger.warning(
+                "event=sharepoint_discover_site_url_unparseable site_url=%s. "
+                "fix: use a full site URL like "
+                "'https://contoso.sharepoint.com/sites/marketing', or pin site_id directly. "
+                "next: the connector retries discovery on the next tick.",
+                site_url,
+            )
+            return None
+        resolved_site_id = self._graph.resolve_site_by_path(hostname, server_relative_path).site_id
+        if not resolved_site_id:
+            logger.warning(
+                "event=sharepoint_discover_site_unresolved site_url=%s. "
+                "fix: confirm the site URL is correct and the app can read it "
+                "(Sites.Read.All), or pin the site_id (composite id) directly. "
+                "next: the connector retries discovery on the next tick.",
+                site_url,
+            )
+            return None
+        return resolved_site_id
+
+    def _drive_spec_from_ref(self, ref: DriveRef, *, site_spec: SiteDiscoverySpec) -> SharePointDriveSpec:
+        """Map a discovered :class:`DriveRef` to a concrete drive spec.
+
+        Carries the library name from the ref as the display name (so
+        status surfaces show a real label, not a drive-id prefix) and
+        inherits the site spec's ``include_paths`` / ``exclude_paths`` so
+        the operator's site-level folder scope applies to every drive.
+        """
+        return SharePointDriveSpec(
+            drive_id=ref.drive_id,
+            site_id=ref.site_id or site_spec.site_id,
+            display_name=ref.name or None,
+            include_paths=site_spec.include_paths,
+            exclude_paths=site_spec.exclude_paths,
+        )
 
     # ------------------------------------------------------------------
     # SourceConnector Protocol surface
     # ------------------------------------------------------------------
 
     def list_changes(self, cursor: Cursor | None) -> Iterator[ChangeEvent]:
-        """Stream changes across every configured drive.
+        """Stream changes across every configured + discovered drive.
 
         ``cursor`` is the JSON map persisted on the previous tick (or
-        ``None`` for cold start). The connector walks each configured
-        drive's delta endpoint, caches envelopes on the way through, and
-        records the next-tick cursor on :attr:`_next_cursor`.
+        ``None`` for cold start). The connector resolves the live drive
+        set (explicit drives + every drive discovered from configured
+        sites), walks each drive's delta endpoint, caches envelopes on
+        the way through, and records the next-tick cursor on
+        :attr:`_next_cursor`. The per-drive cursor is keyed on the
+        (possibly discovered) ``drive_id`` so it round-trips through the
+        existing deltaLink map regardless of how the drive was declared.
         """
         per_drive_cursor = _deserialise_cursor(cursor)
         events: list[ChangeEvent] = []
         next_links: dict[str, str] = {}
-        for spec in self._drives:
+        for spec in self._refresh_resolved_specs():
             drive_id = spec.drive_id
             start_url = per_drive_cursor.get(drive_id)
             for item in self._graph.iter_drive_items(drive_id, start_url=start_url):
@@ -437,8 +686,18 @@ class SharePointConnector:
         framework's lifecycle layer (``kairix/core/connectors/cc_pair.py``)
         passes ``cc_pair_id`` so the connector can construct the
         Container without reaching back into the cc_pair store.
+
+        Site-discovery drives surface here too — each drive discovered
+        from a configured site becomes its own Container (resolved fresh
+        each call so newly-added libraries appear automatically).
+
+        This is a TICK entry point: it refreshes the per-tick
+        resolved-spec map once (one discovery call per site) so the
+        per-container :meth:`list_changes_for_container` /
+        :meth:`retrieve_all_slim_docs` calls that follow reuse it instead
+        of each re-running discovery (NxM → M discovery calls per tick).
         """
-        for spec in self._drives:
+        for spec in self._refresh_resolved_specs():
             yield Container(
                 cc_pair_id=cc_pair_id,
                 container_id=spec.drive_id,
@@ -477,6 +736,10 @@ class SharePointConnector:
 
         ``topology_v2_sharepoint`` retired post-cutover (task #132);
         the SITE + DRIVE per-drive emission is now the only behaviour.
+
+        Site-discovery drives appear as DRIVE nodes too — the drive set
+        is resolved fresh (explicit + discovered) so the hierarchy
+        reflects libraries added to a site since configuration.
         """
         yield HierarchyNode(
             cc_pair_id=cc_pair_id,
@@ -488,7 +751,7 @@ class SharePointConnector:
             external_access_json=None,
             sensitivity_hint=None,
         )
-        for spec in self._drives:
+        for spec in self._refresh_resolved_specs():
             yield HierarchyNode(
                 cc_pair_id=cc_pair_id,
                 raw_node_id=spec.drive_id,
@@ -517,7 +780,7 @@ class SharePointConnector:
         """
         drive_id = container.container_id
         start_url = container.cursor_token
-        spec = self._spec_by_drive_id.get(drive_id)
+        spec = self._spec_for_drive_id(drive_id)
         for item in self._graph.iter_drive_items(drive_id, start_url=start_url):
             if not item.item_id or item.removed:
                 continue
@@ -609,7 +872,7 @@ class SharePointConnector:
         """
         drive_id = container.container_id
         start_url = container.cursor_token
-        spec = self._spec_by_drive_id.get(drive_id)
+        spec = self._spec_for_drive_id(drive_id)
         events: list[ChangeEvent] = []
         for item in self._graph.iter_drive_items(drive_id, start_url=start_url):
             if spec is not None and not self._item_passes_spec_filter(item, spec=spec):
@@ -843,6 +1106,28 @@ def _full_item_path(item: DriveItemRef) -> str | None:
     return f"{item.parent_path}/{item.name}"
 
 
+def _split_site_url(site_url: str) -> tuple[str | None, str | None]:
+    """Split a friendly SharePoint site URL into ``(hostname, server_relative_path)``.
+
+    ``https://contoso.sharepoint.com/sites/marketing`` →
+    ``("contoso.sharepoint.com", "/sites/marketing")``. The components
+    feed :meth:`SharePointGraphClient.resolve_site_by_path`. Tolerant of
+    a missing scheme (``contoso.sharepoint.com/sites/marketing`` parses
+    too). Returns ``(None, None)`` when the URL has no host or no
+    server-relative path so the caller warns + skips that site.
+    """
+    trimmed = site_url.strip()
+    if not trimmed:
+        return None, None
+    without_scheme = trimmed.split("://", 1)[-1]
+    if "/" not in without_scheme:
+        return None, None
+    hostname, _, path = without_scheme.partition("/")
+    if not hostname or not path:
+        return None, None
+    return hostname, "/" + path.strip("/")
+
+
 def _serialise_cursor(per_drive: Mapping[str, str]) -> str:
     """Encode per-drive cursors as a deterministic JSON string."""
     return json.dumps(dict(per_drive), sort_keys=True, ensure_ascii=False)
@@ -929,8 +1214,95 @@ def _validate_no_exact_overlap(
         )
 
 
-def parse_drive_entry(entry: object) -> SharePointDriveSpec:
+def _optional_str(value: object) -> str | None:
+    """Return ``value`` when it is a non-empty string, else ``None``.
+
+    Narrows the ``object``-typed result of ``dict.get`` so the typed
+    spec dataclasses receive a clean ``str | None``.
+    """
+    return value if isinstance(value, str) and value else None
+
+
+# F17 — the include / exclude path-list field names are read by both the
+# explicit-drive and site-discovery parsers; extracting them keeps the
+# literal off the dup-string gate's radar (≥3 occurrences in a module).
+_INCLUDE_PATHS_FIELD = "include_paths"
+_EXCLUDE_PATHS_FIELD = "exclude_paths"
+
+
+def _parse_include_exclude(entry: dict[str, object], label: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Parse + validate an entry's include/exclude path lists.
+
+    Shared by the explicit-drive and site-discovery parsers. ``label``
+    is the drive id (explicit) or a ``site:`` synthetic label (discovery)
+    threaded into the fix-pointer error messages. Returns the
+    ``(include_paths, exclude_paths)`` tuple after the no-exact-overlap
+    validation.
+    """
+    include_paths = _parse_path_list(entry.get(_INCLUDE_PATHS_FIELD), _INCLUDE_PATHS_FIELD, label)
+    exclude_paths = _parse_path_list(entry.get(_EXCLUDE_PATHS_FIELD), _EXCLUDE_PATHS_FIELD, label)
+    _validate_no_exact_overlap(label, include_paths, exclude_paths)
+    return include_paths, exclude_paths
+
+
+def _parse_site_discovery_entry(entry: dict[str, object]) -> SiteDiscoverySpec:
+    """Parse one config dict that names a SITE (no ``drive_id``).
+
+    The caller has already established ``drive_id`` is absent and at
+    least one of ``site_id`` / ``site_url`` is present. Inherited
+    ``include_paths`` / ``exclude_paths`` apply to every discovered
+    drive; the path-list parser reuses the drive validation surface with
+    a synthetic label so the fix-pointer message still names the site.
+    """
+    site_id = _optional_str(entry.get("site_id"))
+    site_url = _optional_str(entry.get("site_url"))
+    label = f"site:{site_id or site_url}"
+    include_paths, exclude_paths = _parse_include_exclude(entry, label)
+    return SiteDiscoverySpec(
+        site_id=site_id,
+        site_url=site_url,
+        include_paths=include_paths,
+        exclude_paths=exclude_paths,
+    )
+
+
+def _parse_explicit_drive_entry(entry: dict[str, object], drive_id: str) -> SharePointDriveSpec:
+    """Parse one config dict that names an explicit ``drive_id``.
+
+    Split out of :func:`parse_drive_entry` so the entry-shape routing
+    (string / explicit-drive / site-discovery / reject) stays under
+    F16's cognitive-complexity ceiling.
+    """
+    site_id = _optional_str(entry.get("site_id"))
+    display = _optional_str(entry.get("display_name"))
+    include_paths, exclude_paths = _parse_include_exclude(entry, drive_id)
+    return SharePointDriveSpec(
+        drive_id=drive_id,
+        site_id=site_id,
+        display_name=display,
+        include_paths=include_paths,
+        exclude_paths=exclude_paths,
+    )
+
+
+def parse_drive_entry(entry: object) -> SharePointDriveSpec | SiteDiscoverySpec:
     """Parse one operator-config drive entry into a typed spec.
+
+    Three accepted shapes:
+
+      * a bare ``drive_id`` string → :class:`SharePointDriveSpec`;
+      * a mapping with ``drive_id`` (+ optional ``site_id`` /
+        ``display_name`` / ``include_paths`` / ``exclude_paths``) →
+        :class:`SharePointDriveSpec` (explicit drive, UNCHANGED
+        behaviour); or
+      * a mapping that names a SITE (``site_id`` and/or ``site_url``,
+        NO ``drive_id``, + optional ``include_paths`` / ``exclude_paths``)
+        → :class:`SiteDiscoverySpec` — "discover ALL drives in this
+        site" (F42 self-discovery). Resolution happens lazily at sync
+        time.
+
+    A mapping carrying neither ``drive_id`` nor ``site_id``/``site_url``
+    raises with an F21-style fix-pointer.
 
     Extracted from ``_drive_specs_from_config`` to keep that function
     under F16's cognitive-complexity ceiling — the per-entry isinstance
@@ -940,47 +1312,54 @@ def parse_drive_entry(entry: object) -> SharePointDriveSpec:
         return SharePointDriveSpec(drive_id=entry)
     if isinstance(entry, dict):
         drive_id = entry.get("drive_id")
-        if not isinstance(drive_id, str) or not drive_id:
-            raise ValueError(
-                "sharepoint: drive block missing 'drive_id'. "
-                "fix: every drive entry must declare drive_id as a non-empty string. "
-                "next: see docs/architecture/connector-ingestion-architecture.md §8."
-            )
-        site_id = entry.get("site_id") if isinstance(entry.get("site_id"), str) else None
-        display = entry.get("display_name") if isinstance(entry.get("display_name"), str) else None
-        include_paths = _parse_path_list(entry.get("include_paths"), "include_paths", drive_id)
-        exclude_paths = _parse_path_list(entry.get("exclude_paths"), "exclude_paths", drive_id)
-        _validate_no_exact_overlap(drive_id, include_paths, exclude_paths)
-        return SharePointDriveSpec(
-            drive_id=drive_id,
-            site_id=site_id,
-            display_name=display,
-            include_paths=include_paths,
-            exclude_paths=exclude_paths,
+        if isinstance(drive_id, str) and drive_id:
+            return _parse_explicit_drive_entry(entry, drive_id)
+        if _optional_str(entry.get("site_id")) or _optional_str(entry.get("site_url")):
+            return _parse_site_discovery_entry(entry)
+        raise ValueError(
+            "sharepoint: drive block names neither 'drive_id' nor a site. "
+            "fix: declare an explicit drive_id (non-empty string), OR name a site "
+            "via 'site_id' (and/or 'site_url') to auto-discover all of that site's drives. "
+            "next: see docs/architecture/connector-ingestion-architecture.md §8."
         )
     raise ValueError(
         f"sharepoint: drive entry {entry!r} is not a string or dict. "
-        "fix: each drive entry must be a drive_id string or a block with drive_id. "
+        "fix: each drive entry must be a drive_id string, a block with drive_id, "
+        "or a block naming a site to auto-discover. "
         "next: see docs/architecture/connector-ingestion-architecture.md §8."
     )
 
 
-def _drive_specs_from_config(raw: object) -> list[SharePointDriveSpec]:
+def _drive_specs_from_config(
+    raw: object,
+) -> tuple[tuple[SharePointDriveSpec, ...], tuple[SiteDiscoverySpec, ...]]:
     """Translate operator config drive entries to typed specs.
 
-    Accepts a list of strings (treated as ``drive_id`` only) OR a list
-    of dicts with ``drive_id`` plus optional ``site_id`` / ``display_name``
-    keys. Anything else raises with a fix pointer so misconfigured
-    operators see the contract surface loudly.
+    Accepts a non-empty list whose entries are strings (treated as
+    ``drive_id`` only), explicit-drive dicts (``drive_id`` + optional
+    keys), or site-discovery dicts (``site_id``/``site_url`` + optional
+    path filters). Returns a ``(explicit_drive_specs, site_specs)`` pair
+    so the connector can sync explicit drives directly and expand site
+    specs lazily at sync time. Anything else raises with a fix pointer so
+    misconfigured operators see the contract surface loudly.
     """
     if not isinstance(raw, list) or not raw:
         raise ValueError(
             "sharepoint: 'drives' must be a non-empty list of drive ids or drive blocks. "
-            "fix: declare at least one drive under sharepoint -> drives in kairix.config.yaml. "
+            "fix: declare at least one drive (drive_id) or site (site_id) under "
+            "sharepoint -> drives in kairix.config.yaml. "
             "next: see docs/architecture/connector-ingestion-architecture.md §8 "
             "for the SharePoint connector config shape."
         )
-    return [parse_drive_entry(entry) for entry in raw]
+    drive_specs: list[SharePointDriveSpec] = []
+    site_specs: list[SiteDiscoverySpec] = []
+    for entry in raw:
+        parsed = parse_drive_entry(entry)
+        if isinstance(parsed, SiteDiscoverySpec):
+            site_specs.append(parsed)
+        else:
+            drive_specs.append(parsed)
+    return tuple(drive_specs), tuple(site_specs)
 
 
 def make_connector(config: Mapping[str, Any]) -> SharePointConnector:
@@ -989,10 +1368,17 @@ def make_connector(config: Mapping[str, Any]) -> SharePointConnector:
     Expected keys:
 
       * ``drives`` (required) — non-empty list of drive specs. Each
-        entry is either a drive-id string or a mapping with ``drive_id``
-        plus optional ``site_id`` / ``display_name``.
+        entry is either a drive-id string, a mapping with ``drive_id``
+        plus optional ``site_id`` / ``display_name``, OR a mapping that
+        names a SITE (``site_id`` and/or ``site_url``, no ``drive_id``)
+        to auto-discover all of that site's drives at sync time (F42).
       * ``default_sensitivity`` (optional) — one of the F39 sensitivity
         literals; defaults to ``"internal"``.
+
+    This factory stays PURE — no Graph call, no credential resolution
+    at parse time. Site-discovery entries are parsed into typed specs
+    here and expanded to concrete drives LAZILY on the first sync, when
+    the connector already holds a live Graph client.
 
     Credentials resolve via :class:`kairix.secrets.loader.SecretsLoader`
     against the canonical identities ``(connector, m365, None, tenant-id)``,
@@ -1006,7 +1392,7 @@ def make_connector(config: Mapping[str, Any]) -> SharePointConnector:
     kairix's ``pyproject.toml`` so the orchestration layer can resolve
     ``sharepoint`` to this factory by name.
     """
-    drives = _drive_specs_from_config(config.get("drives"))
+    drives, site_discovery = _drive_specs_from_config(config.get("drives"))
     declared = config.get("default_sensitivity", DEFAULT_SENSITIVITY)
     if declared not in ("public", "internal", "client-confidential", "personal"):
         raise ValueError(
@@ -1016,4 +1402,8 @@ def make_connector(config: Mapping[str, Any]) -> SharePointConnector:
             "next: see kairix/core/protocols.py Sensitivity for the literal set."
         )
     sensitivity = cast(Sensitivity, declared)
-    return SharePointConnector(drives=drives, default_sensitivity=sensitivity)
+    return SharePointConnector(
+        drives=list(drives),
+        site_discovery=list(site_discovery),
+        default_sensitivity=sensitivity,
+    )

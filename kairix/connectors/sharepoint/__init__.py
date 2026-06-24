@@ -44,6 +44,7 @@ from kairix.connectors.sharepoint.connector import (
     SharePointConnector,
     SharePointCredentials,
     SharePointDriveSpec,
+    SiteDiscoverySpec,
     make_connector,
 )
 from kairix.connectors.sharepoint.graph_client import (
@@ -87,6 +88,7 @@ __all__ = [
     "SharePointCredentials",
     "SharePointDriveSpec",
     "SharePointGraphClient",
+    "SiteDiscoverySpec",
     "SiteRef",
     "make_connector",
 ]

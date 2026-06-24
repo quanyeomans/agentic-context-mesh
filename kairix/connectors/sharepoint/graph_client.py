@@ -240,6 +240,40 @@ class SharePointGraphClient:
                 yield _drive_from(entry, site_id=site_id)
             url = _string_or_none(body.get(_ODATA_NEXT_LINK_KEY))
 
+    def resolve_site_by_path(self, hostname: str, server_relative_path: str) -> SiteRef:
+        """Resolve a friendly SharePoint site URL to its Graph composite id.
+
+        Calls ``GET /sites/{hostname}:/{server-relative-path}`` — the
+        documented Graph shape for "look up a site by its server-relative
+        path". Unlike :meth:`list_sites` (a ``value``-array collection),
+        this endpoint returns a SINGLE site object, so the body is parsed
+        directly via :func:`_site_from` (not via :func:`_entries`).
+
+        Args:
+            hostname: The SharePoint host, e.g.
+                ``contoso.sharepoint.com``.
+            server_relative_path: The server-relative site path WITH a
+                leading slash, e.g. ``/sites/marketing``. A drive
+                discovery spec that names a ``site_url`` is split into
+                these two components before the call.
+
+        Returns:
+            The :class:`SiteRef` whose ``site_id`` is the Graph composite
+            id (``<hostname>,<site-guid>,<web-guid>``) that
+            :meth:`list_drives` consumes.
+
+        Raises:
+            httpx.HTTPStatusError: On a non-2xx response (e.g. 404 when
+                the site path does not resolve). The connector's
+                discovery loop wraps this call in a try/except so a bad
+                ``site_url`` warns + skips that site rather than crashing
+                the sync.
+        """
+        normalised = server_relative_path if server_relative_path.startswith("/") else "/" + server_relative_path
+        url = f"{self._graph_base}/sites/{hostname}:{normalised}"
+        body = self._authorised_get(url).json()
+        return _site_from(body)
+
     def initial_delta_url(self, drive_id: str) -> str:
         """Compose the seed delta URL for one drive.
 
