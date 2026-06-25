@@ -440,17 +440,27 @@ class _SqliteEntityGraphSink:
         self._db = db
 
     def buffer(self, signals: Sequence[EntitySignal]) -> int:
-        """Write entity signals to the ``entity_signals`` staging table."""
-        staged = 0
-        for sig in signals:
-            self._db.execute(
-                "INSERT INTO entity_signals "
-                "(kind, value, source_uri, modified_at, confidence, sensitivity, pushed_to_neo4j) "
-                "VALUES (?, ?, ?, ?, ?, ?, 0)",
-                (sig.kind, sig.value, sig.source_uri, sig.modified_at, sig.confidence, sig.sensitivity),
-            )
-            staged += 1
-        return staged
+        """Write entity signals to the ``entity_signals`` staging table.
+
+        Batches every signal into a single ``executemany`` rather than N
+        single-row ``execute`` calls — one prepared statement, one C-level
+        bind loop — so a fast connector emitting thousands of signals per
+        batch doesn't pay per-row Python/SQLite dispatch overhead. Behaviour
+        is identical (same rows, same order). Does NOT commit — the caller's
+        per-batch transaction owns the commit.
+        """
+        rows = [
+            (sig.kind, sig.value, sig.source_uri, sig.modified_at, sig.confidence, sig.sensitivity) for sig in signals
+        ]
+        if not rows:
+            return 0
+        self._db.executemany(
+            "INSERT INTO entity_signals "
+            "(kind, value, source_uri, modified_at, confidence, sensitivity, pushed_to_neo4j) "
+            "VALUES (?, ?, ?, ?, ?, ?, 0)",
+            rows,
+        )
+        return len(rows)
 
 
 def _topology_entry_for_cc_pair(connector: Any, cc_pair: Any) -> dict[str, Any]:
