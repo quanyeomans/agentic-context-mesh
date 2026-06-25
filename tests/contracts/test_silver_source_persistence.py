@@ -66,9 +66,12 @@ def test_ingest_persists_source_markdown_keyed_by_content_hash() -> None:
     _process(silver, raw, _extracted())
     db.commit()
 
-    row = db.execute("SELECT markdown FROM silver_source WHERE hash = ?", (raw.content_hash,)).fetchone()
+    row = db.execute(
+        "SELECT source_uri, markdown FROM silver_source WHERE hash = ?", (raw.content_hash,)
+    ).fetchone()
     assert row is not None, "silver_source row must be written at ingest"
-    assert row[0] == _MARKDOWN
+    assert row[0] == "sharepoint://site/doc-1", "source_uri must be stored for the sweep's delete path"
+    assert row[1] == _MARKDOWN
 
 
 def test_no_source_writer_is_a_silent_noop() -> None:

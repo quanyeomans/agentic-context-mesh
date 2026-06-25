@@ -138,9 +138,14 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
         -- documents_media.hash). Persisted at ingest so the re-chunk sweep can
         -- re-run Silver chunking from the original text WITHOUT re-fetching from
         -- the remote connector when a chunker version bumps. Non-paged docs
-        -- re-chunk losslessly from this column.
+        -- re-chunk losslessly from this column. ``source_uri`` is the document's
+        -- chunk key prefix (documents.source_uri) — stored here so the sweep can
+        -- locate + delete the doc's existing chunks before re-writing without an
+        -- item-level documents <-> documents_media join (the keys differ: chunk
+        -- text hash vs raw-bytes hash).
         CREATE TABLE IF NOT EXISTS silver_source (
             hash TEXT PRIMARY KEY,
+            source_uri TEXT,
             markdown TEXT NOT NULL,
             created_at TEXT,
             FOREIGN KEY (hash) REFERENCES documents_media(hash)
@@ -454,6 +459,7 @@ CREATE TABLE IF NOT EXISTS document_pages (
 -- See create_schema() for the rationale; keyed by raw-bytes content_hash.
 CREATE TABLE IF NOT EXISTS silver_source (
     hash TEXT PRIMARY KEY,
+    source_uri TEXT,
     markdown TEXT NOT NULL,
     created_at TEXT,
     FOREIGN KEY (hash) REFERENCES documents_media(hash)

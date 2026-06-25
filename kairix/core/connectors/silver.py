@@ -452,11 +452,16 @@ class SqliteSilverSourceWriter:
     def __init__(self, db: sqlite3.Connection) -> None:
         self._db = db
 
-    def write_source(self, *, content_hash: str, markdown: str) -> None:
-        """INSERT or REPLACE the ``silver_source`` row for the document."""
+    def write_source(self, *, content_hash: str, source_uri: str, markdown: str) -> None:
+        """INSERT or REPLACE the ``silver_source`` row for the document.
+
+        ``source_uri`` is stored so the re-chunk sweep can locate + delete the
+        document's existing chunk rows (keyed by ``documents.source_uri``)
+        before re-writing them.
+        """
         self._db.execute(
-            "INSERT OR REPLACE INTO silver_source (hash, markdown, created_at) VALUES (?, ?, ?)",
-            (content_hash, markdown, _utc_now_iso()),
+            "INSERT OR REPLACE INTO silver_source (hash, source_uri, markdown, created_at) VALUES (?, ?, ?, ?)",
+            (content_hash, source_uri, markdown, _utc_now_iso()),
         )
 
 
@@ -617,6 +622,7 @@ class DefaultSilverProcessor:
             raw=raw,
             extracted=extracted,
             merged=merged,
+            source_uri=source_uri,
             extractor_name=extractor_name,
             extractor_version=extractor_version,
             extraction_status=extraction_status,
@@ -671,6 +677,7 @@ class DefaultSilverProcessor:
         raw: BronzeRef,
         extracted: ExtractedDocument,
         merged: SourceMetadata,
+        source_uri: str,
         extractor_name: str | None,
         extractor_version: str | None,
         extraction_status: str,
@@ -728,6 +735,7 @@ class DefaultSilverProcessor:
         if self._silver_source_writer is not None and extracted.markdown:
             self._silver_source_writer.write_source(
                 content_hash=raw.content_hash,
+                source_uri=source_uri,
                 markdown=extracted.markdown,
             )
 
