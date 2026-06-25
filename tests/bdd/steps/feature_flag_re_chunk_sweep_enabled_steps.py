@@ -38,9 +38,7 @@ def rechunk_sweep_flag_state() -> _State:
 
 
 def _deps(state: _State, *, sweep_on: bool) -> WorkerDeps:
-    resolver = (
-        FakeFeatureFlagResolver().with_flag(_SWEEP_FLAG, sweep_on).with_flag(_REGISTRY_FLAG, True)
-    )
+    resolver = FakeFeatureFlagResolver().with_flag(_SWEEP_FLAG, sweep_on).with_flag(_REGISTRY_FLAG, True)
     return WorkerDeps(flag_reader=resolver.get, rechunk_sweep_fn=lambda: state.calls.append(1))
 
 
