@@ -31,6 +31,7 @@ from kairix.connectors.sharepoint import (
     SharePointCredentials,
     SharePointDriveSpec,
     SharePointGraphClient,
+    SiteDiscoverySpec,
 )
 from kairix.core.protocols import ChangeEvent
 from kairix.transport.auth.oauth2_client_creds import OAuth2ClientCredsAuth
@@ -191,3 +192,122 @@ def _cursor_encodes_drive_map(sharepoint_ctx: _Ctx) -> None:
     assert isinstance(parsed, dict), f"cursor must decode to dict, got {parsed!r}"
     assert _DRIVE_ID in parsed, f"cursor map missing drive {_DRIVE_ID!r}: {parsed!r}"
     assert "deltatoken" in parsed[_DRIVE_ID], f"cursor map value missing delta token: {parsed[_DRIVE_ID]!r}"
+
+
+# ---------------------------------------------------------------------------
+# Site auto-discovery scenario
+# ---------------------------------------------------------------------------
+
+_SITE_ID = "contoso.sharepoint.com,site-guid,web-guid"
+_DISCOVERED_DRIVES = ("drive-disco-a", "drive-disco-b")
+
+
+def _site_drives_listing() -> dict[str, Any]:
+    """A Graph ``/sites/{id}/drives`` response naming two document libraries."""
+    return {
+        "value": [
+            {"id": did, "name": f"Library-{did}", "webUrl": f"https://contoso.sharepoint.com/sites/team/{did}"}
+            for did in _DISCOVERED_DRIVES
+        ]
+    }
+
+
+def _delta_page_for(drive_id: str) -> dict[str, Any]:
+    """One delta page with a single PDF envelope, tagged with the drive id."""
+    return {
+        "@odata.context": f"https://graph.microsoft.com/v1.0/$metadata#drives/{drive_id}/root/delta",
+        "value": [
+            {
+                "id": f"item-{drive_id}",
+                "name": f"{drive_id}.pdf",
+                "size": 1234,
+                "lastModifiedDateTime": "2026-05-22T10:00:00Z",
+                "webUrl": f"https://contoso.sharepoint.com/sites/team/{drive_id}/doc.pdf",
+                "file": {"mimeType": "application/pdf"},
+                "parentReference": {"driveId": drive_id},
+            }
+        ],
+        "@odata.deltaLink": f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/delta?$deltatoken=tok-{drive_id}",
+    }
+
+
+def _build_connector_for_site_discovery(ctx: _Ctx) -> SharePointConnector:
+    """Real connector wired to a stub that discovers a site's drives.
+
+    The stub routes the ``/sites/{id}/drives`` enumeration to a
+    two-library listing and each ``/drives/{id}/root/delta`` to a
+    single-PDF page — so list_changes auto-discovers both libraries and
+    syncs one item from each.
+    """
+
+    def _stub_handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/oauth2/v2.0/token" in url:
+            return httpx.Response(
+                200,
+                json={"access_token": "fake-bearer-token-value", "expires_in": 3600, "token_type": "Bearer"},
+            )
+        ctx.requested_urls.append(url)
+        if f"/sites/{_SITE_ID}/drives" in url:
+            return httpx.Response(200, json=_site_drives_listing())
+        for did in _DISCOVERED_DRIVES:
+            if f"/drives/{did}/" in url:
+                return httpx.Response(200, json=_delta_page_for(did))
+        return httpx.Response(200, json={"value": []})
+
+    transport = httpx.MockTransport(_stub_handler)
+    shared_client = httpx.Client(transport=transport)
+
+    auth = OAuth2ClientCredsAuth(
+        tenant_id="fake-tenant",
+        client_id="fake-client-id",
+        client_secret="fake-client-secret-value",  # pragma: allowlist secret — test fixture
+        scope="https://graph.microsoft.com/.default",
+        http_client=shared_client,
+    )
+
+    def _client_builder(resolved_auth: OAuth2ClientCredsAuth) -> SharePointGraphClient:
+        return SharePointGraphClient(auth=resolved_auth, http_client=shared_client)
+
+    return SharePointConnector(
+        drives=[],
+        site_discovery=[SiteDiscoverySpec(site_id=_SITE_ID)],
+        credentials=SharePointCredentials(
+            tenant_id="fake-tenant",
+            client_id="fake-client-id",
+            client_secret="fake-client-secret-value",  # pragma: allowlist secret — test fixture
+        ),
+        auth=auth,
+        client_builder=_client_builder,
+    )
+
+
+@given(parsers.parse("a stubbed Microsoft Graph site that lists two drives each with one pdf envelope"))
+def _given_site_with_two_drives(sharepoint_ctx: _Ctx) -> None:
+    sharepoint_ctx.connector = _build_connector_for_site_discovery(sharepoint_ctx)
+
+
+@when(parsers.parse("the operator runs the sharepoint connector list_changes with no cursor for the discovered site"))
+def _when_list_changes_discovered(sharepoint_ctx: _Ctx) -> None:
+    assert sharepoint_ctx.connector is not None, "Given step must run before When"
+    sharepoint_ctx.events = list(sharepoint_ctx.connector.list_changes(cursor=None))
+
+
+@then("two created change events are emitted one per discovered drive")
+def _two_created_events(sharepoint_ctx: _Ctx) -> None:
+    events = sharepoint_ctx.events
+    assert len(events) == 2, f"expected 2 events (one per discovered drive), got {len(events)}: {events!r}"
+    assert all(e.op == "created" for e in events), f"all events must be created: {events!r}"
+    drive_ids = {e.metadata.get("drive_id") for e in events}
+    assert drive_ids == set(_DISCOVERED_DRIVES), f"events must come from each discovered drive; got {drive_ids!r}"
+
+
+@then("the next cursor records a delta link for each discovered drive")
+def _cursor_has_each_discovered_drive(sharepoint_ctx: _Ctx) -> None:
+    assert sharepoint_ctx.connector is not None
+    cursor = sharepoint_ctx.connector.next_cursor()
+    assert cursor is not None, "discovered drives must produce a next cursor"
+    parsed = json.loads(cursor)
+    assert set(parsed.keys()) == set(_DISCOVERED_DRIVES), (
+        f"cursor map must key on each discovered drive id; got {sorted(parsed.keys())!r}"
+    )

@@ -254,11 +254,26 @@ topology_v2:
       #       timeout_s: 60.0
       #       max_file_size_mb: 256
       #
-      # For SharePoint: the Graph drive id. Until ``kairix sharepoint
-      # discover`` lands (KFEAT-022), enumerate drives via
-      # ``az rest --method get --url 'https://graph.microsoft.com/v1.0/sites?search=*'``
-      # then ``/sites/<site-id>/drives``. Pin by id — not by URL — so the
-      # sync stays deterministic across site renames.
+      # For SharePoint: ``drives`` is a non-empty list whose entries are
+      # EITHER an explicit drive OR a self-discovering site.
+      #
+      #  • Explicit drive — a Graph drive id (deterministic across site
+      #    renames). Pin by id, not by URL. To find drive ids manually:
+      #    ``az rest --method get --url
+      #    'https://graph.microsoft.com/v1.0/sites?search=*'`` then
+      #    ``/sites/<site-id>/drives``.
+      #
+      #  • SITE entry (self-discovery, F42 — foundation for the
+      #    ``kairix sharepoint discover`` wizard, KFEAT-022) — name a
+      #    ``site_id`` (and/or ``site_url``) and OMIT ``drive_id``: kairix
+      #    auto-discovers EVERY document library on that site and syncs
+      #    each one. Discovery runs lazily at sync time and re-runs every
+      #    tick, so libraries added later are picked up automatically. The
+      #    site's ``include_paths`` / ``exclude_paths`` are inherited by
+      #    every discovered drive. A site that fails to resolve (not found
+      #    / auth / throttle / empty) is logged + skipped for that tick —
+      #    explicit drives and other sites keep syncing (per-site fault
+      #    isolation).
       #
       # ``include_paths`` / ``exclude_paths`` (optional) scope which
       # folders within the drive get indexed. Empty = whole drive walked.
@@ -268,6 +283,7 @@ topology_v2:
       # docs/architecture/sharepoint-path-filtering.md.
       connector_specific_config:
         drives:
+          # Explicit-drive entry — pin one drive by its Graph id.
           - drive_id: "b!exampleDriveIdReplaceWithRealOne"
             site_id: "contoso.sharepoint.com,xxxx,yyyy"
             include_paths:
@@ -275,6 +291,15 @@ topology_v2:
               - "/Shared Documents"
             exclude_paths:
               - "/Curated-Content/draft"
+          # Self-discovering SITE entry — no drive_id: kairix finds and
+          # syncs every document library on this site. The exclude_paths
+          # below apply to each discovered drive.
+          - site_id: "contoso.sharepoint.com,aaaa,bbbb"
+            exclude_paths:
+              - "/Archive"
+          # Alternatively name the site by URL (resolved to a site_id via
+          # Graph at sync time) instead of the opaque composite id:
+          # - site_url: "https://contoso.sharepoint.com/sites/marketing"
 
     - id: slack-workspace-conn
       kind: slack

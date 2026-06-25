@@ -429,8 +429,36 @@ connectors:
   - name: sharepoint
     sensitivity: client-confidential
     config:
-      tenant: <tenant-id>
-      site: <site-id>
+      # ``drives`` is a non-empty list. Each entry is ONE of:
+      #
+      #   (a) an explicit drive — a bare Graph drive-id string, or a
+      #       mapping with ``drive_id`` (+ optional ``site_id`` /
+      #       ``display_name`` / ``include_paths`` / ``exclude_paths``);
+      #       OR
+      #   (b) a SITE entry — a mapping naming ``site_id`` (and/or
+      #       ``site_url``) and NO ``drive_id`` — meaning "auto-discover
+      #       every document library on this site" (F42). The site's
+      #       ``include_paths`` / ``exclude_paths`` are inherited by every
+      #       discovered drive. Discovery runs LAZILY at sync time and
+      #       re-runs each tick, so libraries added later are picked up
+      #       automatically. A site that fails to resolve (not found /
+      #       auth / throttle / empty) is logged + skipped for that tick;
+      #       explicit drives and other sites still sync (per-site fault
+      #       isolation).
+      #
+      # The M365 tenant / client / secret triple is resolved from secrets
+      # (canonical identity ``(connector, m365, None, <leaf>)``) — it is
+      # NOT declared here. Pin drives by id (not URL) for determinism
+      # across site renames; use a site entry to let kairix self-discover.
+      drives:
+        - drive_id: <graph-drive-id>                # explicit drive
+          site_id: <hostname,site-guid,web-guid>    # optional, informational
+          include_paths: ["/Curated-Content"]       # optional folder scope
+        - site_id: <hostname,site-guid,web-guid>    # SITE entry — discover all drives
+          exclude_paths: ["/Archive"]               # inherited by every discovered drive
+        # - site_url: https://contoso.sharepoint.com/sites/marketing
+        #   # ``site_url`` is resolved to a site_id via Graph at sync time
+        #   # (an alternative to pinning the composite ``site_id``).
 
 extractors:
   default: markitdown
