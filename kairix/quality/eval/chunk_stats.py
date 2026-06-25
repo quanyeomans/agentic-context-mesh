@@ -209,6 +209,44 @@ def render_human(stats: Iterable[ChunkStats]) -> str:
     return "\n".join(lines) + "\n"
 
 
+# text-embedding-3-large truncates silently at its 8191-token limit; at the
+# production ~4 chars/token density that is ~32K chars. A chunk above this is
+# embedded only up to the limit, so its tail never reaches retrieval — a hidden
+# quality cliff for any source type with oversized chunks (e.g. whole-document
+# "chunks" that were never split). Surfacing it tells the operator which sources
+# need the per-type chunker cutover (chunker_registry_dispatch_enabled).
+_EMBED_TOKEN_LIMIT = 8191
+_EMBED_CHAR_BUDGET = _EMBED_TOKEN_LIMIT * 4
+
+
+def truncation_risk(by_type: dict[str, list[int]], char_budget: int = _EMBED_CHAR_BUDGET) -> list[tuple[str, int]]:
+    """Return ``(source_type, max_chunk_chars)`` for types whose largest chunk
+    exceeds ``char_budget`` — i.e. it silently truncates at embed time.
+
+    Sorted by max size descending so the worst offenders surface first.
+    """
+    at_risk = [(stype, max(sizes)) for stype, sizes in by_type.items() if sizes and max(sizes) > char_budget]
+    return sorted(at_risk, key=lambda pair: pair[1], reverse=True)
+
+
+def render_truncation_warning(by_type: dict[str, list[int]], char_budget: int = _EMBED_CHAR_BUDGET) -> str:
+    """Render the embed-truncation warning block, or ``""`` when nothing is at risk."""
+    at_risk = truncation_risk(by_type, char_budget)
+    if not at_risk:
+        return ""
+    lines = [
+        "",
+        f"embed-truncation risk: source types with chunks over the {char_budget}-char "
+        f"(~{_EMBED_TOKEN_LIMIT}-token) embedding budget truncate silently at embed time:",
+    ]
+    for stype, max_chars in at_risk:
+        lines.append(f"    {stype:14} max={max_chars} chars")
+    lines.append(
+        "  fix: enable chunker_registry_dispatch_enabled (per-type bounded chunkers) and re-embed the affected sources."
+    )
+    return "\n".join(lines) + "\n"
+
+
 def emit_chunk_stats(db_path: Path, out_sink: TextIO) -> int:
     """Compute + emit per-source-type chunk-size stats. Returns exit code."""
     if not db_path.exists():
@@ -227,6 +265,7 @@ def emit_chunk_stats(db_path: Path, out_sink: TextIO) -> int:
         db.close()
     stats = compute_stats(by_type)
     out_sink.write(render_human(stats))
+    out_sink.write(render_truncation_warning(by_type))
     return 0
 
 
@@ -236,4 +275,6 @@ __all__ = [
     "compute_stats",
     "emit_chunk_stats",
     "render_human",
+    "render_truncation_warning",
+    "truncation_risk",
 ]
