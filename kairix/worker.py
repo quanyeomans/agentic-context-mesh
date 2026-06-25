@@ -471,13 +471,15 @@ def _topology_entry_for_cc_pair(connector: Any, cc_pair: Any) -> dict[str, Any]:
       * ``extractor`` / ``extractor_chain`` / ``extractor_config`` — the
         extractor wiring (D1) consumed by ``build_extractor_from_entry``.
     """
+    from kairix.config.topology_v2 import config_pairs_to_mapping
+
     return {
         "name": cc_pair.name,
         "kind": connector.kind,
-        "config": dict(connector.connector_specific_config),
+        "config": config_pairs_to_mapping(connector.connector_specific_config),
         "extractor": connector.extractor,
         "extractor_chain": list(connector.extractor_chain),
-        "extractor_config": dict(connector.extractor_config),
+        "extractor_config": config_pairs_to_mapping(connector.extractor_config),
     }
 
 

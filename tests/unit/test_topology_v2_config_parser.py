@@ -13,6 +13,7 @@ colliding with the legacy top-level ``collections.shared`` dict shape.
 
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,7 @@ from kairix.config import (
     SkillSourceConfig,
     SkillTaskCollectionConfig,
     TopologyV2Config,
+    config_pairs_to_mapping,
     parse_topology_v2,
 )
 from kairix.config.topology_v2 import TopologyV2ParseError
@@ -109,7 +111,107 @@ def test_single_connector_parses() -> None:
     assert c.kind == "obsidian"
     assert c.refresh_freq_seconds == 300
     assert c.default_sensitivity == "internal"
-    assert ("vault_root", "/data/vault") in c.connector_specific_config
+    assert config_pairs_to_mapping(c.connector_specific_config) == {"vault_root": "/data/vault"}
+
+
+def test_connector_specific_config_preserves_nested_drives() -> None:
+    """Nested connector config (SharePoint ``drives:``) round-trips as a list.
+
+    Regression: ``_parse_connector_specific_config`` previously ``str()``-coerced
+    every value, turning the ``drives`` list into a Python-repr string. The
+    SharePoint connector factory then rejected it every sync tick with
+    "'drives' must be a non-empty list", stalling the pipeline. JSON encoding
+    preserves the structure so the materialized value is a real list.
+    """
+    drives = [
+        {
+            "site_id": "contoso.sharepoint.com,aaaa,bbbb",
+            "exclude_paths": ["/Archive", "/Personal"],
+        }
+    ]
+    config = parse_topology_v2(
+        {
+            "topology_v2": {
+                "connectors": [
+                    {
+                        "id": "sp",
+                        "kind": "sharepoint",
+                        "name": "sp",
+                        "connector_specific_config": {"drives": drives},
+                    }
+                ]
+            }
+        }
+    )
+    c = config.connectors[0]
+    mapping = config_pairs_to_mapping(c.connector_specific_config)
+    assert mapping["drives"] == drives
+    assert isinstance(mapping["drives"], list)
+    assert isinstance(mapping["drives"][0], dict)
+
+
+def test_connector_specific_config_preserves_scalar_types() -> None:
+    """Scalar config values round-trip to their real Python types (not str-coerced).
+
+    Restores the pre-topology_v2 contract that connector/extractor factories
+    receive raw YAML types. ``str()`` coercion (the bug) turned every value into
+    a string; the JSON round-trip preserves int/bool/float as themselves.
+    """
+    config = parse_topology_v2(
+        {
+            "topology_v2": {
+                "connectors": [
+                    {
+                        "id": "c",
+                        "kind": "obsidian",
+                        "name": "c",
+                        "connector_specific_config": {
+                            "max_items": 50,
+                            "recursive": True,
+                            "ratio": 1.5,
+                        },
+                    }
+                ]
+            }
+        }
+    )
+    mapping = config_pairs_to_mapping(config.connectors[0].connector_specific_config)
+    assert mapping == {"max_items": 50, "recursive": True, "ratio": 1.5}
+    assert isinstance(mapping["max_items"], int)
+    assert isinstance(mapping["recursive"], bool)
+
+
+def test_connector_specific_config_date_values_do_not_crash() -> None:
+    """YAML date values (JSON-unserializable) fall back to str, never crash.
+
+    Regression: ``json.dumps`` without ``default=`` raises ``TypeError`` on
+    ``datetime.date`` — which YAML 1.1 produces from bare ``2026-06-01`` scalars
+    — crashing ``parse_topology_v2`` and dropping every connector for the tick.
+    ``default=str`` makes the encode total.
+    """
+    config = parse_topology_v2(
+        {
+            "topology_v2": {
+                "connectors": [
+                    {
+                        "id": "c",
+                        "kind": "obsidian",
+                        "name": "c",
+                        "connector_specific_config": {"valid_from": datetime.date(2026, 6, 1)},
+                    }
+                ]
+            }
+        }
+    )
+    mapping = config_pairs_to_mapping(config.connectors[0].connector_specific_config)
+    assert mapping == {"valid_from": "2026-06-01"}
+
+
+def test_config_pairs_to_mapping_empty_and_invalid() -> None:
+    """Empty pairs → ``{}``; a non-JSON value raises a loud ValueError naming the key."""
+    assert config_pairs_to_mapping(()) == {}
+    with pytest.raises(ValueError, match="legacy_key"):
+        config_pairs_to_mapping((("legacy_key", "[{'not': 'json'}]"),))
 
 
 def test_connector_extractor_fields_default_when_absent() -> None:
@@ -160,8 +262,9 @@ def test_connector_extractor_fields_parse() -> None:
     assert isinstance(c, ConnectorConfig)
     assert c.extractor == "markitdown"
     assert c.extractor_chain == ("markitdown", "passthrough")
-    # extractor_config is a sorted tuple of (key, value-as-str) pairs (F42).
-    assert c.extractor_config == (("max_pages", "50"), ("ocr", "true"))
+    # extractor_config is a sorted tuple of (key, json-value) pairs (F42);
+    # read it back through the per-connector boundary materializer.
+    assert config_pairs_to_mapping(c.extractor_config) == {"max_pages": "50", "ocr": "true"}
 
 
 def test_connector_extractor_config_must_be_mapping() -> None:

@@ -52,6 +52,7 @@ from kairix.config.topology_v2 import (
     ConnectorConfig,
     CredentialConfig,
     TopologyV2Config,
+    config_pairs_to_mapping,
 )
 from kairix.config.topology_v2_validators import (
     ValidationFailure,
@@ -260,7 +261,7 @@ def _apply_connectors(
     unchanged = 0
     id_map: dict[str, int] = {}
     for spec in connectors:
-        config_json = json.dumps(dict(spec.connector_specific_config), sort_keys=True)
+        config_json = json.dumps(config_pairs_to_mapping(spec.connector_specific_config), sort_keys=True)
         existing = db.execute(
             "SELECT id, kind, connector_specific_config, refresh_freq_seconds, "
             "prune_freq_seconds, perm_sync_freq_seconds, default_sensitivity "
