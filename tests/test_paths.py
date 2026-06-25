@@ -19,6 +19,7 @@ from kairix.paths import (
     load_paths_from_config,
     log_dir,
     maintenance_skip_noop_threshold,
+    rechunk_sweep_per_tick_cap,
     reference_library_root,
 )
 
@@ -1148,3 +1149,26 @@ class TestEmbeddingCachePath:
 
         result_system = embedding_cache_path(Mode.system)
         assert result_system == data_dir(Mode.system) / "cache" / "embedding_cache.sqlite"
+
+
+@pytest.mark.unit
+class TestRechunkSweepPerTickCap:
+    """ADR-028 Wave F.4 — KAIRIX_RECHUNK_SWEEP_PER_TICK_CAP env resolution."""
+
+    def test_default_when_unset(self, monkeypatch) -> None:
+        monkeypatch.delenv("KAIRIX_RECHUNK_SWEEP_PER_TICK_CAP", raising=False)
+        assert rechunk_sweep_per_tick_cap() == 200
+
+    def test_valid_positive_int_from_env(self, monkeypatch) -> None:
+        monkeypatch.setenv("KAIRIX_RECHUNK_SWEEP_PER_TICK_CAP", "50")
+        assert rechunk_sweep_per_tick_cap() == 50
+
+    def test_non_int_falls_back_to_default(self, monkeypatch) -> None:
+        monkeypatch.setenv("KAIRIX_RECHUNK_SWEEP_PER_TICK_CAP", "not-a-number")
+        assert rechunk_sweep_per_tick_cap() == 200
+
+    def test_non_positive_falls_back_to_default(self, monkeypatch) -> None:
+        monkeypatch.setenv("KAIRIX_RECHUNK_SWEEP_PER_TICK_CAP", "0")
+        assert rechunk_sweep_per_tick_cap() == 200
+        monkeypatch.setenv("KAIRIX_RECHUNK_SWEEP_PER_TICK_CAP", "-5")
+        assert rechunk_sweep_per_tick_cap() == 200
