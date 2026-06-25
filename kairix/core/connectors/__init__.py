@@ -43,6 +43,7 @@ from kairix.core.connectors.silver import (
     DefaultSilverProcessor,
     SqliteDocumentPagesWriter,
     SqliteDocumentsMediaWriter,
+    SqliteSilverSourceWriter,
 )
 from kairix.core.connectors.streaming_bronze import BronzeNotPersistedError, StreamingBronzeStore
 from kairix.core.protocols import ChunkWriter
@@ -70,6 +71,7 @@ __all__ = [
     "SourceFreshness",
     "SqliteDocumentPagesWriter",
     "SqliteDocumentsMediaWriter",
+    "SqliteSilverSourceWriter",
     "StreamingBronzeStore",
     "build_envelope",
     "build_freshness",

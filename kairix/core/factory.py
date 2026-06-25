@@ -1424,6 +1424,7 @@ def build_connector_pipeline(
         DefaultSilverProcessor,
         SqliteDocumentPagesWriter,
         SqliteDocumentsMediaWriter,
+        SqliteSilverSourceWriter,
         StreamingBronzeStore,
     )
     from kairix.core.connectors.collection_router import legacy_chunk_writer
@@ -1432,10 +1433,13 @@ def build_connector_pipeline(
     # GH #336 (ADR-024 Bundle B) — documents_media writer.
     # GH #338 (F70 paydown) — document_pages writer; per-page rows
     # enable retrieval citation paths back to the source page/slide.
+    # ADR-028 Wave F.4 — silver_source writer; the per-document source
+    # markdown lets the re-chunk sweep re-chunk without remote re-fetch.
     # Caller-supplied silvers opt out by passing their own ``silver=``.
     default_silver = DefaultSilverProcessor(
         documents_media_writer=SqliteDocumentsMediaWriter(db),
         document_pages_writer=SqliteDocumentPagesWriter(db),
+        silver_source_writer=SqliteSilverSourceWriter(db),
     )
     return ConnectorPipeline(
         db=db,
