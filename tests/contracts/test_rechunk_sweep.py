@@ -1,10 +1,11 @@
-"""Integration: the ADR-028 Wave F.4 re-chunk sweep.
+"""Contract: the ADR-028 Wave F.4 re-chunk sweep.
 
-Exercises the real Silver pipeline + chunk writer + sweep against a real
+Exercises the Silver pipeline + chunk writer + sweep against an in-memory
 SQLite schema: a document whose recorded chunker version is behind the
 registry is re-chunked from its persisted ``silver_source`` markdown; a
 converged document is left alone; paged formats and docs without a source
-row are skipped; the per-tick cursor advances and wraps.
+row are skipped; empty re-chunks and per-doc failures are counted; the
+per-tick cursor advances and wraps.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from kairix.core.db.schema import create_schema
 from kairix.core.embed.schema import get_pending_chunks
 from kairix.core.protocols import BronzeRef, DocMetadata, ExtractedDocument
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.contract
 
 _TS = "2026-06-25T00:00:00Z"
 _MD = "# Heading\n\nFirst paragraph body text.\n\nSecond paragraph body text."
@@ -168,6 +169,73 @@ def test_doc_without_silver_source_is_not_scanned() -> None:
 
     assert scanned == 0, "documents_media rows without a silver_source row are invisible to the sweep"
     assert stale == []
+
+
+def _seed_direct(db, *, content_hash, source_uri, mime, markdown, version) -> None:
+    db.execute(
+        "INSERT INTO documents_media (hash, path, format, extraction_status, chunker_version) "
+        "VALUES (?, ?, ?, 'ok', ?)",
+        (content_hash, f"item-{content_hash}", mime, version),
+    )
+    db.execute(
+        "INSERT INTO silver_source (hash, source_uri, markdown, created_at) VALUES (?, ?, ?, ?)",
+        (content_hash, source_uri, markdown, _TS),
+    )
+    db.execute(
+        "INSERT INTO documents (collection, path, hash, source_name, source_uri, source_modified_at, "
+        "source_page, sensitivity, created_at, modified_at, active) "
+        "VALUES ('default', ?, ?, 'obsidian', ?, ?, NULL, 'internal', ?, ?, 1)",
+        (f"{source_uri}#0", f"chunk-{content_hash}", source_uri, _TS, _TS, _TS),
+    )
+    db.commit()
+
+
+def test_empty_rechunk_is_counted_as_skipped() -> None:
+    db = _db()
+    registry = build_default_registry()
+    # Whitespace-only markdown is truthy (so silver_source was written) but
+    # re-chunks to zero chunks — the doc is left deleted and counted skipped.
+    _seed_direct(
+        db,
+        content_hash="rawE",
+        source_uri="obsidian://empty",
+        mime="text/markdown",
+        markdown="   \n\n  ",
+        version="stale-v0",
+    )
+
+    result = run_rechunk_sweep(db, cap=100, registry=registry)
+
+    assert result.stale == 1
+    assert result.rechunked == 0
+    assert result.skipped_empty == 1
+    assert _chunk_count(db, "obsidian://empty") == 0, "an empty re-chunk leaves no chunk rows"
+
+
+def test_per_doc_failure_is_isolated_and_counted() -> None:
+    db = _db()
+    registry = build_default_registry()
+    # A healthy stale doc that re-chunks cleanly...
+    _ingest(db, content_hash="rawOK", source_uri="obsidian://ok", registry=registry)
+    _make_stale(db, "rawOK")
+    # ...and a poisoned one whose re-chunk raises: drop documents_fts so the
+    # chunk writer's FTS insert fails for the bad doc's source_uri. (Both share
+    # the table, but the healthy doc is processed in its own committed txn first
+    # by hash order — rawBad < rawOK lexically, so rawBad fails, rawOK is fine.)
+    _seed_direct(
+        db,
+        content_hash="rawBad",
+        source_uri="obsidian://bad",
+        mime="text/markdown",
+        markdown=_MD,
+        version="stale-v0",
+    )
+    db.execute("DROP TABLE documents_fts")
+    db.commit()
+
+    result = run_rechunk_sweep(db, cap=100, registry=registry)
+
+    assert result.failed >= 1, "a per-doc re-chunk failure is isolated + counted, not propagated"
 
 
 def test_cursor_advances_then_wraps_to_head() -> None:
