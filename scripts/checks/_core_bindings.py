@@ -5,15 +5,17 @@ Python-side source the catalogue rows and the equivalence harness both read. The
 same dicts are mirrored verbatim into ``pyproject.toml``'s
 ``[tool.tc_fitness.core_checks.*]`` tables (the engine reads those at gate time).
 
-Only checks PROVEN equivalent to their retired local reimplementation — same raw
-``collect_violations()`` set on kairix's tree AND positive/negative differential
-fixture parity — are bound here; every other local check stays local. The proof
-that gated each row: ``local.file_has_violation(f) == core.file_has_violation(f)``
-for every crafted fixture (positives and negatives) and an identical raw violation
-set over ``kairix/`` (and ``tests/`` for the test-skip rule). ``no_logging_secrets``
+Two binding provenances live here. MIGRATED bindings replaced a retired local
+reimplementation and were gated on equivalence — same raw ``collect_violations()``
+set on kairix's tree AND positive/negative differential fixture parity
+(``local.file_has_violation(f) == core.file_has_violation(f)`` for every crafted
+fixture, and an identical raw violation set over ``kairix/``). ``no_logging_secrets``
 is the canonical KEPT-LOCAL case: the CORE detector flagged a logged ``password`` /
 ``api_token`` parameter the local kairix detector did not — divergent, so it stays
-local.
+local. NET-NEW bindings (``pattern_chokepoint``, ``integrity_state_predicate``) have
+no local predecessor; they are forward regression guards authored directly in
+tc-fitness (so the core set is shared across repos) and gated on zero violations +
+zero false-positives over kairix's current tree.
 """
 
 from __future__ import annotations
@@ -67,5 +69,25 @@ CORE_BINDINGS: dict[str, dict[str, Any]] = {
         "roots": _TESTS,
         "extensions": _PY,
         "name": "test-skip-rationale",
+    },
+    # F95 — cypher write-mode chokepoint (#628). Only client.py may name the
+    # write-mode selectors; any other module re-deriving read-vs-write is the
+    # silent-write class. `exempt_files` is the allow-list (the chokepoint itself).
+    "pattern_chokepoint": {
+        "roots": _KAIRIX,
+        "extensions": _PY,
+        "patterns": ["default_access_mode", "_is_write_query"],
+        "exempt_files": ["kairix/knowledge/graph/client.py"],
+        "name": "cypher-write-mode-chokepoint",
+    },
+    # F96 — embed-discovery state predicate (#627 chunk-0). A completeness query
+    # (LEFT JOIN content_vectors ... IS NULL) must reference a state column, never
+    # presence alone. Scoped to kairix/core/embed so the legitimately presence-only
+    # bronze-limbo check in kairix/core/db/integrity.py is out of scope.
+    "integrity_state_predicate": {
+        "roots": ["kairix/core/embed"],
+        "extensions": _PY,
+        "state_tables": {"content_vectors": ["model", "embedded_at"]},
+        "name": "embed-discovery-state-predicate",
     },
 }

@@ -199,6 +199,47 @@ def _check_documents_without_vectors(db: sqlite3.Connection) -> IntegrityGap | N
     )
 
 
+def _check_documents_without_embedded_vector(db: sqlite3.Connection) -> IntegrityGap | None:
+    """Every active document should have a content_vectors row with a REAL
+    embedding (``model`` set), not just an un-promoted ``(hash, seq, pos)``
+    placeholder.
+
+    This is the chunk-0 invariant: the chunk writer lands a model-NULL
+    placeholder per chunk, and the embed worker later promotes it to a real
+    vector (``model`` set). The presence-only ``documents-without-vectors``
+    check above is satisfied by the placeholder alone — so a document whose
+    only vector is a placeholder (because a discovery query never surfaced it
+    for embedding) passed every check while never being searchable by vector.
+
+    WARN, not error: a freshly-upserted document is transiently placeholder-only
+    until the next embed cycle, so a small count is the normal embed lag and must
+    never block (even strict-mode) preflight. A PERSISTENT count is the signal —
+    documents stuck without an embedding.
+    """
+    # F63-bounded: preflight integrity check; enumerates the gap by design (sample bounded by _MAX_SAMPLE later).
+    # The ``AND v.model IS NOT NULL`` join is the STATE predicate — it asserts an
+    # embedded vector, not mere presence (the gap the presence-only check misses).
+    rows = db.execute(
+        "SELECT d.path FROM documents d "
+        "LEFT JOIN content_vectors v ON v.hash = d.hash AND v.model IS NOT NULL "
+        "WHERE d.active = 1 AND v.hash IS NULL"
+    ).fetchall()
+    if not rows:
+        return None
+    return IntegrityGap(
+        invariant="documents-without-embedded-vector",
+        severity="warn",
+        count=len(rows),
+        sample=_sample(rows),
+        remediation=(
+            "fix: a small count is the normal embed lag — run kairix embed to drain it; "
+            "next: if the count persists across embed cycles, documents are stuck "
+            "un-embedded (check the embed discovery query surfaces them); "
+            "run: kairix embed"
+        ),
+    )
+
+
 def _check_content_vectors_without_documents(db: sqlite3.Connection) -> IntegrityGap | None:
     """Every ``content_vectors`` row's hash must appear in ``documents``."""
     # F63-bounded: preflight integrity check; enumerates the orphan-vector gap by design.
@@ -453,6 +494,7 @@ _CHECKS = (
     _check_documents_without_content,
     _check_documents_without_fts,
     _check_documents_without_vectors,
+    _check_documents_without_embedded_vector,
     _check_content_vectors_without_documents,
     _check_fts_without_documents,
     _check_vector_store_vs_content_vectors,
