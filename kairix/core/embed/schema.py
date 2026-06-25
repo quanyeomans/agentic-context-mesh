@@ -75,12 +75,18 @@ def get_pending_chunks(db: sqlite3.Connection) -> list[dict[str, Any]]:
 
     Returns list of dicts: {hash, text, path}
     """
+    # "needs embedding" = no *embedded* vector for this content hash. We join on
+    # ``v.model IS NOT NULL`` (every real embed writes ``model``; the
+    # _SqliteChunkWriter placeholder writes only (hash, seq, pos)) rather than
+    # ``v.seq = 0`` — the placeholder occupies (hash, seq=0) for a doc's first
+    # chunk, so a ``seq = 0`` join silently excluded chunk-0 of every multi-chunk
+    # connector doc from embedding (BM25/FTS masked it). See chunk_writer.upsert.
     # F63-bounded: embed worker tick consumes pending candidates by design; bounded by per-batch processing upstream.
     rows = db.execute("""
         SELECT c.hash, c.doc, d.path
         FROM content c
         JOIN documents d ON c.hash = d.hash
-        LEFT JOIN content_vectors v ON c.hash = v.hash AND v.seq = 0
+        LEFT JOIN content_vectors v ON c.hash = v.hash AND v.model IS NOT NULL
         WHERE v.hash IS NULL
           AND d.active = 1
           AND c.doc IS NOT NULL

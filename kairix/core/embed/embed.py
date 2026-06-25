@@ -577,13 +577,21 @@ def _gather_pending_chunks(
             {order_by}
         """).fetchall()
     else:
+        # "needs embedding" = no *embedded* vector for this content hash. We join
+        # on ``v.model IS NOT NULL`` (every real embed writes ``model``; the
+        # _SqliteChunkWriter placeholder writes only (hash, seq, pos)) instead of
+        # ``v.seq = 0``. The placeholder lands at (hash, seq=enumerate-index): for
+        # a doc's first chunk that is (hash, seq=0), so a ``seq = 0`` join treated
+        # it as already-embedded and silently skipped chunk-0 of every multi-chunk
+        # connector doc from vector embedding (BM25/FTS masked the gap).
+        #
         # F63-bounded: hourly embed worker tick consumes candidates needing vectors; cycle gates further work.
         # Scale risk flagged for future streaming-cursor refactor — see #211 for context.
         rows = db.execute(f"""
             SELECT c.hash, c.doc, d.path, {smt_select}, {col_select}
             FROM content c
             JOIN documents d ON c.hash = d.hash
-            LEFT JOIN content_vectors v ON c.hash = v.hash AND v.seq = 0
+            LEFT JOIN content_vectors v ON c.hash = v.hash AND v.model IS NOT NULL
             WHERE v.hash IS NULL
               AND d.active = 1
               AND c.doc IS NOT NULL

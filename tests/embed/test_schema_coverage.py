@@ -34,7 +34,13 @@ def _make_minimal_db() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE documents (hash TEXT PRIMARY KEY, path TEXT, active INTEGER DEFAULT 1)")
     db.execute("CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT)")
-    db.execute("CREATE TABLE content_vectors (hash TEXT, seq INTEGER, pos INTEGER)")
+    # Mirror the real content_vectors shape (kairix.core.db.schema.create_schema):
+    # the discovery join keys on ``model IS NOT NULL`` to tell an embedded row
+    # from the chunk_writer (hash, seq, pos) placeholder.
+    db.execute(
+        "CREATE TABLE content_vectors"
+        " (hash TEXT, seq INTEGER, pos INTEGER, model TEXT, embedded_at INTEGER, chunk_date TEXT)"
+    )
     return db
 
 
