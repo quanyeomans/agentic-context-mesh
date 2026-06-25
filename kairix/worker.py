@@ -170,6 +170,11 @@ WAL_CHECKPOINT_INTERVAL = 600  # 10 minutes
 # clean — an empty table is a single GROUP BY read.
 DEADLETTER_SWEEP_INTERVAL = 3600  # 1 hour
 
+# ADR-028 Wave F.4 — cadence for the bounded re-chunk sweep tick. 1h matches the
+# embed cycle so a tick's freshly-written (un-embedded) chunks are visible to the
+# next embed run. Gated OFF by default (re_chunk_sweep_enabled).
+RECHUNK_SWEEP_INTERVAL = 3600  # 1 hour
+
 # Idle backoff (#224): when embed runs find no work to do, the next-embed
 # wait extends exponentially. Cap at 4 hours so we don't go totally silent
 # on a long-idle vault but also don't churn CPU/IO every hour for nothing.
@@ -1512,6 +1517,29 @@ def _default_deadletter_sweep() -> tuple[Any, ...]:
         conn.close()
 
 
+def _default_rechunk_sweep() -> Any:
+    """Worker-loop dispatch slot for the re-chunk sweep tick (ADR-028 Wave F.4).
+
+    Opens the kairix index DB and runs one bounded re-chunk sweep pass
+    (:func:`kairix.core.connectors.rechunk_sweep.run_rechunk_sweep`) over up to
+    ``KAIRIX_RECHUNK_SWEEP_PER_TICK_CAP`` documents from the persisted cursor.
+    Returns the :class:`RechunkSweepResult` so the worker can log the outcome.
+
+    Tests inject a substitute via ``WorkerDeps(rechunk_sweep_fn=fake)``;
+    production omits and gets this default.
+    """
+    import sqlite3
+
+    from kairix.core.connectors.rechunk_sweep import run_rechunk_sweep as _run_sweep_pass
+    from kairix.paths import db_path, rechunk_sweep_per_tick_cap
+
+    conn = sqlite3.connect(str(db_path()), timeout=30.0)
+    try:
+        return _run_sweep_pass(conn, cap=rechunk_sweep_per_tick_cap())
+    finally:
+        conn.close()
+
+
 def _default_connector_sync() -> ConnectorSyncResult:
     """Worker-loop dispatch slot for the connector-sync maintenance task.
 
@@ -1543,6 +1571,7 @@ def _default_flag_value(name: str) -> bool:
 # PR#6 — read once per Silver construction. OFF (default) -> registry None ->
 # Silver keeps its byte-identical paragraph fallback; ON -> per-type dispatch.
 _CHUNKER_REGISTRY_FLAG = "chunker_registry_dispatch_enabled"
+_RECHUNK_SWEEP_FLAG = "re_chunk_sweep_enabled"
 
 
 def _silver_with_registry(
@@ -1917,6 +1946,15 @@ class WorkerDeps:
     # Returns the per-source DrainSummary tuple (typed Any so the import
     # stays in the function body, keeping worker boot lazy).
     deadletter_sweep_fn: Callable[[], Any] = field(default_factory=lambda: _default_deadletter_sweep)
+    # ADR-028 Wave F.4 — re-chunk sweep dispatch slot. Same F6-clean shape.
+    # Tests pass a Fake; production omits and gets ``_default_rechunk_sweep``
+    # which opens the index DB and runs one bounded re-chunk pass. Returns the
+    # RechunkSweepResult (typed Any so the import stays in the function body).
+    rechunk_sweep_fn: Callable[[], Any] = field(default_factory=lambda: _default_rechunk_sweep)
+    # ADR-028 Wave F.4 — feature-flag resolver seam for the re-chunk sweep gate.
+    # Default reads the live registry; tests inject a stub. Mirrors the
+    # flag_reader on MaintenanceLoopDeps / ConnectorSyncDeps.
+    flag_reader: Callable[[str], bool] = field(default_factory=lambda: _default_flag_value)
     sleep: Callable[[float], None] = field(default_factory=lambda: time.sleep)
     # #224 phase 4-5 combined — observable state + pause flag.
     # ``state`` is the in-memory dataclass the loop mutates on phase changes.
@@ -2313,6 +2351,39 @@ def run_deadletter_sweep(deps: WorkerDeps | None = None) -> None:
         logger.warning("worker: deadletter sweep raised — %s", exc)
 
 
+def run_rechunk_sweep_tick(deps: WorkerDeps | None = None) -> None:
+    """ADR-028 Wave F.4 — drive one bounded re-chunk sweep tick.
+
+    No-op unless BOTH ``re_chunk_sweep_enabled`` AND
+    ``chunker_registry_dispatch_enabled`` are ON: the sweep converges documents
+    to the registry chunker versions, so running it while ingest still uses the
+    legacy chunker would churn. Invokes ``deps.rechunk_sweep_fn`` (default
+    :func:`_default_rechunk_sweep`) and logs the per-tick outcome. Mirrors the
+    ``(Exception, SystemExit)`` discipline of every other maintenance helper —
+    a sweep failure must never bring the worker process down (the per-document
+    core is best-effort + idempotent, so a re-run is always safe).
+    """
+    deps = deps if deps is not None else WorkerDeps()
+    if not deps.flag_reader(_RECHUNK_SWEEP_FLAG):
+        return
+    if not deps.flag_reader(_CHUNKER_REGISTRY_FLAG):
+        logger.info("worker: re-chunk sweep skipped — chunker_registry_dispatch_enabled is OFF")
+        return
+    try:
+        result = deps.rechunk_sweep_fn()
+        if result is not None and getattr(result, "rechunked", 0):
+            logger.info(
+                "worker: re-chunk sweep — scanned=%d stale=%d rechunked=%d skipped_paged=%d failed=%d",
+                int(getattr(result, "scanned", 0)),
+                int(getattr(result, "stale", 0)),
+                int(getattr(result, "rechunked", 0)),
+                int(getattr(result, "skipped_paged", 0)),
+                int(getattr(result, "failed", 0)),
+            )
+    except (Exception, SystemExit) as exc:
+        logger.warning("worker: re-chunk sweep raised — %s", exc)
+
+
 @dataclass
 class _Schedule:
     """Worker task interval config — bundles the cadence ints.
@@ -2332,6 +2403,7 @@ class _Schedule:
     neo4j_drain: int
     wal_checkpoint: int
     deadletter_sweep: int
+    rechunk_sweep: int
 
 
 def _resolve_schedule(
@@ -2343,6 +2415,7 @@ def _resolve_schedule(
     neo4j_drain_interval: int | None = None,
     wal_checkpoint_interval: int | None = None,
     deadletter_sweep_interval: int | None = None,
+    rechunk_sweep_interval: int | None = None,
 ) -> _Schedule:
     """Fold kwargs + module defaults into a single ``_Schedule``."""
     return _Schedule(
@@ -2356,6 +2429,7 @@ def _resolve_schedule(
         deadletter_sweep=(
             deadletter_sweep_interval if deadletter_sweep_interval is not None else DEADLETTER_SWEEP_INTERVAL
         ),
+        rechunk_sweep=(rechunk_sweep_interval if rechunk_sweep_interval is not None else RECHUNK_SWEEP_INTERVAL),
     )
 
 
@@ -2822,9 +2896,10 @@ def _maybe_run_maintenance_cycle(
     last_neo4j_drain: float,
     last_wal_checkpoint: float,
     last_deadletter_sweep: float,
+    last_rechunk_sweep: float,
     schedule: _Schedule,
     state: WorkerState,
-) -> tuple[float, float, float, float, float, float, float]:
+) -> tuple[float, float, float, float, float, float, float, float]:
     """Run any maintenance task whose interval has elapsed; return updated timestamps.
 
     Two buckets (#312):
@@ -2890,6 +2965,13 @@ def _maybe_run_maintenance_cycle(
         _run_maintenance_task(deps, transition, run_deadletter_sweep)
         new_deadletter_sweep = now
 
+    # ADR-028 Wave F.4 — re-chunk sweep. Always-run bucket (independent of
+    # ``maintenance_active``; the tick self-gates on its feature flags).
+    new_rechunk_sweep = last_rechunk_sweep
+    if now - last_rechunk_sweep >= schedule.rechunk_sweep:
+        _run_maintenance_task(deps, transition, run_rechunk_sweep_tick)
+        new_rechunk_sweep = now
+
     return (
         new_entity,
         new_health,
@@ -2898,6 +2980,7 @@ def _maybe_run_maintenance_cycle(
         new_neo4j_drain,
         new_wal_checkpoint,
         new_deadletter_sweep,
+        new_rechunk_sweep,
     )
 
 
@@ -2911,6 +2994,7 @@ def main(
     connector_sync_interval: int | None = None,
     neo4j_drain_interval: int | None = None,
     deadletter_sweep_interval: int | None = None,
+    rechunk_sweep_interval: int | None = None,
 ) -> None:
     """Run the worker loop.
 
@@ -2942,6 +3026,7 @@ def main(
         connector_sync_interval,
         neo4j_drain_interval,
         deadletter_sweep_interval=deadletter_sweep_interval,
+        rechunk_sweep_interval=rechunk_sweep_interval,
     )
 
     logger.info(
@@ -3021,6 +3106,9 @@ def main(
     # the first post-boot iteration sweeps immediately, clearing any
     # orphaned backlog inherited from before the previous shutdown.
     last_deadletter_sweep = 0.0
+    # ADR-028 Wave F.4 — last re-chunk sweep. 0.0 bootstrap so the first
+    # post-boot iteration sweeps immediately (a no-op unless both flags are ON).
+    last_rechunk_sweep = 0.0
     # KFEAT-021 — last maintenance tick. Carried in WorkerState across
     # restarts so the cadence survives a container bounce; mirror it
     # into a local for the in-loop is_tick_due comparison.
@@ -3098,6 +3186,7 @@ def main(
             last_neo4j_drain,
             last_wal_checkpoint,
             last_deadletter_sweep,
+            last_rechunk_sweep,
         ) = _maybe_run_maintenance_cycle(
             deps=deps,
             transition=_transition,
@@ -3110,6 +3199,7 @@ def main(
             last_neo4j_drain=last_neo4j_drain,
             last_wal_checkpoint=last_wal_checkpoint,
             last_deadletter_sweep=last_deadletter_sweep,
+            last_rechunk_sweep=last_rechunk_sweep,
             schedule=schedule,
             state=state,
         )

@@ -613,6 +613,29 @@ def maintenance_interval_seconds() -> int:
     return parsed
 
 
+def rechunk_sweep_per_tick_cap() -> int:
+    """ADR-028 Wave F.4 — max documents the re-chunk sweep scans per tick.
+
+    Bounds the per-tick scan (F66); the sweep walks the rest of the corpus on
+    later ticks via its persisted cursor. Default 200 keeps a single tick cheap.
+
+    Reads ``KAIRIX_RECHUNK_SWEEP_PER_TICK_CAP`` (positive int) — default 200.
+    F4 keeps the env read centralised here in paths.py.
+    """
+    raw = os.environ.get("KAIRIX_RECHUNK_SWEEP_PER_TICK_CAP")
+    if raw is None:
+        return 200
+    try:
+        parsed = int(raw)
+    except ValueError:
+        logger.warning("KAIRIX_RECHUNK_SWEEP_PER_TICK_CAP=%r is not an int; using default 200", raw)
+        return 200
+    if parsed <= 0:
+        logger.warning("KAIRIX_RECHUNK_SWEEP_PER_TICK_CAP=%r is not positive; using default 200", raw)
+        return 200
+    return parsed
+
+
 def trace_enabled() -> bool:
     """Return True when ``KAIRIX_TRACE=1`` opts into structured pipeline diagnostics.
 
