@@ -37,6 +37,7 @@ from kairix.config.topology_v2 import (
     SkillSourceConfig,
     SkillTaskCollectionConfig,
     TopologyV2Config,
+    config_pairs_to_mapping,
     parse_topology_v2,
 )
 from kairix.config.topology_v2_validators import (
@@ -57,6 +58,7 @@ __all__ = [
     "SkillTaskCollectionConfig",
     "TopologyV2Config",
     "ValidationFailure",
+    "config_pairs_to_mapping",
     "parse_topology_v2",
     "validate_topology_v2_references",
 ]
