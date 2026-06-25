@@ -9,6 +9,14 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ### For operators
 
+- **Point SharePoint at a site and it finds the drives.** The SharePoint connector now auto-discovers every drive in a site you name (`site_id`, or a `site_url`) — no more hand-entering drive IDs. Configure a site and kairix indexes its document libraries; if one site can't be resolved it's skipped with a clear warning while the others keep syncing. (This is also the foundation for guided SharePoint setup.)
+- **Tell a quiet connector from a dead one.** `kairix worker status` now shows, per sync tick, whether connectors actually ran and yielded anything — so a source that's simply quiet is no longer indistinguishable from one that has silently stalled. Frozen cursors, low-disk skips, and poison-skips now surface as warnings instead of failing silently.
+- **Clear stuck items from any source.** `kairix dead-letter drain [<source>]` clears permanently-unprocessable dead-letters (corrupt archives, unsupported formats) for any source — including a connector that is no longer actively syncing — and a periodic sweep keeps the queue clean. `--dry-run` shows what would clear before you commit.
+
+## [2026.6.24.1] - 2026-06-24
+
+### For operators
+
 - **SharePoint stops choking on files it can't read.** Documents kairix can't extract — Office binaries, Visio drawings, corrupt archives, and other unsupported formats — are now recognised up front and recorded as "skipped (unsupported)" instead of failing over and over and clogging the dead-letter queue. Office documents that arrive without a proper file type (a common SharePoint quirk) are now detected by their content and indexed instead of dropped.
 - **The stuck-file backlog cleans itself up.** On each sync, kairix automatically clears dead-letter entries that can never succeed — corrupt archives and known-unsupported formats — recording them as skipped. Recoverable items (anything that might index once a converter or extractor is in place) are deliberately left for retry.
 - **Optional: convert legacy and uncommon Office formats.** kairix can now convert legacy Office (`.doc`/`.ppt`/`.xls`), Visio, OpenDocument, Publisher, and RTF to PDF and index them, via a Gotenberg conversion service. It's off by default — add the `gotenberg` tier to a connector's `extractor_chain` and point it at your Gotenberg service to turn it on. Modern `.docx`/`.pptx`/`.xlsx` continue to be handled in-process, unchanged.
