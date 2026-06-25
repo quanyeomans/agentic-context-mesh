@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
 from kairix.core.connectors.chunker_registry import (
     DOCX_MIME,
@@ -39,7 +40,10 @@ from kairix.core.connectors.chunker_registry import (
     ChunkerRegistry,
     build_default_registry,
 )
-from kairix.core.protocols import BronzeRef, DocMetadata, ExtractedDocument
+from kairix.core.protocols import BronzeRef, DocMetadata, ExtractedDocument, Sensitivity
+
+if TYPE_CHECKING:
+    from kairix.core.connectors.silver import DefaultSilverProcessor
 
 # Paged formats need ``extracted.pages`` (not persisted by the worker ingest
 # path) to re-chunk faithfully; the sweep skips them. Deferred to the
@@ -85,7 +89,7 @@ class StaleDoc:
     markdown: str
     collection: str
     source_modified_at: str
-    sensitivity: str
+    sensitivity: Sensitivity
     title: str | None
     author: str | None
     created_date: str | None
@@ -198,7 +202,7 @@ def _candidate_to_stale(
         markdown=markdown,
         collection=collection,
         source_modified_at=source_modified_at or "",
-        sensitivity=sensitivity or "internal",
+        sensitivity=cast(Sensitivity, sensitivity or "internal"),
         title=title,
         author=author,
         created_date=created_date,
@@ -211,7 +215,7 @@ def _candidate_to_stale(
     )
 
 
-def _build_silver(db: sqlite3.Connection, registry: ChunkerRegistry):
+def _build_silver(db: sqlite3.Connection, registry: ChunkerRegistry) -> DefaultSilverProcessor:
     from kairix.core.connectors.silver import (
         DefaultSilverProcessor,
         SqliteDocumentsMediaWriter,

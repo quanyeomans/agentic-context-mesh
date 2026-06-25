@@ -2371,14 +2371,16 @@ def run_rechunk_sweep_tick(deps: WorkerDeps | None = None) -> None:
         return
     try:
         result = deps.rechunk_sweep_fn()
-        if result is not None and getattr(result, "rechunked", 0):
+        # ``result`` is the RechunkSweepResult from _default_rechunk_sweep (typed
+        # Any via the WorkerDeps seam); only log when something was re-chunked.
+        if result is not None and result.rechunked:
             logger.info(
                 "worker: re-chunk sweep — scanned=%d stale=%d rechunked=%d skipped_paged=%d failed=%d",
-                int(getattr(result, "scanned", 0)),
-                int(getattr(result, "stale", 0)),
-                int(getattr(result, "rechunked", 0)),
-                int(getattr(result, "skipped_paged", 0)),
-                int(getattr(result, "failed", 0)),
+                result.scanned,
+                result.stale,
+                result.rechunked,
+                result.skipped_paged,
+                result.failed,
             )
     except (Exception, SystemExit) as exc:
         logger.warning("worker: re-chunk sweep raised — %s", exc)
