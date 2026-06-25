@@ -432,6 +432,39 @@ class SqliteDocumentPagesWriter:
         return written
 
 
+class SqliteSilverSourceWriter:
+    """Production writer for the ``silver_source`` table (ADR-028 Wave F.4).
+
+    Persists the per-document Silver source text (``extracted.markdown``)
+    keyed by the raw-bytes ``content_hash`` (== ``documents_media.hash``)
+    so the re-chunk sweep can re-run Silver chunking from the original
+    text — WITHOUT re-fetching from the remote connector — when a chunker
+    version bumps. Mirrors :class:`SqliteDocumentsMediaWriter` /
+    :class:`SqliteDocumentPagesWriter`: keyed by content_hash, ``INSERT OR
+    REPLACE`` so a re-ingest of the same bytes overwrites rather than
+    duplicates.
+
+    The writer does NOT commit — the caller's per-batch transaction owns
+    the commit so the silver_source row, documents_media row, chunks, and
+    cursor advance commit together or roll back together.
+    """
+
+    def __init__(self, db: sqlite3.Connection) -> None:
+        self._db = db
+
+    def write_source(self, *, content_hash: str, source_uri: str, markdown: str) -> None:
+        """INSERT or REPLACE the ``silver_source`` row for the document.
+
+        ``source_uri`` is stored so the re-chunk sweep can locate + delete the
+        document's existing chunk rows (keyed by ``documents.source_uri``)
+        before re-writing them.
+        """
+        self._db.execute(
+            "INSERT OR REPLACE INTO silver_source (hash, source_uri, markdown, created_at) VALUES (?, ?, ?, ?)",
+            (content_hash, source_uri, markdown, _utc_now_iso()),
+        )
+
+
 class DefaultSilverProcessor:
     """Production :class:`~kairix.core.protocols.SilverProcessor` implementation.
 
@@ -462,6 +495,7 @@ class DefaultSilverProcessor:
         documents_media_writer: SqliteDocumentsMediaWriter | None = None,
         document_pages_writer: SqliteDocumentPagesWriter | None = None,
         chunker_registry: ChunkerRegistry | None = None,
+        silver_source_writer: SqliteSilverSourceWriter | None = None,
     ) -> None:
         self._documents_media_writer = documents_media_writer
         self._document_pages_writer = document_pages_writer
@@ -470,6 +504,10 @@ class DefaultSilverProcessor:
         # chunker registry; None (default) keeps the paragraph fallback so the
         # OFF path is byte-identical to pre-cutover behaviour.
         self._chunker_registry = chunker_registry
+        # ADR-028 Wave F.4: when wired, Silver persists the source markdown to
+        # ``silver_source`` so the re-chunk sweep can re-chunk from the original
+        # text. None keeps legacy behaviour (no source persistence).
+        self._silver_source_writer = silver_source_writer
 
     def process(
         self,
@@ -584,6 +622,7 @@ class DefaultSilverProcessor:
             raw=raw,
             extracted=extracted,
             merged=merged,
+            source_uri=source_uri,
             extractor_name=extractor_name,
             extractor_version=extractor_version,
             extraction_status=extraction_status,
@@ -638,6 +677,7 @@ class DefaultSilverProcessor:
         raw: BronzeRef,
         extracted: ExtractedDocument,
         merged: SourceMetadata,
+        source_uri: str,
         extractor_name: str | None,
         extractor_version: str | None,
         extraction_status: str,
@@ -688,6 +728,15 @@ class DefaultSilverProcessor:
             self._document_pages_writer.write_pages(
                 content_hash=raw.content_hash,
                 pages=extracted.pages,
+            )
+        # ADR-028 Wave F.4 — persist the source markdown for the re-chunk
+        # sweep. Silent no-op when no writer wired or the extractor produced
+        # no markdown (the sweep skips docs without a source row).
+        if self._silver_source_writer is not None and extracted.markdown:
+            self._silver_source_writer.write_source(
+                content_hash=raw.content_hash,
+                source_uri=source_uri,
+                markdown=extracted.markdown,
             )
 
     def write_extraction_outcome(

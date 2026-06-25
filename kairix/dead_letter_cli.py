@@ -178,9 +178,16 @@ def _run_drain(conn: sqlite3.Connection, *, source_name: str | None, dry_run: bo
         drain_all_source_deadletters,
         drain_source_deadletters,
     )
-    from kairix.core.connectors.silver import DefaultSilverProcessor, SqliteDocumentsMediaWriter
+    from kairix.core.connectors.silver import (
+        DefaultSilverProcessor,
+        SqliteDocumentsMediaWriter,
+        SqliteSilverSourceWriter,
+    )
 
-    silver = DefaultSilverProcessor(documents_media_writer=SqliteDocumentsMediaWriter(conn))
+    silver = DefaultSilverProcessor(
+        documents_media_writer=SqliteDocumentsMediaWriter(conn),
+        silver_source_writer=SqliteSilverSourceWriter(conn),
+    )
     if source_name is not None:
         one = drain_source_deadletters(
             conn, source_name=source_name, silver=silver, dry_run=dry_run, max_items=max_items

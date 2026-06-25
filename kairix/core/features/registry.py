@@ -520,6 +520,32 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_PER_TYPE_CHUNKING_SPEC,
     ),
+    "re_chunk_sweep_enabled": FeatureFlag(
+        name="re_chunk_sweep_enabled",
+        default=False,
+        description=(
+            "When ON, the worker runs the bounded re-chunk sweep maintenance tick "
+            "(ADR-028 Wave F.4): it re-chunks already-ingested documents whose "
+            "recorded documents_media.chunker_version is behind the current chunker "
+            "registry, re-running Silver from the source markdown persisted at "
+            "ingest (silver_source) WITHOUT re-fetching from the remote connector. "
+            "Each tick scans at most KAIRIX_RECHUNK_SWEEP_PER_TICK_CAP documents "
+            "from a persisted cursor (F66) and writes un-embedded chunks the embed "
+            "worker picks up on its own cycle (no inline embed -> no #352 OOM). "
+            "REQUIRES chunker_registry_dispatch_enabled to ALSO be ON: the sweep "
+            "converges docs to the registry chunker versions, so running it while "
+            "ingest still uses the legacy chunker would churn — the tick no-ops "
+            "when registry dispatch is OFF. Paged formats (PPTX/XLSX/DOCX) are "
+            "skipped (their chunkers need extracted.pages, not persisted by the "
+            "worker path) and deferred to the operator re-fetch path. OFF (default) "
+            "is a complete no-op."
+        ),
+        stage="introduce",
+        introduced_in="v2026.6.25",
+        target_retire_in="v2026.12.25",
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_PER_TYPE_CHUNKING_SPEC,
+    ),
 }
 
 

@@ -38,7 +38,7 @@ from kairix.worker_state import WorkerPhase, WorkerState, read_state, write_stat
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from kairix.core.connectors.silver import DefaultSilverProcessor, SqliteDocumentsMediaWriter
+    from kairix.core.connectors.silver import DefaultSilverProcessor
     from kairix.core.embed.use_cases import EmbedPipelineResult
     from kairix.core.features.registry import FeatureFlag
     from kairix.core.protocols import Chunk, EntitySignal
@@ -169,6 +169,11 @@ WAL_CHECKPOINT_INTERVAL = 600  # 10 minutes
 # the cheap, idempotent backstop for the orphaned remainder. Cheap when
 # clean — an empty table is a single GROUP BY read.
 DEADLETTER_SWEEP_INTERVAL = 3600  # 1 hour
+
+# ADR-028 Wave F.4 — cadence for the bounded re-chunk sweep tick. 1h matches the
+# embed cycle so a tick's freshly-written (un-embedded) chunks are visible to the
+# next embed run. Gated OFF by default (re_chunk_sweep_enabled).
+RECHUNK_SWEEP_INTERVAL = 3600  # 1 hour
 
 # Idle backoff (#224): when embed runs find no work to do, the next-embed
 # wait extends exponentially. Cap at 4 hours so we don't go totally silent
@@ -582,7 +587,6 @@ def _run_one_connector_batch(
         ConnectorPipeline,
         CursorStore,
         DeadLetterStore,
-        SqliteDocumentsMediaWriter,
         resolve_connector,
     )
     from kairix.core.connectors.collection_router import _legacy_chunk_writer
@@ -609,7 +613,7 @@ def _run_one_connector_batch(
     # legacy_chunk_writer remains the fallback when no cc_pair has been
     # registered for the entry.
     chunk_writer = resolve_chunk_writer_for_entry(db, name, cc_pair_id=cc_pair_id)
-    silver = _silver_with_registry(SqliteDocumentsMediaWriter(db))
+    silver = _silver_with_registry(db)
     pipeline = ConnectorPipeline(
         db=db,
         bronze=bronze_store,
@@ -1184,7 +1188,7 @@ def _build_reextract_components(
     routing name. ``entry["name"]`` keys the chunk-writer collection (via
     :func:`resolve_collection_for_entry`).
     """
-    from kairix.core.connectors import SqliteDocumentsMediaWriter, resolve_connector
+    from kairix.core.connectors import resolve_connector
     from kairix.core.connectors.collection_router import legacy_chunk_writer
     from kairix.core.connectors.registry import build_extractor_from_entry
 
@@ -1196,7 +1200,7 @@ def _build_reextract_components(
     # documents_media row that the original sync would have. Without
     # this, re-extracted documents flow through but the per-doc row is
     # silently skipped, leaving F40/F70 blind to recovered docs.
-    silver = _silver_with_registry(SqliteDocumentsMediaWriter(db))
+    silver = _silver_with_registry(db)
     # GH #371 — re-extract MUST tag with the same collection the sync
     # path uses. The previous ``entry.get("collection", "default")``
     # silently leaked ~1M SharePoint docs into the ``default`` collection.
@@ -1503,13 +1507,35 @@ def _default_deadletter_sweep() -> tuple[Any, ...]:
     import sqlite3
 
     from kairix.core.connectors.deadletter_drain import drain_all_source_deadletters
-    from kairix.core.connectors.silver import SqliteDocumentsMediaWriter
     from kairix.paths import db_path
 
     conn = sqlite3.connect(str(db_path()), timeout=30.0)
     try:
-        silver = _silver_with_registry(SqliteDocumentsMediaWriter(conn))
+        silver = _silver_with_registry(conn)
         return drain_all_source_deadletters(conn, silver=silver)
+    finally:
+        conn.close()
+
+
+def _default_rechunk_sweep() -> Any:
+    """Worker-loop dispatch slot for the re-chunk sweep tick (ADR-028 Wave F.4).
+
+    Opens the kairix index DB and runs one bounded re-chunk sweep pass
+    (:func:`kairix.core.connectors.rechunk_sweep.run_rechunk_sweep`) over up to
+    ``KAIRIX_RECHUNK_SWEEP_PER_TICK_CAP`` documents from the persisted cursor.
+    Returns the :class:`RechunkSweepResult` so the worker can log the outcome.
+
+    Tests inject a substitute via ``WorkerDeps(rechunk_sweep_fn=fake)``;
+    production omits and gets this default.
+    """
+    import sqlite3
+
+    from kairix.core.connectors.rechunk_sweep import run_rechunk_sweep as _run_sweep_pass
+    from kairix.paths import db_path, rechunk_sweep_per_tick_cap
+
+    conn = sqlite3.connect(str(db_path()), timeout=30.0)
+    try:
+        return _run_sweep_pass(conn, cap=rechunk_sweep_per_tick_cap())
     finally:
         conn.close()
 
@@ -1545,21 +1571,35 @@ def _default_flag_value(name: str) -> bool:
 # PR#6 — read once per Silver construction. OFF (default) -> registry None ->
 # Silver keeps its byte-identical paragraph fallback; ON -> per-type dispatch.
 _CHUNKER_REGISTRY_FLAG = "chunker_registry_dispatch_enabled"
+_RECHUNK_SWEEP_FLAG = "re_chunk_sweep_enabled"
 
 
 def _silver_with_registry(
-    writer: SqliteDocumentsMediaWriter,
+    db: sqlite3.Connection,
     *,
     read_flag: Callable[[str], bool] = _default_flag_value,
 ) -> DefaultSilverProcessor:
     """Construct Silver, wiring the per-type chunker registry when
     ``chunker_registry_dispatch_enabled`` is ON (default OFF -> paragraph fallback).
+
+    Also wires the ``documents_media`` + ``silver_source`` writers so each
+    processed document records its extractor/chunker identity AND its source
+    markdown — the latter lets the re-chunk sweep (ADR-028 Wave F.4) re-chunk
+    from the original text without re-fetching from the remote connector.
     """
     from kairix.core.connectors.chunker_registry import build_default_registry
-    from kairix.core.connectors.silver import DefaultSilverProcessor
+    from kairix.core.connectors.silver import (
+        DefaultSilverProcessor,
+        SqliteDocumentsMediaWriter,
+        SqliteSilverSourceWriter,
+    )
 
     registry = build_default_registry() if read_flag(_CHUNKER_REGISTRY_FLAG) else None
-    return DefaultSilverProcessor(documents_media_writer=writer, chunker_registry=registry)
+    return DefaultSilverProcessor(
+        documents_media_writer=SqliteDocumentsMediaWriter(db),
+        silver_source_writer=SqliteSilverSourceWriter(db),
+        chunker_registry=registry,
+    )
 
 
 def connector_enabled(
@@ -1906,6 +1946,15 @@ class WorkerDeps:
     # Returns the per-source DrainSummary tuple (typed Any so the import
     # stays in the function body, keeping worker boot lazy).
     deadletter_sweep_fn: Callable[[], Any] = field(default_factory=lambda: _default_deadletter_sweep)
+    # ADR-028 Wave F.4 — re-chunk sweep dispatch slot. Same F6-clean shape.
+    # Tests pass a Fake; production omits and gets ``_default_rechunk_sweep``
+    # which opens the index DB and runs one bounded re-chunk pass. Returns the
+    # RechunkSweepResult (typed Any so the import stays in the function body).
+    rechunk_sweep_fn: Callable[[], Any] = field(default_factory=lambda: _default_rechunk_sweep)
+    # ADR-028 Wave F.4 — feature-flag resolver seam for the re-chunk sweep gate.
+    # Default reads the live registry; tests inject a stub. Mirrors the
+    # flag_reader on MaintenanceLoopDeps / ConnectorSyncDeps.
+    flag_reader: Callable[[str], bool] = field(default_factory=lambda: _default_flag_value)
     sleep: Callable[[float], None] = field(default_factory=lambda: time.sleep)
     # #224 phase 4-5 combined — observable state + pause flag.
     # ``state`` is the in-memory dataclass the loop mutates on phase changes.
@@ -2302,6 +2351,41 @@ def run_deadletter_sweep(deps: WorkerDeps | None = None) -> None:
         logger.warning("worker: deadletter sweep raised — %s", exc)
 
 
+def run_rechunk_sweep_tick(deps: WorkerDeps | None = None) -> None:
+    """ADR-028 Wave F.4 — drive one bounded re-chunk sweep tick.
+
+    No-op unless BOTH ``re_chunk_sweep_enabled`` AND
+    ``chunker_registry_dispatch_enabled`` are ON: the sweep converges documents
+    to the registry chunker versions, so running it while ingest still uses the
+    legacy chunker would churn. Invokes ``deps.rechunk_sweep_fn`` (default
+    :func:`_default_rechunk_sweep`) and logs the per-tick outcome. Mirrors the
+    ``(Exception, SystemExit)`` discipline of every other maintenance helper —
+    a sweep failure must never bring the worker process down (the per-document
+    core is best-effort + idempotent, so a re-run is always safe).
+    """
+    deps = deps if deps is not None else WorkerDeps()
+    if not deps.flag_reader(_RECHUNK_SWEEP_FLAG):
+        return
+    if not deps.flag_reader(_CHUNKER_REGISTRY_FLAG):
+        logger.info("worker: re-chunk sweep skipped — chunker_registry_dispatch_enabled is OFF")
+        return
+    try:
+        result = deps.rechunk_sweep_fn()
+        # ``result`` is the RechunkSweepResult from _default_rechunk_sweep (typed
+        # Any via the WorkerDeps seam); only log when something was re-chunked.
+        if result is not None and result.rechunked:
+            logger.info(
+                "worker: re-chunk sweep — scanned=%d stale=%d rechunked=%d skipped_paged=%d failed=%d",
+                result.scanned,
+                result.stale,
+                result.rechunked,
+                result.skipped_paged,
+                result.failed,
+            )
+    except (Exception, SystemExit) as exc:
+        logger.warning("worker: re-chunk sweep raised — %s", exc)
+
+
 @dataclass
 class _Schedule:
     """Worker task interval config — bundles the cadence ints.
@@ -2321,6 +2405,7 @@ class _Schedule:
     neo4j_drain: int
     wal_checkpoint: int
     deadletter_sweep: int
+    rechunk_sweep: int
 
 
 def _resolve_schedule(
@@ -2332,6 +2417,7 @@ def _resolve_schedule(
     neo4j_drain_interval: int | None = None,
     wal_checkpoint_interval: int | None = None,
     deadletter_sweep_interval: int | None = None,
+    rechunk_sweep_interval: int | None = None,
 ) -> _Schedule:
     """Fold kwargs + module defaults into a single ``_Schedule``."""
     return _Schedule(
@@ -2345,6 +2431,7 @@ def _resolve_schedule(
         deadletter_sweep=(
             deadletter_sweep_interval if deadletter_sweep_interval is not None else DEADLETTER_SWEEP_INTERVAL
         ),
+        rechunk_sweep=(rechunk_sweep_interval if rechunk_sweep_interval is not None else RECHUNK_SWEEP_INTERVAL),
     )
 
 
@@ -2798,22 +2885,31 @@ def maybe_run_connector_sync_tick(
     return result
 
 
+@dataclass(frozen=True)
+class _LastTicks:
+    """The last-run wall-clock for each maintenance tick (bundled to keep
+    :func:`_maybe_run_maintenance_cycle` under the Sonar S107 param ceiling)."""
+
+    entity: float
+    health: float
+    wikilinks: float
+    connector_sync: float
+    neo4j_drain: float
+    wal_checkpoint: float
+    deadletter_sweep: float
+    rechunk_sweep: float
+
+
 def _maybe_run_maintenance_cycle(
     *,
     deps: WorkerDeps,
     transition: Callable[[WorkerPhase], None],
     now: float,
     maintenance_active: bool,
-    last_entity: float,
-    last_health: float,
-    last_wikilinks: float,
-    last_connector_sync: float,
-    last_neo4j_drain: float,
-    last_wal_checkpoint: float,
-    last_deadletter_sweep: float,
+    last: _LastTicks,
     schedule: _Schedule,
     state: WorkerState,
-) -> tuple[float, float, float, float, float, float, float]:
+) -> tuple[float, float, float, float, float, float, float, float]:
     """Run any maintenance task whose interval has elapsed; return updated timestamps.
 
     Two buckets (#312):
@@ -2831,6 +2927,17 @@ def _maybe_run_maintenance_cycle(
       upstream sources, a drained ``entity_signals`` queue, or a drained
       orphaned-source dead-letter backlog.
     """
+    # Unpack the bundled timestamps into locals so the dispatch body below
+    # reads unchanged (the bundle exists only to bound the param count).
+    last_entity = last.entity
+    last_health = last.health
+    last_wikilinks = last.wikilinks
+    last_connector_sync = last.connector_sync
+    last_neo4j_drain = last.neo4j_drain
+    last_wal_checkpoint = last.wal_checkpoint
+    last_deadletter_sweep = last.deadletter_sweep
+    last_rechunk_sweep = last.rechunk_sweep
+
     new_entity, new_health, new_wikilinks = last_entity, last_health, last_wikilinks
     if maintenance_active:
         local_tasks = (
@@ -2879,6 +2986,13 @@ def _maybe_run_maintenance_cycle(
         _run_maintenance_task(deps, transition, run_deadletter_sweep)
         new_deadletter_sweep = now
 
+    # ADR-028 Wave F.4 — re-chunk sweep. Always-run bucket (independent of
+    # ``maintenance_active``; the tick self-gates on its feature flags).
+    new_rechunk_sweep = last_rechunk_sweep
+    if now - last_rechunk_sweep >= schedule.rechunk_sweep:
+        _run_maintenance_task(deps, transition, run_rechunk_sweep_tick)
+        new_rechunk_sweep = now
+
     return (
         new_entity,
         new_health,
@@ -2887,6 +3001,7 @@ def _maybe_run_maintenance_cycle(
         new_neo4j_drain,
         new_wal_checkpoint,
         new_deadletter_sweep,
+        new_rechunk_sweep,
     )
 
 
@@ -2900,6 +3015,7 @@ def main(
     connector_sync_interval: int | None = None,
     neo4j_drain_interval: int | None = None,
     deadletter_sweep_interval: int | None = None,
+    rechunk_sweep_interval: int | None = None,
 ) -> None:
     """Run the worker loop.
 
@@ -2931,6 +3047,7 @@ def main(
         connector_sync_interval,
         neo4j_drain_interval,
         deadletter_sweep_interval=deadletter_sweep_interval,
+        rechunk_sweep_interval=rechunk_sweep_interval,
     )
 
     logger.info(
@@ -3010,6 +3127,9 @@ def main(
     # the first post-boot iteration sweeps immediately, clearing any
     # orphaned backlog inherited from before the previous shutdown.
     last_deadletter_sweep = 0.0
+    # ADR-028 Wave F.4 — last re-chunk sweep. 0.0 bootstrap so the first
+    # post-boot iteration sweeps immediately (a no-op unless both flags are ON).
+    last_rechunk_sweep = 0.0
     # KFEAT-021 — last maintenance tick. Carried in WorkerState across
     # restarts so the cadence survives a container bounce; mirror it
     # into a local for the in-loop is_tick_due comparison.
@@ -3087,18 +3207,22 @@ def main(
             last_neo4j_drain,
             last_wal_checkpoint,
             last_deadletter_sweep,
+            last_rechunk_sweep,
         ) = _maybe_run_maintenance_cycle(
             deps=deps,
             transition=_transition,
             now=now,
             maintenance_active=maintenance_active,
-            last_entity=last_entity,
-            last_health=last_health,
-            last_wikilinks=last_wikilinks,
-            last_connector_sync=last_connector_sync,
-            last_neo4j_drain=last_neo4j_drain,
-            last_wal_checkpoint=last_wal_checkpoint,
-            last_deadletter_sweep=last_deadletter_sweep,
+            last=_LastTicks(
+                entity=last_entity,
+                health=last_health,
+                wikilinks=last_wikilinks,
+                connector_sync=last_connector_sync,
+                neo4j_drain=last_neo4j_drain,
+                wal_checkpoint=last_wal_checkpoint,
+                deadletter_sweep=last_deadletter_sweep,
+                rechunk_sweep=last_rechunk_sweep,
+            ),
             schedule=schedule,
             state=state,
         )
