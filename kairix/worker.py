@@ -2885,20 +2885,28 @@ def maybe_run_connector_sync_tick(
     return result
 
 
+@dataclass(frozen=True)
+class _LastTicks:
+    """The last-run wall-clock for each maintenance tick (bundled to keep
+    :func:`_maybe_run_maintenance_cycle` under the Sonar S107 param ceiling)."""
+
+    entity: float
+    health: float
+    wikilinks: float
+    connector_sync: float
+    neo4j_drain: float
+    wal_checkpoint: float
+    deadletter_sweep: float
+    rechunk_sweep: float
+
+
 def _maybe_run_maintenance_cycle(
     *,
     deps: WorkerDeps,
     transition: Callable[[WorkerPhase], None],
     now: float,
     maintenance_active: bool,
-    last_entity: float,
-    last_health: float,
-    last_wikilinks: float,
-    last_connector_sync: float,
-    last_neo4j_drain: float,
-    last_wal_checkpoint: float,
-    last_deadletter_sweep: float,
-    last_rechunk_sweep: float,
+    last: _LastTicks,
     schedule: _Schedule,
     state: WorkerState,
 ) -> tuple[float, float, float, float, float, float, float, float]:
@@ -2919,6 +2927,17 @@ def _maybe_run_maintenance_cycle(
       upstream sources, a drained ``entity_signals`` queue, or a drained
       orphaned-source dead-letter backlog.
     """
+    # Unpack the bundled timestamps into locals so the dispatch body below
+    # reads unchanged (the bundle exists only to bound the param count).
+    last_entity = last.entity
+    last_health = last.health
+    last_wikilinks = last.wikilinks
+    last_connector_sync = last.connector_sync
+    last_neo4j_drain = last.neo4j_drain
+    last_wal_checkpoint = last.wal_checkpoint
+    last_deadletter_sweep = last.deadletter_sweep
+    last_rechunk_sweep = last.rechunk_sweep
+
     new_entity, new_health, new_wikilinks = last_entity, last_health, last_wikilinks
     if maintenance_active:
         local_tasks = (
@@ -3194,14 +3213,16 @@ def main(
             transition=_transition,
             now=now,
             maintenance_active=maintenance_active,
-            last_entity=last_entity,
-            last_health=last_health,
-            last_wikilinks=last_wikilinks,
-            last_connector_sync=last_connector_sync,
-            last_neo4j_drain=last_neo4j_drain,
-            last_wal_checkpoint=last_wal_checkpoint,
-            last_deadletter_sweep=last_deadletter_sweep,
-            last_rechunk_sweep=last_rechunk_sweep,
+            last=_LastTicks(
+                entity=last_entity,
+                health=last_health,
+                wikilinks=last_wikilinks,
+                connector_sync=last_connector_sync,
+                neo4j_drain=last_neo4j_drain,
+                wal_checkpoint=last_wal_checkpoint,
+                deadletter_sweep=last_deadletter_sweep,
+                rechunk_sweep=last_rechunk_sweep,
+            ),
             schedule=schedule,
             state=state,
         )
