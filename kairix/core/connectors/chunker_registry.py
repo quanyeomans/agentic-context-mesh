@@ -51,6 +51,42 @@ MARKDOWN_MIME = "text/markdown"
 _TARGET_CHUNK_CHARS = 1000
 
 
+def _glue(items: list[str], target: int, sep: str) -> list[str]:
+    """Greedy-glue already-bounded items into chunks up to ``target`` chars (joined by ``sep``)."""
+    chunks: list[str] = []
+    current = ""
+    for item in items:
+        if not current:
+            current = item
+        elif len(current) + len(sep) + len(item) <= target:
+            current = current + sep + item
+        else:
+            chunks.append(current)
+            current = item
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _atomize(word: str, target: int) -> list[str]:
+    """A word, or hard char-cut pieces when it is itself longer than ``target``."""
+    if len(word) <= target:
+        return [word]
+    return [word[i : i + target] for i in range(0, len(word), target)]
+
+
+def _split_oversized(paragraph: str, target: int) -> list[str]:
+    """Split a paragraph longer than ``target`` into pieces each <= ``target``.
+
+    Word boundaries first, then a hard char-cut for a single token longer than
+    ``target`` (a base64 blob, a minified line, an unbroken run). Mirrors the
+    bounding in ``silver._chunk_markdown`` so the fallback never emits a chunk
+    over the embed token budget regardless of input shape (F99).
+    """
+    atoms = [atom for word in paragraph.split() for atom in _atomize(word, target)]
+    return _glue(atoms, target, " ") or [paragraph[:target]]
+
+
 def _split_paragraphs(text: str) -> tuple[str, ...]:
     """Split ``text`` on blank-line boundaries, glue paragraphs up to budget.
 
@@ -61,23 +97,17 @@ def _split_paragraphs(text: str) -> tuple[str, ...]:
     stripped = text.strip()
     if not stripped:
         return ()
-    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", stripped) if p.strip()]
-    if not paragraphs:
+    raw_paragraphs = [p.strip() for p in re.split(r"\n\s*\n", stripped) if p.strip()]
+    if not raw_paragraphs:
         return ()
-    chunks: list[str] = []
-    current = ""
-    for para in paragraphs:
-        if not current:
-            current = para
-            continue
-        if len(current) + len(para) + 2 <= _TARGET_CHUNK_CHARS:
-            current = current + "\n\n" + para
-        else:
-            chunks.append(current)
-            current = para
-    if current:
-        chunks.append(current)
-    return tuple(chunks)
+    # Expand any paragraph larger than the target into bounded pieces BEFORE the
+    # greedy-glue — otherwise a single oversized paragraph lands as one oversized
+    # chunk that truncates silently at the 8191-token embed limit. Mirrors
+    # silver._chunk_markdown (the docstring's "behaviour-identical" claim).
+    paragraphs: list[str] = []
+    for para in raw_paragraphs:
+        paragraphs.extend([para] if len(para) <= _TARGET_CHUNK_CHARS else _split_oversized(para, _TARGET_CHUNK_CHARS))
+    return tuple(_glue(paragraphs, _TARGET_CHUNK_CHARS, "\n\n"))
 
 
 class ParagraphFallbackChunker:
