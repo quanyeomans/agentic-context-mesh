@@ -183,15 +183,13 @@ def enrich_entity(
         )
 
     try:
-        # #416 — must pass write=True; default cypher() session is READ-only
-        # and Neo4j rejects SET on a READ session with AccessMode error.
-        # Also verify the write actually landed via a RETURN clause; without
-        # this check, a no-op MATCH (entity not found) would silently report
-        # updated=True.
+        # The SET routes to a WRITE session automatically (cypher() derives the
+        # access mode from the query — #416). The RETURN clause also verifies the
+        # write landed; without it a no-op MATCH (entity not found) would silently
+        # report updated=True.
         rows = neo4j_client.cypher(
             "MATCH (n {name: $name}) SET n.summary = $summary, n.summary_source = $source RETURN n.name AS name",
             {"name": name, "summary": summary.description, "source": summary.source},
-            write=True,
         )
     except Exception as exc:
         logger.warning("enrich_entity(%r): Neo4j write failed: %s", name, exc)

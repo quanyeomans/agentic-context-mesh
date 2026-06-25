@@ -17,6 +17,7 @@ are logged as warnings and are expected to be retried on the next crawl.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from kairix.knowledge.graph.models import (
@@ -40,6 +41,19 @@ _load_secrets()
 logging.getLogger("neo4j").setLevel(logging.ERROR)
 
 logger = logging.getLogger(__name__)
+
+# A Cypher write clause anywhere in the query routes it to a WRITE session.
+# Read-only queries (MATCH/RETURN/etc.) stay on READ and route to replicas.
+# Bias is intentionally toward WRITE: a false positive (e.g. the keyword inside
+# a string literal) just lands on the leader (harmless for reads), whereas a
+# missed write would be rejected on a READ session + swallowed = silent no-op.
+_WRITE_CLAUSE_RE = re.compile(r"\b(?:CREATE|MERGE|SET|DELETE|REMOVE|FOREACH)\b", re.IGNORECASE)
+
+
+def _is_write_query(query: str) -> bool:
+    """True when ``query`` contains a Cypher write clause (the single source of
+    truth for read/write session routing — see :meth:`Neo4jClient.cypher`)."""
+    return bool(_WRITE_CLAUSE_RE.search(query))
 
 
 def _get_neo4j_defaults() -> tuple[str, str, str]:
@@ -351,28 +365,22 @@ class Neo4jClient:
             logger.warning("find_by_name(%s): %s", name, e)
             return []
 
-    def cypher(
-        self,
-        query: str,
-        params: dict[str, Any] | None = None,
-        *,
-        write: bool = False,
-    ) -> list[dict[str, Any]]:
+    def cypher(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """
-        Execute an arbitrary Cypher query.
+        Execute an arbitrary Cypher query. Returns [] on any error.
 
-        Intended for MCP kairix.graph_query tool (default: scoped reads).
-        Set ``write=True`` for callers that need to MERGE/SET/CREATE/DELETE —
-        without this kwarg the session opens with ``default_access_mode="READ"``
-        which Neo4j rejects with ``Neo.ClientError.Statement.AccessMode`` on
-        any write. Returns [] on any error.
-
-        Closes #416 — the enricher's ``SET n.summary = ...`` silently
-        failed because every cypher() call landed on a READ session.
+        The session access mode is derived from the QUERY (:func:`_is_write_query`),
+        not from the call site: a query containing a write clause
+        (MERGE/CREATE/SET/DELETE/REMOVE/FOREACH) opens a WRITE session; everything
+        else opens a READ session (which routes to read replicas). Deriving it here
+        is the single source of truth, so a write can never be silently routed to a
+        READ session — which Neo4j rejects with ``Neo.ClientError.Statement.AccessMode``
+        and ``cypher()`` then swallows, making the write a silent no-op (#416, and
+        the drain / summary-projector / entity-purge regressions this replaces).
         """
         if not self._driver:
             return []
-        access_mode = "WRITE" if write else "READ"
+        access_mode = "WRITE" if _is_write_query(query) else "READ"
         try:
             with self._driver.session(default_access_mode=access_mode) as session:
                 result = session.run(query, **(params or {}))

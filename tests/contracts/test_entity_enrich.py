@@ -369,17 +369,20 @@ def test_enrich_all_missing_rejects_zero_limit() -> None:
     assert batch.requested == 0
 
 
-def test_enrich_entity_set_cypher_uses_write_session() -> None:
-    """#416 — the SET cypher must be invoked with ``write=True`` so the
-    Neo4j driver opens a WRITE-mode session. Without this, every SET on a
-    READ session silently fails with ``Neo.ClientError.Statement.AccessMode``,
-    the enricher's ``cypher()`` call swallows the exception and returns [],
-    and the wrapper falsely reports ``updated=True`` because it didn't
-    check the return value.
+def test_enrich_entity_set_cypher_verifies_the_write_landed() -> None:
+    """#416 — the enricher's SET must reach Neo4j on a WRITE session and the
+    wrapper must confirm the write actually landed.
 
-    Sabotage-proof: remove the ``write=True`` kwarg in
-    ``enrich_entity`` → this test fails because the recorded ``write``
-    flag is False on the SET call. (Verified locally before commit.)
+    Write/read session routing is now derived from the query itself
+    (``Neo4jClient.cypher`` -> ``_is_write_query``; the session-mode wiring is
+    locked in ``tests/.../test_neo4j_client_access_mode.py``), so the enricher
+    no longer passes a call-site ``write=`` kwarg. What this test locks at the
+    enrich layer: exactly one ``SET n.summary`` cypher fires AND it carries a
+    ``RETURN`` clause so a no-op MATCH (entity not found) can't falsely report
+    ``updated=True``.
+
+    Sabotage-proof: drop the ``RETURN n.name`` clause and the wrapper would
+    report ``updated=True`` on an empty result.
     """
 
     def fake_get(url: str, **kwargs: Any) -> _FakeResponse:
@@ -389,13 +392,9 @@ def test_enrich_entity_set_cypher_uses_write_session() -> None:
     result = enrich_entity("Acme Corp", neo4j, http_get=fake_get)
 
     assert result.updated is True
-    set_calls = [(q, p, w) for q, p, w in neo4j.cypher_calls if "SET n.summary" in q]
+    set_calls = [q for q, _p, _w in neo4j.cypher_calls if "SET n.summary" in q]
     assert len(set_calls) == 1
-    _q, _p, write_flag = set_calls[0]
-    assert write_flag is True, (
-        "SET n.summary cypher must be invoked with write=True (#416); "
-        "READ-mode session rejects writes with AccessMode error."
-    )
+    assert "RETURN n.name AS name" in set_calls[0], "the SET cypher must RETURN so the enricher verifies the write"
 
 
 def test_enrich_entity_returns_error_when_set_match_returns_zero_rows() -> None:
