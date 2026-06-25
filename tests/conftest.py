@@ -217,6 +217,7 @@ pytest_plugins = [
     "tests.bdd.steps.document_pages_writer_steps",
     # ADR-025 Phase 1 — pipeline_status_emit flag both-branch coverage.
     "tests.bdd.steps.feature_flag_pipeline_status_emit_steps",
+    "tests.bdd.steps.feature_flag_chunker_registry_dispatch_enabled_steps",
     # F64 reference test — SharePoint Graph 429 / Retry-After handling.
     "tests.bdd.steps.sharepoint_rate_limit_steps",
     # F63 reference test — maintenance scale-bound per-tick row cap.

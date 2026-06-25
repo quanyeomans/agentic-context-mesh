@@ -38,6 +38,7 @@ from kairix.worker_state import WorkerPhase, WorkerState, read_state, write_stat
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from kairix.core.connectors.silver import DefaultSilverProcessor, SqliteDocumentsMediaWriter
     from kairix.core.embed.use_cases import EmbedPipelineResult
     from kairix.core.features.registry import FeatureFlag
     from kairix.core.protocols import Chunk, EntitySignal
@@ -571,7 +572,6 @@ def _run_one_connector_batch(
         ConnectorPipeline,
         CursorStore,
         DeadLetterStore,
-        DefaultSilverProcessor,
         SqliteDocumentsMediaWriter,
         resolve_connector,
     )
@@ -599,7 +599,7 @@ def _run_one_connector_batch(
     # legacy_chunk_writer remains the fallback when no cc_pair has been
     # registered for the entry.
     chunk_writer = resolve_chunk_writer_for_entry(db, name, cc_pair_id=cc_pair_id)
-    silver = DefaultSilverProcessor(documents_media_writer=SqliteDocumentsMediaWriter(db))
+    silver = _silver_with_registry(SqliteDocumentsMediaWriter(db))
     pipeline = ConnectorPipeline(
         db=db,
         bronze=bronze_store,
@@ -1174,7 +1174,7 @@ def _build_reextract_components(
     routing name. ``entry["name"]`` keys the chunk-writer collection (via
     :func:`resolve_collection_for_entry`).
     """
-    from kairix.core.connectors import DefaultSilverProcessor, SqliteDocumentsMediaWriter, resolve_connector
+    from kairix.core.connectors import SqliteDocumentsMediaWriter, resolve_connector
     from kairix.core.connectors.collection_router import legacy_chunk_writer
     from kairix.core.connectors.registry import build_extractor_from_entry
 
@@ -1186,7 +1186,7 @@ def _build_reextract_components(
     # documents_media row that the original sync would have. Without
     # this, re-extracted documents flow through but the per-doc row is
     # silently skipped, leaving F40/F70 blind to recovered docs.
-    silver = DefaultSilverProcessor(documents_media_writer=SqliteDocumentsMediaWriter(db))
+    silver = _silver_with_registry(SqliteDocumentsMediaWriter(db))
     # GH #371 — re-extract MUST tag with the same collection the sync
     # path uses. The previous ``entry.get("collection", "default")``
     # silently leaked ~1M SharePoint docs into the ``default`` collection.
@@ -1493,12 +1493,12 @@ def _default_deadletter_sweep() -> tuple[Any, ...]:
     import sqlite3
 
     from kairix.core.connectors.deadletter_drain import drain_all_source_deadletters
-    from kairix.core.connectors.silver import DefaultSilverProcessor, SqliteDocumentsMediaWriter
+    from kairix.core.connectors.silver import SqliteDocumentsMediaWriter
     from kairix.paths import db_path
 
     conn = sqlite3.connect(str(db_path()), timeout=30.0)
     try:
-        silver = DefaultSilverProcessor(documents_media_writer=SqliteDocumentsMediaWriter(conn))
+        silver = _silver_with_registry(SqliteDocumentsMediaWriter(conn))
         return drain_all_source_deadletters(conn, silver=silver)
     finally:
         conn.close()
@@ -1530,6 +1530,26 @@ def _default_flag_value(name: str) -> bool:
     from kairix.core.features import flag as _prod_flag
 
     return _prod_flag(name)
+
+
+# PR#6 — read once per Silver construction. OFF (default) -> registry None ->
+# Silver keeps its byte-identical paragraph fallback; ON -> per-type dispatch.
+_CHUNKER_REGISTRY_FLAG = "chunker_registry_dispatch_enabled"
+
+
+def _silver_with_registry(
+    writer: SqliteDocumentsMediaWriter,
+    *,
+    read_flag: Callable[[str], bool] = _default_flag_value,
+) -> DefaultSilverProcessor:
+    """Construct Silver, wiring the per-type chunker registry when
+    ``chunker_registry_dispatch_enabled`` is ON (default OFF -> paragraph fallback).
+    """
+    from kairix.core.connectors.chunker_registry import build_default_registry
+    from kairix.core.connectors.silver import DefaultSilverProcessor
+
+    registry = build_default_registry() if read_flag(_CHUNKER_REGISTRY_FLAG) else None
+    return DefaultSilverProcessor(documents_media_writer=writer, chunker_registry=registry)
 
 
 def connector_enabled(

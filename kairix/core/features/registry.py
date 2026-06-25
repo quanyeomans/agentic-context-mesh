@@ -47,6 +47,7 @@ class FeatureFlag:
 # the check; these are the canonical recurring fields.
 _CONNECTOR_FRAMEWORK_OWNER = "connector-framework"
 _CONNECTOR_INGESTION_SPEC = "docs/architecture/connector-ingestion-architecture.md"
+_PER_TYPE_CHUNKING_SPEC = "docs/architecture/ADR-028-per-type-chunking-and-evaluation.md"
 _FLAG_INTRODUCED_IN_DISPATCH_WINDOW = "v2026.5.23"
 _FLAG_TARGET_RETIRE_IN = "v2026.7.23"
 # Long-window retire ceiling for connectors with slower per-customer adoption
@@ -492,6 +493,32 @@ REGISTRY: dict[str, FeatureFlag] = {
         target_retire_in="v2026.12.6",
         owner="cli-warm-mcp",
         related_spec=_FEATURE_FLAG_ARCHITECTURE_SPEC,
+    ),
+    "chunker_registry_dispatch_enabled": FeatureFlag(
+        name="chunker_registry_dispatch_enabled",
+        default=False,
+        description=(
+            "When ON, Silver routes passthrough (no-pages) content through the "
+            "per-type chunker registry (build_default_registry) instead of the "
+            "paragraph fallback — markdown_structural for obsidian / notion / "
+            "github markdown, DocxHeadingChunker for DOCX, with the bounded "
+            "paragraph fallback for any unregistered (kind, mime). Chunks carry "
+            "the per-type chunker_version + structural metadata (heading_path) so "
+            "a re-chunk sweep can identify them. OFF (default) keeps the "
+            "byte-identical silver-markdown-v1 fallback. CAVEAT: existing "
+            "documents re-chunk lazily on their next sync, but the per-document "
+            "upsert keys on source_uri#seq — a document whose chunk count SHRINKS "
+            "keeps stale tail chunks (old chunker_version) searchable until the "
+            "re-chunk sweep (forthcoming) retires them, so prefer enabling on "
+            "fresh deployments or pair the flip with a re-embed sweep. ADR-028 "
+            "markdown-first cutover; page-bearing PPTX / XLSX take the page path "
+            "(their registry entries are inert until per-page dispatch lands)."
+        ),
+        stage="introduce",
+        introduced_in="v2026.6.25",
+        target_retire_in="v2026.12.25",
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_PER_TYPE_CHUNKING_SPEC,
     ),
 }
 

@@ -39,7 +39,7 @@ import re
 import sqlite3
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from kairix.core.protocols import (
     BronzeRef,
@@ -51,6 +51,9 @@ from kairix.core.protocols import (
     SilverOutput,
     SourceMetadata,
 )
+
+if TYPE_CHECKING:
+    from kairix.core.connectors.chunker_registry import ChunkerRegistry
 
 # Allowed values for ``documents_media.extraction_status``. ``ok`` and
 # ``failed`` mirror the legacy schema default; ``unsupported`` is new
@@ -458,9 +461,15 @@ class DefaultSilverProcessor:
         self,
         documents_media_writer: SqliteDocumentsMediaWriter | None = None,
         document_pages_writer: SqliteDocumentPagesWriter | None = None,
+        chunker_registry: ChunkerRegistry | None = None,
     ) -> None:
         self._documents_media_writer = documents_media_writer
         self._document_pages_writer = document_pages_writer
+        # PR#6: when wired (the chunker_registry_dispatch_enabled flag is ON at
+        # worker boot), passthrough markdown is routed through the per-type
+        # chunker registry; None (default) keeps the paragraph fallback so the
+        # OFF path is byte-identical to pre-cutover behaviour.
+        self._chunker_registry = chunker_registry
 
     def process(
         self,
@@ -518,6 +527,15 @@ class DefaultSilverProcessor:
                 )
                 for chunk_text, page_number in page_chunks
             )
+        elif self._chunker_registry is not None:
+            chunks = self._dispatch_markdown_chunks(
+                markdown=extracted.markdown,
+                raw=raw,
+                source_uri=source_uri,
+                chunk_modified_at=chunk_modified_at,
+                sensitivity=sensitivity,
+                merged=merged,
+            )
         else:
             chunk_texts = _chunk_markdown(extracted.markdown)
             chunks = tuple(
@@ -572,6 +590,47 @@ class DefaultSilverProcessor:
             chunker_version=_first_chunker_version(chunks),
         )
         return SilverOutput(chunks=chunks, entity_signals=signals)
+
+    def _dispatch_markdown_chunks(
+        self,
+        *,
+        markdown: str,
+        raw: BronzeRef,
+        source_uri: str,
+        chunk_modified_at: str,
+        sensitivity: Sensitivity,
+        merged: SourceMetadata,
+    ) -> tuple[Chunk, ...]:
+        """Chunk passthrough markdown via the per-type chunker registry (PR#6).
+
+        The registry resolves a chunker by ``(connector kind, source mime)`` and
+        returns minimally-shaped Chunks carrying the per-type ``chunker_version``
+        + structural metadata (e.g. ``heading_path``); Silver re-wraps each with
+        the source / sensitivity / author metadata it owns. Any unregistered
+        ``(kind, mime)`` falls through to the registry's bounded paragraph
+        fallback, so no document is left unchunked and every chunk stays within
+        the embed token budget.
+        """
+        assert self._chunker_registry is not None
+        chunker = self._chunker_registry.dispatch(kind=raw.source_name, mime=raw.mime, section_kind="text")
+        dispatched = chunker.chunk(text=markdown, section_kind="text", source_uri=source_uri)
+        return tuple(
+            Chunk(
+                text=chunk.text,
+                content_hash=chunk.content_hash,
+                source_name=raw.source_name,
+                source_uri=source_uri,
+                source_modified_at=chunk_modified_at,
+                source_page=None,
+                sensitivity=sensitivity,
+                chunker_version=chunk.chunker_version,
+                author=merged.author,
+                author_email=merged.author_email,
+                tags=merged.tags,
+                metadata={**merged.properties, **chunk.metadata} if chunk.metadata else merged.properties,
+            )
+            for chunk in dispatched
+        )
 
     def _maybe_write_documents_media(
         self,
