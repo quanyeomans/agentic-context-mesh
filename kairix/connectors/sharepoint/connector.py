@@ -43,8 +43,10 @@ import json
 import logging
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, cast
+
+import httpx
 
 from kairix.connectors.sharepoint.graph_client import (
     DriveItemRef,
@@ -92,12 +94,52 @@ _HIERARCHY_ROOT_DISPLAY = "SharePoint"
 # the legacy + Wave E emission paths has one edit site.
 _META_SENSITIVITY_KEY = "sensitivity"
 
+# PR#4 429 circuit-breaker. After this many drives exhaust the graph
+# client's per-request retry budget with sustained throttling (429) in a
+# single tick, the connector backs the WHOLE tick off for one cycle so a
+# tenant-wide throttle stops thrashing the worker every
+# CONNECTOR_SYNC_INTERVAL. Threshold > 1 so a single hot drive can't trip it.
+_THROTTLE_BREAKER_THRESHOLD = 3
+_THROTTLE_BACKOFF_SECONDS = 900  # one connector tick
+
 
 def _now_iso() -> str:
     """Return a current ISO-8601 UTC timestamp matching the connector
     boundary's :class:`ChangeEvent.modified_at` format.
     """
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _timestamp_after_s(seconds: int) -> str:
+    """Return an ISO-8601 UTC timestamp ``seconds`` in the future.
+
+    Stamps the 429 breaker's backoff-expiry in the same string shape as
+    :func:`_now_iso`, so the two compare lexicographically.
+    """
+    future = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    return future.isoformat().replace("+00:00", "Z")
+
+
+def _is_throttle_exhaustion_error(exc: BaseException) -> bool:
+    """True when ``exc``'s cause chain carries a 429 the retries couldn't clear.
+
+    The graph client converts an exhausted-retry throttle into an
+    :class:`httpx.HTTPStatusError` (status 429) via ``raise_for_status``;
+    walk the ``__cause__`` / ``__context__`` chain so a wrapped 429 still
+    counts toward the breaker while a transient 403 or timeout does not.
+    """
+    seen: set[int] = set()
+    pending: list[BaseException | None] = [exc]
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, httpx.HTTPStatusError) and current.response.status_code == 429:
+            return True
+        pending.append(current.__cause__)
+        pending.append(current.__context__)
+    return False
 
 
 @dataclass(frozen=True)
@@ -294,6 +336,11 @@ class SharePointConnector:
         # ``drive_id -> deltaLink`` so a single opaque string round-trips
         # through the orchestrator's cursor_store.
         self._next_cursor: str | None = None
+        # PR#4 429 breaker state: count of drives that exhausted retries with
+        # sustained throttling this tick, and the ISO timestamp until which the
+        # breaker holds the connector off (None = breaker not tripped).
+        self._throttle_hits_this_tick = 0
+        self._throttle_backoff_until: str | None = None
 
         # Probe each EXPLICIT include_path against the live drive at
         # startup so missing folders surface proactively (not silently,
@@ -503,27 +550,118 @@ class SharePointConnector:
         (possibly discovered) ``drive_id`` so it round-trips through the
         existing deltaLink map regardless of how the drive was declared.
         """
+        if self._throttle_breaker_active():
+            logger.warning(
+                "event=sharepoint_breaker_active name=%s backoff_until=%s "
+                "(sustained 429 last tick; skipping this tick so Graph recovers; "
+                "cursor unchanged, next tick will retry)",
+                self.name,
+                self._throttle_backoff_until,
+            )
+            self._next_cursor = cursor if isinstance(cursor, str) else None
+            return iter([])
         per_drive_cursor = _deserialise_cursor(cursor)
         events: list[ChangeEvent] = []
         next_links: dict[str, str] = {}
+        self._throttle_hits_this_tick = 0
         for spec in self._refresh_resolved_specs():
             drive_id = spec.drive_id
             start_url = per_drive_cursor.get(drive_id)
-            for item in self._graph.iter_drive_items(drive_id, start_url=start_url):
-                if not self._item_passes_spec_filter(item, spec=spec):
-                    continue
-                event = self._item_to_event(item, drive_id=drive_id)
-                if event is None:
-                    continue
-                self._cache[event.item_id] = item
-                events.append(event)
-            drive_delta = self._graph.last_delta_link_for_drive(drive_id)
+            try:
+                drive_delta = self._drain_drive(spec, start_url, events)
+            except Exception as exc:
+                self._record_drive_failure(drive_id, exc, start_url, next_links)
+                continue
             if drive_delta is not None:
                 next_links[drive_id] = drive_delta
             elif start_url is not None:
                 next_links[drive_id] = start_url
+        self._maybe_trip_throttle_breaker()
         self._next_cursor = _serialise_cursor(next_links) if next_links else None
         return iter(events)
+
+    def _drain_drive(
+        self,
+        spec: SharePointDriveSpec,
+        start_url: str | None,
+        events: list[ChangeEvent],
+    ) -> str | None:
+        """Drain one drive's delta into ``events`` atomically; return its deltaLink.
+
+        Changes are staged locally and only merged into ``events`` + the
+        envelope cache once the drive drains in full. A mid-iteration failure
+        (e.g. a throttle on delta page 2) therefore leaves NO partial events
+        or stale cache entries behind — :meth:`list_changes` wraps the call,
+        carries the drive's prior cursor forward, and the next tick re-drains
+        the whole drive cleanly.
+        """
+        drive_id = spec.drive_id
+        staged: list[ChangeEvent] = []
+        staged_cache: dict[str, DriveItemRef] = {}
+        for item in self._graph.iter_drive_items(drive_id, start_url=start_url):
+            if not self._item_passes_spec_filter(item, spec=spec):
+                continue
+            event = self._item_to_event(item, drive_id=drive_id)
+            if event is None:
+                continue
+            staged_cache[event.item_id] = item
+            staged.append(event)
+        self._cache.update(staged_cache)
+        events.extend(staged)
+        return self._graph.last_delta_link_for_drive(drive_id)
+
+    def _record_drive_failure(
+        self,
+        drive_id: str,
+        exc: Exception,
+        start_url: str | None,
+        next_links: dict[str, str],
+    ) -> None:
+        """Log a per-drive failure and carry its cursor forward for a retry.
+
+        A drive that raised is skipped this tick; its prior cursor (when it
+        had one) is re-persisted so the next tick resumes from the same
+        position. Counts toward the 429 breaker only when the error chain
+        carries an exhausted-retry 429.
+        """
+        if _is_throttle_exhaustion_error(exc):
+            self._throttle_hits_this_tick += 1
+        if start_url is not None:
+            next_links[drive_id] = start_url
+        logger.warning(
+            "event=sharepoint_drive_error name=%s drive=%s error=%s "
+            "(this drive skipped this tick; other drives still sync; "
+            "next tick will retry)",
+            self.name,
+            drive_id,
+            exc,
+        )
+
+    def _throttle_breaker_active(self) -> bool:
+        """Return True while the 429 breaker is holding the connector off.
+
+        Clears the breaker (and returns False) once the backoff window set by
+        :meth:`_maybe_trip_throttle_breaker` has elapsed.
+        """
+        if self._throttle_backoff_until is None:
+            return False
+        if _now_iso() >= self._throttle_backoff_until:
+            self._throttle_backoff_until = None
+            return False
+        return True
+
+    def _maybe_trip_throttle_breaker(self) -> None:
+        """Trip the 429 breaker when this tick's throttle count hit the threshold."""
+        if self._throttle_hits_this_tick < _THROTTLE_BREAKER_THRESHOLD:
+            return
+        self._throttle_backoff_until = _timestamp_after_s(_THROTTLE_BACKOFF_SECONDS)
+        logger.warning(
+            "event=sharepoint_breaker_tripped name=%s drives_throttled=%d backoff_until=%s "
+            "(connector backing off one tick to let Graph recover; cursor not advanced)",
+            self.name,
+            self._throttle_hits_this_tick,
+            self._throttle_backoff_until,
+        )
 
     def fetch(self, item_id: str) -> RawArtefact:
         """Download the binary content for ``item_id``.
