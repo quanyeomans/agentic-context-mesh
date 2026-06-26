@@ -745,7 +745,7 @@ jobs:
   # gate on this `SonarCloud analysis` job, not the webhook-posted check.
   # fan-in: informational — SonarCloud is advisory and intentionally NOT in
   # the `check` (CI gate) fan-in. Branch protection requires exactly "CI gate"
-  # + "2 · Pre-merge PR gates (PR → main)"; SonarCloud is not a separately
+  # + "PR compliance check"; SonarCloud is not a separately
   # required status context (the webhook-posted "SonarCloud Code Analysis"
   # check can race / temporarily disagree with this job — #269). The Sonar
   # per-file ratchet (check_sonar_new_code.py) is enforced locally via

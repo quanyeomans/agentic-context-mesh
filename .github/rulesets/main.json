@@ -1,5 +1,5 @@
 {
-  "_comment": "Importable ruleset for the default branch (main). Apply with: gh api repos/three-cubes/kairix/rulesets --method POST --input .github/rulesets/main.json (requires Administration:Write). NOTE: the merge_queue rule is NOT included \u2014 GitHub's REST rulesets API rejects it (422) in both active and disabled mode; enable the merge queue via the web UI: Settings -> Rules -> Rulesets -> 'main' -> Add rule -> Require merge queue (grouping: ALLGREEN). Only the human admin role may bypass; agent Apps are not admins.",
+  "_comment": "Importable SNAPSHOT of the live default-branch (main) ruleset — kept faithful to the enforced state so re-applying it is idempotent (it must never silently re-tighten governance). Apply with: gh api repos/three-cubes/kairix/rulesets/<id> --method PUT --input .github/rulesets/main.json (or POST to create; requires Administration:Write). Governance model — tc-pipelines/governance/STANDARDS.md §4-§5: autonomous-on-green (required_approving_review_count 0) with code-owner review ONLY on CODEOWNERS-matched control-plane paths, and ZERO bypass actors (no admin bypass; humans hold the gate, never route around it). The merge_queue rule (grouping ALLGREEN) must be enabled via the web UI (Settings -> Rules -> Rulesets -> 'main' -> Add rule -> Require merge queue) and is intentionally omitted from this file because GitHub's REST rulesets API rejects it (422); it is therefore NOT round-tripped or verified by re-applying this snapshot.",
   "name": "main",
   "target": "branch",
   "enforcement": "active",
@@ -21,38 +21,33 @@
     {
       "type": "pull_request",
       "parameters": {
-        "required_approving_review_count": 1,
+        "required_approving_review_count": 0,
         "require_code_owner_review": true,
-        "dismiss_stale_reviews_on_push": true,
+        "dismiss_stale_reviews_on_push": false,
         "require_last_push_approval": false,
-        "required_review_thread_resolution": true,
+        "required_review_thread_resolution": false,
+        "required_reviewers": [],
         "allowed_merge_methods": [
-          "squash",
-          "merge"
+          "merge",
+          "squash"
         ]
       }
     },
     {
       "type": "required_status_checks",
       "parameters": {
-        "strict_required_status_checks_policy": true,
+        "strict_required_status_checks_policy": false,
         "do_not_enforce_on_create": false,
         "required_status_checks": [
           {
             "context": "CI gate"
           },
           {
-            "context": "2 \u00b7 Pre-merge PR gates (PR \u2192 main)"
+            "context": "PR compliance check"
           }
         ]
       }
     }
   ],
-  "bypass_actors": [
-    {
-      "actor_id": 5,
-      "actor_type": "RepositoryRole",
-      "bypass_mode": "pull_request"
-    }
-  ]
+  "bypass_actors": []
 }
