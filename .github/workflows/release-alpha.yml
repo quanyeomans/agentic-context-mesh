@@ -32,6 +32,7 @@ on:
 permissions:
   contents: write   # required to create tags + pre-releases
   actions: write    # required to dispatch downstream publish workflows
+  id-token: write   # WIF: mint the three-cubes-agent App token from Key Vault
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -48,6 +49,18 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+
+      # Mint a short-lived three-cubes-agent App installation token over WIF
+      # (Key Vault → App ID + private key → token). Tagging, the pre-release,
+      # and the downstream-workflow dispatches act as the App identity, not
+      # github-actions[bot] — clean authorship, no GitHub-stored secret.
+      - name: Mint three-cubes-agent App token
+        id: app
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@v1
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Validate inputs
         env:
@@ -152,9 +165,19 @@ jobs:
         env:
           DATE_VERSION: ${{ inputs.date_version }}
           ALPHA_N: ${{ inputs.alpha_n }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Author the tag as the three-cubes-agent App, not github-actions[bot].
+          # The noreply email uses the App bot user's numeric id
+          # (295831460) in the canonical <id>+<slug>[bot]@users.noreply...
+          # form so GitHub attributes the commit to the App identity.
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "295831460+three-cubes-agent[bot]@users.noreply.github.com"
+          # Push the tag as the App: re-point origin auth at the App token so
+          # the push is attributed to the App identity, not the runner's
+          # default GITHUB_TOKEN that actions/checkout configured.
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           TAG="v${DATE_VERSION}a${ALPHA_N}"
           git tag -a "$TAG" -m "kairix alpha $TAG"
           git push origin "$TAG"
@@ -182,7 +205,7 @@ jobs:
 
       - name: Create GitHub pre-release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           DATE_VERSION: ${{ inputs.date_version }}
           ALPHA_N: ${{ inputs.alpha_n }}
         run: |
@@ -207,7 +230,7 @@ jobs:
         # or the deploy never happened — caught when v2026.5.25a1's
         # webhook never fired despite the prerelease being marked.
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           DATE_VERSION: ${{ inputs.date_version }}
           ALPHA_N: ${{ inputs.alpha_n }}
           SKIP_VM_DEPLOY: ${{ inputs.skip_vm_deploy }}
