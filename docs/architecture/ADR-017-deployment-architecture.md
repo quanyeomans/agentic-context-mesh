@@ -15,6 +15,28 @@ related:
 
 ---
 
+## Current direction (2026-06)
+
+The **deploy plane migrated to the App-bot + WIF + `azure-vm-deploy` standard.**
+Release/deploy workflows (`release.yml`, `release-alpha.yml`, `release-vm-deploy.yml`)
+now run as the **`three-cubes-agent` GitHub App over Workload Identity
+Federation** — each job mints a short-lived installation token at runtime via
+tc-pipelines' `github-app-token@v1` (Key Vault → App creds, no GitHub-stored
+secret), so tags, releases, and dispatches are authored by the App.
+
+The **VM deploy uses the canonical tc-pipelines reusable workflow
+`azure-vm-deploy.yml@v1`** (WIF Azure login → OS-disk snapshot → `az vm
+run-command` the box-side apply script → smoke `systemctl is-active`),
+**replacing the bespoke HMAC-webhook**. The box-side apply logic lives in
+[`scripts/deploy/apply-alpha.sh`](../../scripts/deploy/apply-alpha.sh), which
+faithfully replicates the prior webhook's deploy sequence. The Go webhook under
+`services/alpha-deploy-webhook/` is **retained as a documented fallback only**;
+the workflow no longer depends on it. This follows the org "canonical in
+tc-pipelines, don't reinvent" rule — use the shared deploy workflow and WIF
+login rather than re-implementing them per repo.
+
+---
+
 ## Decision
 
 **Docker Compose is the primary install path.** It provides the full experience — search, entity graph, background indexing — with no components for the user to install or configure separately. Neo4j is included in the stack and just works.
