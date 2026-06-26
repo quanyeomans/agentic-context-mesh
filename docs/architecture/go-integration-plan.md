@@ -1,6 +1,6 @@
 # Go in the kairix repo — integration plan
 
-> **Status**: plan-of-record. Lands the scaffolding (CI, fitness, conventions, docs) **before** any Go business code. The webhook handler in [#272](https://github.com/three-cubes/kairix/issues/272) Phase 4 is the first user of this pipeline.
+> **Status**: Implemented — scaffolding landed. The CI / fitness (G1–G10 checks under `scripts/checks/check_go_*.py`) / conventions / docs are in place, and `services/` now holds both the `hello` sample binary and the `alpha-deploy-webhook` service (the [#272](https://github.com/three-cubes/kairix/issues/272) Phase 4 webhook handler — the first user of this pipeline).
 
 ## Why a second language at all
 

@@ -12,7 +12,7 @@ related:
 
 # ADR-018: Adopt dlt as the connector ingestion framework
 
-**Status:** Proposed
+**Status:** Superseded — dlt rejected; the connector framework was built in-house (ADR-018-dlt direction not taken)
 **Date:** 2026-05-26
 
 ---

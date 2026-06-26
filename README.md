@@ -124,6 +124,8 @@ Install it, set it up in your browser, and point your agent at it.
 
 **Prereqs:** Docker (or Python 3.12+) and a folder of documents. An AI provider key turns on the smarter search — but you can add it later; keyword search works straight away.
 
+> **Not a developer? Start here.** The fastest path is the browser setup wizard — run `docker compose up -d`, then open <http://localhost:8080/setup> and follow the steps. It walks you through your AI provider, your documents, and a first search. No YAML to hand-edit, no terminal beyond that one command.
+
 ### 1. Install
 
 ```bash
@@ -272,7 +274,7 @@ ruff check kairix/ tests/          # lint only
 Stuck, or found a bug?
 
 - **[GitHub Issues](https://github.com/three-cubes/kairix/issues)** — report a bug or request a feature.
-- **[GitHub Discussions](https://github.com/three-cubes/kairix/discussions)** — ask questions, share how your team uses kairix, follow the roadmap.
+- **[GitHub Discussions](https://github.com/three-cubes/kairix/discussions)** — ask questions, share how your team uses kairix, and request or influence priorities. For what's planned and shipping next, see the roadmap summary in [`docs/project/ROADMAP.md`](docs/project/ROADMAP.md) (a public summary of the Linear-backed plan).
 
 When you report a problem, attach the output of:
 

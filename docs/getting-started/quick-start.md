@@ -7,6 +7,8 @@ Get kairix running and searching your documents in under 30 minutes. Two install
 
 Pick the path that matches your environment and skip the other one.
 
+> **Not a developer? Start here.** The fastest path is the browser setup wizard — run `docker compose up -d`, then open <http://localhost:8080/setup> and follow the steps (provider, documents, first search). No YAML, no terminal beyond that one command. The full wizard walkthrough is in [Path A → A4b. Set up in your browser](#a4b-set-up-in-your-browser-optional) below.
+
 > **Want a system-managed install with `kairix init --system` (kairix user, systemd unit, FHS paths)?** See [install.md](install.md) — the full three-track guide for system, user, Docker, macOS, and Windows.
 
 ## What you need (either path)

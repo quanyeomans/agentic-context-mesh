@@ -2,7 +2,7 @@
 
 Kairix is a contextual retrieval platform for human-agent teams that keeps your knowledge private and on your own infrastructure. This document describes the current state and near-term direction.
 
-Discussion of priorities and feature direction happens in [GitHub Discussions → Roadmap & Priorities](https://github.com/three-cubes/kairix/discussions).
+The canonical, live plan is the prioritised roadmap tracked in Linear (Core Platform); this document is its public summary. To request or influence priorities, open a [GitHub Discussion → Roadmap & Priorities](https://github.com/three-cubes/kairix/discussions) or a [GitHub Issue](https://github.com/three-cubes/kairix/issues) with a concrete use case — those are the inbound channels, not the canonical plan.
 
 ---
 
@@ -33,7 +33,7 @@ The benchmark uses strict NDCG@10 scoring with graded relevance (0/1/2). See [EV
 3. **In-product usage guide** — the agent usage guide ships inside the image and is reachable in-product, so agents get guidance instead of an error envelope (closes the production `UsageGuideNotFound` gap, #466).
 4. **Agent memory write** — agents can persist a memory directly (`kairix remember` / `memory_write`), saving a dated markdown note that is indexed for BM25 retrieval immediately.
 
-Earlier in this release line, the eval-feedback loop (EPIC #465) and the capability/skill recommender (`kairix recommend`) also shipped. See the [Recently shipped](#recently-shipped) section.
+Earlier in this release line, the capability/skill recommender (`kairix recommend`) also shipped. See the [Recently shipped](#recently-shipped) section. (The `kairix mcp-calls` per-call *analytics* layer shipped; the full agent-feedback *eval loop* it was meant to feed — EPIC #465 — was retired NOT_PLANNED and re-derived as [#633](https://github.com/three-cubes/kairix/issues/633).)
 
 | Capability | Status | Notes |
 |---|---|---|
@@ -73,8 +73,8 @@ Earlier in this release line, the eval-feedback loop (EPIC #465) and the capabil
 | In-product usage guide | ✅ Shipped v2026.6.18 | `kairix usage-guide` CLI + in-product agent guide shipped in the image (#466) |
 | Agent memory write | ✅ Shipped v2026.6.18 | `kairix remember` / `memory_write` — dated markdown note, immediate BM25 index |
 | Capability / skill recommender | ✅ Shipped | `kairix recommend` — ranks the kairix tool or local skill that fits a described task (PR #569/#570) |
-| Per-call observability | ✅ Shipped | `kairix mcp-calls` — per-tool/agent/intent latency + outcome analytics over `mcp_call_log` (#465 Layer 2/5) |
-| Agent-feedback eval loop | ✅ Shipped | Real failed queries → proposed eval cases → release-gate integration (EPIC [#465](https://github.com/three-cubes/kairix/issues/465), Layers [#538](https://github.com/three-cubes/kairix/issues/538)–[#542](https://github.com/three-cubes/kairix/issues/542)) |
+| Per-call observability | ✅ Shipped | `kairix mcp-calls` — per-tool/agent latency + success/error analytics over `mcp_call_log` (the only shipped layer of EPIC #465) |
+| Agent-feedback eval loop | 🔲 Planned | Failed queries → proposed eval cases → release-gate integration. The original EPIC #465 / Layers #538–#542 were retired NOT_PLANNED; re-derived as [#633](https://github.com/three-cubes/kairix/issues/633). The `kairix mcp-calls` analytics layer (above) shipped — the loop it feeds did not. |
 | Incremental file watcher | 🔲 Planned | `watchfiles`-based daemon; sub-60s document store sync latency |
 | Multi-user isolation | 🔲 Planned | Per-agent Neo4j namespace, collection-level access control |
 | Streaming search response | 🔲 Planned | Server-sent events for MCP and REST consumers |
@@ -154,7 +154,7 @@ The reference-library numbers above are the upper bound for clean, well-curated 
 Newest first. Connector and retrieval cutovers land behind default-off feature flags — reversible until each cutover soak validates parity. See [`how-to-upgrade-kairix`](../operations/runbooks/how-to-upgrade-kairix.md) for the operator recipe.
 
 - **v2026.6.18 — "Set up kairix in your browser."** A guided browser setup wizard takes a new operator from a fresh install to a working knowledge store; OAuth sign-in for Slack, GitHub, and Google replaces pasting API keys; the agent usage guide ships inside the image and is reachable in-product (closes #466); and agents can persist a memory directly via `kairix remember` / `memory_write` (dated markdown note, immediate BM25 index). [Release notes](https://github.com/three-cubes/kairix/releases/tag/v2026.6.18).
-- **Eval-feedback loop (EPIC [#465](https://github.com/three-cubes/kairix/issues/465)).** Every kairix call is instrumented into an enriched `mcp_call_log`, surfaced via `kairix mcp-calls` analytics + failing-queries, clustered into proposed eval cases (`kairix eval generate --from-call-log`), and folded into a per-release gate — so real agent failures become release gates without manual curation. Shipped as five layers ([#542](https://github.com/three-cubes/kairix/issues/542) Layer 1 enrich + `record_quality`, [#538](https://github.com/three-cubes/kairix/issues/538) Layer 2 analytics, [#539](https://github.com/three-cubes/kairix/issues/539) Layer 3 proposer, [#540](https://github.com/three-cubes/kairix/issues/540) Layer 4 release-gate, [#541](https://github.com/three-cubes/kairix/issues/541) Layer 5 dashboard).
+- **Per-call observability (`kairix mcp-calls`).** Every MCP tool call is logged to `mcp_call_log` (tool, agent, latency, success/error) and surfaced via `kairix mcp-calls` for per-tool latency + failure inspection. This is the observability *foundation* only — the full agent-feedback *eval loop* meant to sit on top of it (call-log enrichment → auto-proposed eval cases → release-gate → dashboard) was scoped as EPIC [#465](https://github.com/three-cubes/kairix/issues/465) / Layers #538–#542 but retired NOT_PLANNED, and is re-derived as [#633](https://github.com/three-cubes/kairix/issues/633).
 - **Capability / skill recommender** (`kairix recommend`, PR #569/#570) — give it a plain-English task and it ranks the kairix tool or local skill that fits, so agents reach for the right surface first.
 - **CLI / MCP feature parity ([#168](https://github.com/three-cubes/kairix/issues/168)).** Every operation is exposed via both the CLI and the MCP server with uniform UX — shared use cases in `kairix/use_cases/`, with CLI and MCP as thin adapters over the same parameter names, defaults, output shapes, and help text.
 - **v2026.6.9 — Retrieval quality v2 + entity-summary indexing.** The ADR-036 entity-summary indexing surface (Slices A–D: Protocol + projector + worker dispatch + operator surface), source-tier ranking with canonical-filename allowlist + per-intent overrides (#432), content-quality boost knobs (#458), fact-layer score floor + cross-layer dedup (#455), canonical entity seeding at worker boot (#431), MCP warm-state self-heal (#425), CLI search readability + snippet-width tuning (#385), prep envelope consistency (#433), contradict scoring honesty (#434), 42-case Phase B benchmark expansion (#453). [Release notes](https://github.com/three-cubes/kairix/releases/tag/v2026.6.9).

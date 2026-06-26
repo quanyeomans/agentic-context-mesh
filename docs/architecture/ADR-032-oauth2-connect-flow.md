@@ -1,6 +1,6 @@
 # ADR-032 — `kairix connect <service>` OAuth2 flow
 
-**Status:** Proposed (2026-06-01)
+**Status:** Accepted — shipped v2026.6.8
 **Supersedes:** none. **Builds on:** ADR-031 (canonical credential naming + SecretsLoader)
 **Owner:** platform / operator surface
 
