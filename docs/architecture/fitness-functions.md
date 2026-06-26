@@ -320,6 +320,8 @@ _Generated from `scripts/checks/_rule_catalogue.py` — do not edit by hand._
 | F92 | process | cross-cutting | shipped | catalogue currency — every check_*.{py,sh} has a RuleEntry, every RuleEntry maps to an existing check, and the generated doc regions match generate_catalogue_docs.py --check (the self-hosting guard for the catalogue-driven runner) |
 | capability-affordance | agent-affordance | cross-cutting | shipped | agent-callable capabilities surface their affordances at the call boundary |
 | no-hardcoded-user-paths | repo-hygiene | per-file | shipped | F31: no hardcoded /Users/ or /home/<dev>/ paths |
+| F95 | production-safety | per-file | shipped | Neo4j write-mode selection lives at ONE chokepoint — only kairix/knowledge/graph/client.py may name `default_access_mode` / the `_is_write_query` derivation, so no caller re-derives read-vs-write and silently opens a READ session for a write query (the #628 silent-write class) |
+| F96 | production-safety | per-file | shipped | embed-discovery completeness queries that LEFT JOIN content_vectors ... IS NULL must reference a state column (model / embedded_at), never presence alone — a presence-only join counts an un-promoted placeholder as 'done' (the chunk-0 #627 class, where seq=0 placeholders were never embedded) |
 | G1 | go-discipline | per-file | shipped | every Go binary exposes --version |
 | G6 | go-discipline | per-file | shipped | no panic outside main/init |
 | G8 | go-discipline | per-file | shipped | logging via log/slog (no log.Println or fmt.Println in service code) |

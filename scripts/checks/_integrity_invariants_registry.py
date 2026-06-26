@@ -37,6 +37,10 @@ from __future__ import annotations
 INVARIANTS: dict[str, str] = {
     "bronze_coverage_parity": ("every bronze row maps to either content+1+ rows or a dead-letter entry"),
     "content_vectors_alignment": ("every content_vectors row traces to a content row (no orphan vector slots)"),
+    "documents_embedded_completeness": (
+        "every active document has a content_vectors row with a real embedding (model set), "
+        "not just an un-promoted placeholder; a persistent gap means documents are stuck un-embedded"
+    ),
     "staging_drain_progress": (
         "pushed_to_<sink>=0 counts only grow when the sink is unreachable; preflight reports the true backlog size"
     ),

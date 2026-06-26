@@ -1381,6 +1381,42 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         # hardcoded path); the trigger isn't a single tree. Always run.
         staged_class="always-run",
     ),
+    RuleEntry(
+        id="F95",
+        gate="cypher-write-mode-chokepoint",
+        check="core:pattern_chokepoint",
+        category="production-safety",
+        scope="per-file",
+        summary=(
+            "Neo4j write-mode selection lives at ONE chokepoint — only "
+            "kairix/knowledge/graph/client.py may name `default_access_mode` / the "
+            "`_is_write_query` derivation, so no caller re-derives read-vs-write and "
+            "silently opens a READ session for a write query (the #628 silent-write class)"
+        ),
+        adr_origin="GH #628 — neo4j silent-write incident",
+        tags=("production-safety",),
+        # Literal scan over kairix/** for the forbidden write-mode selectors (the
+        # chokepoint file is exempt); any module could re-introduce one. Always run.
+        staged_class="always-run",
+    ),
+    RuleEntry(
+        id="F96",
+        gate="embed-discovery-state-predicate",
+        check="core:integrity_state_predicate",
+        category="production-safety",
+        scope="per-file",
+        summary=(
+            "embed-discovery completeness queries that LEFT JOIN content_vectors ... "
+            "IS NULL must reference a state column (model / embedded_at), never presence "
+            "alone — a presence-only join counts an un-promoted placeholder as 'done' "
+            "(the chunk-0 #627 class, where seq=0 placeholders were never embedded)"
+        ),
+        adr_origin="GH #627 — chunk-0 silent-embedding gap",
+        tags=("production-safety",),
+        # AST scan of SQL string literals under kairix/core/embed/**; scoped there
+        # so the legitimately presence-only integrity check is excluded. Always run.
+        staged_class="always-run",
+    ),
     # ----- go-discipline (active when services/*/go.mod exists) -----------
     RuleEntry(
         id="G1",

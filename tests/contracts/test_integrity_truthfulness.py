@@ -117,6 +117,7 @@ _PREFLIGHT_INVARIANT = {
     "_check_documents_without_content": "documents-without-content",
     "_check_documents_without_fts": "documents-without-fts",
     "_check_documents_without_vectors": "documents-without-vectors",
+    "_check_documents_without_embedded_vector": "documents-without-embedded-vector",
     "_check_content_vectors_without_documents": "content-vectors-without-documents",
     "_check_fts_without_documents": "fts-without-documents",
     "_check_entity_signals_staging_not_stuck": "entity-signals-staging-not-stuck",
@@ -205,6 +206,34 @@ def _seed_documents_without_vectors(db: sqlite3.Connection, *, n: int) -> None:
         db.execute(
             "INSERT INTO documents_fts (rowid, filepath, title, doc) VALUES (?, ?, ?, ?)",
             (doc_id, f"no-vec-{i}.md", "", f"text-{i}"),
+        )
+    db.commit()
+
+
+def _seed_documents_without_embedded_vector(db: sqlite3.Connection, *, n: int) -> None:
+    """Insert n active documents (+ content + a model-NULL PLACEHOLDER vector).
+
+    Each document has a ``content_vectors`` row written as the chunk writer
+    writes it pre-embed — ``(hash, seq, pos)`` with ``model`` NULL. So the
+    presence-only ``documents-without-vectors`` check is SATISFIED (a vector
+    row exists), while the state check ``documents-without-embedded-vector``
+    fires (no row with ``model`` set). This is exactly the chunk-0 #627 shape:
+    a placeholder that the discovery query never promoted.
+    """
+    now = _now_iso()
+    for i in range(n):
+        db.execute(
+            "INSERT INTO documents (collection, path, hash, created_at, modified_at, active) VALUES (?, ?, ?, ?, ?, 1)",
+            ("default", f"placeholder-only-{i}.md", f"placeholder-hash-{i}", now, now),
+        )
+        db.execute(
+            "INSERT INTO content (hash, doc, created_at) VALUES (?, ?, ?)",
+            (f"placeholder-hash-{i}", f"text-{i}", now),
+        )
+        # model NULL → an un-promoted placeholder, not a real embedding.
+        db.execute(
+            "INSERT INTO content_vectors (hash, seq, pos) VALUES (?, 0, 0)",
+            (f"placeholder-hash-{i}",),
         )
     db.commit()
 
@@ -374,6 +403,46 @@ def test__check_documents_without_vectors_count_equals_ground_truth() -> None:
         f"would let the dogfood VM ship vector-less docs invisibly."
     )
     assert gap.severity == "error"
+
+
+def test__check_documents_without_embedded_vector_count_equals_ground_truth() -> None:
+    """F71: gap.count for documents-without-embedded-vector equals COUNT(*) ground truth.
+
+    Predicate (the STATE check): ``documents d LEFT JOIN content_vectors v ON
+    v.hash = d.hash AND v.model IS NOT NULL WHERE d.active = 1 AND v.hash IS
+    NULL``. Every seeded doc carries a model-NULL placeholder, so the join's
+    ``AND v.model IS NOT NULL`` finds no embedded vector and all n are counted.
+    Sabotage-prove by slicing ``rows[:100]`` in the preflight; the 1500-row
+    seed surfaces the masking as a concrete mismatch.
+    """
+    db = _make_db()
+    try:
+        _seed_documents_without_embedded_vector(db, n=_SEED_N)
+        report = check_integrity(db, vector_store_loader=_vector_loader_returns_none)
+        gap = _gap_by_invariant(report, _PREFLIGHT_INVARIANT["_check_documents_without_embedded_vector"])
+        ground_truth_row = db.execute(
+            "SELECT COUNT(*) FROM documents d "
+            "LEFT JOIN content_vectors v ON v.hash = d.hash AND v.model IS NOT NULL "
+            "WHERE d.active = 1 AND v.hash IS NULL"
+        ).fetchone()
+        ground_truth = int(ground_truth_row[0]) if ground_truth_row else 0
+    finally:
+        db.close()
+
+    assert gap is not None, "F71: preflight must surface a gap when 1500 placeholder-only documents are seeded"
+    assert ground_truth == _SEED_N, (
+        f"F71 self-check: SELECT COUNT(*) should match the seed ({_SEED_N}); got {ground_truth}"
+    )
+    assert gap.count == ground_truth, (
+        f"F71: _check_documents_without_embedded_vector reported count={gap.count}; "
+        f"SELECT COUNT(*) reports {ground_truth}. Masking the un-embedded-placeholder "
+        f"backlog (the chunk-0 #627 class) would let documents ship vector-unsearchable "
+        f"while the presence-only check stays green."
+    )
+    assert gap.severity == "warn", (
+        f"F71 sibling-assert: documents-without-embedded-vector is a warn signal "
+        f"(transient embed lag must never block strict preflight); got {gap.severity!r}"
+    )
 
 
 def test__check_content_vectors_without_documents_count_equals_ground_truth() -> None:
