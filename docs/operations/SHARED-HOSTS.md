@@ -70,7 +70,7 @@ Search, `/mcp` calls, and the graph database keep working. The index is read-onl
 docker compose start kairix
 ```
 
-A first-class `kairix worker pause` / `kairix worker resume` interface lands with #224 phase 4. Once it's available it will pause the loop in-process without restarting the container, which avoids the index reload cost on resume. Until then, `docker compose stop` is the recommended pause.
+A first-class `kairix worker pause` / `kairix worker resume` interface pauses the loop in-process without restarting the container, which avoids the index reload cost on resume. `docker compose stop` remains available as an alternative pause.
 
 ---
 

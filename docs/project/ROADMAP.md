@@ -18,11 +18,13 @@ Kairix is the alternative: a private, on-infrastructure retrieval layer that bot
 
 ---
 
-## Current state — v2026.6.18 (released 2026-06-18)
+## Current state — v2026.6.24.1 (released 2026-06-24)
+
+**v2026.6.24 highlights:** the Linear connector ships (behind the `connector_linear` flag, default-off — pulls a Linear workspace's roadmap and docs into the knowledge store), and kairix now requires **Python 3.12 or newer** (recreate any host-venv / systemd environment on 3.12+ before upgrading; Docker images already ship 3.12).
 
 **Standing retrieval baseline: weighted total 0.808 · NDCG@10 0.884 · Hit@5 0.913 · MRR@10 0.831**, measured on the production deployment against the 242-case `reflib` suite (recall / temporal / entity / conceptual / multi_hop / procedural categories). This is the v2026.6.9 measurement — the standing baseline carried forward, as no newer full sweep has been published. The Phase B expansion (#453) lifted the entity category from a 1-case measurement to 15 cases, so the entity-category NDCG of 0.800 is a meaningful figure rather than a single-question artefact.
 
-The benchmark uses strict NDCG@10 scoring with graded relevance (0/1/2). See [EVALUATION.md](EVALUATION.md) for methodology and scoring interpretation.
+The benchmark uses strict NDCG@10 scoring with graded relevance (0/1/2). See [EVALUATION.md](../evaluation/EVALUATION.md) for methodology and scoring interpretation.
 
 **v2026.6.18 headline — "Set up kairix in your browser":**
 
@@ -77,7 +79,7 @@ Earlier in this release line, the eval-feedback loop (EPIC #465) and the capabil
 | Multi-user isolation | 🔲 Planned | Per-agent Neo4j namespace, collection-level access control |
 | Streaming search response | 🔲 Planned | Server-sent events for MCP and REST consumers |
 | Webhook / push indexing | 🔲 Planned | HTTP endpoint to trigger incremental embed on external write events |
-| Local/offline embedding | 🔲 Planned | `EmbedProvider` abstraction; Ollama + sentence-transformers adapters |
+| Local/offline embedding | ✅ Shipped | Ollama local embedding provider (select provider `ollama`); sentence-transformers adapter still planned |
 | REST API server mode | 🔲 Planned | FastAPI server mode exposing search, entity, and briefing as HTTP endpoints |
 
 **Benchmark category breakdown (242-case `reflib` suite, NDCG@10 — standing baseline, measured on the production VM 2026-06-09; no newer full sweep published):**
@@ -180,7 +182,7 @@ The live, prioritised plan is tracked in Linear (Core Platform) and on GitHub Is
 - **Pre-release container registry** — CI builds and pushes alpha Docker images to GHCR on green `main` builds (`ghcr.io/three-cubes/kairix:2026.5.1a1`). VM deploys via `docker compose pull` instead of building from source. Tests the exact same image end users will get. Stable tags pushed on merge to `main`.
 - **File watcher** — `watchfiles`-based daemon replacing the 60-second embed cron. Document store changes embedded within seconds of write, reducing lag for session-prep queries against recently-added content.
 - **Structured-log observability** — structured JSON log output (`LOG_LEVEL=json`) parsed by a lightweight dashboard for per-query latency, intent distribution, entity hit rate, and RRF score distributions without third-party tooling. Complements the shipped `kairix mcp-calls` per-call analytics over `mcp_call_log`.
-- **Local/offline embedding** — `EmbedProvider` abstraction; Ollama and sentence-transformers adapters (removes Azure OpenAI as hard dependency for non-Azure deployments).
+- **sentence-transformers embedding adapter** — adds a sentence-transformers local embedding adapter alongside the shipped Ollama provider (removes Azure OpenAI as a hard dependency for non-Azure deployments).
 - **REST API** — FastAPI server mode exposing search, entity, and briefing as local HTTP endpoints.
 
 ---

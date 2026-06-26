@@ -73,7 +73,7 @@ Every kairix tool response includes a `health` envelope:
     "bm25": "ok" | "offline",
     "chat": "ok" | "offline",
     "secrets_loaded": true,
-    "degraded_reason": "Missing KAIRIX_LLM_API_KEY — vector results unavailable; falling back to BM25",
+    "degraded_reason": "Missing KAIRIX_PROVIDER_LLM_API_KEY — vector results unavailable; falling back to BM25",
     "next_action": "Run `kairix onboard check` for full diagnostic, or ask your admin to re-run `kairix-fetch-secrets.service`"
   }
 }
@@ -97,7 +97,7 @@ Every kairix tool response includes a `health` envelope:
 
 ## 6. When `kairix onboard check` returns non-zero
 
-`kairix onboard check` is the canonical "is kairix healthy" probe. It runs 9 checks, in dependency order (PATH → wrapper → secrets → document root → vector search → Neo4j → agent memory → chunk dates → MCP service). A green run prints `9/9 passed`.
+`kairix onboard check` is the canonical "is kairix healthy" probe. It runs its checks in dependency order (PATH → wrapper → secrets → document root → vector search → Neo4j → agent memory → chunk dates → MCP service → …). A green run reports every check passed.
 
 **MCP form:** if your human asks you to run it, ask them to run it on the host — you cannot run shell commands. The output is structured and includes a remediation string for every failed check.
 
@@ -111,8 +111,8 @@ Every kairix tool response includes a `health` envelope:
   "failures": [
     {
       "check": "secrets_loaded",
-      "detail": "LLM credentials not found in environment or secrets file: KAIRIX_LLM_API_KEY, KAIRIX_LLM_ENDPOINT",
-      "remediation": "Run `sudo systemctl enable --now kairix-fetch-secrets.service` on the host; if that fails, confirm `/run/secrets/kairix.env` exists and contains `KAIRIX_LLM_API_KEY=...` and `KAIRIX_LLM_ENDPOINT=...`."
+      "detail": "LLM credentials not found in environment or secrets file: KAIRIX_PROVIDER_LLM_API_KEY, KAIRIX_LLM_ENDPOINT",
+      "remediation": "Run `sudo systemctl enable --now kairix-fetch-secrets.service` on the host; if that fails, confirm `/run/secrets/kairix.env` exists and contains `KAIRIX_PROVIDER_LLM_API_KEY=...` and `KAIRIX_LLM_ENDPOINT=...`."
     }
   ]
 }

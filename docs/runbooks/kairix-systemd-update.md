@@ -38,7 +38,7 @@ cat /tmp/kairix-preupdate-version.txt
 kairix onboard check --json > /tmp/kairix-preupdate-onboard.json
 jq '{passed, total, fully_passed}' /tmp/kairix-preupdate-onboard.json
 # Expected: {"passed": 9, "total": 9, "fully_passed": true}
-# If this is not 9/9 BEFORE the update, stop. Fix the deployment first via
+# If not every check passes BEFORE the update, stop. Fix the deployment first via
 # kairix-retrieval-health.md; do not update on top of a degraded baseline.
 
 # 3. Worker phase + counters — proves nothing is mid-embed.
@@ -86,7 +86,7 @@ sudo /opt/kairix/.venv/bin/pip install --upgrade kairix==<NEW_VERSION>
 kairix --version
 ```
 
-**Known gap:** today `kairix-deploy.sh` (whatever your equivalent is called) typically ignores the `kairix onboard check` exit code and has no `--rollback` flag. Track the fix in your infrastructure repo's issue tracker; until it lands, you are the gate — run §3 step 4 manually and refuse to proceed if it is not 9/9.
+**Known gap:** today `kairix-deploy.sh` (whatever your equivalent is called) typically ignores the `kairix onboard check` exit code and has no `--rollback` flag. Track the fix in your infrastructure repo's issue tracker; until it lands, you are the gate — run §3 step 4 manually and refuse to proceed unless every check passes.
 
 **Next action:** confirm `kairix --version` prints the target version. If pip silently kept the old version (cached wheel), re-run with `--force-reinstall --no-deps`.
 
@@ -102,7 +102,7 @@ sudo systemctl status kairix-fetch-secrets.service --no-pager
 
 # 2. Confirm the rendered secrets file exists and has both required keys
 #    BEFORE you restart MCP.
-sudo grep -E '^(KAIRIX_LLM_API_KEY|KAIRIX_LLM_ENDPOINT)=' /run/secrets/kairix.env
+sudo grep -E '^(KAIRIX_PROVIDER_LLM_API_KEY|KAIRIX_LLM_ENDPOINT)=' /run/secrets/kairix.env
 # Expected: two lines, one per key, non-empty values.
 
 # 3. MCP second — now reads the freshly written environment.
@@ -113,7 +113,7 @@ sudo systemctl status kairix-mcp.service --no-pager
 
 **Next action:** confirm both units report `Active: active`. If `kairix-fetch-secrets.service` is `disabled`, jump to §4 — failure mode "secrets unit ends up disabled."
 
-### Step 4 — Refuse to proceed unless onboard check is 9/9
+### Step 4 — Refuse to proceed unless every onboard check passes
 
 This is the hard gate. The update is not "applied" until this returns green.
 
@@ -187,7 +187,7 @@ sudo systemctl restart kairix-mcp.service
 sudo systemctl restart kairix-fetch-secrets.service
 
 # Confirm both required keys landed.
-sudo grep -E '^(KAIRIX_LLM_API_KEY|KAIRIX_LLM_ENDPOINT)=' /run/secrets/kairix.env
+sudo grep -E '^(KAIRIX_PROVIDER_LLM_API_KEY|KAIRIX_LLM_ENDPOINT)=' /run/secrets/kairix.env
 # Expected: two non-empty lines.
 
 # Push the fresh environment into MCP.
@@ -200,11 +200,11 @@ sudo systemctl restart kairix-mcp.service
 
 **Symptom:** secrets passed but two checks fail — typically `vector_search_working` and `chunk_date_populated`, or `bm25_search_working` indirectly and `agent_knowledge_populated`. Indicates retrieval state went bad during the swap, not the systemd plumbing.
 
-**Next action:** stop the update flow and follow [`kairix-retrieval-health.md`](kairix-retrieval-health.md) §3, branching on the first failed check in `/tmp/kairix-postupdate-onboard.json`. Do not run §3 step 5 (resume) until retrieval-health returns 9/9. If retrieval-health cannot restore green inside your incident window, roll back via §5.
+**Next action:** stop the update flow and follow [`kairix-retrieval-health.md`](kairix-retrieval-health.md) §3, branching on the first failed check in `/tmp/kairix-postupdate-onboard.json`. Do not run §3 step 5 (resume) until retrieval-health returns all checks green. If retrieval-health cannot restore green inside your incident window, roll back via §5.
 
 ### Vector index out of sync after the update
 
-**Symptom:** onboard check returns 9/9 but search results are obviously stale or missing recently-added documents; `kairix embed status` shows the last embed run predates the update.
+**Symptom:** onboard check passes every check but search results are obviously stale or missing recently-added documents; `kairix embed status` shows the last embed run predates the update.
 
 **Manual remediation today:**
 
@@ -225,7 +225,7 @@ See [`kairix-retrieval-health.md`](kairix-retrieval-health.md) §4 ("No vectors 
 
 ### Entity graph drift after the update
 
-**Symptom:** onboard check returns 9/9 but `kairix entity suggest` returns junk, or the reflib suite regresses on entity-heavy categories.
+**Symptom:** onboard check passes every check but `kairix entity suggest` returns junk, or the reflib suite regresses on entity-heavy categories.
 
 **Next action:** follow [`kairix-entity-audit.md`](../operations/runbooks/kairix-entity-audit.md) — that runbook walks detect → repair-paths → enrichment → safe-purge in order of safety. Do not skip the dry-run step.
 
@@ -237,7 +237,7 @@ Rollback today is manual — there is no `kairix-deploy.sh --rollback` flag yet.
 
 Use rollback when:
 
-- §3 step 4 (onboard check) cannot return 9/9 within your incident window after the manual remediations in §4.
+- §3 step 4 (onboard check) cannot return all checks green within your incident window after the manual remediations in §4.
 - §3 step 6 (benchmark) shows `weighted_total` regression greater than 0.05.
 - A failure mode in §4 cannot be cleared from the failure-mode commands alone.
 
@@ -258,10 +258,10 @@ kairix --version
 
 # 3. Restart in order — secrets first, then MCP (same as §3 step 3).
 sudo systemctl restart kairix-fetch-secrets.service
-sudo grep -E '^(KAIRIX_LLM_API_KEY|KAIRIX_LLM_ENDPOINT)=' /run/secrets/kairix.env
+sudo grep -E '^(KAIRIX_PROVIDER_LLM_API_KEY|KAIRIX_LLM_ENDPOINT)=' /run/secrets/kairix.env
 sudo systemctl restart kairix-mcp.service
 
-# 4. Hard gate: onboard check must be 9/9 against the rolled-back version.
+# 4. Hard gate: onboard check must pass every check against the rolled-back version.
 kairix onboard check --json | jq '{passed, total, fully_passed}'
 # Expected: {"passed": 9, "total": 9, "fully_passed": true}
 
@@ -318,7 +318,7 @@ Tag the issue with whichever dogfood agent first reported the symptom — the pr
 
 ### Full reset path (worst case)
 
-If rollback restores the package but onboard check still cannot return 9/9, the deployment's derived state (vectors, FTS, entity graph) has drifted away from what the rolled-back version expects. Run the full retrieval reset:
+If rollback restores the package but onboard check still cannot return all checks green, the deployment's derived state (vectors, FTS, entity graph) has drifted away from what the rolled-back version expects. Run the full retrieval reset:
 
 1. Roll back the package per §5 steps 1-3.
 2. Re-run `kairix onboard check --json` and capture the failure list.
@@ -338,4 +338,4 @@ If rollback restores the package but onboard check still cannot return 9/9, the 
 - [`runbook-benchmark-regression.md`](../operations/runbooks/runbook-benchmark-regression.md) — bisect workflow when §3 step 6 or §5 step 6 shows a regression.
 - Your infrastructure repo's `kairix-deploy.sh` resilience tracker — rollback flag, onboard-check exit-code gating.
 - [kairix#243](https://github.com/three-cubes/kairix/issues/243) — SRE worker design: collapses `kairix-fetch-secrets.service` into a managed step inside `kairix.service`, eliminating the disabled-after-reboot failure mode in §4.
-- `kairix-secrets-rotation.md` — the next runbook the operator owes; covers `KAIRIX_LLM_API_KEY` / `KAIRIX_LLM_ENDPOINT` rotation without a package change. Will live in this same directory.
+- `kairix-secrets-rotation.md` — the next runbook the operator owes; covers `KAIRIX_PROVIDER_LLM_API_KEY` / `KAIRIX_LLM_ENDPOINT` rotation without a package change. Will live in this same directory.

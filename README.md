@@ -228,7 +228,7 @@ The fact extractor surfaces claims like `(agent-alpha, current-project, project-
 
 ## How your data is handled
 
-Your documents stay on your machine. The only outbound call is to generate search embeddings (a mathematical fingerprint of your text) — and even that can run locally with an Ollama adapter (coming soon).
+Your documents stay on your machine. The only outbound call is to generate search embeddings (a mathematical fingerprint of your text) — and even that can run locally: Ollama local embedding is available (select provider `ollama`).
 
 All indexes, vectors, and knowledge graph data live in SQLite and Neo4j on your own infrastructure. Nothing is stored externally.
 
@@ -258,7 +258,7 @@ See [SECURITY.md](SECURITY.md) for detail.
 git clone https://github.com/three-cubes/kairix
 cd kairix
 pip install -e ".[dev,neo4j,agents,rerank]"
-bash scripts/safe-commit.sh "msg"  # canonical commit gate: lint, format, mypy, ~3,966 tests, security, fitness
+bash scripts/safe-commit.sh "msg"  # canonical commit gate: lint, format, mypy, the full test suite, security, fitness
 pytest tests/                      # bare test run
 ruff check kairix/ tests/          # lint only
 ```

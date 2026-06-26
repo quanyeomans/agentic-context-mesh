@@ -26,7 +26,7 @@ Streamable HTTP makes each tool call a normal HTTP request/response. The gateway
 ## What does NOT change
 
 - The host and port — still whatever your kairix is listening on (e.g. `127.0.0.1:8080`, a `KAIRIX_HOST_PORT` override like `127.0.0.1:8090`, or `your-mcp-host.example.com`).
-- Tool names — `search`, `entity`, `prep`, `timeline`, `research`, `contradict`, `usage_guide`. All seven still there.
+- Tool names — `search`, `entity`, `prep`, `timeline`, `research`, `contradict`, `usage_guide`, and the rest of the set (see [mcp-tools.md](../user-guide/mcp-tools.md) for the complete list). All still there.
 - Tool parameters — same JSON schema, same defaults.
 - Authentication — if your gateway uses Cloudflare Access, OAuth, or anything else, that all carries over to `/mcp` unchanged.
 
@@ -147,7 +147,7 @@ curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
-# Expect: a JSON-RPC response listing seven tools
+# Expect: a JSON-RPC response listing the full set of MCP tools (see ../user-guide/mcp-tools.md)
 ```
 
 If both succeed, the server side is good. Any client-side issue is in your MCP client configuration.

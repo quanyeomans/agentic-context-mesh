@@ -146,7 +146,7 @@ Skip this step if you don't have per-agent subdirectories yet — kairix synthes
 ### B1. Install the package
 
 ```bash
-pipx install "Kairix-agentic-knowledge-mgt[agents]"
+pipx install "kairix-agentic-knowledge-mgt[agents]"
 ```
 
 Or, if you prefer a virtualenv you manage yourself:
@@ -154,7 +154,7 @@ Or, if you prefer a virtualenv you manage yourself:
 ```bash
 python3 -m venv ~/.venvs/kairix
 source ~/.venvs/kairix/bin/activate
-pip install "Kairix-agentic-knowledge-mgt[agents]"
+pip install "kairix-agentic-knowledge-mgt[agents]"
 ```
 
 The `[agents]` extra pulls in the MCP server dependencies. Most operators want this.
@@ -383,7 +383,7 @@ If you're an LLM agent reading this and standing kairix up on a user's behalf, s
 ## What happens next
 
 - **Documents are indexed automatically** every hour by the worker service. Operator controls: `kairix worker pause` / `resume` / `status`.
-- **The MCP server exposes 35 tools** — retrieval (`search`, `prep`, `timeline`, `research`, `brief`, `bootstrap`, `facts_about`), entity (`entity`, `entity_suggest`, `entity_validate`), and operator surfaces (`onboard_check`, `worker_status`, `features_status`, `secrets_verify`, `benchmark_run`, and more). Each response carries a `health` envelope so agents know what's online. See [`docs/user-guide/mcp-tools.md`](../user-guide/mcp-tools.md) for the full reference.
+- **The MCP server exposes the full set of MCP tools** (see [`docs/user-guide/mcp-tools.md`](../user-guide/mcp-tools.md) for the complete, authoritative reference) — retrieval (`search`, `prep`, `timeline`, `research`, `brief`, `bootstrap`, `facts_about`), entity (`entity`, `entity_suggest`, `entity_validate`), and operator surfaces (`onboard_check`, `worker_status`, `features_status`, `secrets_verify`, `benchmark_run`, and more). Each response carries a `health` envelope so agents know what's online.
 - **Agents should call `kairix bootstrap <agent>` at session start** to get a one-shot orientation envelope (role, board, recent memory, active goals, health).
 - **Run `kairix onboard check --json`** any time — exit 0 means every check passed; exit 1 prints structured failures with remediation strings.
 - **Run `kairix benchmark run reflib`** to benchmark search quality against the bundled gold suite.

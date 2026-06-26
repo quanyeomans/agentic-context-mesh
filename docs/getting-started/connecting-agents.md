@@ -105,7 +105,7 @@ memory-write tool, store durable decisions through it so the team can
 find them later.
 ```
 
-Each agent should use its own stable name so its memory and scopes resolve correctly across sessions. (The memory-write line only applies once your kairix release lists such a tool — check the server's tool list; `bootstrap`, `search`, and `prep` are available everywhere.)
+Each agent should use its own stable name so its memory and scopes resolve correctly across sessions. (`bootstrap`, `search`, `prep`, and the memory-write tool are all available — check the server's tool list.)
 
 ---
 
@@ -181,7 +181,7 @@ For any framework that supports tool calling (LangChain, CrewAI, AutoGen, etc.):
 2. **Option B: Direct import** — import `tool_search`, `tool_research`, etc. from `kairix.agents.mcp.server`
 3. **Option C: HTTP wrapper** — run `kairix mcp serve --transport http --port 8080` and call `http://localhost:8080/mcp`
 
-All three options expose the same 35 tools with identical parameters and return values. See [mcp-tools.md](../user-guide/mcp-tools.md) for the full tool reference.
+All three options expose the full set of MCP tools with identical parameters and return values. See [mcp-tools.md](../user-guide/mcp-tools.md) for the complete, authoritative tool reference.
 
 ---
 
@@ -189,7 +189,7 @@ All three options expose the same 35 tools with identical parameters and return 
 
 | Problem | Fix |
 |---------|-----|
-| "kairix: command not found" | Run `pipx install Kairix-agentic-knowledge-mgt` (or `pip install Kairix-agentic-knowledge-mgt` inside a venv) or check your PATH |
+| "kairix: command not found" | Run `pipx install kairix-agentic-knowledge-mgt` (or `pip install kairix-agentic-knowledge-mgt` inside a venv) or check your PATH |
 | Tools don't appear in Claude Desktop | Restart Claude Desktop after editing config |
 | Connection refused on `/mcp` (or legacy `/sse`) | Check `docker compose ps` — kairix service must be running |
 | "No results" on first search | Run `kairix embed` to index your documents first |

@@ -4,6 +4,17 @@ User-facing documentation. Internal sprint planning and PM artefacts
 live in the operator's private knowledge store, not here (this repo
 stays user-facing).
 
+## Start here
+
+New to kairix? Read in this order:
+
+1. [`../README.md`](../README.md) — what kairix is and why it exists
+2. [`getting-started/quick-start.md`](getting-started/quick-start.md) — get a working knowledge store running
+3. [`user-guide/what-kairix-does-for-you.md`](user-guide/what-kairix-does-for-you.md) — the agent-and-human framing
+4. [`project/ROADMAP.md`](project/ROADMAP.md) — current state and where kairix is heading
+
+## Index
+
 - `getting-started/` — quick-start guide for new users
 - `user-guide/` — end-user task guides, MCP tools reference, agent-and-human framing in [what-kairix-does-for-you.md](user-guide/what-kairix-does-for-you.md)
 - `architecture/` — ENGINEERING.md, fitness-functions.md, ADRs
