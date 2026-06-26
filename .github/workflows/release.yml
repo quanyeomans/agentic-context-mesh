@@ -27,6 +27,7 @@ on:
 permissions:
   contents: write  # required to create tags + releases
   actions: write   # required to dispatch downstream publish workflows (#230)
+  id-token: write  # WIF: mint the three-cubes-agent App token from Key Vault
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -116,6 +117,19 @@ jobs:
           ref: main
           fetch-depth: 0
 
+      # Mint a short-lived three-cubes-agent App installation token over WIF
+      # (Key Vault → App ID + private key → token). Release tagging, the
+      # GitHub Release, and the downstream-workflow dispatches all act as the
+      # App identity, not github-actions[bot] — clean authorship, no
+      # GitHub-stored secret. Canonical in tc-pipelines; don't reinvent.
+      - name: Mint three-cubes-agent App token
+        id: app
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@v1
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
       - name: Validate version format
         env:
           VERSION: ${{ inputs.version }}
@@ -177,9 +191,19 @@ jobs:
       - name: Tag main
         env:
           VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Author the tag as the three-cubes-agent App, not github-actions[bot].
+          # The noreply email uses the App bot user's numeric id
+          # (295831460) in the canonical <id>+<slug>[bot]@users.noreply...
+          # form so GitHub attributes the commit to the App identity.
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "295831460+three-cubes-agent[bot]@users.noreply.github.com"
+          # Push the tag as the App: re-point origin auth at the App token so
+          # the push is attributed to the App identity, not the runner's
+          # default GITHUB_TOKEN that actions/checkout configured.
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git tag -a "$VERSION" -m "kairix $VERSION"
           git push origin "$VERSION"
 
@@ -203,7 +227,7 @@ jobs:
 
       - name: Create GitHub Release (draft for human review)
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           VERSION: ${{ inputs.version }}
         run: |
           # Release lands as a draft so an operator can review the rendered
@@ -229,9 +253,10 @@ jobs:
         # workflows (GitHub's recursion guard — #230). We explicitly
         # dispatch the downstream workflows here so a single
         # `gh workflow run release.yml` call ends with image + PyPI
-        # published, no manual follow-up required.
+        # published, no manual follow-up required. Dispatching as the App
+        # token (not github.token) keeps the identity consistent.
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           VERSION: ${{ inputs.version }}
         run: |
           gh workflow run docker-publish.yml --ref main --field ref="$VERSION"

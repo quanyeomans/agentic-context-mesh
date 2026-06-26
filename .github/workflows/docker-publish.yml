@@ -74,6 +74,14 @@ jobs:
 
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
+      # TODO(app-bot-wif migration): authenticate GHCR as the
+      # three-cubes-agent App over WIF, consistent with release.yml /
+      # release-alpha.yml. Doing so requires adding `id-token: write` to this
+      # job + a `github-app-token@v1` step (an Azure round-trip on every
+      # image build) and using `steps.app.outputs.token` as the password.
+      # Deferred as lowest-priority: GHCR push already works with the
+      # repo-scoped GITHUB_TOKEN (packages: write), so this is identity
+      # tidiness, not a functional gap.
       - name: Login to GitHub Container Registry
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
