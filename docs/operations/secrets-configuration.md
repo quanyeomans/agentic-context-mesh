@@ -134,7 +134,7 @@ sudo chmod +x /etc/kairix/bin/fetch-secrets.sh
 sudo systemctl enable --now kairix-fetch-secrets.service
 
 # 3. Verify
-ls -la /run/secrets/kairix.env   # should be 0640, root:openclaw
+ls -la /run/secrets/kairix.env   # should be 0640, root:kairix
 sudo systemctl status kairix-fetch-secrets.service
 
 # 4. Start kairix — docker-compose mounts /run/secrets into the containers
@@ -148,6 +148,8 @@ after a reboot because the vault name was only exported in the operator's
 `.bashrc` — the etc-default file removes that footgun.
 
 The fetch-secrets script reads `az keyvault secret list --query "[?starts_with(name,'kairix-')]"` and writes each one to both `/run/secrets/<name>` (per-file) and `/run/secrets/kairix.env` (bundle). No per-secret list to maintain — adding `kairix-connector-newthing-api-key` to your KV makes it available on the next service restart, with no code change.
+
+> **Group/gid contract (load-bearing).** The secrets files are mode `0640` — group-readable only — and are group-owned by the **container's runtime group**, `kairix` (gid **985** in the published image). The kairix container runs as `uid 995 / gid 985` and reads the bundle via group-read, so the host's `kairix` group **must** be gid 985 to match the image. Grouping the files to a *different* group (e.g. the operator's `openclaw` group) means the container cannot read its own secrets and crash-loops on the next recreate — this caused the 2026-06-28 outage, where `openclaw` had drifted to gid 1001 while the container stayed gid 985. Override the group with `KAIRIX_SECRETS_GROUP` (default `kairix`) only if you point it at another group the container is in. The `openclaw` operator user is a member of the `kairix` group, so it retains read access for debugging. `fetch-secrets.sh` warns in its output if the chosen group's gid doesn't match `KAIRIX_CONTAINER_GID` (default 985).
 
 To rotate a secret: run `az keyvault secret set` with `--vault-name "$KAIRIX_KV_NAME"`, `--name "<canonical-name>"`, and the new value, then `sudo systemctl restart kairix-fetch-secrets && docker compose restart kairix`.
 
