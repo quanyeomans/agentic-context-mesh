@@ -16,10 +16,14 @@ on:
       - "!CLAUDE.md"
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
-      - "!CLAUDE.md"
+    # No paths-ignore here, deliberately: the `CI gate` fan-in (job `check`) is a
+    # REQUIRED status check in the branch ruleset, so this workflow MUST run on
+    # every PR — including docs-only ones — to report it. GitHub never reports a
+    # status for a path-skipped workflow, so a required check that's path-ignored
+    # is "expected, waiting forever" and deadlocks the merge: a docs-only PR can
+    # then never go green (this stranded #632). The internal dorny/paths-filter
+    # (`changes` job) still skips the heavy stages for a docs-only diff, so the
+    # gate fans in green in ~15s rather than running the full pipeline.
   workflow_dispatch:
 
 # Deny all permissions by default. Each job declares its own minimum.
