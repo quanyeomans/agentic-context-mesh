@@ -48,20 +48,33 @@ fi
 RAW_TAG="$1"
 IMAGE_TAG="${RAW_TAG#v}"
 
-# Operational constants — kept in lock-step with the webhook's
-# unified-container config defaults (internal/config/config.go).
+# Operational constants — kept in lock-step with the webhook's config defaults
+# (internal/config/config.go).
 COMPOSE_DIR="/opt/kairix/app"
-COMPOSE_FILE="docker-compose.yml"
 COMPOSE_SERVICE="kairix"
 CONTAINER="app-kairix-1"
 BENCHMARK_SUITE="reflib"
 REGRESSION_TOLERANCE="${KAIRIX_REGRESSION_TOLERANCE:-0.05}"
+# Standing reflib weighted-total baseline (ROADMAP); overridable via env. Kept
+# always-set so the regression gate stays armed on every deploy — an unset
+# baseline silently disarmed it, whereas the webhook always gated.
+BASELINE_WEIGHTED="${KAIRIX_BASELINE_WEIGHTED:-0.808}"
 
 # All compose commands run from the compose dir (deploy.go sets c.Dir).
 cd "$COMPOSE_DIR" || {
 	echo "FAIL apply-alpha: compose dir $COMPOSE_DIR not found" >&2
 	exit 1
 }
+
+# Compose -f file list. The kairix image TAG is interpolated in
+# docker-compose.override.yml (image: ...:${KAIRIX_IMAGE_TAG:-latest}); the base
+# docker-compose.yml pins :latest and the override also carries the /run/secrets
+# mount. BOTH must be passed (the webhook's deploy.go default) — the base alone
+# deploys :latest and drops the secrets wiring. Include the override only when
+# present so a unified host shipping the base alone still works. IMAGE_TAG is
+# already captured above, so reusing the positional params here is safe.
+set -- -f docker-compose.yml
+[ -f docker-compose.override.yml ] && set -- "$@" -f docker-compose.override.yml
 
 echo "apply-alpha: deploying image tag '$IMAGE_TAG' from $COMPOSE_DIR"
 
@@ -100,11 +113,10 @@ trap - EXIT
 
 # --- (c) docker compose pull + up -----------------------------------------
 #
-# docker-compose.yml on the VM uses ${KAIRIX_IMAGE_TAG:-latest} for the
-# kairix service; export it so pull/up resolve the alpha image rather than
-# :latest. Unified-container default: single compose file, single service.
+# The override's ${KAIRIX_IMAGE_TAG:-latest} resolves the alpha image once the
+# tag is exported (see the compose-file note above for why both files are passed).
 echo "apply-alpha: docker compose pull $COMPOSE_SERVICE (tag=$IMAGE_TAG)"
-if ! KAIRIX_IMAGE_TAG="$IMAGE_TAG" docker compose -f "$COMPOSE_FILE" pull "$COMPOSE_SERVICE"; then
+if ! KAIRIX_IMAGE_TAG="$IMAGE_TAG" docker compose "$@" pull "$COMPOSE_SERVICE"; then
 	echo "FAIL apply-alpha: docker compose pull failed" >&2
 	exit 1
 fi
@@ -121,7 +133,7 @@ fi
 # the restart, so the stale-config container stayed up). Costs one ~10s
 # restart per deploy in exchange for eliminating the stale-container trap.
 echo "apply-alpha: docker compose up -d --force-recreate --wait $COMPOSE_SERVICE"
-if ! KAIRIX_IMAGE_TAG="$IMAGE_TAG" docker compose -f "$COMPOSE_FILE" up -d --force-recreate --wait --wait-timeout 90 "$COMPOSE_SERVICE"; then
+if ! KAIRIX_IMAGE_TAG="$IMAGE_TAG" docker compose "$@" up -d --force-recreate --wait --wait-timeout 90 "$COMPOSE_SERVICE"; then
 	echo "FAIL apply-alpha: docker compose up failed" >&2
 	exit 1
 fi
@@ -181,13 +193,14 @@ fi
 # Regression gate: only when a baseline is supplied. delta = baseline -
 # weighted; fail if delta > tolerance (deploy.go's BaselineWeightedTotal
 # check). awk does the float compare; print a clear message on regression.
-if [ -n "${KAIRIX_BASELINE_WEIGHTED:-}" ]; then
-	if awk -v w="$weighted" -v b="$KAIRIX_BASELINE_WEIGHTED" -v tol="$REGRESSION_TOLERANCE" \
-		'BEGIN { delta = b - w; exit !(delta > tol) }'; then
-		printf 'FAIL apply-alpha: regression: weighted=%s vs baseline=%s (delta>%s tolerance)\n' \
-			"$weighted" "$KAIRIX_BASELINE_WEIGHTED" "$REGRESSION_TOLERANCE" >&2
-		exit 1
-	fi
+# Regression gate — always armed (BASELINE_WEIGHTED defaults to the standing
+# baseline). delta = baseline - weighted; fail if delta > tolerance, matching
+# deploy.go's BaselineWeightedTotal check.
+if awk -v w="$weighted" -v b="$BASELINE_WEIGHTED" -v tol="$REGRESSION_TOLERANCE" \
+	'BEGIN { delta = b - w; exit !(delta > tol) }'; then
+	printf 'FAIL apply-alpha: regression: weighted=%s vs baseline=%s (delta>%s tolerance)\n' \
+		"$weighted" "$BASELINE_WEIGHTED" "$REGRESSION_TOLERANCE" >&2
+	exit 1
 fi
 
 printf 'alpha %s validated — weighted=%s\n' "$IMAGE_TAG" "$weighted"
