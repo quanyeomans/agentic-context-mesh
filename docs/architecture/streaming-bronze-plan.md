@@ -1,6 +1,6 @@
 # Streaming Bronze Architecture — Implementation Plan
 
-**Status:** Planning · **Targeted release:** v2026.6.x (multi-week effort across several alphas)
+**Status:** Implemented · **Targeted release:** v2026.6.x (multi-week effort across several alphas)
 **Author:** kairix engineering · **Date opened:** 2026-05-26
 
 ## 1. Problem

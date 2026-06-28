@@ -51,7 +51,7 @@ The lines under each "Script:" heading are written for you to say verbatim to yo
 **Files / commands the admin needs:**
 
 - `systemctl status kairix-fetch-secrets.service` — current state of the secrets-fetch unit
-- `/run/secrets/kairix.env` — the tmpfs file the unit writes to (should contain `KAIRIX_LLM_API_KEY`, `KAIRIX_LLM_ENDPOINT`)
+- `/run/secrets/kairix.env` — the tmpfs file the unit writes to (should contain `KAIRIX_PROVIDER_LLM_API_KEY`, `KAIRIX_LLM_ENDPOINT`)
 - `kairix onboard check` — full diagnostic
 
 ---
@@ -99,8 +99,8 @@ The lines under each "Script:" heading are written for you to say verbatim to yo
 
 **Files / commands the admin needs:**
 
-- `kairix benchmark list` — lists bundled suites (lands in #222)
-- `kairix benchmark run reflib` — canonical search-quality benchmark (lands in #222)
+- `kairix benchmark list` — lists bundled suites
+- `kairix benchmark run reflib` — canonical search-quality benchmark
 - `docker compose logs kairix` — embed worker logs
 
 ---

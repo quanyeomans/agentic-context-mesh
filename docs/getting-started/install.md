@@ -18,12 +18,12 @@ All four end with a `kairix mcp serve` endpoint the agent can connect to. If Doc
 For production servers + shared-knowledge-store deployments where kairix needs to run as a managed service under its own account.
 
 ```bash
-pipx install Kairix-agentic-knowledge-mgt
+pipx install kairix-agentic-knowledge-mgt
 sudo $(which kairix) init --system
 sudo systemctl start kairix
 ```
 
-> pipx keeps kairix in its own virtualenv and puts the `kairix` command on your PATH. A bare `pip install` fails on modern distros (Ubuntu 24.04, Debian 12+) because the system Python is externally managed (PEP 668). If you'd rather manage the virtualenv yourself, `python3 -m venv` + `pip install Kairix-agentic-knowledge-mgt` inside it works the same way. The `$(which kairix)` is needed because `sudo` resets PATH.
+> pipx keeps kairix in its own virtualenv and puts the `kairix` command on your PATH. A bare `pip install` fails on modern distros (Ubuntu 24.04, Debian 12+) because the system Python is externally managed (PEP 668). If you'd rather manage the virtualenv yourself, `python3 -m venv` + `pip install kairix-agentic-knowledge-mgt` inside it works the same way. The `$(which kairix)` is needed because `sudo` resets PATH.
 
 What `kairix init --system` does:
 
@@ -58,7 +58,7 @@ Keeping data is the default. Pass `--no-keep-data` if you also want the data dir
 For an agent (or a single human) running kairix as its own private knowledge store under its own user account. No sudo, nothing system-wide.
 
 ```bash
-pipx install Kairix-agentic-knowledge-mgt
+pipx install kairix-agentic-knowledge-mgt
 kairix init --user
 systemctl --user start kairix
 ```
@@ -98,7 +98,7 @@ Full Docker walkthrough — including the `.env` shape, port mapping, and indexi
 Same `pipx install` + `kairix init --user` pattern as Linux user mode. Paths follow each platform's conventions. (Homebrew Python is also PEP 668 externally managed — pipx or a venv, not bare pip.)
 
 ```bash
-pipx install Kairix-agentic-knowledge-mgt
+pipx install kairix-agentic-knowledge-mgt
 kairix init --user
 ```
 

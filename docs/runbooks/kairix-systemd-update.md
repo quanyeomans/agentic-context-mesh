@@ -1,8 +1,8 @@
 # Runbook — Kairix systemd update and rollback
 
-**Severity:** P1 — wrong-order or interrupted updates break MCP, leak in-flight embeds, or leave a deployment with `kairix-fetch-secrets.service` disabled after a reboot inside the update window.
+**Severity:** P1 — wrong-order or interrupted updates break the MCP api, leak in-flight embeds, or leave a deployment with `kairix-fetch-secrets.service` disabled after a reboot inside the update window.
 
-You are the operator (human or agent) pushing a new kairix package version, a unit-file change, or a secrets-fetcher change onto a systemd-managed VM. This runbook is the safe path for update plus rollback. Every step ends with a concrete next action — if a step does not give you one, stop and escalate.
+You are the operator (human or agent) rolling a new kairix image, a unit-file change, or a secrets-fetcher change onto a systemd-managed VM. On the current model the VM runs the Docker stack: `kairix.service` is a `Type=oneshot` unit that gates `docker compose up -d` on `kairix-fetch-secrets.service` having hydrated `/run/secrets/kairix.env`. A single unified `kairix` container runs both the MCP api and the background worker as s6-supervised siblings (alongside `neo4j`); there is no separate `kairix-mcp.service` and no pip-venv MCP process. This runbook is the safe path for update plus rollback. Every step ends with a concrete next action — if a step does not give you one, stop and escalate.
 
 Closes [#257](https://github.com/three-cubes/kairix/issues/257) (migrated from a sibling infrastructure repo issue).
 
@@ -12,16 +12,17 @@ Closes [#257](https://github.com/three-cubes/kairix/issues/257) (migrated from a
 
 Reach for this runbook when you are about to:
 
-- Bump the installed kairix package version (`pip install --upgrade kairix==<version>`, or your operator-owned `kairix-deploy.sh` from a sibling infrastructure repo).
-- Change the `kairix-mcp.service` unit file (ports, environment, `ExecStart`, `Restart=` policy).
+- Bump the deployed kairix image tag (`KAIRIX_IMAGE_TAG` → `docker compose pull` → restart `kairix.service`, or your operator-owned `kairix-deploy.sh` from a sibling infrastructure repo).
+- Change the `kairix.service` unit file (dependency ordering, environment, `ExecStartPre`, `Restart=` policy) or the compose stack it drives.
 - Change the `kairix-fetch-secrets.service` unit file or its rendered `/run/secrets/kairix.env` writer (the docker-compose `vault-agent` analogue for the VM).
-- Land a `kairix.service` unit file once #243 ships — the SRE worker is planned but not yet on the VM; use the worker-CLI procedure here in the interim.
+
+This runbook covers the systemd-on-VM deployment, where systemd owns the *gating* (`kairix.service` waits on `kairix-fetch-secrets.service`) and Docker's `restart: unless-stopped` owns per-container lifecycle.
 
 Do NOT use this runbook for:
 
-- Pure secrets rotation (no package change) — link forward to `kairix-secrets-rotation.md` (the next runbook the operator owes; will live in this same directory).
+- Pure secrets rotation (no image change) — link forward to `kairix-secrets-rotation.md` (the next runbook the operator owes; will live in this same directory).
 - Retrieval going bad without an update — see [`kairix-retrieval-health.md`](kairix-retrieval-health.md). If retrieval went bad *as a result of* an update, run the update rollback in §5 first, then branch into retrieval-health for diagnosis.
-- Docker-compose deployments — see [`how-to-upgrade-kairix.md`](../operations/runbooks/how-to-upgrade-kairix.md). This runbook is the systemd-on-VM path only.
+- A plain docker-compose deployment without systemd gating — see [`how-to-upgrade-kairix.md`](../operations/runbooks/how-to-upgrade-kairix.md) for the bare `docker compose pull && up -d` upgrade. This runbook is the systemd-managed-VM path, where unit ordering and the secrets-fetcher are in play.
 
 ---
 
@@ -30,23 +31,25 @@ Do NOT use this runbook for:
 You can only roll back what you measured. Capture four artefacts before touching anything; they become the comparison baseline in §3 step 6 and the evidence attached to any escalation issue in §6.
 
 ```bash
-# 1. Current installed version — the rollback target.
-kairix --version > /tmp/kairix-preupdate-version.txt
+# 1. Current image tag — the rollback target. Capture both the configured
+#    tag and the running version so a cached/mismatched image is visible.
+grep '^KAIRIX_IMAGE_TAG=' /opt/kairix/app/.env > /tmp/kairix-preupdate-version.txt
+docker compose exec kairix kairix --version >> /tmp/kairix-preupdate-version.txt
 cat /tmp/kairix-preupdate-version.txt
 
 # 2. Full subsystem envelope — the gate baseline.
-kairix onboard check --json > /tmp/kairix-preupdate-onboard.json
+docker compose exec kairix kairix onboard check --json > /tmp/kairix-preupdate-onboard.json
 jq '{passed, total, fully_passed}' /tmp/kairix-preupdate-onboard.json
 # Expected: {"passed": 9, "total": 9, "fully_passed": true}
-# If this is not 9/9 BEFORE the update, stop. Fix the deployment first via
+# If not every check passes BEFORE the update, stop. Fix the deployment first via
 # kairix-retrieval-health.md; do not update on top of a degraded baseline.
 
 # 3. Worker phase + counters — proves nothing is mid-embed.
-kairix worker status > /tmp/kairix-preupdate-worker.txt
+docker compose exec kairix kairix worker status > /tmp/kairix-preupdate-worker.txt
 cat /tmp/kairix-preupdate-worker.txt
 
 # 4. Last known-good recall score — the regression gate.
-kairix benchmark run --suite reflib \
+docker compose exec kairix kairix benchmark run --suite reflib \
   --output ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/benchmark-results/
 # Note the filename printed; this is your pre-update score for §3 step 6.
 ```
@@ -57,42 +60,44 @@ kairix benchmark run --suite reflib \
 
 ## 3. Update sequence (current path)
 
-This is the order that matters: pause the worker, apply, restart secrets first then MCP, gate on onboard check, then resume. Skipping the pause causes in-flight embeds to die mid-batch; restarting MCP before secrets gives MCP an empty environment and a degraded first request.
+This is the order that matters: pause the worker, pull the new image, restart secrets first then the kairix stack, gate on onboard check, then resume. Skipping the pause causes in-flight embeds to die mid-batch; restarting the stack before secrets gives the container an empty environment and a degraded first request.
 
 ### Step 1 — Pause the worker
 
+The worker runs as an s6-supervised sibling inside the `kairix` container, so pause it through the container:
+
 ```bash
-# Stops the embed loop cleanly before package files swap underfoot.
-kairix worker pause
-kairix worker status
+# Stops the embed loop cleanly before the image swaps underfoot.
+docker compose exec kairix kairix worker pause
+docker compose exec kairix kairix worker status
 # Expected: phase=paused (or phase=idle if it was already idle).
 ```
 
-**Next action:** confirm `phase=paused` or `phase=idle`. If `phase=embedding` persists for more than 30 seconds, the worker is stuck in a batch — wait one more cycle, then `systemctl stop kairix.service` once #243 lands; today the worker is in-process and exits when MCP restarts.
+**Next action:** confirm `phase=paused` or `phase=idle`. If `phase=embedding` persists for more than 30 seconds, the worker is stuck in a batch — wait one more cycle. The pause flag persists on the data volume, so the worker comes back paused after the container restart in step 3 and you resume it explicitly in step 5.
 
-### Step 2 — Apply the update
+### Step 2 — Pull the new image
 
-Use whichever path your operator config supports. Both are safe at this point because the worker is paused.
+Bump the image tag, then pull. The worker is paused, so this is safe.
 
 ```bash
 # Preferred — operator-owned deploy script (lives in your infrastructure repo,
 # not in the kairix repo — e.g. a separate ops repo with systemd units + apply scripts).
 sudo /opt/kairix/bin/kairix-deploy.sh --version <NEW_VERSION>
 
-# Fallback — direct pip into the kairix virtualenv.
-sudo /opt/kairix/.venv/bin/pip install --upgrade kairix==<NEW_VERSION>
-
-# Confirm the binary matches the target version.
-kairix --version
+# Fallback — bump KAIRIX_IMAGE_TAG in the operator .env, then pull the image.
+# The stack is ghcr.io/three-cubes/kairix:${KAIRIX_IMAGE_TAG}; restarting the
+# unit in step 3 recreates the container from the pulled image.
+sudo sed -i 's/^KAIRIX_IMAGE_TAG=.*/KAIRIX_IMAGE_TAG=<NEW_VERSION>/' /opt/kairix/app/.env
+docker compose pull kairix
 ```
 
-**Known gap:** today `kairix-deploy.sh` (whatever your equivalent is called) typically ignores the `kairix onboard check` exit code and has no `--rollback` flag. Track the fix in your infrastructure repo's issue tracker; until it lands, you are the gate — run §3 step 4 manually and refuse to proceed if it is not 9/9.
+**Known gap:** today `kairix-deploy.sh` (whatever your equivalent is called) typically ignores the `kairix onboard check` exit code and has no `--rollback` flag. Track the fix in your infrastructure repo's issue tracker; until it lands, you are the gate — run §3 step 4 manually and refuse to proceed unless every check passes.
 
-**Next action:** confirm `kairix --version` prints the target version. If pip silently kept the old version (cached wheel), re-run with `--force-reinstall --no-deps`.
+**Next action:** confirm `docker compose pull kairix` reports the new tag downloaded (or "up to date" if already cached). The version check happens after the restart in step 4.
 
-### Step 3 — Restart units in order: secrets first, then MCP
+### Step 3 — Restart units in order: secrets first, then the kairix stack
 
-Order matters. `kairix-mcp.service` reads `/run/secrets/kairix.env` at startup via `EnvironmentFile=`; if you restart MCP before the secrets unit has written the file, MCP boots with an empty environment and the first onboard check fails on `secrets_loaded`.
+Order matters. The `kairix` container reads `/run/secrets/kairix.env` at startup via the unit's `EnvironmentFile=` / compose `env_file:`; if you restart the stack before the secrets unit has written the file, the container boots with an empty environment and the first onboard check fails on `secrets_loaded`. `kairix.service` declares `Requires=`/`After=kairix-fetch-secrets.service` for exactly this reason, but restart them in order by hand so you can verify the secrets file between steps.
 
 ```bash
 # 1. Secrets first — repopulates /run/secrets/kairix.env on tmpfs.
@@ -101,24 +106,31 @@ sudo systemctl status kairix-fetch-secrets.service --no-pager
 # Expected: Active: active (exited) — it's a oneshot.
 
 # 2. Confirm the rendered secrets file exists and has both required keys
-#    BEFORE you restart MCP.
-sudo grep -E '^(KAIRIX_LLM_API_KEY|KAIRIX_LLM_ENDPOINT)=' /run/secrets/kairix.env
+#    BEFORE you restart the stack.
+sudo grep -E '^(KAIRIX_PROVIDER_LLM_API_KEY|KAIRIX_LLM_ENDPOINT)=' /run/secrets/kairix.env
 # Expected: two lines, one per key, non-empty values.
 
-# 3. MCP second — now reads the freshly written environment.
-sudo systemctl restart kairix-mcp.service
-sudo systemctl status kairix-mcp.service --no-pager
-# Expected: Active: active (running).
+# 3. kairix.service second — its `docker compose up -d` recreates the
+#    container from the pulled image with the freshly written environment.
+sudo systemctl restart kairix.service
+sudo systemctl status kairix.service --no-pager
+# Expected: Active: active (exited) — it's a Type=oneshot wrapper; the
+# containers run detached under dockerd. Check the stack itself:
+docker compose ps
+# Expected: kairix and neo4j both Up (kairix healthy after warm-up).
 ```
 
-**Next action:** confirm both units report `Active: active`. If `kairix-fetch-secrets.service` is `disabled`, jump to §4 — failure mode "secrets unit ends up disabled."
+**Next action:** confirm `kairix-fetch-secrets.service` is `active (exited)`, `kairix.service` is `active`, and `docker compose ps` shows both containers Up. If `kairix-fetch-secrets.service` is `disabled`, jump to §4 — failure mode "secrets unit ends up disabled."
 
-### Step 4 — Refuse to proceed unless onboard check is 9/9
+### Step 4 — Refuse to proceed unless every onboard check passes
 
 This is the hard gate. The update is not "applied" until this returns green.
 
 ```bash
-kairix onboard check --json > /tmp/kairix-postupdate-onboard.json
+# Confirm the running container is the target version first.
+docker compose exec kairix kairix --version
+
+docker compose exec kairix kairix onboard check --json > /tmp/kairix-postupdate-onboard.json
 jq '{passed, total, fully_passed}' /tmp/kairix-postupdate-onboard.json
 # Expected: {"passed": 9, "total": 9, "fully_passed": true}
 ```
@@ -128,21 +140,21 @@ jq '{passed, total, fully_passed}' /tmp/kairix-postupdate-onboard.json
 ### Step 5 — Resume the worker
 
 ```bash
-kairix worker resume
-kairix worker status
+docker compose exec kairix kairix worker resume
+docker compose exec kairix kairix worker status
 # Expected: phase=idle or phase=embedding (a fresh cycle has started).
 ```
 
-**Next action:** confirm `phase` is not `paused`. If the worker refuses to resume, check `journalctl -u kairix-mcp.service -n 50` for embed-pipeline errors and branch into [`kairix-retrieval-health.md`](kairix-retrieval-health.md) §4.
+**Next action:** confirm `phase` is not `paused`. If the worker refuses to resume, check `docker compose logs kairix --tail 50` for embed-pipeline errors and branch into [`kairix-retrieval-health.md`](kairix-retrieval-health.md) §4.
 
 ### Step 6 — Post-update validation: recall regression check
 
 ```bash
-kairix benchmark run --suite reflib \
+docker compose exec kairix kairix benchmark run --suite reflib \
   --output ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/benchmark-results/
 # Note the new filename.
 
-kairix benchmark compare \
+docker compose exec kairix kairix benchmark compare \
   ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/benchmark-results/<pre-update>.json \
   ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/benchmark-results/<post-update>.json
 ```
@@ -159,9 +171,9 @@ These are the failure modes seen in the field; reach for the matching section wh
 
 ### `kairix-fetch-secrets.service` ends up `disabled` after a reboot during the update window
 
-**Symptom:** post-reboot, `/run/secrets/kairix.env` does not exist and `systemctl is-enabled kairix-fetch-secrets.service` returns `disabled`. MCP boots without credentials; onboard check fails `secrets_loaded`.
+**Symptom:** post-reboot, `/run/secrets/kairix.env` does not exist and `systemctl is-enabled kairix-fetch-secrets.service` returns `disabled`. The container boots without credentials; onboard check fails `secrets_loaded`.
 
-**Root cause:** the systemd unit was installed without `WantedBy=multi-user.target` (or the enable step was skipped) and got dropped on the first reboot. The durable fix is the SRE worker design in [#243](https://github.com/three-cubes/kairix/issues/243), which makes the secrets fetch a managed step inside `kairix.service` rather than a separate oneshot.
+**Root cause:** the systemd unit was installed without `WantedBy=multi-user.target` (or the enable step was skipped) and got dropped on the first reboot. `kairix.service` now ships with `Requires=kairix-fetch-secrets.service`, so the gating ordering is in place once the secrets unit is enabled; the remaining hardening is the SRE worker design in [#243](https://github.com/three-cubes/kairix/issues/243), which folds the secrets fetch into `kairix.service` rather than a separate oneshot that can be left disabled.
 
 **Manual remediation today:**
 
@@ -170,15 +182,15 @@ sudo systemctl enable --now kairix-fetch-secrets.service
 sudo systemctl status kairix-fetch-secrets.service --no-pager
 # Confirm Active: active (exited) and Loaded: ...; enabled.
 
-# Then re-render MCP environment.
-sudo systemctl restart kairix-mcp.service
+# Then restart the stack so the container picks up the rendered environment.
+sudo systemctl restart kairix.service
 ```
 
 **Next action:** confirm `systemctl is-enabled kairix-fetch-secrets.service` prints `enabled`, then re-run §3 step 4.
 
 ### `/run/secrets/kairix.env` empty after a restart (tmpfs cleared)
 
-**Symptom:** `/run/secrets/kairix.env` exists but is empty (or missing the API key line); MCP boots, onboard check fails `secrets_loaded`. Reproduced in the 2026-05-10.5 and 2026-05-14 incidents — `/run` is a tmpfs and the kairix-fetch-secrets unit hadn't been re-run since the reboot.
+**Symptom:** `/run/secrets/kairix.env` exists but is empty (or missing the API key line); the container boots, onboard check fails `secrets_loaded`. Reproduced in the 2026-05-10.5 and 2026-05-14 incidents — `/run` is a tmpfs and the kairix-fetch-secrets unit hadn't been re-run since the reboot.
 
 **Manual remediation today:**
 
@@ -187,11 +199,11 @@ sudo systemctl restart kairix-mcp.service
 sudo systemctl restart kairix-fetch-secrets.service
 
 # Confirm both required keys landed.
-sudo grep -E '^(KAIRIX_LLM_API_KEY|KAIRIX_LLM_ENDPOINT)=' /run/secrets/kairix.env
+sudo grep -E '^(KAIRIX_PROVIDER_LLM_API_KEY|KAIRIX_LLM_ENDPOINT)=' /run/secrets/kairix.env
 # Expected: two non-empty lines.
 
-# Push the fresh environment into MCP.
-sudo systemctl restart kairix-mcp.service
+# Restart the stack so the container picks up the fresh environment.
+sudo systemctl restart kairix.service
 ```
 
 **Next action:** re-run §3 step 4 (`kairix onboard check --json`) and confirm `secrets_loaded: true`. If the secrets file is still empty after the fetch unit runs, escalate per §6 — the upstream secrets source has dropped the credentials.
@@ -200,32 +212,32 @@ sudo systemctl restart kairix-mcp.service
 
 **Symptom:** secrets passed but two checks fail — typically `vector_search_working` and `chunk_date_populated`, or `bm25_search_working` indirectly and `agent_knowledge_populated`. Indicates retrieval state went bad during the swap, not the systemd plumbing.
 
-**Next action:** stop the update flow and follow [`kairix-retrieval-health.md`](kairix-retrieval-health.md) §3, branching on the first failed check in `/tmp/kairix-postupdate-onboard.json`. Do not run §3 step 5 (resume) until retrieval-health returns 9/9. If retrieval-health cannot restore green inside your incident window, roll back via §5.
+**Next action:** stop the update flow and follow [`kairix-retrieval-health.md`](kairix-retrieval-health.md) §3, branching on the first failed check in `/tmp/kairix-postupdate-onboard.json`. Do not run §3 step 5 (resume) until retrieval-health returns all checks green. If retrieval-health cannot restore green inside your incident window, roll back via §5.
 
 ### Vector index out of sync after the update
 
-**Symptom:** onboard check returns 9/9 but search results are obviously stale or missing recently-added documents; `kairix embed status` shows the last embed run predates the update.
+**Symptom:** onboard check passes every check but search results are obviously stale or missing recently-added documents; `kairix embed status` shows the last embed run predates the update.
 
 **Manual remediation today:**
 
 ```bash
 # Pause first (per §3 step 1) if the worker has already resumed.
-kairix worker pause
+docker compose exec kairix kairix worker pause
 
 # Force re-embed — destructive of derived vectors, NOT of source documents.
-kairix embed --force
+docker compose exec kairix kairix embed --force
 
 # Resume.
-kairix worker resume
+docker compose exec kairix kairix worker resume
 ```
 
 See [`kairix-retrieval-health.md`](kairix-retrieval-health.md) §4 ("No vectors indexed yet" and "Embed pipeline failing mid-run") for the per-failure recovery commands.
 
-**Next action:** confirm `kairix embed status` shows a fresh timestamp and `embedded_chunks > 0`, then re-run §3 step 4.
+**Next action:** confirm `docker compose exec kairix kairix embed status` shows a fresh timestamp and `embedded_chunks > 0`, then re-run §3 step 4.
 
 ### Entity graph drift after the update
 
-**Symptom:** onboard check returns 9/9 but `kairix entity suggest` returns junk, or the reflib suite regresses on entity-heavy categories.
+**Symptom:** onboard check passes every check but `kairix entity suggest` returns junk, or the reflib suite regresses on entity-heavy categories.
 
 **Next action:** follow [`kairix-entity-audit.md`](../operations/runbooks/kairix-entity-audit.md) — that runbook walks detect → repair-paths → enrichment → safe-purge in order of safety. Do not skip the dry-run step.
 
@@ -237,7 +249,7 @@ Rollback today is manual — there is no `kairix-deploy.sh --rollback` flag yet.
 
 Use rollback when:
 
-- §3 step 4 (onboard check) cannot return 9/9 within your incident window after the manual remediations in §4.
+- §3 step 4 (onboard check) cannot return all checks green within your incident window after the manual remediations in §4.
 - §3 step 6 (benchmark) shows `weighted_total` regression greater than 0.05.
 - A failure mode in §4 cannot be cleared from the failure-mode commands alone.
 
@@ -245,33 +257,34 @@ Use rollback when:
 
 ```bash
 # 1. Pause the worker (same as §3 step 1).
-kairix worker pause
+docker compose exec kairix kairix worker pause
 
-# 2. Pin back to the pre-update version captured in §2 artefact 1.
-PREV_VERSION=$(cat /tmp/kairix-preupdate-version.txt | awk '{print $NF}')
-sudo /opt/kairix/.venv/bin/pip install \
-  --force-reinstall --no-deps \
-  kairix==${PREV_VERSION}
+# 2. Pin back to the pre-update image tag captured in §2 artefact 1.
+PREV_VERSION=$(grep '^KAIRIX_IMAGE_TAG=' /tmp/kairix-preupdate-version.txt | cut -d= -f2)
+sudo sed -i "s/^KAIRIX_IMAGE_TAG=.*/KAIRIX_IMAGE_TAG=${PREV_VERSION}/" /opt/kairix/app/.env
+docker compose pull kairix
 
-# Confirm the binary matches the prior version.
-kairix --version
-
-# 3. Restart in order — secrets first, then MCP (same as §3 step 3).
+# 3. Restart in order — secrets first, then the kairix stack (same as §3 step 3).
+#    `kairix.service`'s `docker compose up -d` recreates the container from the
+#    rolled-back image.
 sudo systemctl restart kairix-fetch-secrets.service
-sudo grep -E '^(KAIRIX_LLM_API_KEY|KAIRIX_LLM_ENDPOINT)=' /run/secrets/kairix.env
-sudo systemctl restart kairix-mcp.service
+sudo grep -E '^(KAIRIX_PROVIDER_LLM_API_KEY|KAIRIX_LLM_ENDPOINT)=' /run/secrets/kairix.env
+sudo systemctl restart kairix.service
 
-# 4. Hard gate: onboard check must be 9/9 against the rolled-back version.
-kairix onboard check --json | jq '{passed, total, fully_passed}'
+# Confirm the running container matches the prior version.
+docker compose exec kairix kairix --version
+
+# 4. Hard gate: onboard check must pass every check against the rolled-back version.
+docker compose exec kairix kairix onboard check --json | jq '{passed, total, fully_passed}'
 # Expected: {"passed": 9, "total": 9, "fully_passed": true}
 
 # 5. Resume the worker.
-kairix worker resume
+docker compose exec kairix kairix worker resume
 
 # 6. Confirm recall matches the pre-update baseline captured in §2 artefact 4.
-kairix benchmark run --suite reflib \
+docker compose exec kairix kairix benchmark run --suite reflib \
   --output ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/benchmark-results/
-kairix benchmark compare \
+docker compose exec kairix kairix benchmark compare \
   ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/benchmark-results/<pre-update>.json \
   ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/benchmark-results/<post-rollback>.json
 # Acceptance: weighted_total within 0.01 of the pre-update value.
@@ -300,15 +313,19 @@ cat /tmp/kairix-preupdate-onboard.json
 cat /tmp/kairix-postupdate-onboard.json
 
 # Worker state at the time of failure.
-kairix worker status
+docker compose exec kairix kairix worker status
 
-# Systemd unit state for both services.
+# Systemd unit state for both units.
 sudo systemctl status kairix-fetch-secrets.service --no-pager
-sudo systemctl status kairix-mcp.service --no-pager
+sudo systemctl status kairix.service --no-pager
 
-# Last 50 journal lines from both units.
+# Container state.
+docker compose ps
+
+# Last 50 journal lines from both units, plus container logs.
 sudo journalctl -u kairix-fetch-secrets.service --no-pager -n 50
-sudo journalctl -u kairix-mcp.service --no-pager -n 50
+sudo journalctl -u kairix.service --no-pager -n 50
+docker compose logs kairix --tail 50
 
 # Benchmark JSONs from §3 step 6 (or §5 step 6 if rolled back).
 ls ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/benchmark-results/
@@ -318,11 +335,11 @@ Tag the issue with whichever dogfood agent first reported the symptom — the pr
 
 ### Full reset path (worst case)
 
-If rollback restores the package but onboard check still cannot return 9/9, the deployment's derived state (vectors, FTS, entity graph) has drifted away from what the rolled-back version expects. Run the full retrieval reset:
+If rollback restores the image but onboard check still cannot return all checks green, the deployment's derived state (vectors, FTS, entity graph) has drifted away from what the rolled-back version expects. Run the full retrieval reset:
 
-1. Roll back the package per §5 steps 1-3.
-2. Re-run `kairix onboard check --json` and capture the failure list.
-3. If `neo4j_reachable: false` or the entity graph is wiped, run `kairix store crawl --document-root "${KAIRIX_DOCUMENT_ROOT}"` to repopulate from the document store.
+1. Roll back the image per §5 steps 1-3.
+2. Re-run `docker compose exec kairix kairix onboard check --json` and capture the failure list.
+3. If `neo4j_reachable: false` or the entity graph is wiped, run `docker compose exec kairix kairix store crawl --document-root "${KAIRIX_DOCUMENT_ROOT}"` to repopulate from the document store.
 4. Follow [`kairix-retrieval-health.md`](kairix-retrieval-health.md) §6 (Full reset) for the embed + FTS + canary rebuild sequence.
 5. File the incident issue with the full structured diagnostic envelope attached.
 
@@ -338,4 +355,4 @@ If rollback restores the package but onboard check still cannot return 9/9, the 
 - [`runbook-benchmark-regression.md`](../operations/runbooks/runbook-benchmark-regression.md) — bisect workflow when §3 step 6 or §5 step 6 shows a regression.
 - Your infrastructure repo's `kairix-deploy.sh` resilience tracker — rollback flag, onboard-check exit-code gating.
 - [kairix#243](https://github.com/three-cubes/kairix/issues/243) — SRE worker design: collapses `kairix-fetch-secrets.service` into a managed step inside `kairix.service`, eliminating the disabled-after-reboot failure mode in §4.
-- `kairix-secrets-rotation.md` — the next runbook the operator owes; covers `KAIRIX_LLM_API_KEY` / `KAIRIX_LLM_ENDPOINT` rotation without a package change. Will live in this same directory.
+- `kairix-secrets-rotation.md` — the next runbook the operator owes; covers `KAIRIX_PROVIDER_LLM_API_KEY` / `KAIRIX_LLM_ENDPOINT` rotation without an image change. Will live in this same directory.

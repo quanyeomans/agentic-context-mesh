@@ -15,14 +15,16 @@ For dedicated-host deployments you can stay on the default `docker-compose.yml` 
 
 ## Recommended headroom
 
-Kairix is two workloads stacked. The serving path (`kairix` container, `/mcp` endpoint, search) is latency-sensitive and lightly loaded between requests. The background worker (`kairix`) does scans, embeds, and entity maintenance — it bursts hard during work, and should sit at ~0 CPU when idle (after #224 phase 1's idle backoff lands).
+Kairix is two workloads stacked. The serving path (`/mcp` endpoint, search) is latency-sensitive and lightly loaded between requests. The background worker does scans, embeds, and entity maintenance — it bursts hard during work, and should sit at ~0 CPU when idle (after #224 phase 1's idle backoff lands).
+
+The shared-host compose in this guide (`docker-compose.example.yml`) keeps these two workloads in **separate containers** — `kairix` (api / `/mcp` / search) and `kairix-worker` (the background worker) — so you can cap and pause the noisy worker independently of the latency-sensitive serving path. This is the one place the worker still runs as its own container; the default `docker-compose.yml` folds both into a single unified `kairix` container. On a shared host the split is what lets you stop indexing without stopping search.
 
 For a single shared host running kairix + neo4j + one or two co-located agents, plan for:
 
 | Resource | Minimum | Comfortable | Notes |
 |---|---|---|---|
 | CPU | 2 vCPU | 4 vCPU | Worker bursts are short but heavy. 2 vCPU works if you accept slow embed cycles; 4 vCPU lets the worker finish a backfill in a reasonable window. |
-| Memory | 4 GiB | 8 GiB | kairix ~1.2 GiB steady, neo4j ~1-2 GiB, worker ~256 MiB idle / ~1 GiB during embed. Leave 1-2 GiB for the host kernel and other tenants. |
+| Memory | 4 GiB | 8 GiB | `kairix` ~1.2 GiB steady, neo4j ~1-2 GiB, `kairix-worker` ~256 MiB idle / ~1 GiB during embed. Leave 1-2 GiB for the host kernel and other tenants. |
 | Disk | 10 GiB | 20+ GiB | The usearch index and SQLite content store grow with your document count; plan ~1 GiB per 50k chunks. |
 
 If the host is smaller than the minimum row, kairix will run but you will see exactly the symptoms #224 describes: event-loop starvation in co-located services, sporadic request timeouts, and restart churn. Stop the worker before stopping anything else — see "Pausing the worker safely" below.
@@ -56,21 +58,28 @@ If you see request timeouts on co-located services during a worker burst, tighte
 
 ## Pausing the worker safely
 
-The serving path stays healthy when the worker is stopped — this was confirmed during the #224 incident and is the basis of the "decouple serving from indexing" pattern.
+The serving path stays healthy when the worker is stopped — this was confirmed during the #224 incident and is the basis of the "decouple serving from indexing" pattern. On the split shared-host compose, the worker is its own container, so you can stop it without touching the `kairix` serving container.
 
-Today, stop the worker container directly:
-
-```bash
-docker compose stop kairix
-```
-
-Search, `/mcp` calls, and the graph database keep working. The index is read-only from the serving path's perspective — you just stop getting new content indexed until you start the worker again:
+Preferred — pause the loop in-process with the first-class worker CLI, which avoids the index-reload cost on resume:
 
 ```bash
-docker compose start kairix
+docker compose exec kairix-worker kairix worker pause
+docker compose exec kairix-worker kairix worker status   # phase=paused
 ```
 
-A first-class `kairix worker pause` / `kairix worker resume` interface lands with #224 phase 4. Once it's available it will pause the loop in-process without restarting the container, which avoids the index reload cost on resume. Until then, `docker compose stop` is the recommended pause.
+Resume the same way:
+
+```bash
+docker compose exec kairix-worker kairix worker resume
+```
+
+Alternatively, stop the worker container directly:
+
+```bash
+docker compose stop kairix-worker
+```
+
+Either way, search, `/mcp` calls, and the graph database keep working. The index is read-only from the serving path's perspective — you just stop getting new content indexed until you resume (or `docker compose start kairix-worker`).
 
 ---
 
@@ -82,8 +91,8 @@ If you have ever seen "the worker is always busy but the index never moves", thi
 
 Mitigations, in order of preference:
 
-1. **Use `restart: on-failure` with a max-attempts cap.** The example file ships with `restart: on-failure:5`. After five failed restarts the container stays down and the failure becomes visible instead of being papered over. Exec into the host and read `docker compose logs kairix --tail 200` to see why it's failing.
-2. **Surface restart count via `kairix worker status`** (lands with #224 phase 5). The status command will report restart count and last-failure reason, so a health probe or monitoring loop can detect churn even when `docker ps` shows the container as "running".
+1. **Use `restart: on-failure` with a max-attempts cap.** The example file ships with `restart: on-failure:5` on the worker. After five failed restarts the container stays down and the failure becomes visible instead of being papered over. Exec into the host and read `docker compose logs kairix-worker --tail 200` to see why it's failing.
+2. **Surface restart count via `kairix worker status`.** The status command reports the worker phase, restart count, and last-failure reason, so a health probe or monitoring loop can detect churn even when `docker ps` shows the container as "running".
 3. **For Compose Spec deployments (Swarm), use `restart_policy` with `max_attempts` and a sensible `window`.** Same intent, native to Compose Spec.
 
 If the worker is failing repeatedly, do not raise its memory limit blindly. Read the logs first — the most common cause is a misconfigured `KAIRIX_DOCUMENT_ROOT` or a missing embed provider credential, neither of which more memory fixes.
@@ -96,7 +105,7 @@ If the worker is failing repeatedly, do not raise its memory limit blindly. Read
 2. Copy `docker-compose.example.yml` from the repo root as your starting compose file (or layer it over `docker-compose.yml`).
 3. Watch `docker stats` for a week. Tighten or loosen `deploy.resources` to match what you actually see.
 4. Set `restart: on-failure:5` on the worker (the example file does this for you).
-5. When you co-locate something latency-sensitive, run `docker compose stop kairix` before any benchmark or load test. Confirm the latency issue tracks the worker; if it does, plan the worker's runtime around the latency-sensitive workload's quiet hours, or split it onto its own host.
+5. When you co-locate something latency-sensitive, run `docker compose stop kairix-worker` (or `kairix worker pause`) before any benchmark or load test. Confirm the latency issue tracks the worker; if it does, plan the worker's runtime around the latency-sensitive workload's quiet hours, or split it onto its own host.
 
 See also:
 

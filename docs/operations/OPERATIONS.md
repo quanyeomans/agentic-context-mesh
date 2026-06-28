@@ -2,7 +2,7 @@
 
 Step-by-step deployment and operations guide for Kairix on a server. This document is the single source of truth for getting a new deployment running and keeping it healthy.
 
-For benchmark methodology and current scores see [EVALUATION.md](EVALUATION.md).
+For benchmark methodology and current scores see [EVALUATION.md](../evaluation/EVALUATION.md).
 
 ## Operations docs index
 
@@ -345,7 +345,7 @@ sudo systemctl enable --now kairix-fetch-secrets.service kairix.service
 
 - Fixes `.env` ownership/mode if root + service-user mismatch (the #167 root cause).
 - Fails fast if `/run/secrets/kairix.env` is missing or empty.
-- Verifies that `KAIRIX_LLM_API_KEY`, `KAIRIX_LLM_ENDPOINT`, `KAIRIX_EMBED_API_KEY`, `KAIRIX_EMBED_ENDPOINT` are all populated when the service-env and secrets file are merged.
+- Verifies that `KAIRIX_PROVIDER_LLM_API_KEY`, `KAIRIX_LLM_ENDPOINT`, `KAIRIX_EMBED_API_KEY`, `KAIRIX_EMBED_ENDPOINT` are all populated when the service-env and secrets file are merged.
 
 A failed preflight surfaces as an actionable journalctl line — far more useful than docker compose's "permission denied" loop.
 

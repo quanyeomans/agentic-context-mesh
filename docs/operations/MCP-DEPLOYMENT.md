@@ -175,7 +175,7 @@ Returns granular capability detail so a load balancer can distinguish "process u
     "vector_search_capable": false,
     "bm25_search_capable": true,
     "detail": {
-      "secrets_loaded": "KAIRIX_LLM_API_KEY missing",
+      "secrets_loaded": "KAIRIX_PROVIDER_LLM_API_KEY missing",
       "vector_search_capable": "embed credentials unavailable"
     }
   }
