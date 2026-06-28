@@ -36,6 +36,15 @@
 # Operator overrides:
 #   - $KAIRIX_KV_NAME  — the Key Vault to read from (required)
 #   - $KAIRIX_SECRETS_DIR  — where to write (default /run/secrets)
+#   - $KAIRIX_SECRETS_GROUP — group that owns the secrets files (default
+#                             `kairix`, the container's runtime group). MUST be
+#                             a group the kairix container is in (gid 985 in the
+#                             published image) or the container cannot read its
+#                             own /run/secrets/kairix.env. See the gid guard
+#                             below.
+#   - $KAIRIX_CONTAINER_GID — the gid the kairix container reads as (default
+#                             985, the published image's `kairix` group); used
+#                             only by the mismatch guard.
 #   - $KAIRIX_LEGACY_EXPORT=0  — skip the legacy env-var aliases
 #                                (turn on once Wave-2 lands)
 
@@ -45,12 +54,32 @@ VAULT_NAME="${KAIRIX_KV_NAME:-}"
 OUT_DIR="${KAIRIX_SECRETS_DIR:-/run/secrets}"
 OUT_FILE="${OUT_DIR}/kairix.env"
 LEGACY_EXPORT="${KAIRIX_LEGACY_EXPORT:-1}"
-SECRETS_GROUP="${KAIRIX_SECRETS_GROUP:-openclaw}"
+# The secrets files are group-readable (mode 0640). Group them to the
+# CONTAINER's runtime group — `kairix` (gid 985 in the published image) — NOT
+# the operator's `openclaw` group. The kairix container runs as uid 995 / gid
+# 985 and reads the bundle via group-read; grouping the files to a group the
+# container is not in makes it unable to read its own secrets and crash-loop on
+# the next recreate (the 2026-06-28 incident: `openclaw` had drifted to gid
+# 1001 while the container stayed gid 985, so a fetch-secrets re-run produced
+# files the container could no longer read). The `openclaw` operator user is a
+# member of the `kairix` group, so it keeps read access for debugging.
+SECRETS_GROUP="${KAIRIX_SECRETS_GROUP:-kairix}"
 
 if [[ -z "$VAULT_NAME" ]]; then
     echo "fetch-secrets: ERROR — KAIRIX_KV_NAME is not set" >&2
     echo "fix: set KAIRIX_KV_NAME=<your-vault-name> in /etc/default/kairix-fetch-secrets" >&2
     exit 1
+fi
+
+# Guard: the kairix container reads these files as gid $CONTAINER_GID (985 in
+# the published image). If the chosen secrets group resolves to a different
+# gid, the container will NOT be able to read /run/secrets/kairix.env and will
+# crash-loop on the next recreate. Warn loudly so a host group/gid mismatch
+# surfaces in the journal (and the deploy log) instead of as a silent outage.
+CONTAINER_GID="${KAIRIX_CONTAINER_GID:-985}"
+secrets_group_gid="$(getent group "$SECRETS_GROUP" | cut -d: -f3 || true)"
+if [[ -n "$secrets_group_gid" && "$secrets_group_gid" != "$CONTAINER_GID" ]]; then
+    echo "fetch-secrets: WARN — secrets group '${SECRETS_GROUP}' is gid ${secrets_group_gid} but the kairix container reads as gid ${CONTAINER_GID}; the container may be unable to read ${OUT_FILE}. Align the host '${SECRETS_GROUP}' group to gid ${CONTAINER_GID}, or set KAIRIX_SECRETS_GROUP to a group the container is in." >&2
 fi
 
 mkdir -p "$OUT_DIR"
@@ -214,4 +243,4 @@ for secret_name in "${WEBHOOK_SECRETS[@]}"; do
     chown "root:${WEBHOOK_GROUP}" "$target"
 done
 
-echo "fetch-secrets: wrote ${canonical_count} canonical secret(s) + ${legacy_count} legacy alias(es) to ${OUT_FILE}"
+echo "fetch-secrets: wrote ${canonical_count} canonical secret(s) + ${legacy_count} legacy alias(es) to ${OUT_FILE} ($(stat -c '%U:%G %a' "$OUT_FILE" 2>/dev/null || echo 'perms?'))"
