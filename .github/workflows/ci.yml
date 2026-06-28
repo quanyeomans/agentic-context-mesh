@@ -121,7 +121,7 @@ jobs:
       # The arch-fitness-catalogue hook runs `uv run python3 …` so the
       # catalogue runner imports kairix + the shared three-cubes-fitness
       # package. Sync the venv (and put uv on PATH) before pre-commit runs.
-      - uses: three-cubes/tc-pipelines/actions/setup-uv-cached@4a5fb3c4dead13a3dd0203bd4ce24c5855dfa08c # v1
+      - uses: three-cubes/tc-pipelines/actions/setup-uv-cached@34ce14004bcba06af6b549db233ad90c1ddc225e # v1
         with:
           python-version: "3.12"
           sync-args: "--all-extras --all-groups"
@@ -150,7 +150,7 @@ jobs:
       # bare system interpreter silently masks every import-dependent rule
       # as a vacuous pass (this is the F53 false-green #499 phase 4 closes).
       # Sync the venv via the org-shared composite, then run the gate under it.
-      - uses: three-cubes/tc-pipelines/actions/setup-uv-cached@4a5fb3c4dead13a3dd0203bd4ce24c5855dfa08c # v1
+      - uses: three-cubes/tc-pipelines/actions/setup-uv-cached@34ce14004bcba06af6b549db233ad90c1ddc225e # v1
         with:
           python-version: "3.12"
           sync-args: "--all-extras --all-groups"
@@ -191,7 +191,7 @@ jobs:
       # runs here rather than being skipped by `importorskip("starlette")`.
       # kairix is a single package (not a uv workspace) — do NOT pass
       # --all-packages. Pinned to @main until the action repo cuts tags.
-      - uses: three-cubes/tc-pipelines/actions/setup-uv-cached@4a5fb3c4dead13a3dd0203bd4ce24c5855dfa08c # v1
+      - uses: three-cubes/tc-pipelines/actions/setup-uv-cached@34ce14004bcba06af6b549db233ad90c1ddc225e # v1
         with:
           python-version: "3.12"
           sync-args: "--all-extras --all-groups"
@@ -621,7 +621,7 @@ jobs:
       # package (tc_fitness, in the [dev] group), so this job needs the
       # synced venv — not a bare interpreter. Sync via the org-shared
       # composite and run the floor check under `uv run`.
-      - uses: three-cubes/tc-pipelines/actions/setup-uv-cached@4a5fb3c4dead13a3dd0203bd4ce24c5855dfa08c # v1
+      - uses: three-cubes/tc-pipelines/actions/setup-uv-cached@34ce14004bcba06af6b549db233ad90c1ddc225e # v1
         with:
           python-version: "3.12"
           sync-args: "--all-extras --all-groups"

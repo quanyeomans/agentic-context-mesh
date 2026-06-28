@@ -151,7 +151,7 @@ jobs:
       # "baselines did not shrink"). Sync the venv via the org-shared
       # composite, then run the checks under it — mirrors the Stage 0
       # arch-fitness job in ci.yml.
-      - uses: three-cubes/tc-pipelines/actions/setup-uv-cached@4a5fb3c4dead13a3dd0203bd4ce24c5855dfa08c # v1
+      - uses: three-cubes/tc-pipelines/actions/setup-uv-cached@34ce14004bcba06af6b549db233ad90c1ddc225e # v1
         with:
           python-version: "3.12"
           sync-args: "--all-extras --all-groups"
