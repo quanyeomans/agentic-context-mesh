@@ -9,7 +9,13 @@ Steps:
        client, BM25 + vector backend init). Costs ~120 MB.
     2. Issue one no-op tool_search (populates per-call caches, builds
        query plan). Costs ~70 MB.
-    3. Open the Neo4j client connection (small but waitable).
+    3. Warm the cross-encoder reranker model when rerank is wired on the
+       built pipeline's config (``rerank.enabled`` True OR ``rerank_intents``
+       non-empty — the same condition under which the factory wires a real
+       reranker closure). The first semantic / multi-hop query would
+       otherwise pay a multi-second torch import + model load on the
+       request path even though the server already reports ready (PLA-271).
+    4. Open the Neo4j client connection (small but waitable).
 
 Never raises — each step is wrapped so a single failure populates a
 WarmFailure entry but other steps still attempt to run. Caller decides
@@ -33,6 +39,13 @@ _STEP_BUILD = "build_search_pipeline"
 _STEP_PROBE = "probe_search"
 _STEP_GRAPH = "open_graph_client"
 _STEP_SQLITE_STATS = "ensure_sqlite_stats"
+_STEP_RERANK = "warm_cross_encoder"
+
+# Operator-facing per-step detail strings for the cross-encoder warm step.
+# Extracted as constants so the skip-reason text lives in one place and the
+# step's branches stay readable.
+DETAIL_RERANK_NO_PIPELINE = "rerank warm skipped — search pipeline unavailable"
+DETAIL_RERANK_NOT_WIRED = "rerank not wired (disabled, no rerank intents) — cross-encoder load skipped"
 
 
 # Workload signature used for the no-op probe — short, lowercase, ASCII,
@@ -102,6 +115,63 @@ def _step_probe_search(pipeline: Any) -> Any:
     discarded — only side-effects matter.
     """
     return pipeline.search(query=WARMUP_QUERY, budget=500, scope="shared+agent")
+
+
+@dataclass(frozen=True)
+class _RerankWarmOutcome:
+    """Outcome of the cross-encoder warm step.
+
+    Only ``detail`` is read by the runner (hoisted onto the WarmStep via
+    :func:`_with_detail` so the operator-facing envelope explains whether
+    the model was warmed or the step was a structural skip).
+    """
+
+    detail: str
+
+
+def _step_warm_cross_encoder(pipeline: Any, loader: Callable[[str], Any]) -> _RerankWarmOutcome:
+    """Force-load the cross-encoder reranker model when rerank is wired.
+
+    The reranker is a lazy singleton (:func:`kairix.core.search.rerank.get_cross_encoder`):
+    the model isn't loaded until the first rerank-eligible query. That first
+    query pays a multi-second torch import + model load on the request path —
+    even though ``gate.mark_ready`` already flipped the server to ready. This
+    step pays that cost during warm so "ready" genuinely means warm (PLA-271).
+
+    The step only warms when rerank is actually wired on the built pipeline's
+    config — ``rerank.enabled`` is True OR ``rerank_intents`` is non-empty.
+    That is the exact condition under which the factory
+    (``kairix.core.factory._resolve_reranker``) wires a real reranker closure,
+    so we never import torch + sentence-transformers for a deployment that has
+    rerank fully disabled.
+
+    Args:
+        pipeline: the SearchPipeline built by :func:`_step_build_pipeline`.
+            Its ``.config`` carries the resolved ``RetrievalConfig`` whose
+            ``rerank`` block + ``rerank_intents`` decide whether to warm.
+        loader: one-arg callable ``(model_name) -> encoder`` — production
+            binds :func:`kairix.core.search.rerank.get_cross_encoder`; tests
+            inject a recording fake to prove the load is (not) requested.
+
+    Returns:
+        ``_RerankWarmOutcome`` carrying an operator-facing ``detail``.
+    """
+    cfg = getattr(pipeline, "config", None)
+    if cfg is None:
+        # No built pipeline (failed build) or a config-less stand-in — there
+        # is nothing to warm. The build failure, if any, is reported by the
+        # build step; this is a structural skip.
+        return _RerankWarmOutcome(DETAIL_RERANK_NO_PIPELINE)
+    # cfg is the resolved RetrievalConfig — ``rerank`` (a RerankConfig) and
+    # ``rerank_intents`` are always present. ``wired`` mirrors the factory's
+    # _resolve_reranker condition exactly: a real reranker closure is wired
+    # iff rerank is force-enabled OR at least one intent reranks by default.
+    rerank_cfg = cfg.rerank
+    wired = bool(rerank_cfg.enabled) or bool(cfg.rerank_intents)
+    if not wired:
+        return _RerankWarmOutcome(DETAIL_RERANK_NOT_WIRED)
+    loader(rerank_cfg.model)
+    return _RerankWarmOutcome(f"warmed cross-encoder model {rerank_cfg.model!r}")
 
 
 def _step_ensure_sqlite_stats() -> Any:
@@ -191,6 +261,22 @@ def _time_step(name: str, fn: Callable[[], Any]) -> tuple[WarmStep, Any]:
         )
 
 
+def _with_detail(step: WarmStep, result: Any) -> WarmStep:
+    """Hoist a step result's ``.detail`` onto the WarmStep for the envelope.
+
+    Steps whose result object carries a human-readable ``.detail`` (the
+    sqlite-stats bootstrap and the cross-encoder warm) surface it in the
+    per-step envelope record — operators see "ANALYZE complete" / "warmed
+    cross-encoder ..." / "rerank not wired ... skipped" without
+    cross-referencing a separate field. Steps that return a bare value (or
+    ``None``, or an object with no ``detail``) keep their original record.
+    """
+    detail_attr = getattr(result, "detail", None) if result is not None else None
+    if not detail_attr:
+        return step
+    return WarmStep(name=step.name, ok=step.ok, duration_s=step.duration_s, detail=str(detail_attr))
+
+
 def _emit_progress(callback: Callable[[str], None] | None, stage_name: str) -> None:
     """Fire ``callback(stage_name)`` if provided, swallowing exceptions.
 
@@ -212,6 +298,7 @@ def run_warm(
     search_probe: Callable[[Any], Any] | None = None,
     graph_client_opener: Callable[[], Any] | None = None,
     sqlite_stats_ensurer: Callable[[], Any] | None = None,
+    cross_encoder_loader: Callable[[str], Any] | None = None,
     progress_callback: Callable[[str], None] | None = None,
 ) -> WarmResult:
     """Run all warm-up steps and return a structured result.
@@ -225,6 +312,12 @@ def run_warm(
         sqlite_stats_ensurer: injectable; tests pass a fake that drives
             the ANALYZE bootstrap without opening a real SQLite
             connection. Production omits.
+        cross_encoder_loader: injectable one-arg ``(model_name) -> encoder``
+            loader for the rerank warm step. Default ``None`` binds the
+            production :func:`kairix.core.search.rerank.get_cross_encoder`
+            (force-loads + caches the cross-encoder singleton). Tests inject
+            a recording fake to prove the model load is requested only when
+            rerank is wired on the built pipeline's config.
         progress_callback: optional one-arg callable invoked with the
             stage name each time a step completes (success or failure).
             Default ``None`` — preserves prior behaviour. The CLI wires a
@@ -242,6 +335,15 @@ def run_warm(
     probe = search_probe or _step_probe_search
     open_graph = graph_client_opener or _step_open_graph_client
     ensure_stats = sqlite_stats_ensurer or _step_ensure_sqlite_stats
+    if cross_encoder_loader is None:
+        # Lazy import: keeps the runner importable on call sites that don't
+        # link sentence-transformers, and the module-level rerank import is
+        # cheap (torch only loads inside get_cross_encoder, on first call).
+        from kairix.core.search.rerank import get_cross_encoder
+
+        load_cross_encoder: Callable[[str], Any] = get_cross_encoder
+    else:
+        load_cross_encoder = cross_encoder_loader
 
     mark_warming()
     t_total_start = time.perf_counter()
@@ -265,20 +367,22 @@ def run_warm(
         )
     _emit_progress(progress_callback, _STEP_PROBE)
 
+    # Warm the cross-encoder reranker (PLA-271). The step itself reads the
+    # built pipeline's config to decide whether rerank is wired; a None
+    # pipeline (failed build) surfaces as a structural skip via the
+    # _RerankWarmOutcome detail.
+    step_rerank, rerank_result = _time_step(
+        _STEP_RERANK, lambda: _step_warm_cross_encoder(pipeline, load_cross_encoder)
+    )
+    steps.append(_with_detail(step_rerank, rerank_result))
+    _emit_progress(progress_callback, _STEP_RERANK)
+
     step_stats, stats_result = _time_step(_STEP_SQLITE_STATS, ensure_stats)
     # When the ensurer returned a WarmStepResult-shaped object, hoist its
     # ``detail`` into the WarmStep so operators see "ANALYZE complete" /
     # "stats already present, skipped" in the envelope without having to
     # cross-reference a separate field.
-    detail_attr = getattr(stats_result, "detail", None) if stats_result is not None else None
-    if detail_attr:
-        step_stats = WarmStep(
-            name=step_stats.name,
-            ok=step_stats.ok,
-            duration_s=step_stats.duration_s,
-            detail=str(detail_attr),
-        )
-    steps.append(step_stats)
+    steps.append(_with_detail(step_stats, stats_result))
     _emit_progress(progress_callback, _STEP_SQLITE_STATS)
 
     step_graph, _ = _time_step(_STEP_GRAPH, open_graph)

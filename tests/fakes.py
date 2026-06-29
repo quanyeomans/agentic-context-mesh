@@ -1547,9 +1547,14 @@ class FakeSearchPipeline:
     the runner's *use* of the pipeline, not the pipeline itself.
     """
 
-    def __init__(self, scripted_results: list[Any] | None = None) -> None:
+    def __init__(self, scripted_results: list[Any] | None = None, *, config: Any = None) -> None:
         self._scripted_results = list(scripted_results or [])
         self.calls: list[dict[str, Any]] = []
+        # Mirrors the production SearchPipeline's ``.config`` (a
+        # RetrievalConfig). The warm runner's cross-encoder warm step reads
+        # ``pipeline.config.rerank`` + ``.rerank_intents`` to decide whether
+        # rerank is wired; tests pass a real RetrievalConfig to drive it.
+        self.config = config
 
     def search(self, query: str, **kwargs: Any) -> Any:
         self.calls.append({"query": query, "kwargs": kwargs})
@@ -1582,6 +1587,30 @@ class _FakeSearchResult:
 
     def __init__(self, *, results: list[Any]) -> None:
         self.results = results
+
+
+class FakeCrossEncoderLoader:
+    """Recording stand-in for ``kairix.core.search.rerank.get_cross_encoder``.
+
+    Injected into :func:`kairix.platform.warm.run_warm` through the
+    ``cross_encoder_loader`` seam so a test can prove the cross-encoder model
+    load is requested *exactly* when rerank is wired — without importing
+    torch / sentence-transformers or loading a real model. Every requested
+    model name lands in ``models``; ``calls`` is the request count.
+    """
+
+    def __init__(self, encoder: Any = None) -> None:
+        self._encoder = encoder
+        self.models: list[str] = []
+
+    @property
+    def calls(self) -> int:
+        """Number of times the loader was invoked."""
+        return len(self.models)
+
+    def __call__(self, model: str) -> Any:
+        self.models.append(model)
+        return self._encoder
 
 
 # ---------------------------------------------------------------------------

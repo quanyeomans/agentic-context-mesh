@@ -46,6 +46,14 @@ kairix.platform.llm.embed_provider::get_embed_provider::creds_resolver
 # option to pass a custom pipeline builder for benchmarking variant
 # pipelines without forking the public surface.
 kairix.platform.warm.runner::run_warm::pipeline_builder
+# PLA-271 — cross-encoder warm seam on the same warm orchestrator. Default
+# (None) binds the production kairix.core.search.rerank.get_cross_encoder;
+# tests inject a recording loader to prove the cross-encoder model load
+# fires exactly when rerank is wired (rerank.enabled OR rerank_intents)
+# WITHOUT importing torch / loading a real model. Documented swap point
+# between run_warm and the rerank model loader, mirroring pipeline_builder
+# directly above.
+kairix.platform.warm.runner::run_warm::cross_encoder_loader
 kairix.quality.eval.monitor::run_monitor::suite_loader
 kairix.quality.probe.runner::run_probe_search::suite_loader
 kairix.quality.probe.burst::run_probe_burst::suite_loader
