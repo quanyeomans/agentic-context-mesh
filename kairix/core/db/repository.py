@@ -67,12 +67,11 @@ class SQLiteDocumentRepository:
         """Map one FTS row into the result dict consumed by the search backend."""
         raw_score = float(row["bm25_score"])
         score = abs(raw_score) / (1.0 + abs(raw_score))
-        doc_text = row["doc"] or ""
-        if doc_text.startswith("---"):
-            parts = doc_text.split("---", 2)
-            snippet = parts[2].strip()[:300] if len(parts) >= 3 else doc_text[:300]
-        else:
-            snippet = doc_text[:300]
+        # PLA-269 — the snippet is an FTS5 ``snippet()`` window centred on the
+        # matched terms (built in ``_build_bm25_query``), so an agent can see
+        # WHY the chunk matched instead of a fixed prefix of the chunk opening.
+        # ``or ""`` guards the rare contentless-FTS row that yields NULL.
+        snippet = str(row["snippet"] or "")
         # MM-3 — surface per-page citation. Defensive on legacy rows that
         # may pre-date the source_page column.
         raw_page: Any = None

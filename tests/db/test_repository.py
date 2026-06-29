@@ -178,10 +178,12 @@ def test_search_fts_returns_empty_when_execute_raises(db_path: Path, repo: SQLit
 
 @pytest.mark.unit
 def test_search_fts_returns_hit_with_plain_body_snippet(db_path: Path, repo: SQLiteDocumentRepository) -> None:
-    """Drives line 70 — when the document body has no ``---`` frontmatter,
-    the snippet is the first 300 chars verbatim.
+    """A plain body yields a result whose snippet is a bounded FTS5
+    ``snippet()`` window containing the matched region (PLA-269), not the
+    whole chunk.
     """
-    _seed_doc(db_path, path="docs/plain.md", body="alpha bravo charlie content " * 20)
+    body = "alpha bravo charlie content " * 20
+    _seed_doc(db_path, path="docs/plain.md", body=body)
 
     results = repo.search_fts("alpha")
 
@@ -189,37 +191,41 @@ def test_search_fts_returns_hit_with_plain_body_snippet(db_path: Path, repo: SQL
     hit = results[0]
     assert hit["file"] == "docs/plain.md"
     assert "alpha bravo charlie content" in hit["snippet"]
-    # Snippet is bounded.
-    assert len(hit["snippet"]) <= 300
+    # The snippet is a bounded window around the match, not the full chunk.
+    assert len(hit["snippet"]) < len(body)
 
 
 @pytest.mark.unit
-def test_search_fts_strips_frontmatter_for_snippet(db_path: Path, repo: SQLiteDocumentRepository) -> None:
-    """Drives lines 67-68 — when the body starts with ``---`` frontmatter,
-    the snippet is the post-frontmatter body, not the YAML.
+def test_search_fts_snippet_centres_on_body_match_not_frontmatter(
+    db_path: Path, repo: SQLiteDocumentRepository
+) -> None:
+    """PLA-269: when the match is deep in the body of a frontmattered chunk,
+    the snippet is the window AROUND the match — so it shows WHY the chunk
+    matched and does not lead with the YAML frontmatter block.
 
-    Sabotage proof: if the frontmatter strip were dropped, the snippet
-    would contain ``title:`` and the assertion fails.
+    Sabotage proof: under the retired ``doc_text[:300]`` prefix slice the
+    snippet would be the chunk opening (the frontmatter + filler) and would
+    NOT contain ``deep body alpha``; ``in`` would fail.
     """
-    body = "---\ntitle: My Doc\ndate: 2026-05-01\n---\nactual content alpha begins here."
+    frontmatter = "---\ntitle: My Doc\ndate: 2026-05-01\n---\n"
+    filler = "unrelated lead-in sentence here. " * 20
+    body = frontmatter + filler + "the deep body alpha marker sits far past the opening."
     _seed_doc(db_path, path="docs/fm.md", body=body, content_hash="h2")
 
     results = repo.search_fts("alpha")
 
     assert len(results) >= 1
     snippet = results[0]["snippet"]
-    assert "actual content alpha" in snippet
+    assert "deep body alpha" in snippet
     assert "title: My Doc" not in snippet
+    assert " … " in snippet
 
 
 @pytest.mark.unit
-def test_search_fts_handles_short_frontmatter_body(db_path: Path, repo: SQLiteDocumentRepository) -> None:
-    """Drives the ``len(parts) < 3`` branch on line 68 — a body that
-    starts with ``---`` but has fewer than three ``---``-delimited
-    sections falls back to the raw first-300-chars snippet.
-
-    This is the corner case where the content begins with a literal
-    ``---`` string but is not actual frontmatter.
+def test_search_fts_handles_body_starting_with_triple_dash(db_path: Path, repo: SQLiteDocumentRepository) -> None:
+    """A body that opens with a literal ``---`` but is not real frontmatter
+    still produces a snippet containing the matched term — the FTS5
+    ``snippet()`` window does not choke on the leading delimiter.
     """
     body = "--- shortened body without closing fence and unique zappa marker " * 5
     _seed_doc(db_path, path="docs/short-fm.md", body=body, content_hash="h3")
@@ -227,9 +233,9 @@ def test_search_fts_handles_short_frontmatter_body(db_path: Path, repo: SQLiteDo
     results = repo.search_fts("zappa")
 
     assert len(results) >= 1
-    # Sabotage proof: even with the broken frontmatter, the function
-    # returns a result rather than crashing.
-    assert isinstance(results[0]["snippet"], str)
+    snippet = results[0]["snippet"]
+    assert isinstance(snippet, str)
+    assert "zappa" in snippet
 
 
 # ── get_by_path ───────────────────────────────────────────────────────

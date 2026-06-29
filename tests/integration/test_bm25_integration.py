@@ -94,15 +94,17 @@ def test_bm25_scores_are_normalised_into_zero_one_range(real_db, real_document_r
 
 
 # ---------------------------------------------------------------------------
-# Frontmatter stripping contract — verified against real fixture docs
-# (every reflib fixture doc has YAML frontmatter; the SQL path must
-#  serve a snippet that does NOT begin with the frontmatter delimiter)
+# Matched-region snippet contract (PLA-269) — verified against real fixture
+# docs. Every reflib fixture doc has a YAML frontmatter block; a body-term
+# query must yield a snippet CENTRED on the body match, not the chunk opening,
+# so it never begins with the frontmatter delimiter.
 # ---------------------------------------------------------------------------
 
 
 def test_bm25_snippets_do_not_leak_yaml_frontmatter(real_db, real_document_root) -> None:
-    """The reflib fixture docs all start with ``---`` YAML blocks. The
-    snippet returned by bm25_search MUST be the body, not the frontmatter.
+    """The reflib fixture docs all start with ``---`` YAML blocks. A
+    body-term query yields an FTS5 ``snippet()`` window centred on the body
+    match, so the snippet does not begin with the frontmatter delimiter.
     """
     results = bm25_search(query="codebase", limit=10)
     assert results, "expected reflib hits for 'codebase'"
@@ -117,14 +119,47 @@ def test_bm25_snippets_do_not_leak_yaml_frontmatter(real_db, real_document_root)
         )
 
 
-def test_bm25_snippet_length_capped_at_300_chars(real_db, real_document_root) -> None:
-    """Per impl, snippets are truncated to 300 characters. Verify against
-    the real FTS5 path which serves variable-length doc bodies.
+def test_bm25_snippet_is_centred_on_a_late_match_with_ellipsis(real_db, real_document_root, tmp_path: Path) -> None:
+    """PLA-269 core contract, end-to-end through the production FTS5 schema.
+
+    Seed a chunk where the match term appears LATE — well past the chunk
+    opening — then assert the returned snippet is the window AROUND the match
+    (with the ``…`` truncation marker), not a fixed prefix of the chunk start.
+
+    Sabotage proof (executed): reverting ``_build_bm25_query`` /
+    ``_row_to_bm25_result`` to the old ``doc_text[:300]`` prefix slice makes
+    the snippet the chunk opening — which does NOT contain ``quokkaphore`` —
+    so ``"quokkaphore" in snippet`` fails.
     """
-    results = bm25_search(query="codebase", limit=20)
-    assert results, "expected reflib hits"
-    for r in results:
-        assert len(r["snippet"]) <= 300, f"snippet for {r['file']} exceeded 300 chars: {len(r['snippet'])}"
+    from kairix.core.db import open_db
+    from kairix.core.db.schema import create_schema
+
+    db_path = tmp_path / "late_match.sqlite"
+    db = open_db(db_path)
+    create_schema(db)
+    # A long chunk whose match term lives only at the tail.
+    opening = "This chunk opens with a long stretch of unrelated background prose. " * 12
+    tail = "The decisive term quokkaphore appears solely here at the very chunk tail."
+    doc = opening + tail
+    assert "quokkaphore" not in doc[:300], "fixture must place the match past the old prefix window"
+    db.execute("INSERT INTO content (hash, doc) VALUES ('h1', ?)", (doc,))
+    db.execute(
+        "INSERT INTO documents (collection, path, title, hash, active) VALUES ('notes', 'deep.md', 'Deep', 'h1', 1)"
+    )
+    doc_id = int(db.execute("SELECT id FROM documents WHERE path = 'deep.md'").fetchone()[0])
+    db.execute(
+        "INSERT INTO documents_fts(rowid, filepath, title, doc) VALUES (?, 'deep.md', 'Deep', ?)",
+        (doc_id, doc),
+    )
+    db.commit()
+    db.close()
+
+    results = bm25_search(query="quokkaphore", db_path=db_path)
+
+    assert results, "expected a hit for the seeded chunk"
+    snippet = results[0]["snippet"]
+    assert "quokkaphore" in snippet, "snippet must contain the matched region, not just the chunk prefix"
+    assert " … " in snippet, "a snippet truncated at the leading edge must carry the ellipsis marker"
 
 
 # ---------------------------------------------------------------------------

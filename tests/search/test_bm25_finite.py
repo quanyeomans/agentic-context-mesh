@@ -51,15 +51,17 @@ def _create_db_with_empty_doc(tmp_path: Path) -> Path:
             UNIQUE(collection, path)
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT, created_at TEXT);
+        -- Production-faithful FTS schema (content-storing, filepath/title/doc)
+        -- so _build_bm25_query's FTS5 snippet() resolves column 2 = doc.
         CREATE VIRTUAL TABLE documents_fts USING fts5(
-            title, doc, content='', tokenize='porter unicode61'
+            filepath, title, doc, tokenize='porter unicode61'
         );
 
         INSERT INTO documents (collection, path, title, hash, active)
         VALUES ('coll', 'empty-doc.md', 'kairix', 'h1', 1);
         INSERT INTO content (hash, doc) VALUES ('h1', '');
 
-        INSERT INTO documents_fts(rowid, title, doc) SELECT d.id, d.title, c.doc
+        INSERT INTO documents_fts(rowid, filepath, title, doc) SELECT d.id, d.path, d.title, c.doc
         FROM documents d JOIN content c ON c.hash = d.hash WHERE d.active = 1;
         """
     )

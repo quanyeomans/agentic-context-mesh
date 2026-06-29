@@ -211,6 +211,12 @@ def _build_bm25_query(
     helper, so this function is only ever called with ``None`` or a
     non-empty list.
     """
+    # The snippet is built by FTS5 ``snippet()`` on the ``doc`` column
+    # (index 2 of ``documents_fts(filepath, title, doc)``) so it is a window
+    # CENTRED on the matched terms, with a ``…`` ellipsis marking the
+    # truncated edges — not a fixed prefix of the chunk opening (PLA-269).
+    # ``snippet()`` reads from the FTS index's own stored copy of ``doc``, so
+    # the ``content`` table no longer needs joining for the result snippet.
     if collections is not None:
         placeholders = ",".join("?" * len(collections))
         sql = f"""
@@ -218,11 +224,10 @@ def _build_bm25_query(
                    d.path,
                    d.title,
                    d.source_page,
-                   c.doc,
+                   snippet(documents_fts, 2, '', '', ' … ', 32) AS snippet,
                    bm25(documents_fts, 1.0, 1.0, 0.5) AS bm25_score
             FROM documents_fts
             JOIN documents d ON d.id = documents_fts.rowid
-            JOIN content   c ON c.hash = d.hash
             WHERE documents_fts MATCH ?
               AND d.collection IN ({placeholders})
               AND d.active = 1
@@ -236,11 +241,10 @@ def _build_bm25_query(
                    d.path,
                    d.title,
                    d.source_page,
-                   c.doc,
+                   snippet(documents_fts, 2, '', '', ' … ', 32) AS snippet,
                    bm25(documents_fts, 1.0, 1.0, 0.5) AS bm25_score
             FROM documents_fts
             JOIN documents d ON d.id = documents_fts.rowid
-            JOIN content   c ON c.hash = d.hash
             WHERE documents_fts MATCH ?
               AND d.active = 1
             ORDER BY bm25_score ASC
@@ -305,14 +309,6 @@ def _bm25_via_doc_repo(
         return []
 
 
-def _extract_snippet(doc_text: str) -> str:
-    """Strip leading YAML frontmatter and return a 300-char snippet."""
-    if not doc_text.startswith("---"):
-        return doc_text[:300]
-    parts = doc_text.split("---", 2)
-    return parts[2].strip()[:300] if len(parts) >= 3 else doc_text[:300]
-
-
 def _normalise_bm25_score(raw_score: float, *, path: str = "") -> float:
     """Normalise a raw BM25 score into the closed interval [0, 1].
 
@@ -343,8 +339,11 @@ def _row_to_bm25_result(row: Any) -> BM25Result:
         raw_page = None
     return BM25Result(
         file=path,
+        # FTS5 ``snippet()`` window centred on the match (PLA-269), not a
+        # fixed prefix of the chunk opening. ``or ""`` guards the rare
+        # contentless-FTS row where ``snippet()`` yields NULL.
+        snippet=str(row["snippet"] or ""),
         title=str(row["title"] or ""),
-        snippet=_extract_snippet(row["doc"] or ""),
         score=_normalise_bm25_score(raw_score, path=path),
         collection=str(row["collection"]),
         source_page=int(raw_page) if isinstance(raw_page, int) else None,
