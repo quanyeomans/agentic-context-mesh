@@ -19,9 +19,11 @@ drop content from any configured location.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterable
 from datetime import date, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 # build_search_pipeline is imported at module load (not lazily inside
 # fetch_hybrid_search) so the factory's per-config memoisation kicks in
@@ -39,6 +41,9 @@ from kairix.agents.briefing._source_caches import (
 )
 from kairix.core.factory import build_search_pipeline
 from kairix.text import truncate_to_tokens
+
+if TYPE_CHECKING:
+    from kairix.core.search.pipeline import SearchPipeline
 
 # Re-export the brief-source cache accessors + class so tests + the
 # probe-caches CLI can reach them without an underscore-prefixed
@@ -550,13 +555,131 @@ def _fetch_recent_decisions_impl(agent: str, max_tokens: int, document_root: Pat
 
 
 # ---------------------------------------------------------------------------
-# Source 6: Hybrid search on agent name
+# Source 6: Hybrid search driven by real agent signal (PLA-264)
 # ---------------------------------------------------------------------------
 
+# Actionable-work markers we lift out of the cheap fan-out sources to seed
+# the retrieval query. Matched case-insensitively as substrings — the same
+# convention ``_MEMORY_LOG_TAGS`` uses for the memory-log scan.
+_FOCUS_TAGS = ("[pending]", "[blocked]", "[action:", "todo")
 
-def fetch_hybrid_search(agent: str, max_tokens: int = 600) -> str:
+# Caps so the derived query stays a focused signal, not the whole memory
+# log: at most N distinct work-items, truncated to a small token budget
+# before it hits the embedder.
+_MAX_FOCUS_LINES = 8
+_FOCUS_QUERY_MAX_TOKENS = 80
+
+# Leading bookkeeping markup we strip so the embedded query carries the
+# work-item text ("ship the connector refactor"), not the markers.
+_LEADING_DATE_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2}\]\s*")
+_LEADING_STATUS_RE = re.compile(r"^\[(?:pending|blocked)\]\s*", re.IGNORECASE)
+_LEADING_TODO_RE = re.compile(r"^todo\b:?\s*", re.IGNORECASE)
+
+
+def _clean_focus_line(line: str) -> str:
+    """Reduce one tagged memory line to its searchable work-item text.
+
+    Drops the leading ``[YYYY-MM-DD]`` day label that ``fetch_memory_logs``
+    prefixes, then the ``[pending]``/``[blocked]`` status tag and any
+    ``TODO`` marker, so the query embeds the actual task rather than the
+    bookkeeping markup.
     """
-    Run hybrid search on agent name to get top 5 relevant chunks.
+    text = _LEADING_DATE_RE.sub("", line.strip())
+    text = _LEADING_STATUS_RE.sub("", text)
+    text = _LEADING_TODO_RE.sub("", text)
+    return text.strip(" -*").strip()
+
+
+def _line_is_focus(line_lower: str) -> bool:
+    """True when a lowercased line carries one of the actionable markers."""
+    return any(tag in line_lower for tag in _FOCUS_TAGS)
+
+
+def _extend_focus_from_block(block: str, seen: set[str], out: list[str]) -> None:
+    """Append the distinct actionable lines in ``block`` to ``out``."""
+    for raw in block.splitlines():
+        if not _line_is_focus(raw.strip().lower()):
+            continue
+        cleaned = _clean_focus_line(raw)
+        key = cleaned.lower()
+        if cleaned and key not in seen:
+            seen.add(key)
+            out.append(cleaned)
+
+
+def _extract_focus_lines(signals: Iterable[str]) -> list[str]:
+    """Pull distinct ``[pending]``/``[blocked]``/``[action:]``/TODO items.
+
+    Scans every signal block (memory logs, recent memory, entity stub) and
+    returns the cleaned work-item lines, de-duplicated and capped at
+    :data:`_MAX_FOCUS_LINES`.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for block in signals:
+        _extend_focus_from_block(block, seen, out)
+    return out[:_MAX_FOCUS_LINES]
+
+
+def _collect_focus_signals(agent: str) -> list[str]:
+    """Re-read the cheap fan-out sources to seed the retrieval query.
+
+    Returns the non-empty text blocks the brief's other sources already
+    produce for this agent — memory logs, recent memory, and the entity
+    stub. These fetchers are cached for 1h per ``(source, agent)``, so when
+    the concurrent fan-out has already run them this is a cache hit rather
+    than a second disk/scope read.
+    """
+    blocks: list[str] = []
+    for block in (fetch_memory_logs(agent), fetch_recent_memory(agent), fetch_entity_stub(agent)):
+        if block:
+            blocks.append(block)
+    return blocks
+
+
+def _build_focus_query(agent: str, focus_signals: Iterable[str] | None) -> str:
+    """Build the retrieval query from real agent signal, not the bare name.
+
+    ``focus_signals`` is the injection seam — pass the fan-out's already-
+    fetched memory text directly. Production callers leave it ``None`` and
+    the signal is collected via :func:`_collect_focus_signals`.
+
+    Falls back to the agent name only when there is genuinely no actionable
+    signal yet (a freshly onboarded agent with no memory) — that keeps a
+    non-empty query rather than searching for the empty string.
+    """
+    signals = list(focus_signals) if focus_signals is not None else _collect_focus_signals(agent)
+    focus_lines = _extract_focus_lines(signals)
+    if not focus_lines:
+        return agent
+    return truncate_to_tokens(" ".join(focus_lines), _FOCUS_QUERY_MAX_TOKENS)
+
+
+def fetch_hybrid_search(
+    agent: str,
+    max_tokens: int = 600,
+    *,
+    pipeline: SearchPipeline | None = None,
+    focus_signals: Iterable[str] | None = None,
+) -> str:
+    """
+    Run hybrid search seeded by the agent's real work signal (PLA-264).
+
+    The query is derived from the ``[pending]``/``[blocked]``/``[action:]``/
+    ``TODO`` lines already surfaced by the cheap fan-out sources (memory
+    logs + recent memory + entity stub) — searching for those concrete
+    work-items returns docs relevant to what the agent is actually doing,
+    instead of the degenerate "search for the string 'builder'" that merely
+    matched docs mentioning the agent name. The ``agent=`` / ``scope=``
+    arguments are kept for collection scoping.
+
+    Test seams (production callers leave both ``None``):
+      * ``pipeline`` — inject a search pipeline (e.g. ``FakeSearchPipeline``)
+        instead of constructing the production one via
+        :func:`build_search_pipeline`.
+      * ``focus_signals`` — pass the fan-out signal blocks directly rather
+        than re-reading them through the cached source fetchers.
+
     Returns empty string on failure.
 
     ``build_search_pipeline`` is imported at module load (not lazily
@@ -567,8 +690,9 @@ def fetch_hybrid_search(agent: str, max_tokens: int = 600) -> str:
     cache is locked by #396 W-B Commit 1's double-checked locking.
     """
     try:
-        _pipeline = build_search_pipeline()
-        result = _pipeline.search(query=agent, agent=agent, scope="shared+agent", budget=max_tokens * 2)
+        search_pipeline = build_search_pipeline() if pipeline is None else pipeline
+        query = _build_focus_query(agent, focus_signals)
+        result = search_pipeline.search(query=query, agent=agent, scope="shared+agent", budget=max_tokens * 2)
 
         if not result.results:
             return ""
