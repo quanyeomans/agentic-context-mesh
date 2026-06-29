@@ -33,13 +33,19 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
 
 from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
 from kairix.core.search.fusion import RRFFusion
-from kairix.core.search.pipeline import SearchPipeline
+from kairix.core.search.pipeline import (
+    DEFAULT_DISPATCH_CONCURRENCY,
+    SearchPipeline,
+    build_dispatch_pool,
+    dispatch_workers_for,
+)
 from kairix.transport.embed_service import ProviderEmbeddingService
 from tests.fakes import (
     FakeClassifier,
@@ -243,6 +249,112 @@ def test_dispatch_parallel_preserves_result_set_shape() -> None:
     assert "bm25" in result.stage_latency_ms
     assert "vector" in result.stage_latency_ms
     assert "dispatch" in result.stage_latency_ms
+
+
+# ---------------------------------------------------------------------------
+# Fix 1b — dispatch pool sized for concurrency (PLA-272)
+#
+# The pool was a fixed 2-worker singleton, so backend dispatch for the WHOLE
+# process was capped at one search's worth of parallelism. Under teaming load
+# (#436: post-warm p95 ~640ms at --concurrency 5 — ten dispatch tasks on two
+# workers) the surplus tasks queued. The fix sizes the pool from the expected
+# concurrent load (2 futures per search * KAIRIX_MAX_CONCURRENCY). The size
+# seam is the ``concurrency`` argument to ``dispatch_workers_for`` /
+# ``build_dispatch_pool`` — injected as a value, never read from process env
+# in the test (F2-clean), and the SearchPipeline.dispatch_pool field lets a
+# caller inject its own pool.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_dispatch_pool_sized_from_configured_concurrency() -> None:
+    """The pool scales with the injected concurrency value and clears the legacy 2-worker ceiling.
+
+    ``dispatch_workers_for`` is the sizing seam: the concurrency is passed in
+    as a value (injection, not ``setenv``). The default sizing must exceed the
+    old fixed 2-worker pool that bottlenecked teaming load (PLA-272), and the
+    size must grow with the configured concurrency. ``build_dispatch_pool``
+    then constructs a real pool whose ``max_workers`` equals the computed size,
+    so a hardcoded ceiling is caught at the executor, not just in the helper.
+
+    Sabotage-proof (executed): in ``kairix/core/search/pipeline.py`` change
+    ``build_dispatch_pool`` to ``ThreadPoolExecutor(max_workers=2, ...)`` (the
+    legacy hardcode) and re-run — the ``pool._max_workers == dispatch_workers_for(...)``
+    and ``> 2`` asserts fail. Restore to pass. Equivalently, make
+    ``dispatch_workers_for`` ``return 2`` and the default/scaling asserts fail.
+    """
+    # Default sizing clears the legacy fixed 2-worker ceiling.
+    default_workers = dispatch_workers_for(DEFAULT_DISPATCH_CONCURRENCY)
+    assert default_workers > 2, (
+        f"default dispatch pool sized at {default_workers} workers — must exceed the legacy 2-worker "
+        f"ceiling that bottlenecked teaming load (PLA-272)"
+    )
+
+    # Scales with the configured concurrency value (strict monotonic growth).
+    small = dispatch_workers_for(4)
+    medium = dispatch_workers_for(8)
+    large = dispatch_workers_for(16)
+    assert small < medium < large, f"sizing must grow with concurrency; got {small}, {medium}, {large}"
+
+    # The built pool honours the computed size — guards against a hardcoded
+    # max_workers literal slipping into the executor construction.
+    pool = build_dispatch_pool(concurrency=8)
+    try:
+        assert pool._max_workers == dispatch_workers_for(8)
+        assert pool._max_workers > 2
+    finally:
+        pool.shutdown(wait=False)
+
+
+@pytest.mark.unit
+def test_pipeline_dispatches_through_injected_pool() -> None:
+    """The pipeline submits both legs to the injected ``dispatch_pool`` seam.
+
+    Proves the seam is load-bearing: when a pool is injected via the public
+    ``dispatch_pool`` field, the BM25 + vector legs run on THAT pool's worker
+    threads (identified by the pool's distinctive thread-name prefix), not the
+    process-shared default. This is the injection path PLA-272 relies on for
+    testing sizing without touching process env.
+
+    Sabotage-proof (executed): in ``SearchPipeline._dispatch_backends`` replace
+    ``pool = self.dispatch_pool if self.dispatch_pool is not None else
+    _default_dispatch_pool()`` with ``pool = _default_dispatch_pool()`` — the
+    leg threads then carry the ``search-dispatch`` prefix and the
+    ``startswith("injected-dispatch")`` asserts fail. Restore to pass.
+    """
+    captured: dict[str, str] = {}
+
+    class _NameCapturingBM25:
+        """BM25 backend that records the worker-thread name it ran on."""
+
+        def search(self, query: str, collections: list[str] | None = None, limit: int = 20) -> list[dict]:
+            captured["bm25_thread"] = threading.current_thread().name
+            return [{"file": f"{query}.md", "title": "t", "snippet": "", "score": 1.0, "collection": "c"}]
+
+        def get_chunk_dates(self, paths: list[str]) -> dict[str, str]:
+            return {}
+
+    injected = ThreadPoolExecutor(max_workers=6, thread_name_prefix="injected-dispatch")
+    try:
+        pipeline = SearchPipeline(
+            classifier=FakeClassifier(),
+            bm25=_NameCapturingBM25(),  # type: ignore[arg-type]  # duck-typed BM25 backend test seam — only .search / .get_chunk_dates exercised
+            vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository()),
+            graph=FakeGraphRepository(available=True),
+            fusion=FakeFusion(),
+            boosts=[],
+            logger=None,
+            dispatch_pool=injected,
+        )
+        pipeline.search("injected pool query")
+    finally:
+        injected.shutdown(wait=False)
+
+    assert "bm25_thread" in captured, "BM25 leg never ran"
+    assert captured["bm25_thread"].startswith("injected-dispatch"), (
+        f"BM25 leg ran on {captured['bm25_thread']!r} — expected the injected pool's 'injected-dispatch' "
+        f"threads, so the dispatch_pool seam was bypassed"
+    )
 
 
 # ---------------------------------------------------------------------------
