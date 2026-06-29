@@ -24,6 +24,7 @@ Subcommands:
   probe-config  Probe the configured provider for health + tuning recommendations
   mcp-calls   Inspect the mcp_call_log per-MCP-tool-call observability table
   caches      Inspect the in-memory cache stats (prep summary cache, brief output cache)
+  slo         Perf & affordance SLO harness: cold/warm/concurrency latency + fact-recall + breadcrumb completeness across brief/remember/recall/search
   warm        Pre-load caches + pay factory-init costs (run at container start, before /healthz/ready=200)
   wikilinks   Inject [[wikilinks]] on first mention in agent-written document store files
   reference-library  Reference library: install entities, check status, run extraction
@@ -92,6 +93,8 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "probe-config": ("kairix.quality.probe.config_cli", "main", True),
     "mcp-calls": ("kairix.quality.probe.mcp_calls_cli", "main", True),
     "caches": ("kairix.quality.probe.caches_cli", "main", True),
+    # F45-feature: tests/bdd/features/cli_slo.feature
+    "slo": ("kairix.quality.probe.slo_cli", "main", True),
     "warm": ("kairix.platform.warm.cli", "main", True),
     "summarise": ("kairix.knowledge.summaries.cli", "main", True),
     "timeline": ("kairix.core.temporal.cli", "main", True),
