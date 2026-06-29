@@ -335,14 +335,27 @@ if [ -z "$weighted" ]; then
 	exit 1
 fi
 
-# Regression gate: only when a baseline is supplied. delta = baseline -
-# weighted; fail if delta > tolerance (deploy.go's BaselineWeightedTotal
-# check). awk does the float compare; print a clear message on regression.
 # Regression gate — always armed (BASELINE_WEIGHTED defaults to the standing
-# baseline). delta = baseline - weighted; fail if delta > tolerance, matching
-# deploy.go's BaselineWeightedTotal check.
+# baseline). delta = baseline - weighted; regress if delta > tolerance, matching
+# deploy.go's BaselineWeightedTotal check. awk does the float compare.
 if awk -v w="$weighted" -v b="$BASELINE_WEIGHTED" -v tol="$REGRESSION_TOLERANCE" \
 	'BEGIN { delta = b - w; exit !(delta > tol) }'; then
+	verdict=regress
+else
+	verdict=pass
+fi
+
+# Machine-readable eval marker on STDOUT, emitted on BOTH the pass and regress
+# paths. The migrated deploy plane (release-vm-deploy.yml's post-reflib-status
+# job) reads this off the box-side run-command output to publish the
+# `vm-reflib-regression` commit status (success/failure + the achieved score)
+# that release.yml's stable-release alpha-gate requires. Kept here (not a
+# gh-api call) so NO GitHub token ever rides in the box-side az-run-command
+# payload — the workflow owns the POST. Stable single-line key=value contract.
+printf 'KAIRIX_REFLIB verdict=%s weighted=%s baseline=%s tolerance=%s\n' \
+	"$verdict" "$weighted" "$BASELINE_WEIGHTED" "$REGRESSION_TOLERANCE"
+
+if [ "$verdict" = regress ]; then
 	printf 'FAIL apply-alpha: regression: weighted=%s vs baseline=%s (delta>%s tolerance)\n' \
 		"$weighted" "$BASELINE_WEIGHTED" "$REGRESSION_TOLERANCE" >&2
 	exit 1

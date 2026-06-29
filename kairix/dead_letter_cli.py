@@ -165,7 +165,9 @@ def _write_drain_report(summaries: tuple[DrainSummary, ...], *, dry_run: bool, o
     out.write(f"  total: {verb} {total} across {len(summaries)} source(s).\n")
 
 
-def _run_drain(conn: sqlite3.Connection, *, source_name: str | None, dry_run: bool, max_items: int) -> tuple:
+def _run_drain(
+    conn: sqlite3.Connection, *, source_name: str | None, dry_run: bool, max_items: int
+) -> tuple[DrainSummary, ...]:
     """Dispatch one or all sources through the drain core.
 
     Builds the silver processor on the SAME connection the core commits

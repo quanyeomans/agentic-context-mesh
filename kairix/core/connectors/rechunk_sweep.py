@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from kairix.core.connectors.chunker_registry import (
     DOCX_MIME,
@@ -168,7 +168,7 @@ def scan_candidates(
 def _candidate_to_stale(
     db: sqlite3.Connection,
     registry: ChunkerRegistry,
-    row: tuple,
+    row: tuple[Any, ...],
 ) -> StaleDoc | None:
     """Resolve one discovery row to a :class:`StaleDoc`, or None if converged."""
     (

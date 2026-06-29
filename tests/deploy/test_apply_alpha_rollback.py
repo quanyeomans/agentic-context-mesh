@@ -164,6 +164,26 @@ def test_regression_does_not_roll_back(tmp_path):
     assert sum(1 for ln in dlog.splitlines() if " up " in ln) == 1  # no rollback up
 
 
+def test_emits_reflib_marker_on_pass(tmp_path):
+    # The migrated deploy plane (PLA-250) reads the reflib eval result off the
+    # box-side stdout to post the `vm-reflib-regression` commit status. apply-alpha
+    # must emit a single machine-readable marker carrying verdict + weighted +
+    # baseline + tolerance on the PASS path (default FAKE_WEIGHTED=0.810 > the
+    # 0.808 baseline minus 0.05 tolerance -> pass).
+    proc, _dlog, _env = _run(tmp_path, NEW)
+    assert proc.returncode == 0, proc.stderr
+    assert "KAIRIX_REFLIB verdict=pass weighted=0.810 baseline=0.808 tolerance=0.05" in proc.stdout, proc.stdout
+
+
+def test_emits_reflib_marker_on_regression(tmp_path):
+    # On a regression the marker must STILL be emitted (verdict=regress) so the
+    # workflow can post state=failure with the achieved weighted score, not just
+    # an absent status. The marker goes to stdout; the FAIL line stays on stderr.
+    proc, _dlog, _env = _run(tmp_path, NEW, FAKE_WEIGHTED="0.500")
+    assert proc.returncode == 1, proc.stderr
+    assert "KAIRIX_REFLIB verdict=regress weighted=0.500 baseline=0.808 tolerance=0.05" in proc.stdout, proc.stdout
+
+
 def test_same_tag_redeploy_rollback_impossible_exits_11(tmp_path):
     proc, _dlog, _env = _run(tmp_path, PRIOR, FAKE_UP_FAIL_TAGS=PRIOR)
     assert proc.returncode == 11, proc.stderr
