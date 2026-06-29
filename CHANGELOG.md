@@ -7,6 +7,8 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.6.28] - 2026-06-29
+
 ### For operators
 
 - **Point SharePoint at a site and it finds the drives.** The SharePoint connector now auto-discovers every drive in a site you name (`site_id`, or a `site_url`) — no more hand-entering drive IDs. Configure a site and kairix indexes its document libraries; if one site can't be resolved it's skipped with a clear warning while the others keep syncing. (This is also the foundation for guided SharePoint setup.)
