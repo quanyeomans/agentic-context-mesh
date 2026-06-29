@@ -29,7 +29,7 @@ jobs:
       pull-requests: read
     if: github.event.pull_request.draft == false
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Check PR description completeness
         uses: actions/github-script@v9

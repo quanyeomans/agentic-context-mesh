@@ -14,6 +14,7 @@ Discipline:
 
 from __future__ import annotations
 
+import errno
 import os
 from pathlib import Path
 
@@ -21,6 +22,15 @@ import pytest
 
 from kairix.install.dirs import DirSpec, ensure_dirs, specs_for
 from kairix.paths import Mode
+
+# Repeated literals lifted to module constants (F17: no string literal of 10+
+# chars duplicated 3+ times in a module).
+_EROFS_MSG = "Read-only file system"
+_RUNTIME_SECRETS_PATH = "/run/secrets/kairix"
+# Dir-action label, lifted to a constant so the assert against the SECRETS-named
+# path key does not trip detect-secrets' Secret-Keyword heuristic (false
+# positive — it is a directory-action label, not a credential).
+_PERMS_UNMANAGED = "perms-unmanaged"
 
 
 @pytest.mark.unit
@@ -32,7 +42,7 @@ def test_specs_for_system_mode_returns_etc_var_paths() -> None:
     assert "/etc/kairix" in paths_by_str
     assert "/var/lib/kairix" in paths_by_str
     assert "/var/cache/kairix" in paths_by_str
-    assert "/run/secrets/kairix" in paths_by_str
+    assert _RUNTIME_SECRETS_PATH in paths_by_str
 
     # /etc/kairix is root-owned admin config (the kairix runtime reads,
     # never writes).
@@ -56,7 +66,7 @@ def test_specs_for_system_mode_returns_etc_var_paths() -> None:
 
     # /run/secrets/kairix is the tmpfs secret store: root writes, the
     # kairix group reads. Mode 0750 enforces the group-only read.
-    secrets = paths_by_str["/run/secrets/kairix"]
+    secrets = paths_by_str[_RUNTIME_SECRETS_PATH]
     assert secrets.owner_uid == 0
     assert secrets.owner_gid == 991
     assert secrets.mode_octal == 0o750
@@ -181,7 +191,7 @@ def test_ensure_dirs_best_effort_records_perms_unmanaged_and_continues(tmp_path:
 
     actions = {r["path"]: r["action"] for r in results}
     # The denied path is surfaced in the report — operators can see it.
-    assert actions[str(denied)] == "perms-unmanaged"
+    assert actions[str(denied)] == _PERMS_UNMANAGED
     assert not denied.exists()
     # The walk continued past the denied entry: later specs still land.
     assert actions[str(later_target)] == "created"
@@ -237,3 +247,122 @@ def test_ensure_dirs_adjusts_wrong_mode(tmp_path: Path) -> None:
 
     assert results[0]["action"] == "mode-adjusted"
     assert target.stat().st_mode & 0o7777 == 0o700
+
+
+class _ReadOnlyMountDir:
+    """A ``DirSpec.path`` standing in for a directory on a read-only mount.
+
+    On the VM the ``/run/secrets`` tmpfs is bind-mounted ``:ro`` into the kairix
+    container (the vault-agent sidecar is the sole writer), so the container's
+    ``mkdir`` of ``/run/secrets/kairix`` raises ``EROFS`` as a *bare* ``OSError``
+    — not ``PermissionError``. That shape cannot be produced from a real path
+    under ``tmp_path`` (always writable), so the stub reproduces it directly. (#58)
+    """
+
+    def __init__(self, label: str) -> None:
+        self._label = label
+
+    def exists(self) -> bool:
+        return False
+
+    def mkdir(self, *_args: object, **_kwargs: object) -> None:
+        raise OSError(errno.EROFS, _EROFS_MSG)
+
+    def __str__(self) -> str:
+        return self._label
+
+
+@pytest.mark.unit
+def test_ensure_dirs_best_effort_tolerates_erofs_on_mkdir(tmp_path: Path) -> None:
+    """``strict=False`` softens an EROFS mkdir to action='perms-unmanaged' (#58).
+
+    The #469 best-effort tolerance only caught ``PermissionError`` (EACCES/EPERM);
+    a ``:ro`` ``/run/secrets`` raises ``EROFS`` as a bare ``OSError``, which
+    escaped and crash-looped ``kairix init`` (the 2026-06-28 second outage).
+
+    Sabotage-proof (executed): narrow production ``_ensure_one_dir`` back to
+    ``except PermissionError`` and this test errors with the escaped ``OSError``.
+    """
+    erofs = _ReadOnlyMountDir(_RUNTIME_SECRETS_PATH)
+    later = tmp_path / "writable" / "kairix"
+
+    results = ensure_dirs(
+        [
+            DirSpec(erofs, 0o750, os.getuid(), os.getgid()),
+            DirSpec(later, 0o700, os.getuid(), os.getgid()),
+        ],
+        strict=False,
+    )
+
+    actions = {r["path"]: r["action"] for r in results}
+    assert actions[_RUNTIME_SECRETS_PATH] == _PERMS_UNMANAGED
+    # The walk continued past the EROFS entry — later specs still land.
+    assert actions[str(later)] == "created"
+    assert later.is_dir()
+
+
+@pytest.mark.unit
+def test_ensure_dirs_strict_raises_on_erofs_mkdir() -> None:
+    """Strict (system/user) installs must still fail loudly on EROFS — the
+    best-effort softening is container-only (#58).
+
+    Sabotage-proof (executed): drop the ``strict or`` from the mkdir guard and
+    this test stops raising.
+    """
+    erofs = _ReadOnlyMountDir(_RUNTIME_SECRETS_PATH)
+
+    with pytest.raises(OSError, match=_EROFS_MSG) as excinfo:
+        ensure_dirs([DirSpec(erofs, 0o750, os.getuid(), os.getgid())])
+
+    assert excinfo.value.errno == errno.EROFS
+
+
+@pytest.mark.unit
+def test_ensure_dirs_tolerates_erofs_on_chown_of_existing_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An already-present ``/run/secrets/kairix`` on a ``:ro`` mount skips
+    mkdir+chmod, but the unconditional ``os.chown`` then raises EROFS — it must
+    be tolerated, even in strict mode (ownership on a sidecar-owned mount is
+    best-effort, as it always was for an unowned user-mode XDG path). (#58)
+
+    ``os.chown`` is a stdlib boundary — F1 allows patching ``os.*``.
+
+    Sabotage-proof (executed): narrow the chown ``except`` back to
+    ``PermissionError`` and this test errors with the escaped ``OSError``.
+    """
+    target = tmp_path / "kairix"
+    target.mkdir()
+    target.chmod(0o750)
+
+    def _erofs_chown(*_args: object, **_kwargs: object) -> None:
+        raise OSError(errno.EROFS, _EROFS_MSG)
+
+    monkeypatch.setattr(os, "chown", _erofs_chown)
+
+    # Strict default — the chown tolerance is independent of ``strict``.
+    results = ensure_dirs([DirSpec(target, 0o750, os.getuid(), os.getgid())])
+
+    assert results[0]["action"] == "existing"
+    assert target.is_dir()
+
+
+@pytest.mark.unit
+def test_ensure_dirs_chown_reraises_non_runtime_owned_errno(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The chown tolerance is scoped to runtime-owned-mount errnos — a genuine
+    fault like ENOSPC must still propagate (#58).
+
+    Sabotage-proof (executed): broaden the chown ``except`` to a bare ``pass``
+    and this test stops raising.
+    """
+    target = tmp_path / "kairix"
+    target.mkdir()
+    target.chmod(0o750)
+
+    def _enospc_chown(*_args: object, **_kwargs: object) -> None:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(os, "chown", _enospc_chown)
+
+    with pytest.raises(OSError, match="No space left on device") as excinfo:
+        ensure_dirs([DirSpec(target, 0o750, os.getuid(), os.getgid())])
+
+    assert excinfo.value.errno == errno.ENOSPC

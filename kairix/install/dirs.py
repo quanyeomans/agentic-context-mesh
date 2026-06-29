@@ -38,6 +38,7 @@ owned by the invoking user, mode 0700 (private by default).
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 from dataclasses import dataclass
@@ -54,6 +55,15 @@ _logger = logging.getLogger("kairix.install.dirs")
 _MODE_PRIVATE = 0o700  # XDG-style user-private
 _MODE_FHS_WORLD_READ = 0o755  # FHS daemon-state directories
 _MODE_FHS_GROUP_READ = 0o750  # FHS runtime secrets (root:kairix)
+
+# errnos tolerated best-effort when a target dir lives on a runtime-owned mount.
+# EACCES/EPERM surface as PermissionError; EROFS surfaces as a bare OSError when
+# /run/secrets is mounted :ro into the kairix container (the vault-agent /
+# kairix-fetch-secrets sidecar is the sole writer). The mkdir/chmod step softens
+# these only in container mode (strict=False) so system/user installs still fail
+# loudly; the chown step softens them unconditionally (it always tolerated a
+# PermissionError on an unowned XDG path — EROFS is the same class). (#58)
+_RUNTIME_OWNED_ERRNOS = frozenset({errno.EACCES, errno.EPERM, errno.EROFS})
 
 
 @dataclass(frozen=True)
@@ -174,24 +184,32 @@ def _ensure_one_dir(spec: DirSpec, *, strict: bool) -> DirActionReport:
     """Lay down a single :class:`DirSpec`; see :func:`ensure_dirs` for the contract."""
     try:
         action = _create_and_align_mode(spec)
-    except PermissionError:
-        if strict:
+    except OSError as exc:
+        # Re-raise loudly in strict (system/user) mode, and always for an errno
+        # that is not a runtime-owned-mount signal (e.g. ENOSPC). In container
+        # mode an EROFS/EACCES/EPERM from a :ro /run/secrets is best-effort: the
+        # sidecar lays the dir down, so init must not crash-loop on it.
+        if strict or exc.errno not in _RUNTIME_OWNED_ERRNOS:
             raise
         _logger.warning(
-            "kairix install: mkdir/chmod denied for %s (runtime-owned mount?) — "
-            "recorded action=perms-unmanaged and continuing. fix: lay the "
-            "directory down in the image build or mount it writable, then "
-            "re-run `kairix init`.",
+            "kairix install: mkdir/chmod for %s failed errno=%s (%s) — "
+            "runtime-owned mount (e.g. :ro /run/secrets); recorded "
+            "action=perms-unmanaged and continuing. fix: lay the directory down "
+            "in the image build or the secrets sidecar, then re-run `kairix init`.",
             spec.path,
+            exc.errno,
+            exc.strerror,
         )
         return {"path": str(spec.path), "action": "perms-unmanaged"}
     try:
         os.chown(spec.path, spec.owner_uid, spec.owner_gid)
-    except PermissionError:
-        # User-mode + path not under the invoking user's owned tree
-        # (rare XDG_RUNTIME_DIR on shared hosts). The install report
-        # surfaces the path; operator fixes out-of-band.
-        pass
+    except OSError as exc:
+        # Tolerate the runtime-owned-mount errnos regardless of strict: a
+        # user-mode XDG path not under the invoking user's tree (EACCES/EPERM —
+        # the historical case) or an already-present dir on a :ro /run/secrets
+        # (EROFS, e.g. the sidecar pre-laid it). Any other errno still propagates.
+        if exc.errno not in _RUNTIME_OWNED_ERRNOS:
+            raise
     return {"path": str(spec.path), "action": action}
 
 
