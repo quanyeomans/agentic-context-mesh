@@ -37,9 +37,11 @@ jobs:
     # #272 Phase 5: refuse to tag stable unless (a) an alpha tag exists
     # for the same compute-version AND (b) that alpha SHA has a green
     # `vm-reflib-regression` commit status from release-vm-deploy.yml.
-    # Phase 4 landed that webhook + status posting, so the gate now
-    # actually proves the alpha PASSED its VM regression check, not
-    # merely that an operator cut a tag.
+    # release-vm-deploy.yml's `post-reflib-status` job posts that status
+    # after the VM deploy + reflib gate (apply-alpha.sh onboard fully_passed
+    # + delta <= tolerance), so this gate proves the alpha PASSED its VM
+    # regression check, not merely that an operator cut a tag. (The old
+    # Go alpha-deploy webhook that previously posted it is retired — PLA-250.)
     name: "5a · Alpha-gate (must precede stable)"
     runs-on: ubuntu-latest
     steps:
@@ -87,7 +89,8 @@ jobs:
           if [ -z "$status_json" ] || [ "$status_json" = "null" ]; then
             echo "::error::No vm-reflib-regression status on $latest_alpha ($alpha_sha)."
             echo ""
-            echo "fix: dispatch release-vm-deploy.yml for the alpha. The webhook will post-back the status."
+            echo "fix: dispatch release-vm-deploy.yml for the alpha — its post-reflib-status"
+            echo "     job posts the vm-reflib-regression status after the VM deploy+reflib gate."
             echo "  run:  gh workflow run release-vm-deploy.yml --ref main -f tag=${latest_alpha}"
             echo "  next: once the status is success, re-run this workflow."
             exit 1
@@ -98,10 +101,11 @@ jobs:
           if [ "$state" != "success" ]; then
             echo "::error::Alpha $latest_alpha has vm-reflib-regression state=$state (not 'success'). Refusing to tag stable."
             echo ""
-            echo "fix: investigate the alpha-deploy failure on the VM hosting the webhook —"
-            echo "     journalctl -u kairix-alpha-deploy-webhook.service --no-pager -n 100"
-            echo "     (run from the VM where the alpha-deploy webhook is installed; see"
-            echo "     docs/runbooks/kairix-retrieval-health.md for triage steps)."
+            echo "fix: investigate the alpha-deploy failure in the release-vm-deploy.yml run"
+            echo "     for $latest_alpha — the status's target_url links it. Read the deploy-vm"
+            echo "     job's apply output (apply-alpha.sh: a 'FAIL apply-alpha:' line on a"
+            echo "     compose/onboard/regression failure, or 'KAIRIX_REFLIB verdict=regress' on"
+            echo "     a reflib regression); see docs/runbooks/kairix-retrieval-health.md."
             echo "     Once the underlying regression is fixed and a new alpha cut + passed, re-run this workflow."
             exit 1
           fi

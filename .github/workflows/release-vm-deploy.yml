@@ -136,7 +136,7 @@ jobs:
 
   prep:
     # Deliver the box-side apply-script to the VM at deploy time. The kairix
-    # repo is NOT checked out on vm-openclaw (kairix deploys as a container
+    # repo is NOT checked out on the target VM (kairix deploys as a container
     # image), so /opt/kairix/app/scripts/... doesn't exist on the box. To keep
     # scripts/deploy/apply-alpha.sh as the SINGLE source of truth (one tested
     # copy) rather than inline-duplicating its ~190 lines, base64-encode it
@@ -173,7 +173,11 @@ jobs:
     # Replaces the bespoke HMAC-webhook POST + commit-status poll.
     uses: three-cubes/tc-pipelines/.github/workflows/azure-vm-deploy.yml@v1
     with:
-      resource-group: RG-AGENTS-CORE
+      # Deploy target (resource group + VM name) comes from repo variables, not
+      # hardcoded literals, so infra identifiers stay out of this public repo.
+      # Set vars.KAIRIX_DEPLOY_RESOURCE_GROUP + vars.KAIRIX_DEPLOY_VM_NAME in repo
+      # settings (gh variable set ...) before dispatching this workflow.
+      resource-group: ${{ vars.KAIRIX_DEPLOY_RESOURCE_GROUP }}
       op-tag: kairix-alpha
       # skip-snapshot: the kairix CI identity holds VM Contributor but NOT Disk Snapshot Contributor — kairix rolls back by re-pinning the previous image tag (KAIRIX_IMAGE_TAG), not a VM disk snapshot, so the snapshot step is intentionally skipped.
       skip-snapshot: 'true'
@@ -183,13 +187,104 @@ jobs:
       # any leading 'v' to the GHCR image-tag convention; it is self-contained
       # (cd's only to the on-box /opt/kairix/app compose dir, no repo paths).
       targets: |
-        - vm-name: vm-openclaw
+        - vm-name: ${{ vars.KAIRIX_DEPLOY_VM_NAME }}
           apply-script: |
             set -eu
             printf %s '${{ needs.prep.outputs.script_b64 }}' | base64 -d > /tmp/apply-alpha.sh
             sh /tmp/apply-alpha.sh '${{ needs.gate-alpha-tag.outputs.tag }}'
-          smoke-units: 'kairix.service'
+          # smoke-units intentionally EMPTY (the reusable workflow skips the
+          # systemd smoke when this is blank). `systemctl is-active kairix.service`
+          # is the WRONG probe here: kairix.service is a Type=oneshot wrapper
+          # around `docker compose up`, and its unit state is decoupled from the
+          # docker-managed (restart: unless-stopped) container fleet — it reads
+          # `failed`/`activating` while the containers are healthy (the exact
+          # class in docs/runbooks/kairix-service-failed-containers-healthy.md).
+          # On v2026.6.28a5, is-active returned `failed` (tripping the reusable
+          # smoke's `\b(...|failed|...)\b` assertion, azure-vm-deploy.yml@v1 L187)
+          # even though apply-alpha printed `validated — weighted=0.843`. The
+          # authoritative health gate is apply-alpha.sh's in-band onboard check
+          # (`kairix onboard check --json` -> fully_passed) + `--wait` container
+          # health; a non-zero apply-alpha exit surfaces via the reusable
+          # workflow's apply-output `^FAIL ` grep, failing deploy-vm. No
+          # systemd-unit smoke is needed or correct for this oneshot wrapper.
+          smoke-units: ''
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
     secrets: inherit  # pragma: allowlist secret — passes the caller's AZURE_* repo vars to the reusable workflow; no literal secret here
+
+  post-reflib-status:
+    # PLA-250 Gap A: the WS2 deploy migration (PR #634) moved the VM deploy onto
+    # the reusable azure-vm-deploy workflow + box-side apply-alpha.sh, but dropped
+    # the `vm-reflib-regression` commit status that the retired Go alpha-deploy
+    # webhook used to POST. release.yml's stable-release alpha-gate (5a) still
+    # HARD-REQUIRES that status (it `exit 1`s when absent), so no alpha cut via
+    # the new path can ever clear the gate. This job re-establishes the producer
+    # WORKFLOW-SIDE — never box-side — so NO GitHub token rides in the
+    # az-vm-run-command payload (the box only runs apply-alpha.sh). The reflib
+    # VERDICT is already computed on the box: apply-alpha.sh exits 0 only after
+    # `onboard check` fully_passed AND the regression gate (delta <= tolerance)
+    # passed, so the deploy-vm conclusion IS the verdict. We post `failure` (not
+    # absent) on any non-success so the gate stays closed on a failed / regressing
+    # / rolled-back deploy.
+    name: Post vm-reflib-regression commit status
+    needs: [gate-alpha-tag, deploy-vm]
+    # Run even when deploy-vm failed (to post state=failure), as long as we
+    # resolved an alpha SHA to post against.
+    if: ${{ always() && needs.gate-alpha-tag.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # WIF: mint the three-cubes-agent App token from Key Vault
+    steps:
+      # Mint a short-lived three-cubes-agent App installation token over WIF so
+      # the commit status is authored by three-cubes-agent[bot] (clean identity,
+      # no GitHub-stored PAT). Same composite release.yml uses for tagging.
+      - name: Mint three-cubes-agent App token
+        id: app
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@v1
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Post vm-reflib-regression status on the alpha SHA
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}  # App identity -> status creator = three-cubes-agent[bot]
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.gate-alpha-tag.outputs.sha }}
+          TAG: ${{ needs.gate-alpha-tag.outputs.tag }}
+          DEPLOY_RESULT: ${{ needs.deploy-vm.result }}
+          # apply-output is surfaced by azure-vm-deploy once the caller passes
+          # `surface-apply-output: 'true'` (added once the @v1 enhancement lands).
+          # Empty against older @v1 -> the description falls back to the run link.
+          APPLY_OUTPUT: ${{ needs.deploy-vm.outputs.apply-output }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ "$DEPLOY_RESULT" = "success" ]; then
+            state=success
+            verb="reflib+onboard gate PASS"
+          else
+            state=failure
+            verb="reflib/deploy gate FAIL (${DEPLOY_RESULT})"
+          fi
+          # Best-effort: lift the achieved score from apply-alpha's KAIRIX_REFLIB
+          # marker in the surfaced apply output, so the status reads
+          # `weighted=X baseline=Y`. Falls back to a run link (where the score is
+          # always logged) when the apply output isn't surfaced. The STATE — not
+          # the description — is what release.yml's 5a alpha-gate reads.
+          marker="$(printf '%s' "$APPLY_OUTPUT" | grep -oE 'KAIRIX_REFLIB verdict=[a-z]+ weighted=[0-9.]+ baseline=[0-9.]+ tolerance=[0-9.]+' | tail -n1 || true)"
+          weighted="$(printf '%s' "$marker" | sed -nE 's/.*weighted=([0-9.]+).*/\1/p')"
+          baseline="$(printf '%s' "$marker" | sed -nE 's/.*baseline=([0-9.]+).*/\1/p')"
+          if [ -n "$weighted" ] && [ -n "$baseline" ]; then
+            scores="weighted=${weighted} baseline=${baseline}"
+          else
+            scores="scores in deploy run"
+          fi
+          desc="${verb} — ${TAG} ${scores}"  # GitHub truncates status descriptions at 140 chars
+          gh api "repos/${REPO}/statuses/${SHA}" \
+            -f state="$state" \
+            -f context="vm-reflib-regression" \
+            -f description="$desc" \
+            -f target_url="$RUN_URL"
+          echo "::notice::posted vm-reflib-regression=${state} on ${SHA} (${desc})"
