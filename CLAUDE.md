@@ -20,6 +20,16 @@ Use `bash scripts/safe-commit.sh "message"` for every commit. It runs lint, form
 
 **Link issues from the PR, not by hand.** When a PR fully resolves a GitHub issue, put `Closes #N` (one keyword per issue) in the PR body so GitHub auto-closes it AND records the "closed by PR" link on merge. Use `Refs #N` for a partial fix or a parent/epic that stays open (e.g. an EPIC awaiting later phases). **Agents creating a PR with `gh pr create --body "…"` bypass `.github/pull_request_template.md`, so they must include these lines explicitly.** Don't `gh issue close` by hand after merge — it reaches the closed state but loses the auto-link, and you can't retro-trigger auto-close on an already-merged PR. Never auto-close deferred or unresolved issues.
 
+**Raise branches + PRs as the three-cubes-agent App, never under a human's account.** A local `gh` is usually authenticated as a person; pushing/`gh pr create` over it raises the PR under *them*, so they can't cleanly review/approve their own PR and it collides with the `/.github/ @three-cubes/maintainers` code-owner gate. Mint the App identity from the canonical shared tool (off-CI complement of the CI `github-app-token` action; needs an `az login` with reader access to the agent Key Vault — see [tc-pipelines `tools/`](https://github.com/three-cubes/tc-pipelines/tree/main/tools)) and use it for the push + PR:
+
+```bash
+export GH_TOKEN="$(uvx --from 'git+https://github.com/three-cubes/tc-pipelines@v1#subdirectory=tools' agent-token)"
+git config user.name 'three-cubes-agent[bot]'
+git config user.email '295831460+three-cubes-agent[bot]@users.noreply.github.com'
+git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/three-cubes/kairix.git"  # reset to tokenless after pushing
+GH_TOKEN="$GH_TOKEN" gh pr create ...   # PR author must be app/three-cubes-agent, not a person
+```
+
 **Local-first feedback loops.** Every blocking signal (lint, type, Sonar, coverage) must be reproducible locally in <60s. CI is the *confirmation* gate, not the *discovery* loop. `safe-commit.sh --check` (below) is the <60s inner loop that makes this true; when you hit a CI-flagged Sonar issue, query the full failing set ONCE (`python3 scripts/checks/check_sonar_new_code.py --all`), batch-fix locally, push once. See [`docs/architecture/local-first-feedback-loops.md`](docs/architecture/local-first-feedback-loops.md) for the Sonar-rule → local-fix recipe map.
 
 **`safe-commit.sh --check` is the sub-45s warm inner loop.** Tighter than `--fast`, it runs four stages only — (1) scoped ruff lint + format on the STAGED files, (2) `dmypy` (warm-daemon mypy) instead of cold `mypy`, (3) staged-path fitness (`run_checks.py --staged` — only the rules whose scope intersects the staged files), and (4) the impacted tests touching the staged paths. The FIRST run is cold (the dmypy daemon spins up, ~30s); every run after is warm (~8s of gate work, sub-second mypy). It commits on green like `--fast`. This is the loop that makes the "<60s local feedback" promise true for kairix/ source edits. The FULL gate (default `safe-commit.sh`) REMAINS the merge bar — `--check` does NOT replace CI; it is purely the local inner loop. The dmypy daemon is left warm between runs; `.dmypy.json` is gitignored.
