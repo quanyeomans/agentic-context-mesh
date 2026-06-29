@@ -16,8 +16,11 @@ and re-run; the assertion flips.
 from __future__ import annotations
 
 import importlib.util
+import os
+import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -147,3 +150,87 @@ def test_loads_live_registry_after_pr6() -> None:
         f"expected connector_dex_crm entry; got: {sorted(registry) if registry else 'None'}"
     )
     assert detector.main() == 0  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
+
+
+def test_alpha_tail_and_scm_dev_versions_now_parse() -> None:
+    """The repo's real tag/version shapes resolve to a date (PLA-277).
+
+    Pre-fix, ``_VERSION_RE`` had no branch for a PEP-440 pre-release tail
+    attached without a separator, so the ``release-alpha.yml`` tag shape
+    (``v2026.6.28a5``) and the ``setuptools-scm`` ``aN.devM`` shape
+    (``2026.6.28a6.dev2``) both parsed to None — which made
+    ``find_violations`` return [] and F51 permanently vacuous.
+
+    Sabotage proof (executed): revert ``_VERSION_RE`` to
+    ``r"^v?(\\d{4})\\.(\\d{1,2})\\.(\\d{1,2})(?:[.\\-+].*)?$"`` and both
+    assertions return None instead of the date.
+    """
+    detector = _load_detector()
+    parse = detector._parse_calver  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
+    assert parse("v2026.6.28a5") == date(2026, 6, 28)
+    assert parse("2026.6.28a6.dev2") == date(2026, 6, 28)
+
+
+@pytest.mark.parametrize("current_version", ["v2026.6.28a5", "2026.6.28a6.dev2"])
+def test_beyond_window_flag_fires_for_alpha_shaped_current_version(
+    current_version: str,
+) -> None:
+    """A beyond-window flag is flagged when the CURRENT version carries the
+    alpha tail — the shape that pre-PLA-277 short-circuited
+    ``find_violations`` to [] (vacuous-green), because the unparseable
+    current version made the deadline never evaluate.
+
+    Current ``v2026.6.28a5`` → deadline ``2026.12.28``; a flag targeting
+    ``v2027.5.23`` (≈11 months out) exceeds the 6-month ceiling and fires.
+
+    Sabotage proof (executed): revert ``_VERSION_RE`` to reject the alpha
+    tail → ``current_version`` parses to None → ``find_violations``
+    returns [] and this assertion fails.
+    """
+    detector = _load_detector()
+    registry = {"long_lived_flag": _FakeFlag(target_retire_in="v2027.5.23")}
+    src = """REGISTRY = {
+    "long_lived_flag": FeatureFlag(
+        target_retire_in="v2027.5.23",
+    ),
+}
+"""
+    result = detector.find_violations(registry, src, current_version)  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
+    assert result == ["kairix/core/features/registry.py:flag=long_lived_flag"]
+
+
+def test_git_describe_fallback_resolves_a_parseable_version(tmp_path: Path) -> None:
+    """The git-tag fallback resolves a parseable version when setuptools-scm
+    is not importable (it is only a *build* dependency), so the deadline
+    still evaluates (PLA-277).
+
+    Hermetic by construction: it builds a throwaway git repo under
+    ``tmp_path`` with a single tagged commit and points the fallback at it
+    via the documented ``cwd`` parameter. It does NOT read the repo's own
+    tags, so it is immune to the "passes local, fails Linux CI" trap where
+    the CI checkout has fetched no tags (which would make a REPO_ROOT-only
+    assertion return None and fail).
+
+    Sabotage proof (executed): replace the ``_version_from_git_describe``
+    body with ``return None`` (i.e. remove the fallback) → ``resolved`` is
+    None and the first assertion fails.
+    """
+    detector = _load_detector()
+    repo = tmp_path / "scmless_checkout"
+    repo.mkdir()
+    # Isolate from the host's global/system git config so commit.gpgsign or
+    # a missing identity on the runner can't break the fixture commit.
+    git_env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+
+    def _git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=repo, env=git_env, check=True, capture_output=True, text=True)
+
+    _git("init")
+    _git("config", "user.email", "agent-alpha@example.com")
+    _git("config", "user.name", "agent-alpha")
+    _git("commit", "--allow-empty", "-m", "seed")
+    _git("tag", "v2026.6.28")
+
+    resolved = detector._version_from_git_describe(cwd=repo)  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
+    assert resolved is not None
+    assert detector._parse_calver(resolved) == date(2026, 6, 28)  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
