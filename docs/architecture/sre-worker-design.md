@@ -43,7 +43,7 @@ Each decision below has the question, the options considered, the chosen path, a
 
 **Chosen**: separate process. The boot-failure incident proves the point: pre-flight needs to run before the ingest worker can be trusted to host anything, so the SRE component cannot live inside the worker it diagnoses. On docker-compose this is `kairix-sre` as a sibling service; on systemd it is `kairix-sre.service` as a sibling unit.
 
-**Rationale**: the alpha-deploy webhook (`services/alpha-deploy-webhook/`) already established the "separate small process" pattern for SRE-adjacent work, and our Go-integration plan ([go-integration-plan.md](go-integration-plan.md)) reserves Go for exactly this slot. Process isolation is cheap; coupling is the expensive choice.
+**Rationale**: the (now-retired) alpha-deploy webhook established the "separate small process" pattern for SRE-adjacent work, and our Go-integration plan ([go-integration-plan.md](go-integration-plan.md)) reserves Go for exactly this slot. Process isolation is cheap; coupling is the expensive choice.
 
 **Language**: Python for phase 1 (sharing the existing state-file readers and onboard-check probes is the leverage). Optionally migrate the healthcheck-and-OTel surface to Go in phase 4 if Python's startup cost on a docker-compose healthcheck poll proves measurable. Phase 1 stays in Python.
 
@@ -107,7 +107,7 @@ Each decision below has the question, the options considered, the chosen path, a
 - **Privileged docker container**: equivalent of root inside a sandbox; still root.
 - **Capability-based**: granular Linux capabilities (e.g., `CAP_SYS_ADMIN` for systemd D-Bus); supported but operationally novel.
 
-**Chosen**: dedicated `kairix-sre` system user with a narrow sudoers fragment that allows only the whitelisted `systemctl enable --now <unit>` commands. Mirrors the alpha-deploy-webhook user pattern.
+**Chosen**: dedicated `kairix-sre` system user with a narrow sudoers fragment that allows only the whitelisted `systemctl enable --now <unit>` commands. Mirrors the dedicated-system-user pattern the (now-retired) alpha-deploy webhook used.
 
 **Rationale**: phase-1 alert-only doesn't need any of this — the worker runs as `kairix-sre` and reads state. The sudoers entry is added only when phase-3 ships, and only for the specific units in the remediation whitelist. Bandit and operator-review can audit the sudoers fragment statically — that's the win over a privileged container.
 
@@ -230,4 +230,4 @@ These are intentionally not decided here because they are pure implementation ch
 - [#243](https://github.com/three-cubes/kairix/issues/243) — this issue
 - [go-integration-plan.md](go-integration-plan.md) — when Go is appropriate (relevant if phase-4 migrates the healthcheck-and-OTel surface to Go later)
 - [kairix-retrieval-health.md](../runbooks/kairix-retrieval-health.md) — the operator-facing runbook this worker complements
-- [alpha-deploy-webhook](https://github.com/three-cubes/kairix/tree/main/services/alpha-deploy-webhook) — the existing pattern for a small separate-process operational binary
+- [`services/hello`](https://github.com/three-cubes/kairix/tree/main/services/hello) — the sample pattern for a small separate-process Go operational binary (the alpha-deploy-webhook, the original such binary, was retired 2026-06-29 / PLA-252)

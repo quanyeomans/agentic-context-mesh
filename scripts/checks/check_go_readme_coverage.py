@@ -46,17 +46,16 @@ next: re-run python3 scripts/checks/check_go_readme_coverage.py to
 confirm the gate goes green.
 run: bash scripts/checks/run-all.sh
 
-Pass example: (services/alpha-deploy-webhook/README.md)
-  # alpha-deploy-webhook
-  Receives signed POSTs from release-vm-deploy.yml, pulls the alpha
-  Docker image, runs onboard check + reflib benchmark, posts back via
-  GitHub commit status. Justifies Go vs Python on the operability axis:
-  runs on the VM without a Python venv; verifies HMAC with stdlib.
-  Run: ./bin/alpha-deploy-webhook --listen :9443 --secret-file /run/secrets/webhook.key
-  Deploy: see infra/scripts/install-alpha-deploy-webhook.sh in your sibling infrastructure repo.
+Pass example: (services/hello/README.md)
+  # hello
+  Sample operational binary — the reference shape for a Go service under
+  services/. Justifies Go vs Python on the operability axis: ships as a
+  single static binary, runs without a Python venv.
+  Run: ./bin/hello
+  Deploy: n/a (sample binary).
 
 Forbidden example:
-  services/alpha-deploy-webhook/    # no README.md — fails G9
+  services/hello/    # no README.md — fails G9
 
 Why: every Go binary represents a deliberate decision to leave the
 Python default. The README is where that decision is documented and

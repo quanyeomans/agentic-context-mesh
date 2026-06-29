@@ -76,7 +76,6 @@ The boot-ordering problem this sub-decision targets (container starting before K
 ### What stays
 
 - **`kairix-fetch-secrets.service`** remains — its job (synchronously fetch secrets from Azure Key Vault at boot + write `/run/secrets/kairix.env`) is unchanged. Its `[Install]` section changes to `WantedBy=multi-user.target` instead of being chained to `kairix.service`.
-- **`kairix-alpha-deploy-webhook.service`** unaffected (separate purpose).
 - **`kairix-docker-prune.service`** unaffected (separate purpose).
 
 ### Boot timing

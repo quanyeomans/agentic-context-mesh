@@ -3,13 +3,10 @@
 #
 # This is the on-VM apply script invoked by the canonical tc-pipelines
 # reusable workflow `azure-vm-deploy.yml@v1` via `az vm run-command`
-# (WIF login -> disk snapshot -> THIS script -> smoke `systemctl is-active`).
-# It faithfully replicates the deploy sequence of the (retained, fallback)
-# Go HMAC-webhook in
-#   services/alpha-deploy-webhook/internal/deploy/deploy.go
-# so the deploy plane can move off the bespoke webhook without changing the
-# box-side behaviour. The Go webhook stays installed as a documented
-# fallback; this script is the path the workflow now drives.
+# (WIF login -> [disk snapshot, skipped for kairix] -> THIS script). It is the
+# SINGLE source of the box-side alpha deploy sequence. The manual fallback,
+# when CI is unavailable, is to run this script directly on the box
+# (`sh apply-alpha.sh <image-tag>` from the compose dir).
 #
 # Usage:  apply-alpha.sh <image-tag>
 #   <image-tag> may carry a leading 'v' (e.g. v2026.6.8a1); it is stripped
@@ -25,14 +22,13 @@
 #   (e) kairix benchmark run --suite reflib -> parse "Weighted total: X.XXX";
 #       if a baseline + tolerance are supplied via env, fail on regression.
 #
-# Env (optional regression gate, mirrors deploy.go's Service config):
+# Env (optional regression gate):
 #   KAIRIX_BASELINE_WEIGHTED      baseline weighted-total to compare against
 #   KAIRIX_REGRESSION_TOLERANCE   max allowed delta below baseline (default 0.05)
 #
 # Unified-container default (v2026.6.8+): a single compose file
 # (docker-compose.yml), a single `kairix` service, container `app-kairix-1`,
-# compose dir /opt/kairix/app — matching the webhook's unified-container
-# config defaults.
+# compose dir /opt/kairix/app.
 #
 # Auto-rollback: a failed deploy must never leave production DOWN (the
 # 2026-06-28 incident — `up --force-recreate --wait` failed and left the stack
@@ -44,8 +40,6 @@
 # the HEALTHY build serving for a human call. The GitHub run still FAILS on the
 # non-zero exit — only the box end-state changes. Exit codes: 10 = auto-healed,
 # 11 = rollback impossible (manual), 12 = rollback failed / prod down (page).
-# deploy.go parity is a tracked follow-up (the webhook is the documented
-# fallback, not the active path).
 
 set -eu
 
@@ -58,15 +52,12 @@ if [ "$#" -lt 1 ] || [ -z "${1:-}" ]; then
 fi
 
 # Strip any leading 'v' — the GHCR image tag has no leading 'v'
-# (matches docker-publish.yml's ${REF_NAME#v} convention). deploy.go does
-# strings.TrimPrefix(version, "v").
+# (matches docker-publish.yml's ${REF_NAME#v} convention).
 RAW_TAG="$1"
 IMAGE_TAG="${RAW_TAG#v}"
 
-# Operational constants — kept in lock-step with the webhook's config defaults
-# (internal/config/config.go).
-# COMPOSE_DIR is overridable (KAIRIX_COMPOSE_DIR) purely as a test seam; the
-# prod default is unchanged. The webhook hardcodes /opt/kairix/app.
+# Operational constants. COMPOSE_DIR is overridable (KAIRIX_COMPOSE_DIR) purely
+# as a test seam; the prod default is unchanged (/opt/kairix/app).
 COMPOSE_DIR="${KAIRIX_COMPOSE_DIR:-/opt/kairix/app}"
 COMPOSE_SERVICE="kairix"
 CONTAINER="app-kairix-1"
@@ -74,10 +65,10 @@ BENCHMARK_SUITE="reflib"
 REGRESSION_TOLERANCE="${KAIRIX_REGRESSION_TOLERANCE:-0.05}"
 # Standing reflib weighted-total baseline (ROADMAP); overridable via env. Kept
 # always-set so the regression gate stays armed on every deploy — an unset
-# baseline silently disarmed it, whereas the webhook always gated.
+# baseline silently disarmed it.
 BASELINE_WEIGHTED="${KAIRIX_BASELINE_WEIGHTED:-0.808}"
 
-# All compose commands run from the compose dir (deploy.go sets c.Dir).
+# All compose commands run from the compose dir.
 cd "$COMPOSE_DIR" || {
 	echo "FAIL apply-alpha: compose dir $COMPOSE_DIR not found" >&2
 	exit 1
@@ -118,7 +109,7 @@ fi
 # Compose -f file list. The kairix image TAG is interpolated in
 # docker-compose.override.yml (image: ...:${KAIRIX_IMAGE_TAG:-latest}); the base
 # docker-compose.yml pins :latest and the override also carries the /run/secrets
-# mount. BOTH must be passed (the webhook's deploy.go default) — the base alone
+# mount. BOTH must be passed — the base alone
 # deploys :latest and drops the secrets wiring. Include the override only when
 # present so a unified host shipping the base alone still works. IMAGE_TAG is
 # already captured above, so reusing the positional params here is safe.
@@ -220,7 +211,7 @@ echo "apply-alpha: deploying image tag '$IMAGE_TAG' from $COMPOSE_DIR"
 # Azure Key Vault BEFORE compose pulls/recreates the container, so a Key
 # Vault rotation is picked up without a manual restart. On hosts where the
 # unit isn't installed (dev/fresh hosts), this returns non-zero — we WARN
-# and continue, exactly as deploy.go's refreshSecrets does. A real
+# and continue. A real
 # misconfiguration (stale secrets) surfaces at the onboard check (step d).
 echo "apply-alpha: kairix-fetch-secrets restart (Key Vault -> /run/secrets/kairix.env)"
 if ! systemctl restart kairix-fetch-secrets.service 2>/dev/null; then
@@ -233,7 +224,7 @@ fi
 # interpolates the same tag, avoiding the version-drift fallback to :latest
 # (#313). Replace the existing KAIRIX_IMAGE_TAG line when present, else
 # append. Atomic via tmp-then-rename so a crash mid-write leaves the prior
-# .env intact (deploy.go's persistImageTag).
+# .env intact.
 echo "apply-alpha: persist KAIRIX_IMAGE_TAG=$IMAGE_TAG to .env"
 touch .env
 tmp_env="$(mktemp "${COMPOSE_DIR}/.env.tmp.XXXXXX")"
@@ -283,7 +274,7 @@ fi
 # --- (d) onboard check -----------------------------------------------------
 #
 # Capture stdout only — kairix's onboard CLI mixes deprecation warnings onto
-# stderr; 2>/dev/null isolates the JSON payload (deploy.go's onboardCheck).
+# stderr; 2>/dev/null isolates the JSON payload.
 echo "apply-alpha: kairix onboard check"
 onboard_json="$(docker exec "$CONTAINER" sh -c 'kairix onboard check --json 2>/dev/null')" || {
 	echo "FAIL apply-alpha: onboard check exec failed" >&2
@@ -326,7 +317,7 @@ benchmark_out="$(docker exec "$CONTAINER" sh -c "cd /opt/kairix && kairix benchm
 
 # Parse the "Weighted total: X.XXX" line. The benchmark CLI emits a stable
 # text line (no JSON for the suite run), so we parse text like
-# parseWeightedTotal in deploy.go: take the 3rd field of the matching line.
+# take the 3rd field of the matching line.
 weighted="$(printf '%s\n' "$benchmark_out" \
 	| awk '/Weighted total:/ { print $3; exit }')"
 if [ -z "$weighted" ]; then
@@ -336,8 +327,8 @@ if [ -z "$weighted" ]; then
 fi
 
 # Regression gate — always armed (BASELINE_WEIGHTED defaults to the standing
-# baseline). delta = baseline - weighted; regress if delta > tolerance, matching
-# deploy.go's BaselineWeightedTotal check. awk does the float compare.
+# baseline). delta = baseline - weighted; regress if delta > tolerance.
+# awk does the float compare.
 if awk -v w="$weighted" -v b="$BASELINE_WEIGHTED" -v tol="$REGRESSION_TOLERANCE" \
 	'BEGIN { delta = b - w; exit !(delta > tol) }'; then
 	verdict=regress
