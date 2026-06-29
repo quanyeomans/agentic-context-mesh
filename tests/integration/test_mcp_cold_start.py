@@ -26,14 +26,24 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from kairix.agents.mcp.server import build_server
 from kairix.platform.warm.state import reset_warm_state
+from kairix.use_cases.remember import RememberDeps
 
 pytestmark = pytest.mark.integration
+
+# Single-source the literals the cold-write tests reuse so the module stays
+# free of duplicate string literals (Sonar S1192 / F17).
+_MEMORY_WRITE = "memory_write"
+_ALPHA = "agent-alpha"
+_ALPHA_SURFACE = "04-Agent-Knowledge/agent-alpha"
+_COLD_NOW = datetime(2026, 6, 30, 9, 0, tzinfo=timezone.utc)
 
 
 # ---------------------------------------------------------------------------
@@ -62,15 +72,21 @@ GATED_TOOLS: list[tuple[str, dict[str, Any]]] = [
         {"jsonl_content": "{}\n", "conversation_id": "anything", "namespace": "anything"},
     ),
     ("facts_about", {"entity": "anything"}),
-    # #472 — memory_write shares ingest_chat's out-of-band-write hygiene.
-    ("memory_write", {"agent": "anyone", "content": "anything"}),
 ]
 
 # Tools that must STILL serve real responses while cold — they exist to
-# diagnose the cold state itself, or return static content.
+# diagnose the cold state itself, return static content, OR (memory_write)
+# perform a write that doesn't depend on warmth and must never be refused.
 UNGATED_TOOLS: list[tuple[str, dict[str, Any]]] = [
     ("usage_guide", {}),
     ("onboard_check", {}),
+    # PLA-257 — memory_write is NOT warm-gated: an agent records a decision
+    # at session start, when the embedding model is still warming, and the
+    # write doesn't depend on warmth. The empty-content guard fires before
+    # any config / filesystem resolution, so this stays hermetic — the point
+    # is only that the body RAN (returned its own validation error) rather
+    # than the ColdStart short-circuit.
+    (_MEMORY_WRITE, {"agent": _ALPHA, "content": ""}),
 ]
 
 
@@ -160,3 +176,102 @@ def test_ungated_tool_serves_while_cold(
     assert payload.get("error") != "ColdStart", (
         f"{tool_name} must serve while cold; got ColdStart envelope: {payload!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# memory_write persists on a cold container (PLA-257)
+# ---------------------------------------------------------------------------
+#
+# The parametrised UNGATED case above proves memory_write doesn't return the
+# ColdStart envelope. These tests go one step further: they drive a real
+# write through the live MCP dispatch surface while cold and assert the file
+# lands on disk — the behaviour the bug took away. ``remember_deps`` is the
+# build_server injection seam (F1/F2-clean — a constructor seam, no
+# monkeypatch, no env vars) so the write targets a tmp knowledge store, never
+# the live tree.
+
+
+def _cold_remember_deps(tmp_path: Path, *, indexed: bool) -> RememberDeps:
+    """RememberDeps over tmp paths for the cold-write tests.
+
+    ``index_fn`` is pinned so a test can model both outcomes: indexing
+    completing (searchable now) and indexing being unavailable (the memory
+    is saved and queued for the next indexing pass).
+    """
+    return RememberDeps(
+        config_fn=lambda: {
+            "agents": {
+                _ALPHA: {
+                    "harness": "claude-code",
+                    "surfaces": [{"path": _ALPHA_SURFACE, "label": "memory"}],
+                }
+            }
+        },
+        document_root_fn=lambda: tmp_path / "vault",
+        db_path_fn=lambda: tmp_path / "index.sqlite",
+        now_fn=lambda: _COLD_NOW,
+        index_fn=lambda _db, _root, _hash: indexed,
+    )
+
+
+def test_memory_write_persists_file_while_cold(tmp_path: Path) -> None:
+    """A memory_write on a NOT-yet-warm kairix persists the file through the
+    live MCP dispatch path instead of refusing with the ColdStart envelope.
+
+    This is the PLA-257 bug: an agent records a decision at session start —
+    while the embedding model is still warming — and the warm gate rejected
+    the write. The write doesn't depend on warmth, so it must land.
+
+    Sabotage-proof: re-add ``@warm_gate`` above ``memory_write`` in
+    ``build_server``; the cold gate short-circuits before the body runs, so
+    ``error`` becomes ``"ColdStart"``, no ``path`` is returned, and both the
+    ``error == ""`` and ``Path(...).exists()`` assertions fail.
+    """
+    reset_warm_state()  # genuine cold — a present gate would fire here
+    server = build_server(
+        host="127.0.0.1",
+        port=18099,
+        remember_deps=_cold_remember_deps(tmp_path, indexed=True),
+    )
+
+    payload = _call_tool(
+        server,
+        _MEMORY_WRITE,
+        {"agent": _ALPHA, "content": "decided: ship the warm-gate fix", "kind": "decision"},
+    )
+
+    assert payload.get("error") == "", f"cold memory_write must persist, not refuse; got {payload!r}"
+    assert payload["indexed"] is True
+    written = Path(payload["path"])
+    assert written.exists(), f"expected the memory file persisted at {written}"
+    assert written.parent == tmp_path / "vault" / _ALPHA_SURFACE
+    assert "ship the warm-gate fix" in written.read_text(encoding="utf-8")
+
+
+def test_memory_write_cold_returns_queued_status_when_indexing_unavailable(tmp_path: Path) -> None:
+    """When immediate indexing can't complete on a cold kairix, the write
+    still persists and the envelope reports a "saved, queued for indexing"
+    status (indexed=False + the re-index affordance) rather than rejecting.
+
+    Sabotage-proof: re-add ``@warm_gate`` above ``memory_write``; the gate
+    returns the ColdStart envelope before the body runs, so ``error`` becomes
+    ``"ColdStart"``, ``indexed`` and ``path`` are absent, and the queued-status
+    + file-exists assertions fail.
+    """
+    reset_warm_state()
+    server = build_server(
+        host="127.0.0.1",
+        port=18099,
+        remember_deps=_cold_remember_deps(tmp_path, indexed=False),
+    )
+
+    payload = _call_tool(
+        server,
+        _MEMORY_WRITE,
+        {"agent": _ALPHA, "content": "fact: the usearch view maps lazily on first query"},
+    )
+
+    assert payload.get("error") == "", f"cold memory_write must persist even when un-indexed; got {payload!r}"
+    assert payload["indexed"] is False
+    assert "next: run kairix embed" in payload["detail"]
+    assert Path(payload["path"]).exists()
