@@ -181,6 +181,10 @@ jobs:
       op-tag: kairix-alpha
       # skip-snapshot: the kairix CI identity holds VM Contributor but NOT Disk Snapshot Contributor — kairix rolls back by re-pinning the previous image tag (KAIRIX_IMAGE_TAG), not a VM disk snapshot, so the snapshot step is intentionally skipped.
       skip-snapshot: 'true'
+      # Surface the box-side apply output (apply-alpha's KAIRIX_REFLIB marker) as
+      # the deploy-vm `apply-output` job output, so post-reflib-status can put the
+      # achieved weighted/baseline in the commit-status description.
+      surface-apply-output: 'true'
       # The apply-script is delivered inline (the repo is not checked out on
       # the box): the prep job base64-encodes scripts/deploy/apply-alpha.sh and
       # we decode + run it here. apply-alpha.sh takes the tag as $1 and strips
@@ -254,9 +258,9 @@ jobs:
           SHA: ${{ needs.gate-alpha-tag.outputs.sha }}
           TAG: ${{ needs.gate-alpha-tag.outputs.tag }}
           DEPLOY_RESULT: ${{ needs.deploy-vm.result }}
-          # apply-output is surfaced by azure-vm-deploy once the caller passes
-          # `surface-apply-output: 'true'` (added once the @v1 enhancement lands).
-          # Empty against older @v1 -> the description falls back to the run link.
+          # apply-output is surfaced by azure-vm-deploy because deploy-vm passes
+          # `surface-apply-output: 'true'`; it carries apply-alpha's KAIRIX_REFLIB
+          # marker. Stays empty (-> run-link fallback) if the deploy was skipped.
           APPLY_OUTPUT: ${{ needs.deploy-vm.outputs.apply-output }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
