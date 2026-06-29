@@ -103,15 +103,16 @@ def _seed_brief_deps(brief_warm_ctx: _BriefWarmCtx, content: str, path: str) -> 
         # lambdas that match the protocol shape.
         generate_fn=lambda _agent, **_kw: content,
         briefing_dir_fn=lambda: out_dir,
+        config_fn=lambda: {"agents": {"builder": {"surfaces": [{"path": "memory/builder", "label": "memory"}]}}},
         health_deps=_healthy_health_deps(),
     )
 
 
 @when("the operator runs the brief CLI with json mode for agent-alpha")
 def _run_brief_json(brief_warm_ctx: _BriefWarmCtx) -> None:
-    # _VALID_AGENTS = {"builder", "shape", "growth", "consultant"} —
-    # use ``builder`` as the canonical role label (F32: role labels are
-    # not real personal names) so the validation guard passes.
+    # ``builder`` is the canonical role label here (F32: role labels are
+    # not real personal names); the injected ``config_fn`` declares its
+    # surface so brief's surface check passes without touching disk.
     out_buf = io.StringIO()
     err_buf = io.StringIO()
     try:

@@ -16,36 +16,36 @@ the ``agents:`` block drives every brief callsite via AgentScope.
 This is NOT ``monkeypatch.setenv`` (F2 targets pytest monkeypatch);
 seeding a config file in a tmp dir is the F2-clean subprocess seam.
 
-Boundary chain exercised (degraded happy-path):
+Boundary chain exercised (config-onboarded custom agent, degraded happy-path):
 
-  subprocess([kairix, brief, <agent>], cwd=tmp_path with config)
+  subprocess([kairix, brief, agent-alpha], cwd=tmp_path with config)
     → kairix/agents/briefing/cli.py:main
     → kairix.use_cases.brief.run_brief
+    → AgentScope resolves agent-alpha from the seeded ``agents:`` block
     → probe_health() → chat=offline (no KAIRIX_LLM_API_KEY in subprocess env)
     → returns BriefOutput(content="", path="", error="") + degraded health
     → CLI: no error branch, no path branch, format_output returns ""
     → exit 0, stderr has the "Generating briefing for agent: ..." line
 
-Boundary chain exercised (invalid-agent error-path):
+This is the PLA-265 fix: ``agent-alpha`` is NOT one of the legacy four
+names, but an operator who onboarded it via ``agents:`` can brief it.
 
-  subprocess([kairix, brief, <rogue-agent>])
+Boundary chain exercised (no-surface error-path):
+
+  subprocess([kairix, brief, ghost], cwd=tmp_path with `ghost: {surfaces: []}`)
+    → AgentScope resolves ghost to a scope with zero surfaces
     → run_brief returns BriefOutput(error="InvalidAgent: ...")
     → CLI prints "Error generating briefing: InvalidAgent..." to stderr
     → exit 1
 
-The error path is independent of LLM availability — it gates on the
-``_VALID_AGENTS`` set before any LLM call — so it's the stable F30
-anchor.
+The error path is independent of LLM availability — agent-surface
+resolution runs before any LLM call — so it's the stable F30 anchor.
 
-Sabotage-proof (executed): mutated ``kairix/use_cases/brief.py``'s
-``if normalised not in _VALID_AGENTS:`` guard to
-``if False and normalised not in _VALID_AGENTS:`` — the invalid-agent
-branch is unreachable, ``run_brief`` falls through to the LLM path,
-which (with no LLM key in subprocess env) takes the degraded
-``chat=offline`` branch and returns an empty-error envelope → CLI exits
-0 with "Generating briefing for agent: rogue-agent" on stderr. The
-invalid-agent test then fails on the ``returncode == 1`` assertion.
-Restored.
+Sabotage-proof (executed): re-adding the dropped
+``if normalised not in {"builder","shape","growth","consultant"}:`` guard
+to ``kairix/use_cases/brief.py`` makes ``agent-alpha`` return an
+InvalidAgent envelope → the happy-path test fails on ``returncode == 0``
+(it gets exit 1 + "Error generating briefing" on stderr). Restored.
 
 Latency baseline (2024 M-series Mac): subprocess wall ~300-500ms
 (interpreter + brief import graph + health probes). Test threshold:
@@ -90,6 +90,25 @@ def _seed_minimal_brief_workspace(tmp_path: Path, agent: str) -> None:
     )
 
 
+def _seed_no_surface_agent(tmp_path: Path, agent: str) -> None:
+    """Seed a ``kairix.config.yaml`` declaring ``agent`` with no surfaces.
+
+    An explicit empty ``surfaces: []`` entry is the only way an operator
+    can produce a scope that genuinely resolves to nothing — the
+    InvalidAgent shape that survives PLA-265. Used to drive the
+    error-path subprocess test deterministically.
+    """
+    config_yaml = tmp_path / "kairix.config.yaml"
+    config_yaml.write_text(
+        textwrap.dedent(f"""\
+            agents:
+              {agent}:
+                surfaces: []
+            """),
+        encoding="utf-8",
+    )
+
+
 def _subprocess_env_without_llm_keys() -> dict[str, str]:
     """Return a subprocess env that strips LLM credential vars.
 
@@ -110,16 +129,19 @@ def _subprocess_env_without_llm_keys() -> dict[str, str]:
     return env
 
 
-def test_brief_cli_subprocess_degraded_happy_path_outcome(tmp_path: Path) -> None:
-    """Drive the real ``kairix brief`` binary against a tmp config + memory dir.
+def test_brief_cli_subprocess_configured_agent_outcome(tmp_path: Path) -> None:
+    """Drive the real ``kairix brief`` binary for a config-onboarded custom agent.
 
-    Without an LLM credential the use case takes the degraded path
-    (``chat=offline``) and returns an empty-content envelope — exit 0,
-    stderr carries the operator-facing "Generating briefing for agent:
-    ..." line. Asserts on the stderr trace + clean exit, NOT on
-    returncode alone, NOT on internal fake call-counts.
+    ``agent-alpha`` is not one of the legacy four role labels — it only
+    works because the seeded ``agents:`` block declares its surface, which
+    is exactly the PLA-265 fix. Without an LLM credential the use case
+    takes the degraded path (``chat=offline``) and returns an
+    empty-content envelope — exit 0, stderr carries the operator-facing
+    "Generating briefing for agent: ..." line. Asserts on the stderr
+    trace + clean exit, NOT on returncode alone, NOT on internal fake
+    call-counts.
     """
-    _seed_minimal_brief_workspace(tmp_path, "builder")
+    _seed_minimal_brief_workspace(tmp_path, "agent-alpha")
 
     t0 = time.monotonic()
     proc = subprocess.run(
@@ -128,7 +150,7 @@ def test_brief_cli_subprocess_degraded_happy_path_outcome(tmp_path: Path) -> Non
             "-m",
             "kairix.cli",
             "brief",
-            "builder",
+            "agent-alpha",
         ],
         capture_output=True,
         text=True,
@@ -141,27 +163,29 @@ def test_brief_cli_subprocess_degraded_happy_path_outcome(tmp_path: Path) -> Non
     assert proc.returncode == 0, (
         f"brief exited {proc.returncode}\n--- stderr ---\n{proc.stderr}\n--- stdout ---\n{proc.stdout}"
     )
-    assert "Generating briefing for agent: builder" in proc.stderr, f"missing operator trace in stderr: {proc.stderr!r}"
+    assert "Generating briefing for agent: agent-alpha" in proc.stderr, (
+        f"missing operator trace in stderr: {proc.stderr!r}"
+    )
     # Degraded path: no error message, no write-confirmation, no content body.
     assert "Error generating briefing" not in proc.stderr, f"unexpected error path in stderr: {proc.stderr!r}"
 
     assert elapsed_ms < 10000.0, f"brief subprocess took {elapsed_ms:.1f}ms (baseline ~300-500ms, threshold 10000ms)"
 
 
-def test_brief_cli_subprocess_invalid_agent_exits_non_zero(tmp_path: Path) -> None:
-    """Pointing at a non-existent agent name must surface a non-zero
-    exit + the structured InvalidAgent error on stderr. Independent of
-    LLM availability — the use case's agent-validation step runs before
-    any LLM call, so this test is the F30 stable anchor.
+def test_brief_cli_subprocess_no_surface_agent_exits_non_zero(tmp_path: Path) -> None:
+    """An agent that resolves to no surface must surface a non-zero exit
+    + the structured InvalidAgent error on stderr. Independent of LLM
+    availability — agent-surface resolution runs before any LLM call, so
+    this test is the F30 stable anchor.
     """
-    _seed_minimal_brief_workspace(tmp_path, "builder")
+    _seed_no_surface_agent(tmp_path, "ghost")
     proc = subprocess.run(
         [
             sys.executable,
             "-m",
             "kairix.cli",
             "brief",
-            "rogue-agent",
+            "ghost",
         ],
         capture_output=True,
         text=True,
@@ -170,6 +194,6 @@ def test_brief_cli_subprocess_invalid_agent_exits_non_zero(tmp_path: Path) -> No
         cwd=str(tmp_path),
     )
 
-    assert proc.returncode == 1, f"expected exit 1 for invalid agent, got {proc.returncode}. stderr={proc.stderr!r}"
+    assert proc.returncode == 1, f"expected exit 1 for no-surface agent, got {proc.returncode}. stderr={proc.stderr!r}"
     assert "Error generating briefing" in proc.stderr, f"stderr missing error prefix: {proc.stderr!r}"
     assert "InvalidAgent" in proc.stderr, f"stderr missing InvalidAgent class name: {proc.stderr!r}"
