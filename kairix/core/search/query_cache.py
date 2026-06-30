@@ -506,8 +506,9 @@ def make_cache_key(
     scope: Any,
     agent: str | None,
     collections: list[str] | None,
+    max_tier: str = "L2",
 ) -> tuple[Any, ...]:
-    """Build the canonical 4-tuple key.
+    """Build the canonical cache key.
 
     Tuples are hashable so the LRU's ``OrderedDict`` can key on them
     directly. ``collections`` is sorted before tupling so callers that
@@ -521,6 +522,12 @@ def make_cache_key(
     scope share one cached result (#281). Agent-specific scopes
     (SHARED_AGENT / AGENT) keep the agent in the key because the result
     set differs per agent.
+
+    ``max_tier`` (PLA-270) is part of the key because the SAME query at a
+    different tier ceiling yields a different result set (L0 abstracts vs
+    L2 snippets) — without it a request for ``max_tier="L0"`` could serve a
+    cached ``L2`` payload. The default ``"L2"`` keeps the historical key
+    shape for the no-tiering path.
     """
     agent_component = "" if _scope_is_agent_agnostic(scope) else (agent or "")
     return (
@@ -528,6 +535,7 @@ def make_cache_key(
         scope,
         agent_component,
         tuple(sorted(collections)) if collections else (),
+        max_tier,
     )
 
 

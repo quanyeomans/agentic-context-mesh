@@ -189,6 +189,42 @@ def test_non_paged_extract_writes_no_document_pages_rows(tmp_path: Path) -> None
     assert media == 1, f"documents_media row must still write; got count={media}"
 
 
+def test_paged_hit_reaches_its_page_text_after_ingest(tmp_path: Path) -> None:
+    """PLA-270 — a paged document's per-page text is reachable after retrieval.
+
+    Drives the real connector pipeline to ingest a 3-page document, then
+    resolves the stored page text through the public
+    :func:`kairix.core.search.pages.page_text` read path keyed on the
+    document's canonical ``source_uri`` + page number — the surface the
+    chunk-expansion tool (PLA-268) consumes.
+    """
+    from kairix.core.search.pages import page_text
+
+    db_path = tmp_path / "paged-read.sqlite"
+    db = sqlite3.connect(str(db_path))
+    create_schema(db)
+    pipeline = _build_pipeline(db, FakeChunkWriter())
+    body = b"<binary pdf-ish payload>"
+    connector = FakeSourceConnector(
+        name="paged-read-source",
+        events=[ChangeEvent(op="modified", item_id="report.pdf", modified_at="2026-05-28T10:00:00Z")],
+        content={"report.pdf": body},
+        cursor_token="paged-read-cursor-1",
+    )
+
+    assert pipeline.run_batch(connector, _PagedExtractor(n_pages=3)).processed == 1
+
+    # The pipeline persists the silver_source bridge row; read the canonical
+    # source_uri it wrote rather than hard-coding the connector's URI scheme.
+    source_uri = db.execute("SELECT source_uri FROM silver_source LIMIT 1").fetchone()[0]
+    assert source_uri, "silver_source must carry the document's source_uri bridge row"
+
+    expected_page_2 = f"page 2 text from body: {body.decode()[:32]}"
+    assert page_text(source_uri=source_uri, page_number=2, db=db) == expected_page_2
+    # Out-of-range page → graceful None (the document has only 3 pages).
+    assert page_text(source_uri=source_uri, page_number=99, db=db) is None
+
+
 def test_re_ingest_replaces_pages_idempotently(tmp_path: Path) -> None:
     """INSERT OR REPLACE — re-ingesting the same document updates rows, doesn't accumulate.
 

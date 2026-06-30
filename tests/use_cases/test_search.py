@@ -57,6 +57,7 @@ class _FakeInner:
     snippet: str = ""
     boosted_score: float = 0.0
     collection: str = ""
+    seq: int | None = None
 
 
 @dataclass
@@ -126,6 +127,46 @@ def test_search_hit_default_optional_fields() -> None:
     assert h.collection == ""
     assert h.source == ""
     assert h.entity == {}
+    # PLA-270 — chunk seq defaults to None for non-chunked rows.
+    assert h.seq is None
+
+
+@pytest.mark.unit
+def test_chunk_seq_projected_from_fused_result_into_hit() -> None:
+    """PLA-270 — ``_budgeted_to_hit`` lifts the typed ``seq`` off the fused result."""
+    inner = _FakeInner(path="m365://doc.pdf#5", seq=5)
+    sr = _FakeSearchResult(results=[_FakeBudgeted(result=inner, content="c")])
+    deps, _ = _build_deps(sr=sr)
+    out = run_search("q", deps=deps)
+    assert out.results[0].seq == 5
+
+
+@pytest.mark.unit
+def test_chunk_seq_zero_is_preserved_through_projection() -> None:
+    """seq=0 is a real first-chunk index, not a falsy 'missing'."""
+    inner = _FakeInner(path="m365://doc.pdf#0", seq=0)
+    sr = _FakeSearchResult(results=[_FakeBudgeted(result=inner, content="c")])
+    deps, _ = _build_deps(sr=sr)
+    out = run_search("q", deps=deps)
+    assert out.results[0].seq == 0
+
+
+@pytest.mark.unit
+def test_chunk_seq_round_trips_through_envelope() -> None:
+    """PLA-270 — ``seq`` survives the MCP envelope writer→reader round-trip."""
+    hit = SearchHit(path="m365://doc.pdf#3", title="t", snippet="s", score=0.5, seq=3)
+    out = SearchOutput(query="q", intent="semantic", results=[hit])
+    env = search_output_to_envelope(out)
+    assert env["results"][0]["seq"] == 3
+    rebuilt = SearchOutput.from_envelope(env)
+    assert rebuilt.results[0].seq == 3
+
+
+@pytest.mark.unit
+def test_chunk_seq_absent_from_envelope_rebuilds_as_none() -> None:
+    """A row with no ``seq`` key rebuilds with ``seq=None`` (legacy-worker tolerant)."""
+    rebuilt = SearchHit.from_envelope({"path": "notes/x.md", "score": 0.1})
+    assert rebuilt.seq is None
 
 
 @pytest.mark.unit

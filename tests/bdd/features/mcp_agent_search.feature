@@ -30,3 +30,9 @@ Feature: MCP agent search tool
     When the agent calls tool_search with query "anything"
     Then no search exception was raised
     And the search response is a valid dict with key "error"
+
+  Scenario: Agent requests the cheapest tier and receives a chunk handle for expansion
+    Given the hybrid search returns a chunk hit with seq 4 and source uri "m365://drive/report.pdf"
+    When the agent calls tool_search with query "report findings" and max tier "L0"
+    Then the search retrieval received max tier "L0"
+    And the first search result carries seq 4 and source uri "m365://drive/report.pdf"

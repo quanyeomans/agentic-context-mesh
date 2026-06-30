@@ -54,6 +54,72 @@ def _vec(path: str, distance: float = 0.1, collection: str = "c") -> VecResult:
 
 
 # ---------------------------------------------------------------------------
+# PLA-270 — chunk seq carried through fusion as a typed field
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestParseChunkSeq:
+    """``parse_chunk_seq`` turns a ``<uri>#<seq>`` chunk path into a typed int."""
+
+    def test_parses_trailing_numeric_suffix(self) -> None:
+        from kairix.core.search.rrf import parse_chunk_seq
+
+        assert parse_chunk_seq("m365://doc.pdf#3") == 3
+
+    def test_zero_seq_is_kept_not_treated_as_falsy(self) -> None:
+        from kairix.core.search.rrf import parse_chunk_seq
+
+        assert parse_chunk_seq("sharepoint://x#0") == 0
+
+    def test_passthrough_path_without_suffix_is_none(self) -> None:
+        from kairix.core.search.rrf import parse_chunk_seq
+
+        assert parse_chunk_seq("notes/meeting.md") is None
+
+    def test_heading_anchor_is_not_mistaken_for_seq(self) -> None:
+        from kairix.core.search.rrf import parse_chunk_seq
+
+        # ``#section`` is a heading-slug locator, not a numeric chunk seq.
+        assert parse_chunk_seq("notes/meeting.md#section") is None
+
+    def test_empty_path_is_none(self) -> None:
+        from kairix.core.search.rrf import parse_chunk_seq
+
+        assert parse_chunk_seq("") is None
+
+
+@pytest.mark.unit
+def test_rrf_carries_chunk_seq_from_path() -> None:
+    """A chunk path ``<uri>#<seq>`` surfaces ``FusedResult.seq`` as a typed int."""
+    results = rrf([_bm25("m365://doc.pdf#7")], [])
+    assert len(results) == 1
+    assert results[0].seq == 7
+
+
+@pytest.mark.unit
+def test_rrf_vec_only_chunk_carries_seq() -> None:
+    """The vector leg also surfaces the typed seq off its path."""
+    results = rrf([], [_vec("m365://doc.pdf#4")])
+    assert len(results) == 1
+    assert results[0].seq == 4
+
+
+@pytest.mark.unit
+def test_rrf_passthrough_note_has_no_seq() -> None:
+    """A passthrough vault note (no ``#seq``) carries ``seq=None``."""
+    results = rrf([_bm25("notes/plan.md")], [])
+    assert results[0].seq is None
+
+
+@pytest.mark.unit
+def test_bm25_primary_fuse_carries_chunk_seq() -> None:
+    """BM25-primary fusion carries the typed seq through too."""
+    results = bm25_primary_fuse([_bm25("sharepoint://q.pptx#2")], [])
+    assert results[0].seq == 2
+
+
+# ---------------------------------------------------------------------------
 # RRF formula correctness
 # ---------------------------------------------------------------------------
 

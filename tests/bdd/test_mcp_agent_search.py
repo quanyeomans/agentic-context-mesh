@@ -30,3 +30,9 @@ def test_entity_query_returns_graph_first():
 @scenario(FEATURE, "Search tool never raises to the caller")
 def test_search_never_raises():
     """Body populated by @scenario from the .feature file."""
+
+
+@pytest.mark.bdd
+@scenario(FEATURE, "Agent requests the cheapest tier and receives a chunk handle for expansion")
+def test_agent_requests_cheapest_tier_and_gets_chunk_handle():
+    """Body populated by @scenario from the .feature file."""

@@ -83,6 +83,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         help="Skip the entity-graph augmentation",
     )
+    parser.add_argument(
+        "--max-tier",
+        dest="max_tier",
+        default="L2",
+        choices=["L0", "L1", "L2"],
+        help=(
+            "Richest context tier per result (default: L2 full snippet). "
+            "Use L0 for abstracts or L1 for overviews to triage many hits "
+            "cheaply; takes effect when tier summaries are generated."
+        ),
+    )
     return parser
 
 
@@ -236,6 +247,7 @@ def main(argv: list[str] | None = None, *, deps: SearchDeps | None = None) -> No
         budget=args.budget,
         limit=args.limit,
         include_entity_card=args.include_entity_card,
+        max_tier=args.max_tier,
         deps=effective_deps,
     )
 

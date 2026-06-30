@@ -46,6 +46,39 @@ L2_BUDGET_MIN: int = 2_000
 
 Tier = Literal["L0", "L1", "L2"]
 
+# PLA-270 — tier cost ordering (cheapest → richest). Used to clamp the
+# score/budget-selected tier down to a caller-requested ceiling so an agent
+# can ask for the CHEAPEST sufficient representation (e.g. ``max_tier="L0"``
+# → abstracts only) instead of always paying for the full snippet.
+_TIER_RANK: dict[str, int] = {"L0": 0, "L1": 1, "L2": 2}
+DEFAULT_MAX_TIER: Tier = "L2"
+
+
+def _clamp_tier(selected: Tier, ceiling: Tier) -> Tier:
+    """Return the cheaper of ``selected`` and ``ceiling`` by cost rank.
+
+    The ceiling is the agent's "no richer than this" request; a selection
+    already at or below it passes through unchanged. ``min`` over the cost
+    rank picks the cheaper tier (and is identical on a tie, since the rank
+    map is a bijection).
+    """
+    return min(selected, ceiling, key=lambda tier: _TIER_RANK[tier])
+
+
+def coerce_tier(value: str | None, *, default: Tier = DEFAULT_MAX_TIER) -> Tier:
+    """Normalise an agent-supplied tier request to a known :data:`Tier`.
+
+    The single validation site for the tier vocabulary — the CLI ``--max-tier``
+    flag, the MCP ``tool_search`` ``max_tier`` arg, and ``run_search`` all
+    route through here so an unknown / mis-cased value degrades safely to
+    ``default`` (the full ``L2`` snippet) instead of silently mis-tiering.
+    Accepts lower-case (``"l0"``) and surrounding whitespace.
+    """
+    if not value:
+        return default
+    candidate = value.strip().upper()
+    return candidate if candidate in _TIER_RANK else default  # type: ignore[return-value]  # membership-guarded against the Tier literal set
+
 
 # ---------------------------------------------------------------------------
 # SummaryLoader protocol — Phase 2 injection seam
@@ -98,6 +131,7 @@ def apply_budget(
     l2_threshold: float = L2_SCORE_THRESHOLD,
     *,
     summary_loader: SummaryLoader | None = None,
+    max_tier: Tier = DEFAULT_MAX_TIER,
 ) -> list[BudgetedResult]:
     """
     Apply token budget to fused results, assigning each a tier and truncating at cap.
@@ -118,6 +152,13 @@ def apply_budget(
         l2_threshold:   Score threshold for L2 promotion (Phase 2+).
         summary_loader: Phase 2 loader. ``None`` (default) keeps Phase 1
                         behaviour. Tests pass ``FakeSummaryLoader``.
+        max_tier:       PLA-270 ceiling — the richest tier the caller will
+                        accept. The score/budget selection is clamped DOWN to
+                        this so an agent can request the cheapest sufficient
+                        representation (``"L0"`` abstracts, ``"L1"`` overviews,
+                        ``"L2"`` full snippets — the default, no clamp). Only
+                        meaningful with a ``summary_loader``; Phase 1 has no
+                        summaries to serve so every row stays ``L2``.
 
     Returns:
         List of BudgetedResult, truncated when budget exhausted.
@@ -128,7 +169,7 @@ def apply_budget(
         return []
 
     try:
-        return _apply_budget_impl(results, budget, l1_threshold, l2_threshold, summary_loader)
+        return _apply_budget_impl(results, budget, l1_threshold, l2_threshold, summary_loader, max_tier)
     except Exception as e:
         logger.warning("apply_budget: unexpected error — %s", e)
         return []
@@ -155,6 +196,7 @@ def _apply_budget_impl(
     l1_threshold: float,
     l2_threshold: float,
     summary_loader: SummaryLoader | None,
+    max_tier: Tier,
 ) -> list[BudgetedResult]:
     """Internal budget implementation."""
     budgeted: list[BudgetedResult] = []
@@ -164,7 +206,7 @@ def _apply_budget_impl(
         if remaining <= 0:
             break
 
-        tier = _select_tier(result, remaining, l1_threshold, l2_threshold, summary_loader)
+        tier = _select_tier(result, remaining, l1_threshold, l2_threshold, summary_loader, max_tier)
         content = _get_content_for_tier(result, tier, summary_loader)
         tokens = _estimate_tokens(content)
 
@@ -203,12 +245,17 @@ def _select_tier(
     l1_threshold: float,
     l2_threshold: float,
     summary_loader: SummaryLoader | None,
+    max_tier: Tier = DEFAULT_MAX_TIER,
 ) -> Tier:
     """
     Select the appropriate tier for a result given the current budget.
 
-    Phase 1 (no loader): always return L2 (full snippet).
-    Phase 2+: L0 by default; promote to L1 or L2 based on score and budget.
+    Phase 1 (no loader): always return L2 (full snippet) — there are no
+    summaries to serve, so a ``max_tier`` ceiling has nothing to clamp to.
+
+    Phase 2+: L0 by default; promote to L1 or L2 based on score and budget,
+    then clamp DOWN to ``max_tier`` so a caller's "no richer than this"
+    request is honoured (PLA-270 cheapest-sufficient-tier).
     """
     if summary_loader is None:
         return "L2"
@@ -216,11 +263,13 @@ def _select_tier(
     score = result.boosted_score
 
     if remaining_budget >= L2_BUDGET_MIN and score >= l2_threshold:
-        return "L2"
+        selected: Tier = "L2"
     elif remaining_budget >= L1_BUDGET_MIN and score >= l1_threshold:
-        return "L1"
+        selected = "L1"
     else:
-        return "L0"
+        selected = "L0"
+
+    return _clamp_tier(selected, max_tier)
 
 
 def _lookup_tier_summary(

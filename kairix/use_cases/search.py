@@ -57,6 +57,8 @@ _KEY_SOURCE_PAGE = "source_page"
 # (``search_output_to_envelope``) AND the reader (``SearchHit.from_envelope``).
 _KEY_SOURCE_URI = "source_uri"
 _KEY_LOCATOR = "locator"
+# PLA-270 — chunk-sequence envelope key; same writer↔reader coupling.
+_KEY_SEQ = "seq"
 
 
 def _default_search(
@@ -66,6 +68,7 @@ def _default_search(
     agent: str | None,
     collections: list[str] | None = None,
     intent: QueryIntent | None = None,
+    max_tier: str = "L2",
 ) -> Any:
     """Lazy-load the production search pipeline.
 
@@ -89,7 +92,15 @@ def _default_search(
     from kairix.core.search.config_loader import load_config
 
     pipeline = build_search_pipeline(config=load_config())
-    return pipeline.search(query=query, budget=budget, scope=scope, agent=agent, collections=collections, intent=intent)
+    return pipeline.search(
+        query=query,
+        budget=budget,
+        scope=scope,
+        agent=agent,
+        collections=collections,
+        intent=intent,
+        max_tier=max_tier,
+    )
 
 
 def _default_entity_card(name: str) -> dict[str, Any] | None:
@@ -135,6 +146,12 @@ class SearchHit:
     # resolves. ``locator`` is the within-document anchor for non-paged docs.
     source_uri: str = ""
     locator: str | None = None
+    # PLA-270 — the chunk sequence index (0-based) parsed from the chunk
+    # path at fusion. ``None`` for non-chunked rows (passthrough vault
+    # notes, entity cards). Together with ``source_uri`` this is the clean,
+    # typed expansion key the chunk-expansion tool (PLA-268) consumes —
+    # an agent no longer string-parses ``#N`` off ``path``.
+    seq: int | None = None
 
     def source_ref(self) -> SourceRef:
         """Return the shared :class:`SourceRef` breadcrumb for this hit (F97).
@@ -173,6 +190,7 @@ class SearchHit:
         # not assume the dict was untouched.
         entity = {str(k): str(v) for k, v in entity_raw.items()}
         raw_locator = hit.get(_KEY_LOCATOR)
+        raw_seq = hit.get(_KEY_SEQ)
         return cls(
             path=str(hit.get("path", "")),
             title=str(hit.get("title", "")),
@@ -186,6 +204,7 @@ class SearchHit:
             source_page=int(raw_page) if isinstance(raw_page, int) else None,
             source_uri=str(hit.get(_KEY_SOURCE_URI, "") or ""),
             locator=str(raw_locator) if raw_locator else None,
+            seq=int(raw_seq) if isinstance(raw_seq, int) else None,
         )
 
 
@@ -344,6 +363,7 @@ def _budgeted_to_hit(b: Any) -> SearchHit:
         return SearchHit(path="", title="", snippet="", score=0.0)
     snippet_src = getattr(b, "content", "") or getattr(inner, "snippet", "") or ""
     raw_page = getattr(inner, "source_page", None)
+    raw_seq = getattr(inner, "seq", None)
     return SearchHit(
         path=str(getattr(inner, "path", "")),
         title=str(getattr(inner, "title", "") or ""),
@@ -355,6 +375,8 @@ def _budgeted_to_hit(b: Any) -> SearchHit:
         source_page=int(raw_page) if isinstance(raw_page, int) else None,
         # PLA-274 — carry the canonical breadcrumb off the fused result.
         source_uri=str(getattr(inner, "source_uri", "") or ""),
+        # PLA-270 — carry the typed chunk seq off the fused result.
+        seq=int(raw_seq) if isinstance(raw_seq, int) else None,
     )
 
 
@@ -388,6 +410,10 @@ def search_output_to_envelope(out: SearchOutput) -> dict[str, Any]:
                 # through ``SourceRef.from_envelope`` losslessly.
                 _KEY_SOURCE_URI: h.source_ref().source_uri,
                 _KEY_LOCATOR: h.source_ref().locator,
+                # PLA-270 — the typed chunk-sequence expansion key. ``None``
+                # for non-chunked rows; PLA-268's chunk-expansion tool reads
+                # ``seq`` + ``source_uri`` rather than re-parsing ``#N``.
+                _KEY_SEQ: h.seq,
                 **({"source": h.source, "entity": h.entity} if h.source else {}),
                 # ADR-036 §Q7 — entity-summary chunks from the projector
                 # carry source_uri='entity://<QID>'; the MCP renderer + any
@@ -494,6 +520,7 @@ def run_search(
     budget: int = _DEFAULT_BUDGET,
     limit: int = 10,
     include_entity_card: bool = True,
+    max_tier: str = "L2",
     deps: SearchDeps | None = None,
 ) -> SearchOutput:
     """Run hybrid search and return a structured result.
@@ -512,6 +539,11 @@ def run_search(
         include_entity_card: When True (the default) and the query is
             classified as ENTITY, prepend a graph-card hit. CLI callers
             who only want flat results pass False.
+        max_tier: PLA-270 tiered-context ceiling — the richest representation
+            to return per hit: ``"L0"`` abstracts (cheapest), ``"L1"``
+            overviews, or ``"L2"`` full snippets (the default). Lets an agent
+            request the cheapest sufficient context. Takes effect when the
+            pipeline has tier summaries wired; otherwise every hit is L2.
         deps: Injectable dependencies; production callers leave None.
     """
     if deps is None:  # pragma: no cover — production lazy default; tests pass deps=SearchDeps(...)
@@ -527,7 +559,9 @@ def run_search(
         # pipeline so the query isn't classified twice (PLA-273).
         intent = _classify_for_request(query, deps.classify_fn)
         effective_budget = _infer_budget(query, budget, intent)
-        sr = deps.search_fn(query=query, agent=agent, scope=scope, budget=effective_budget, intent=intent)
+        sr = deps.search_fn(
+            query=query, agent=agent, scope=scope, budget=effective_budget, intent=intent, max_tier=max_tier
+        )
         intent_value = _intent_value(sr)
         hits: list[SearchHit] = [_budgeted_to_hit(b) for b in getattr(sr, "results", [])[:limit]]
         _maybe_prepend_entity_card(hits, query, intent_value, deps.entity_card_fn, include_entity_card)

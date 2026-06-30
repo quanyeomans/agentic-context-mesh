@@ -120,3 +120,20 @@ def test_mcp_search_signature_exposes_limit() -> None:
 
     params = set(inspect.signature(tool_search).parameters)
     assert "limit" in params, "tool_search must expose limit (Phase 2 of #168)"
+
+
+@pytest.mark.contract
+def test_both_surfaces_expose_max_tier() -> None:
+    """PLA-270 — the tiered-context ceiling must be requestable from CLI AND MCP.
+
+    The MCP ``tool_search`` exposes ``max_tier`` as a parameter; the CLI
+    parser exposes the parallel ``--max-tier`` flag. Without both, an agent
+    and an operator can't ask for the same cheapest-sufficient tier.
+    """
+    from kairix.agents.mcp.server import tool_search
+    from kairix.core.search.cli import build_parser
+
+    assert "max_tier" in set(inspect.signature(tool_search).parameters)
+
+    parsed = build_parser().parse_args(["q", "--max-tier", "L0"])
+    assert parsed.max_tier == "L0"

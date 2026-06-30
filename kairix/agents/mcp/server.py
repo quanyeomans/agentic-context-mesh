@@ -249,6 +249,7 @@ def tool_search(
     scope: Scope = Scope.SHARED_AGENT,
     budget: int = 3000,
     limit: int = 10,
+    max_tier: str = "L2",
     *,
     deps: Any = None,
 ) -> dict[str, Any]:
@@ -258,19 +259,25 @@ def tool_search(
     MCP both delegate to the same use case so the surfaces stay aligned
     (closes Phase-2 drift in #168).
 
+    ``max_tier`` (PLA-270) lets the agent request the cheapest sufficient
+    context per hit: ``"L0"`` abstracts, ``"L1"`` overviews, or ``"L2"``
+    full snippets (the default). Use a cheaper ceiling to triage many hits
+    within a tight token budget, then re-query a promising hit at ``"L2"``.
+
     The optional ``deps`` parameter forwards a ``SearchDeps`` directly
     to the use case — production callers leave it None; tests pass a
     ``SearchDeps`` to drive without touching live services.
     """
     from kairix.use_cases.search import run_search, search_output_to_envelope
 
-    logger.info("mcp.search: agent=%r scope=%r", agent, scope)
+    logger.info("mcp.search: agent=%r scope=%r max_tier=%r", agent, scope, max_tier)
     out = run_search(
         query,
         agent=agent,
         scope=scope,
         budget=budget,
         limit=limit,
+        max_tier=max_tier,
         deps=deps,
     )
     return search_output_to_envelope(out)
