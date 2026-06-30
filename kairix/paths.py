@@ -128,6 +128,18 @@ _CONTAINER_DOCUMENTS_MOUNT = "/data/documents"
 # CWD fallback, and reference_corpus_install_dir all compose this segment.
 _REFERENCE_LIBRARY_DIR = "reference-library"
 
+# FHS-layout roots for the system + container install modes (Plan 1 / Plan 2).
+# The Docker image bakes ``KAIRIX_DATA_DIR=/var/lib/kairix`` +
+# ``KAIRIX_CACHE_DIR=/var/cache/kairix`` (see Dockerfile), so the standard
+# deploy honours the env override; these constants are the matching fallback
+# so the legacy platform-aware resolvers (``default_data_dir`` /
+# ``default_cache_dir`` / ``default_workspace_root``) land on the SAME FHS
+# tree as the per-mode resolvers (``data_dir`` / ``cache_dir`` /
+# ``index_path``) instead of the retired ``/data/kairix`` location (#447 /
+# PLA-276). Centralised (F17) — each root is referenced by ≥3 resolvers.
+_FHS_DATA_DIR = "/var/lib/kairix"
+_FHS_CACHE_DIR = "/var/cache/kairix"
+
 
 def is_docker_runtime_check() -> bool:
     """Detect if running inside a Docker container."""
@@ -157,14 +169,15 @@ def default_document_root() -> Path:
     return Path.home() / "Documents"
 
 
-def default_data_dir(platform: str = sys.platform) -> Path:
+def default_data_dir(platform: str = sys.platform, *, env: Mapping[str, str] | None = None) -> Path:
     """Platform-appropriate data directory for DB, vectors, and state.
 
     Resolution order:
       1. ``KAIRIX_DATA_DIR`` env if set — operator override, always wins
-      2. Docker runtime (``KAIRIX_CONTAINER=1``): ``/data/kairix`` (legacy
-         default; operators on the v2026.6.8+ FHS layout set
-         ``KAIRIX_DATA_DIR=/var/lib/kairix`` to override — see #447)
+      2. Docker runtime (``KAIRIX_CONTAINER=1``): ``/var/lib/kairix`` (FHS;
+         matches the image-baked ``KAIRIX_DATA_DIR`` and the per-mode
+         ``data_dir(Mode.container)`` resolver — #447 / PLA-276 retired the
+         old ``/data/kairix`` default that landed data off the mounted volume)
       3. Service install (system-mode kairix init): ``/var/lib/kairix``
       4. Windows user: ``%LOCALAPPDATA%/kairix``
       5. ``XDG_DATA_HOME``/kairix when set
@@ -172,69 +185,81 @@ def default_data_dir(platform: str = sys.platform) -> Path:
 
     ``platform`` defaults to ``sys.platform`` and is exposed as a
     parameter so unit tests can drive the Windows branch on any host
-    without patching ``kairix.paths.sys``.
+    without patching ``kairix.paths.sys``. ``env`` is the F2-clean test
+    seam (mirrors :func:`is_docker_env` / :func:`Mode.detect`) — production
+    callers leave it ``None`` and the live ``os.environ`` is read at this
+    paths boundary (F4); tests pass an explicit mapping to drive the
+    docker / XDG branches without ``monkeypatch.setenv``.
     """
-    env = os.environ.get("KAIRIX_DATA_DIR")
-    if env:
-        return Path(env).expanduser()
-    if is_docker_runtime_check():
-        # Legacy default — see #447 + docs/architecture/deployment-architecture.md.
-        # Operators on FHS layouts (v2026.6.8+ kairix init --system) set
-        # KAIRIX_DATA_DIR=/var/lib/kairix explicitly to override.
-        return Path("/data/kairix")
+    e = env if env is not None else os.environ
+    override = e.get("KAIRIX_DATA_DIR")
+    if override:
+        return Path(override).expanduser()
+    if is_docker_env(e):
+        return Path(_FHS_DATA_DIR)
     if is_service_install():
-        return Path("/var/lib/kairix")
+        return Path(_FHS_DATA_DIR)
     if platform == "win32":
-        local = os.environ.get("LOCALAPPDATA")
+        local = e.get("LOCALAPPDATA")
         if local:
             return Path(local) / "kairix"
-    xdg = os.environ.get("XDG_DATA_HOME")
+    xdg = e.get("XDG_DATA_HOME")
     if xdg:
         return Path(xdg) / "kairix"
     return Path.home() / ".local" / "share" / "kairix"
 
 
-def default_cache_dir(platform: str = sys.platform) -> Path:
+def default_cache_dir(platform: str = sys.platform, *, env: Mapping[str, str] | None = None) -> Path:
     """Platform-appropriate cache directory for temporary data.
 
     Resolution order:
       1. ``KAIRIX_CACHE_DIR`` env if set — operator override, always wins
-      2. Docker runtime (``KAIRIX_CONTAINER=1``): ``/data/kairix`` (legacy
-         default; operators on FHS layouts set
-         ``KAIRIX_CACHE_DIR=/var/cache/kairix`` to override — see #447)
+      2. Docker runtime (``KAIRIX_CONTAINER=1``): ``/var/cache/kairix`` (FHS;
+         matches the image-baked ``KAIRIX_CACHE_DIR`` and the per-mode
+         ``cache_dir(Mode.container)`` resolver — #447 / PLA-276 retired the
+         old ``/data/kairix`` default)
       3. Service install (system-mode kairix init): ``/var/cache/kairix``
       4. Windows user: ``%LOCALAPPDATA%/kairix/cache``
       5. ``XDG_CACHE_HOME``/kairix when set
       6. ``~/.cache/kairix`` (XDG default)
 
     ``platform`` defaults to ``sys.platform``; injectable for the same
-    reason as ``default_data_dir``.
+    reason as ``default_data_dir``. ``env`` is the F2-clean test seam —
+    production leaves it ``None`` and the live ``os.environ`` is read here
+    (F4); tests pass an explicit mapping to drive the docker / XDG branches.
     """
-    env = os.environ.get("KAIRIX_CACHE_DIR")
-    if env:
-        return Path(env).expanduser()
-    if is_docker_runtime_check():
-        # Legacy default — see #447. Operators on FHS layouts set
-        # KAIRIX_CACHE_DIR=/var/cache/kairix explicitly to override.
-        return Path("/data/kairix")
+    e = env if env is not None else os.environ
+    override = e.get("KAIRIX_CACHE_DIR")
+    if override:
+        return Path(override).expanduser()
+    if is_docker_env(e):
+        return Path(_FHS_CACHE_DIR)
     if is_service_install():
-        return Path("/var/cache/kairix")
+        return Path(_FHS_CACHE_DIR)
     if platform == "win32":
-        local = os.environ.get("LOCALAPPDATA")
+        local = e.get("LOCALAPPDATA")
         if local:
             return Path(local) / "kairix" / "cache"
-    xdg = os.environ.get("XDG_CACHE_HOME")
+    xdg = e.get("XDG_CACHE_HOME")
     if xdg:
         return Path(xdg) / "kairix"
     return Path.home() / _USER_CACHE_DIR / "kairix"
 
 
-def default_workspace_root() -> Path:
-    """Platform-appropriate workspace root for agent memory logs."""
-    if is_docker_runtime_check():
-        return Path("/data/workspaces")
-    if is_service_install():
-        return Path("/data/workspaces")
+def default_workspace_root(*, env: Mapping[str, str] | None = None) -> Path:
+    """Platform-appropriate workspace root for agent memory logs.
+
+    Docker + service installs land under ``/var/lib/kairix/workspaces`` to
+    match the image-baked ``KAIRIX_WORKSPACE_ROOT`` and sit on the same FHS
+    data tree as the SQLite index (#447 / PLA-276 retired the old
+    ``/data/workspaces`` default that fell off the mounted data volume). The
+    user fallback stays ``~/.kairix/workspaces``. ``env`` is the F2-clean
+    test seam — production leaves it ``None`` (live ``os.environ`` read here,
+    F4); tests pass an explicit mapping to drive the docker branch.
+    """
+    e = env if env is not None else os.environ
+    if is_docker_env(e) or is_service_install():
+        return Path(_FHS_DATA_DIR) / "workspaces"
     return Path.home() / ".kairix" / "workspaces"
 
 
@@ -264,6 +289,7 @@ class KairixPaths:
 def _resolve_cached() -> KairixPaths:
     """Internal cached resolution — called by KairixPaths.resolve()."""
     cache_dir = default_cache_dir()
+    data_dir_default = default_data_dir()
 
     # Try loading paths from config file
     config_paths = load_paths_from_config()
@@ -272,8 +298,14 @@ def _resolve_cached() -> KairixPaths:
         os.environ.get(_KAIRIX_DOCUMENT_ROOT_ENV) or config_paths.get("document_root") or str(default_document_root())
     ).expanduser()
 
+    # The primary SQLite index is the source of truth (FTS5 + content_vectors),
+    # NOT a regenerable cache — so it falls back to the persistent DATA dir,
+    # matching index_path()/vec_index_path() and the image-baked
+    # KAIRIX_DB_PATH=/var/lib/kairix/index.sqlite. Resolving it under the
+    # cache dir let cache-eviction or a non-persistent cache mount silently
+    # drop the index (#447 / PLA-276).
     db_path = Path(
-        os.environ.get("KAIRIX_DB_PATH") or config_paths.get("db_path") or str(cache_dir / "index.sqlite")
+        os.environ.get("KAIRIX_DB_PATH") or config_paths.get("db_path") or str(data_dir_default / "index.sqlite")
     ).expanduser()
 
     log_dir = Path(
@@ -1355,7 +1387,7 @@ def data_dir(mode: Mode | None = None) -> Path:
         if mode == Mode.user:
             return _xdg("XDG_DATA_HOME", "~/.local/share") / "kairix"
         # system + container share /var/lib/kairix
-        return Path("/var/lib/kairix")
+        return Path(_FHS_DATA_DIR)
     raw = os.environ.get("KAIRIX_DATA_DIR")
     if raw:
         return Path(raw)
@@ -1393,7 +1425,7 @@ def cache_dir(mode: Mode | None = None) -> Path:
     m = mode or Mode.detect()
     if m == Mode.user:
         return _xdg("XDG_CACHE_HOME", "~/.cache") / "kairix"
-    return Path("/var/cache/kairix")
+    return Path(_FHS_CACHE_DIR)
 
 
 def runtime_secrets_dir(mode: Mode | None = None) -> Path:

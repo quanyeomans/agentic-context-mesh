@@ -184,11 +184,20 @@ class TestIsServiceInstall:
 @pytest.mark.unit
 class TestDefaultDataDir:
     @pytest.mark.unit
-    def test_docker_returns_data_kairix(self, monkeypatch) -> None:
-        monkeypatch.setenv("KAIRIX_DOCKER", "1")
-        monkeypatch.delenv("container", raising=False)
-        result = default_data_dir()
-        assert result == Path("/data/kairix")
+    def test_docker_returns_fhs_var_lib(self) -> None:
+        """Docker runtime resolves to the FHS ``/var/lib/kairix`` data dir,
+        matching the image-baked ``KAIRIX_DATA_DIR`` and the per-mode
+        ``data_dir(Mode.container)`` resolver (#447 / PLA-276 retired the old
+        ``/data/kairix`` default that landed the index off the mounted volume).
+
+        F2-clean: the docker signal is injected through the ``env`` seam, not
+        ``monkeypatch.setenv``.
+
+        Sabotage: revert the docker branch to ``Path("/data/kairix")`` and
+        this assertion fails.
+        """
+        result = default_data_dir(env={"KAIRIX_DOCKER": "1"})
+        assert result == Path("/var/lib/kairix")
 
     @pytest.mark.unit
     def test_xdg_data_home(self, monkeypatch) -> None:
@@ -235,11 +244,18 @@ class TestDefaultDataDir:
 @pytest.mark.unit
 class TestDefaultCacheDir:
     @pytest.mark.unit
-    def test_docker_returns_data_kairix(self, monkeypatch) -> None:
-        monkeypatch.setenv("KAIRIX_DOCKER", "1")
-        monkeypatch.delenv("container", raising=False)
-        result = default_cache_dir()
-        assert result == Path("/data/kairix")
+    def test_docker_returns_fhs_var_cache(self) -> None:
+        """Docker runtime resolves to the FHS ``/var/cache/kairix`` cache dir,
+        matching the image-baked ``KAIRIX_CACHE_DIR`` and the per-mode
+        ``cache_dir(Mode.container)`` resolver (#447 / PLA-276 retired the old
+        ``/data/kairix`` default).
+
+        F2-clean: the docker signal is injected through the ``env`` seam.
+
+        Sabotage: revert the docker branch to ``Path("/data/kairix")`` → fails.
+        """
+        result = default_cache_dir(env={"KAIRIX_DOCKER": "1"})
+        assert result == Path("/var/cache/kairix")
 
     @pytest.mark.unit
     def test_xdg_cache_home(self, monkeypatch) -> None:
@@ -385,14 +401,19 @@ class TestServiceInstallDefaults:
 
     @pytest.mark.unit
     def test_service_install_workspace_root(self, monkeypatch) -> None:
-        """Service install → workspaces under /data/workspaces (same as Docker)."""
+        """Service install → workspaces under /var/lib/kairix/workspaces (FHS).
+
+        #447 / PLA-276 reconciled this off the old /data/workspaces default
+        so agent-memory logs sit on the same persistent data tree as the
+        SQLite index. Docker shares the same FHS workspace root.
+        """
         monkeypatch.delenv("KAIRIX_DOCKER", raising=False)
         monkeypatch.delenv("container", raising=False)
         with (
             patch("os.path.exists", return_value=False),
             patch.object(Path, "exists", return_value=True),
         ):
-            assert default_workspace_root() == Path("/data/workspaces")
+            assert default_workspace_root() == Path("/var/lib/kairix/workspaces")
 
     @pytest.mark.unit
     def test_workspace_root_user_default(self, monkeypatch) -> None:
@@ -404,6 +425,82 @@ class TestServiceInstallDefaults:
             patch.object(Path, "exists", return_value=False),
         ):
             assert default_workspace_root() == Path.home() / ".kairix" / "workspaces"
+
+
+# ---------------------------------------------------------------------------
+# #447 / PLA-276 — the primary SQLite index defaults to the PERSISTENT data
+# dir (source of truth: FTS5 + content_vectors), never the regenerable cache,
+# and the docker/container defaults match the FHS image layout
+# (/var/lib/kairix, /var/cache/kairix, /data/documents). These pin the
+# divergence the issue closed; F2-clean throughout (env seam + per-mode
+# resolvers, no monkeypatch.setenv driving the docker detection).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestPrimaryIndexUnderDataDir:
+    @pytest.mark.unit
+    def test_db_path_defaults_under_data_dir_not_cache(self, monkeypatch) -> None:
+        """``KairixPaths.resolve().db_path`` falls back to
+        ``default_data_dir()/index.sqlite`` (the persistent data dir), NOT
+        ``default_cache_dir()/index.sqlite`` — matching ``index_path()``.
+
+        ``delenv`` (not ``setenv``) keeps this F2-clean: it only strips any
+        ambient override so the documented FALLBACK is exercised; the
+        hermetic conftest already empties the config search path.
+
+        Sabotage: revert the ``_resolve_cached`` db_path fallback to
+        ``cache_dir / "index.sqlite"`` and this fails on any host where the
+        data dir differs from the cache dir.
+        """
+        monkeypatch.delenv("KAIRIX_DB_PATH", raising=False)
+        clear_cache()
+        resolved = KairixPaths.resolve()
+        assert resolved.db_path == default_data_dir() / "index.sqlite"
+        assert resolved.db_path != default_cache_dir() / "index.sqlite"
+
+    @pytest.mark.unit
+    def test_index_path_container_is_on_fhs_data_tree(self) -> None:
+        """``index_path(Mode.container)`` sits on the persistent FHS data dir
+        (the same ``/var/lib/kairix`` tree the runtime db_path fallback now
+        uses), closing the cache-vs-data divergence (#447).
+
+        Sabotage: point ``data_dir``/``index_path`` at the cache root → fails.
+        """
+        from kairix.paths import Mode, data_dir, index_path
+
+        assert index_path(Mode.container) == data_dir(Mode.container) / "index.sqlite"
+        assert index_path(Mode.container) == Path("/var/lib/kairix/index.sqlite")
+
+
+@pytest.mark.unit
+class TestDockerFhsLayout:
+    @pytest.mark.unit
+    def test_docker_mode_defaults_match_fhs_layout(self) -> None:
+        """The docker/container defaults match the FHS image layout:
+        data=/var/lib/kairix, cache=/var/cache/kairix, documents=/data/documents.
+
+        F2-clean: ``default_*`` driven via the ``env`` seam; the document
+        root via the explicit-``mode`` per-mode resolver. No ``setenv``.
+
+        Sabotage: revert any docker branch to ``/data/kairix`` → fails.
+        """
+        from kairix.paths import Mode, document_root
+
+        assert default_data_dir(env={"KAIRIX_DOCKER": "1"}) == Path("/var/lib/kairix")
+        assert default_cache_dir(env={"KAIRIX_DOCKER": "1"}) == Path("/var/cache/kairix")
+        assert document_root(Mode.container) == Path("/data/documents")
+
+    @pytest.mark.unit
+    def test_docker_workspace_root_on_fhs_data_tree(self) -> None:
+        """Docker workspace root lands under ``/var/lib/kairix/workspaces`` —
+        on the mounted data volume, not the retired ``/data/workspaces``.
+
+        F2-clean via the ``env`` seam.
+
+        Sabotage: revert the docker branch to ``/data/workspaces`` → fails.
+        """
+        assert default_workspace_root(env={"KAIRIX_DOCKER": "1"}) == Path("/var/lib/kairix/workspaces")
 
 
 # ---------------------------------------------------------------------------
