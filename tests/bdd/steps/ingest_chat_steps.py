@@ -60,6 +60,11 @@ def _paths_for(root: Path, tmp_path: Path) -> KairixPaths:
     )
 
 
+def _conversations_dir(document_root: Path) -> Path:
+    """The writable agent-knowledge submount conversations land under (PLA-275)."""
+    return document_root / "04-Agent-Knowledge" / "conversations"
+
+
 def _write_transcript(target: Path, conversations: int, turns_per_conv: int) -> None:
     """Lay out a believable JSONL transcript with the given shape."""
     lines: list[str] = []
@@ -127,7 +132,7 @@ def _given_already_ingested(_ingest_state: _State, tmp_path: Path, turns: int) -
         fact_store=_ingest_state.fact_store,
         fact_extractor=_ingest_state.fact_extractor,
     )
-    written = next((_ingest_state.document_root / "conversations").glob("*.md"))
+    written = next(_conversations_dir(_ingest_state.document_root).glob("*.md"))
     _ingest_state.first_pass_text = written.read_text(encoding="utf-8")
 
 
@@ -196,7 +201,7 @@ def _then_conversations_reported(_ingest_state: _State, n: int) -> None:
 
 @then(parsers.parse("{n:d} markdown files appear under the conversations directory of the document root"))
 def _then_markdown_count(_ingest_state: _State, n: int) -> None:
-    written = sorted((_ingest_state.document_root / "conversations").glob("*.md"))
+    written = sorted(_conversations_dir(_ingest_state.document_root).glob("*.md"))
     assert len(written) == n, f"expected {n} markdown files; got {[p.name for p in written]}"
 
 
@@ -212,14 +217,14 @@ def _then_facts_persisted(_ingest_state: _State, n: int) -> None:
 
 @then("the conversation markdown is still written to the document root")
 def _then_markdown_written(_ingest_state: _State) -> None:
-    written = list((_ingest_state.document_root / "conversations").glob("*.md"))
+    written = list(_conversations_dir(_ingest_state.document_root).glob("*.md"))
     assert written, "no markdown chunks written under conversations/"
 
 
 @then("the markdown file content stays identical to the first ingest")
 def _then_markdown_unchanged(_ingest_state: _State) -> None:
     assert _ingest_state.first_pass_text is not None, "first-pass text was not recorded by the Given step"
-    written = next((_ingest_state.document_root / "conversations").glob("*.md"))
+    written = next(_conversations_dir(_ingest_state.document_root).glob("*.md"))
     second_pass = written.read_text(encoding="utf-8")
     assert second_pass == _ingest_state.first_pass_text
 

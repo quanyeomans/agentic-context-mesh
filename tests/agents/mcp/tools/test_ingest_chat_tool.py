@@ -26,6 +26,8 @@ attribute-reassignment, no ``@patch``.
 from __future__ import annotations
 
 import json
+import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +53,34 @@ def _paths(tmp_path: Path) -> KairixPaths:
         log_dir=tmp_path / "logs",
         workspace_root=tmp_path / "workspaces",
     )
+
+
+def _conversations_dir(document_root: Path) -> Path:
+    """The writable agent-knowledge submount conversations land under (PLA-275)."""
+    return document_root / "04-Agent-Knowledge" / "conversations"
+
+
+def _require_enforced_readonly_or_skip(directory: Path) -> None:
+    """Strip write perms from ``directory``; skip if the platform won't enforce it.
+
+    Running as root (uid 0) bypasses DAC write checks and some filesystems
+    ignore mode bits — in either case a read-only directory can't be
+    simulated, so the read-only-write path is unverifiable here. We skip with
+    rationale rather than assert a guarantee the platform can't make, mirroring
+    the CLAUDE.md /run/secrets read-only-fs lesson.
+    """
+    os.chmod(directory, 0o500)
+    probe = directory / ".probe-write"
+    try:
+        probe.write_text("x", encoding="utf-8")
+    except OSError:
+        return  # read-only is enforced — proceed with the test
+    # Write unexpectedly succeeded → the platform cannot enforce read-only here.
+    probe.unlink()
+    os.chmod(directory, 0o700)
+    # F11: platform does not enforce read-only directory perms (root or a
+    # mode-blind filesystem); the RO-write branch is unverifiable, so skip.
+    pytest.skip("filesystem does not enforce read-only directory permissions; cannot simulate the RO submount")
 
 
 def _jsonl(conversation_id: str, n_turns: int) -> str:
@@ -99,8 +129,8 @@ def test_happy_path_returns_counts_and_writes_markdown(tmp_path: Path) -> None:
     assert out["turns_ingested"] == 5
     assert out["facts_added"] >= 1  # one scripted fact per window; 5 turns → 1 window
     assert out["windows_extracted"] == 1
-    # Markdown chunk was actually persisted to disk.
-    chunk = paths.document_root / "conversations" / "conv-01.md"
+    # Markdown chunk was actually persisted to disk (writable submount).
+    chunk = _conversations_dir(paths.document_root) / "conv-01.md"
     assert chunk.exists(), f"expected markdown at {chunk}"
 
 
@@ -132,7 +162,7 @@ def test_cross_engagement_namespace_is_rejected(tmp_path: Path) -> None:
     assert out["facts_added"] == 0
     # No side effects: store untouched, no markdown directory created.
     assert store._facts == {}
-    assert not (paths.document_root / "conversations").exists()
+    assert not _conversations_dir(paths.document_root).exists()
 
 
 def test_empty_jsonl_content_is_rejected(tmp_path: Path) -> None:
@@ -239,7 +269,7 @@ def test_no_extract_mode_skips_facts(tmp_path: Path) -> None:
     assert out["facts_added"] == 0
     assert out["windows_extracted"] == 0
     # Chunk still written even without extraction.
-    assert (paths.document_root / "conversations" / "conv-03.md").exists()
+    assert (_conversations_dir(paths.document_root) / "conv-03.md").exists()
 
 
 def test_default_fact_store_and_extractor_are_resolved_when_omitted(tmp_path: Path) -> None:
@@ -281,7 +311,95 @@ def test_default_fact_store_and_extractor_are_resolved_when_omitted(tmp_path: Pa
     assert out["error"] == ""
     assert out["facts_added"] == 0  # no_extract=True
     assert out["turns_ingested"] == 3
-    assert (paths.document_root / "conversations" / "conv-default.md").exists()
+    assert (_conversations_dir(paths.document_root) / "conv-default.md").exists()
+
+
+def test_writes_under_writable_agent_knowledge_submount_not_ro_root(tmp_path: Path) -> None:
+    """Conversations land under the writable agent-knowledge submount, not the
+    bare (read-only on stock compose) document root (PLA-275).
+
+    On the standard compose ``/data/documents`` mounts ``:ro`` while
+    ``/data/documents/04-Agent-Knowledge`` is overlaid as a separate writable
+    mount (docker-compose.yml). Writing the bare-root ``conversations/`` path
+    crashed with ``OSError: Read-only file system``; the chunk must land under
+    ``04-Agent-Knowledge/conversations`` so the write succeeds on the deploy.
+
+    Sabotage: revert the use case to ``paths.document_root / "conversations"``
+    → the submount assertion fails (chunk absent there) and the bare-root
+    negative assertion fails (chunk present at the read-only root).
+    """
+    paths = _paths(tmp_path)
+
+    out = tool_ingest_chat(
+        jsonl_content=_jsonl("conv-ak", n_turns=3),
+        conversation_id="conv-ak",
+        namespace="engagement-alpha",
+        allowed_namespace="engagement-alpha",
+        paths=paths,
+        fact_store=FakeFactStore(),
+        fact_extractor=FakeFactExtractor(),
+        no_extract=True,
+    )
+
+    assert out["error"] == ""
+    submount_chunk = _conversations_dir(paths.document_root) / "conv-ak.md"
+    assert submount_chunk.exists(), f"expected chunk under the writable submount at {submount_chunk}"
+    bare_root_chunk = paths.document_root / "conversations" / "conv-ak.md"
+    assert not bare_root_chunk.exists(), "chunk must NOT be written to the bare read-only document root"
+
+
+def test_readonly_submount_returns_actionable_envelope_not_oserror(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A read-only agent-knowledge submount yields an actionable envelope, not a crash.
+
+    Simulates a misconfigured (read-only) writable submount by stripping write
+    perms from ``04-Agent-Knowledge`` so the use case's
+    ``conversations_dir.mkdir(...)`` raises ``PermissionError`` (an OSError
+    subclass). The tool must catch it and hand the agent an F21-actionable
+    envelope pointing at the fix — never let the OSError propagate (PLA-275).
+
+    Sabotage: remove the ``except OSError`` branch around the ``ingest_chat``
+    call in ``tool_ingest_chat`` → the PermissionError propagates out of the
+    handler and this test fails with the unhandled exception.
+    """
+    paths = _paths(tmp_path)
+    ak_dir = paths.document_root / "04-Agent-Knowledge"
+    ak_dir.mkdir(parents=True)
+    _require_enforced_readonly_or_skip(ak_dir)
+
+    try:
+        with caplog.at_level(logging.WARNING, logger="kairix.agents.mcp.tools.ingest_chat"):
+            out = tool_ingest_chat(
+                jsonl_content=_jsonl("conv-ro", n_turns=2),
+                conversation_id="conv-ro",
+                namespace="engagement-alpha",
+                allowed_namespace="engagement-alpha",
+                paths=paths,
+                fact_store=FakeFactStore(),
+                fact_extractor=FakeFactExtractor(),
+                no_extract=True,
+            )
+    finally:
+        # Restore perms so pytest can clean up tmp_path even if an assertion fails.
+        os.chmod(ak_dir, 0o700)
+
+    assert out["error"] == ERROR_INGEST_FAILED
+    # Actionable: F21 fix:/next: markers + names the writable submount.
+    assert "fix:" in out["detail"]
+    assert "next:" in out["detail"]
+    assert "04-Agent-Knowledge" in out["detail"]
+    assert out["turns_ingested"] == 0
+    assert out["facts_added"] == 0
+    # The filesystem error is logged WITH traceback context (exc_info=True) so
+    # operators can diagnose the misconfigured mount from the worker logs. A
+    # truthy ``exc_info`` carries the captured exception tuple; ``exc_info=False``
+    # would leave it falsy — so the truthiness + type check pins exc_info=True.
+    fs_records = [r for r in caplog.records if "filesystem error" in r.getMessage()]
+    assert fs_records, "expected a WARNING log for the filesystem error"
+    captured = fs_records[0].exc_info
+    assert captured, "the filesystem-error warning must capture exc_info for diagnosis"
+    assert issubclass(captured[0], OSError), "captured exc_info must carry the filesystem (OSError) exception"
 
 
 def test_tmp_jsonl_write_failure_returns_ingestfailed_envelope(tmp_path: Path) -> None:

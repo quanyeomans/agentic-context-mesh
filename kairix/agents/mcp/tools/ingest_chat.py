@@ -205,7 +205,25 @@ def tool_ingest_chat(
             window_turns=window_turns,
             no_extract=no_extract,
         )
-    except (OSError, ValueError, RuntimeError) as exc:
+    except OSError as exc:
+        # Conversations write to {document_root}/04-Agent-Knowledge/conversations
+        # — the writable submount on the stock compose (PLA-275). If even that
+        # is read-only (misconfigured / missing writable mount), hand the agent
+        # an actionable envelope rather than letting the OSError crash the call.
+        logger.warning("tool_ingest_chat: ingest_chat hit a filesystem error: %s", exc, exc_info=True)
+        return _failure_envelope(
+            error=ERROR_INGEST_FAILED,
+            detail=(
+                f"could not write the conversation under the agent-knowledge area ({type(exc).__name__}). "
+                "fix: mount 04-Agent-Knowledge writable — on the standard compose the document root is "
+                "read-only and 04-Agent-Knowledge is the one writable submount kairix writes to. "
+                "next: `mkdir -p documents/04-Agent-Knowledge` and grant the kairix container user "
+                "write access before `docker compose up`."
+            ),
+            namespace=namespace,
+            conversation_id=conversation_id,
+        )
+    except (ValueError, RuntimeError) as exc:
         logger.warning("tool_ingest_chat: ingest_chat raised: %s", exc, exc_info=True)
         return _failure_envelope(
             error=ERROR_INGEST_FAILED,
