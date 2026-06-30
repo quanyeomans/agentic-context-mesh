@@ -61,6 +61,10 @@ _REGISTERED_SURFACES: tuple[tuple[str, str], ...] = (
     ("kairix/use_cases/contradict.py", "ContradictionHit"),
     ("kairix/use_cases/research.py", "ResearchChunk"),
     ("kairix/use_cases/prep.py", "PrepOutput"),
+    # PLA-266 — the brief surface emits its retrieved chunks as structured
+    # SourceRef citations (``sources: tuple[SourceRef, ...]`` — the EMBED
+    # option), so a brief is now self-citing like every other surface.
+    ("kairix/use_cases/brief.py", "BriefOutput"),
 )
 
 # The shared breadcrumb type name. A field whose annotation references this

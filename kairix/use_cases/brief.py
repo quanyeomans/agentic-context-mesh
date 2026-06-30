@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,6 +24,7 @@ from kairix.core.health import (
     cached_probe_health,
     health_to_envelope,
 )
+from kairix.core.protocols import SourceRef
 from kairix.core.search.brief_output_cache import (
     DEFAULT_MAX_AGE_S as _BRIEF_DEFAULT_MAX_AGE_S,
 )
@@ -107,6 +108,48 @@ def _default_generate(agent: str, **kwargs: Any) -> str:
     return generate_briefing(agent, **kwargs)
 
 
+def _default_brief_sources(agent: str) -> list[SourceRef]:
+    """Capture the brief's retrieved chunks as resolvable ``SourceRef``s.
+
+    The production default for :attr:`BriefDeps.sources_fn` (PLA-266). Runs
+    the same work-signal-seeded hybrid search the synthesis fan-out runs, so
+    the factory's per-config query cache dedups the two onto one backend
+    round-trip; returns ``[]`` on any failure (degraded pipeline, no index)
+    so the brief still assembles without a footer.
+    """
+    from kairix.agents.briefing.sources import fetch_hybrid_search_sources
+
+    return fetch_hybrid_search_sources(agent)
+
+
+# Footer heading + intro the brief appends below the synthesised body. Kept as
+# constants because the heading is asserted by tests + parsed by the render
+# path (F17 — a repeated >=10-char literal trips the duplicate-string rule).
+_SOURCES_HEADING = "## Sources"
+_SOURCES_INTRO = "_Retrieved sources behind this brief — cite or re-open by source_uri._"
+
+
+def render_sources_footer(sources: Sequence[SourceRef]) -> str:
+    """Render the deterministic ``## Sources`` citation footer (PLA-266).
+
+    Each retrieved chunk is one numbered line carrying the canonical
+    ``source_uri`` (the resolvable breadcrumb), the human label (title, or the
+    path when untitled), and the collection when known — so an agent reading
+    the brief can verify or expand any claim by re-opening the source instead
+    of re-running search blind. Returns ``""`` for an empty list so the caller
+    appends nothing (no dangling heading on a brief with no hits). Pure +
+    order-stable: same refs in, same markdown out.
+    """
+    if not sources:
+        return ""
+    lines = ["", _SOURCES_HEADING, "", _SOURCES_INTRO, ""]
+    for i, ref in enumerate(sources, start=1):
+        label = ref.title or ref.path
+        collection = f" — {ref.collection}" if ref.collection else ""
+        lines.append(f"{i}. {label} — {ref.source_uri}{collection}")
+    return "\n".join(lines)
+
+
 def _default_briefing_dir() -> Path:
     from kairix.paths import briefing_dir
 
@@ -159,6 +202,13 @@ class BriefOutput:
             on top-level failure, or ``"InvalidAgent: <name> resolves to
             no configured surface. ..."`` when scope resolution yields no
             surfaces for the requested agent.
+        sources: The retrieved chunks behind this brief, as resolvable
+            :class:`SourceRef` breadcrumbs (PLA-266). The shared contract
+            every agent surface uses (F97), so an MCP caller gets
+            machine-parseable provenance — the canonical ``source_uri`` to
+            cite or re-open each source — instead of prose the synthesiser
+            collapsed. Rendered into ``content``'s ``## Sources`` footer and
+            projected to the envelope. Empty when no chunk was retrieved.
     """
 
     agent: str
@@ -167,6 +217,7 @@ class BriefOutput:
     preview: str = ""
     health: KairixHealth = field(default_factory=KairixHealth)
     error: str = ""
+    sources: tuple[SourceRef, ...] = ()
 
     @classmethod
     def from_envelope(cls, envelope: dict[str, Any]) -> BriefOutput:
@@ -185,13 +236,20 @@ class BriefOutput:
         is acceptable because the CLI's rendering path never reads it.
         Any future caller that needs the round-tripped health snapshot
         should add an explicit ``envelope_to_health`` and wire it here.
+
+        ``sources`` IS round-tripped (PLA-266) — each breadcrumb dict rebuilds
+        through :meth:`SourceRef.from_envelope`, tolerant of a legacy envelope
+        that predates the field (``sources`` absent → empty tuple).
         """
+        sources_raw = envelope.get("sources", []) or []
+        sources = tuple(SourceRef.from_envelope(s) for s in sources_raw if isinstance(s, Mapping))
         return cls(
             agent=str(envelope.get("agent", "")),
             content=str(envelope.get("content", "")),
             path=str(envelope.get("path", "")),
             preview=str(envelope.get("preview", "")),
             error=str(envelope.get("error", "")),
+            sources=sources,
         )
 
 
@@ -210,11 +268,18 @@ class BriefDeps:
     AgentScope resolution. Tests inject a config that declares the
     agent under test (``config_fn=lambda: {"agents": {...}}``) to prove
     a config-onboarded agent is briefable without writing a real file.
+
+    ``sources_fn`` is the PLA-266 structured-citation seam: it returns the
+    retrieved chunks as resolvable ``SourceRef`` breadcrumbs for the
+    ``## Sources`` footer + the envelope's ``sources`` field. Tests inject a
+    fixed list (``sources_fn=lambda agent: [SourceRef.of(...)]``) so the
+    footer + provenance projection are proven without an index.
     """
 
     generate_fn: Callable[..., str] = field(default_factory=lambda: _default_generate)
     briefing_dir_fn: Callable[[], Path] = field(default_factory=lambda: _default_briefing_dir)
     config_fn: Callable[[], dict[str, object] | None] = field(default_factory=lambda: _default_brief_config)
+    sources_fn: Callable[[str], list[SourceRef]] = field(default_factory=lambda: _default_brief_sources)
     health_deps: HealthDeps = field(default_factory=HealthDeps)
 
 
@@ -275,6 +340,12 @@ def run_brief(
             return cached_output
 
         content = d.generate_fn(normalised)
+        # PLA-266 — capture the retrieved chunks as resolvable SourceRef
+        # breadcrumbs and append the deterministic ## Sources footer, so the
+        # agent-facing brief carries machine-parseable provenance (cite or
+        # re-open by source_uri) instead of prose the synthesiser collapsed.
+        sources = tuple(d.sources_fn(normalised))
+        content = content + render_sources_footer(sources)
         out_dir = d.briefing_dir_fn()
         path = str(out_dir / f"{normalised}-latest.md") if out_dir else ""
         preview = "\n".join(content.splitlines()[:30])
@@ -284,6 +355,7 @@ def run_brief(
             path=path,
             preview=preview,
             health=health,
+            sources=sources,
         )
         cache.put(cache_key, output)
         return output
@@ -320,4 +392,8 @@ def brief_output_to_envelope(out: BriefOutput) -> dict[str, Any]:
         "preview": out.preview,
         "health": dict(health_to_envelope(out.health)),
         "error": out.error,
+        # PLA-266 — each source is a resolvable SourceRef breadcrumb so MCP
+        # callers get machine-parseable provenance (the canonical source_uri
+        # to cite or re-open), not just the prose in ``content``.
+        "sources": [s.to_envelope() for s in out.sources],
     }

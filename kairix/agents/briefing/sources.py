@@ -40,9 +40,12 @@ from kairix.agents.briefing._source_caches import (
     reset_brief_source_cache,
 )
 from kairix.core.factory import build_search_pipeline
+from kairix.core.protocols import SourceRef
 from kairix.text import truncate_to_tokens
 
 if TYPE_CHECKING:
+    from typing import Any
+
     from kairix.core.search.pipeline import SearchPipeline
 
 # Re-export the brief-source cache accessors + class so tests + the
@@ -52,6 +55,7 @@ __all__ = [
     "BriefSourceCache",
     "fetch_entity_stub",
     "fetch_hybrid_search",
+    "fetch_hybrid_search_sources",
     "fetch_knowledge_rules",
     "fetch_memory_logs",
     "fetch_memory_logs_via_scope",
@@ -644,6 +648,43 @@ def _build_focus_query(agent: str, focus_signals: Iterable[str] | None) -> str:
     return truncate_to_tokens(" ".join(focus_lines), _FOCUS_QUERY_MAX_TOKENS)
 
 
+# Top-N retrieved chunks surfaced as both the synthesis text body and the
+# structured ## Sources citations. 5 keeps the brief focused and clears the
+# >=3-citations-per-brief SLO (PLA-266) with headroom for a thin hit list.
+_HYBRID_TOP_N = 5
+
+
+def _run_hybrid_search(
+    agent: str,
+    max_tokens: int,
+    *,
+    pipeline: SearchPipeline | None,
+    focus_signals: Iterable[str] | None,
+) -> Any | None:
+    """Execute the work-signal-seeded hybrid search; return the SearchResult.
+
+    The single retrieval shared by :func:`fetch_hybrid_search` (the synthesis
+    text body) and :func:`fetch_hybrid_search_sources` (the structured
+    ``SourceRef`` citations) so the two consumers read ONE search — in
+    production the factory's per-config query cache dedups the two call sites
+    onto a single backend round-trip. Returns ``None`` on any failure so both
+    callers degrade to empty rather than raising.
+
+    ``build_search_pipeline`` is imported at module load (not lazily here) so
+    the factory's process-shared ``_PIPELINE_CACHE`` is honoured: the first
+    brief call pays the 2.3s construction; every subsequent call observes the
+    cached pipeline instance and short-circuits in <1ms. The race-resistance
+    of that cache is locked by #396 W-B Commit 1's double-checked locking.
+    """
+    try:
+        search_pipeline = build_search_pipeline() if pipeline is None else pipeline
+        query = _build_focus_query(agent, focus_signals)
+        return search_pipeline.search(query=query, agent=agent, scope="shared+agent", budget=max_tokens * 2)
+    except Exception as e:
+        logger.warning("sources: hybrid search failed for %r — %s", agent, e)
+        return None
+
+
 def fetch_hybrid_search(
     agent: str,
     max_tokens: int = 600,
@@ -669,32 +710,77 @@ def fetch_hybrid_search(
       * ``focus_signals`` — pass the fan-out signal blocks directly rather
         than re-reading them through the cached source fetchers.
 
-    Returns empty string on failure.
-
-    ``build_search_pipeline`` is imported at module load (not lazily
-    inside this function) so the factory's process-shared
-    ``_PIPELINE_CACHE`` is honoured: the first brief call pays the 2.3s
-    construction; every subsequent call observes the cached pipeline
-    instance and short-circuits in <1ms. The race-resistance of that
-    cache is locked by #396 W-B Commit 1's double-checked locking.
+    Returns empty string on failure. The structured counterpart that surfaces
+    the SAME hits as resolvable citations is :func:`fetch_hybrid_search_sources`.
     """
-    try:
-        search_pipeline = build_search_pipeline() if pipeline is None else pipeline
-        query = _build_focus_query(agent, focus_signals)
-        result = search_pipeline.search(query=query, agent=agent, scope="shared+agent", budget=max_tokens * 2)
-
-        if not result.results:
-            return ""
-
-        chunks: list[str] = []
-        for item in result.results[:5]:
-            path = getattr(item.result, "path", "unknown")
-            content = getattr(item, "content", "")[:400]
-            chunks.append(f"**{path}**\n{content}")
-
-        combined = "\n\n---\n\n".join(chunks)
-        return truncate_to_tokens(combined, max_tokens)
-
-    except Exception as e:
-        logger.warning("sources: fetch_hybrid_search failed for %r — %s", agent, e)
+    result = _run_hybrid_search(agent, max_tokens, pipeline=pipeline, focus_signals=focus_signals)
+    if result is None or not result.results:
         return ""
+
+    chunks: list[str] = []
+    for item in result.results[:_HYBRID_TOP_N]:
+        path = getattr(item.result, "path", "unknown")
+        content = getattr(item, "content", "")[:400]
+        chunks.append(f"**{path}**\n{content}")
+
+    combined = "\n\n---\n\n".join(chunks)
+    return truncate_to_tokens(combined, max_tokens)
+
+
+def _ref_from_budgeted(item: Any) -> SourceRef | None:
+    """Project one BudgetedResult into a resolvable :class:`SourceRef`.
+
+    Reads the inner ``FusedResult``'s breadcrumb fields (source_uri / path /
+    collection / source_page) and routes them through ``SourceRef.of`` so the
+    source_uri→path fallback and non-paged locator derivation apply uniformly
+    with every other agent surface (F97). Returns ``None`` when the row has no
+    inner result or no path to point at.
+    """
+    inner = getattr(item, "result", None)
+    if inner is None:
+        return None
+    path = str(getattr(inner, "path", "") or "")
+    if not path:
+        return None
+    raw_page = getattr(inner, "source_page", None)
+    title = str(getattr(inner, "title", "") or "") or None
+    return SourceRef.of(
+        path=path,
+        source_uri=str(getattr(inner, "source_uri", "") or ""),
+        title=title,
+        collection=str(getattr(inner, "collection", "") or "") or None,
+        source_page=int(raw_page) if isinstance(raw_page, int) else None,
+    )
+
+
+def fetch_hybrid_search_sources(
+    agent: str,
+    max_tokens: int = 600,
+    *,
+    pipeline: SearchPipeline | None = None,
+    focus_signals: Iterable[str] | None = None,
+) -> list[SourceRef]:
+    """Capture the brief's retrieved chunks as resolvable ``SourceRef``s (PLA-266).
+
+    The synthesiser collapses :func:`fetch_hybrid_search`'s text into prose, so
+    the assembled brief carries no machine-parseable provenance — an agent
+    reading it can't verify or expand a claim without re-running search from
+    scratch. This surfaces the SAME top hits as the shared breadcrumb contract
+    instead: each retrieved chunk becomes one ``SourceRef`` carrying the
+    canonical ``source_uri`` (falling back to ``path``), collection, and page,
+    which :func:`kairix.use_cases.brief.run_brief` renders into a deterministic
+    ``## Sources`` footer and returns in the MCP envelope.
+
+    Same DI seams as :func:`fetch_hybrid_search`. Returns ``[]`` on failure or
+    when no chunk is retrieved; never raises.
+    """
+    result = _run_hybrid_search(agent, max_tokens, pipeline=pipeline, focus_signals=focus_signals)
+    if result is None or not result.results:
+        return []
+
+    refs: list[SourceRef] = []
+    for item in result.results[:_HYBRID_TOP_N]:
+        ref = _ref_from_budgeted(item)
+        if ref is not None:
+            refs.append(ref)
+    return refs

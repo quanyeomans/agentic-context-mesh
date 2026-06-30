@@ -1544,11 +1544,29 @@ class _FakeFusedRow:
     lists. Adapter distinguishes fact rows from chunk rows by the
     ``facts://`` path prefix, so the two flavours just differ on
     ``path``.
+
+    ``source_uri`` / ``collection`` / ``source_page`` mirror the real
+    ``FusedResult`` breadcrumb fields (PLA-274 / PLA-266) so surfaces that
+    project a ``SourceRef`` from the fused row — e.g. the brief's structured
+    ``## Sources`` citations — see the same shape they would in production.
+    They default to the FusedResult zero-values (``""`` / ``""`` / ``None``)
+    so existing callers that pass only ``path`` + ``title`` are unchanged.
     """
 
-    def __init__(self, *, path: str, title: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        path: str,
+        title: str = "",
+        source_uri: str = "",
+        collection: str = "",
+        source_page: int | None = None,
+    ) -> None:
         self.path = path
         self.title = title
+        self.source_uri = source_uri
+        self.collection = collection
+        self.source_page = source_page
 
 
 class FakeSearchPipeline:
@@ -1592,10 +1610,30 @@ class FakeSearchPipeline:
         )
 
     @staticmethod
-    def make_chunk_row(*, path: str, title: str, content: str) -> _FakeBudgetedResult:
-        """Build a chunk-row BudgetedResult — non-facts path, full content text."""
+    def make_chunk_row(
+        *,
+        path: str,
+        title: str,
+        content: str,
+        source_uri: str = "",
+        collection: str = "",
+        source_page: int | None = None,
+    ) -> _FakeBudgetedResult:
+        """Build a chunk-row BudgetedResult — non-facts path, full content text.
+
+        ``source_uri`` / ``collection`` / ``source_page`` populate the
+        FusedResult-shaped breadcrumb fields so a surface that projects a
+        ``SourceRef`` from the row (PLA-266 brief citations) sees the
+        canonical pointer; they default to the FusedResult zero-values.
+        """
         return _FakeBudgetedResult(
-            result=_FakeFusedRow(path=path, title=title),
+            result=_FakeFusedRow(
+                path=path,
+                title=title,
+                source_uri=source_uri,
+                collection=collection,
+                source_page=source_page,
+            ),
             content=content,
             tier="L2",
             token_estimate=len(content) // 4,
