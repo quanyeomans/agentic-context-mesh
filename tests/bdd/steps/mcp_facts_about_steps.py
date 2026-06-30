@@ -15,7 +15,7 @@ import pytest
 from pytest_bdd import given, parsers, then, when
 
 from kairix.agents.mcp.tools.facts_about import tool_facts_about
-from tests.fakes import FakeFactRecord, FakeFactStore
+from tests.fakes import FakeDocumentRepository, FakeFactRecord, FakeFactStore
 
 pytestmark = pytest.mark.bdd
 
@@ -23,6 +23,9 @@ pytestmark = pytest.mark.bdd
 @dataclass
 class _State:
     fact_store: FakeFactStore = field(default_factory=FakeFactStore)
+    # Empty document store keeps the entity-summaries leg hermetic — this
+    # scenario set is about the fact-store leg only (PLA-263 keeps both legs).
+    document_repo: FakeDocumentRepository = field(default_factory=FakeDocumentRepository)
     response: dict[str, Any] = field(default_factory=dict)
 
 
@@ -46,7 +49,11 @@ def _given_no_facts(_facts_state: _State, entity: str) -> None:
 
 @when(parsers.parse('the agent calls facts-about with entity "{entity}"'))
 def _when_call(_facts_state: _State, entity: str) -> None:
-    _facts_state.response = tool_facts_about(entity=entity, fact_store=_facts_state.fact_store)
+    _facts_state.response = tool_facts_about(
+        entity=entity,
+        fact_store=_facts_state.fact_store,
+        document_repo=_facts_state.document_repo,
+    )
 
 
 @then(parsers.parse("the facts response lists {n:d} hit"))

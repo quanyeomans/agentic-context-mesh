@@ -272,9 +272,11 @@ def test_warm_marked_drives_wrapper_bodies_under_unit(warm_marked: None) -> None
     """
     server = build_server(host="127.0.0.1", port=18093)
 
-    # Exercise each warm-gated wrapper. For ingest_chat and facts_about,
-    # use the InvalidInput guard so the wrapper body dispatches deterministically
-    # to the inner tool — the assertion below pins that the inner tool ran
+    # Exercise each registered wrapper body. ingest_chat is warm-gated;
+    # facts_about is NOT (PLA-263 — it only reads local SQLite, so it serves
+    # while cold) but its wrapper body still dispatches to the inner tool, so
+    # the InvalidInput guard proves the body ran. For both, the empty-input
+    # guard makes the inner tool dispatch deterministically (InvalidInput)
     # rather than the ColdStart short-circuit.
     cases = [
         ("search", {"query": "x", "budget": 100, "limit": 1}),

@@ -39,6 +39,7 @@ from kairix.agents.mcp.errors import async_tool_handler
 from kairix.core.search.scope import Scope
 
 if TYPE_CHECKING:
+    from kairix.agents.mcp.tools.facts_about import FactsAboutDeps
     from kairix.use_cases.remember import RememberDeps
 
 logger = logging.getLogger(__name__)
@@ -1110,6 +1111,43 @@ def tool_remember(
     from kairix.agents.mcp.tools.memory_write import tool_memory_write
 
     return tool_memory_write(agent=agent, content=content, kind=kind, deps=deps)
+
+
+def tool_facts_about(
+    entity: str,
+    namespace: str | None = None,
+    top_k: int = 20,
+    *,
+    deps: FactsAboutDeps | None = None,
+) -> dict[str, Any]:
+    """Real MCP binding for ``kairix facts-about`` (PLA-263) — F25 affordance.
+
+    Delegates to :func:`kairix.agents.mcp.tools.facts_about.tool_facts_about`,
+    the SAME use case the ``kairix facts-about`` CLI calls — so an entity
+    lookup answers identically over MCP and at the shell. Agents see this
+    capability registered under the tool name ``facts_about`` in
+    :func:`build_server`.
+
+    ``deps`` is the injection seam: production callers (and the registered
+    ``facts_about`` closure) leave it ``None`` so the use case resolves the
+    real SQLite fact store + document repository; ``build_server(facts_about_deps=...)``
+    threads fakes here so an integration test can drive the registered MCP
+    tool against scripted data — while cold — without touching the live tree
+    (F1/F2-clean — a constructor seam, not a monkeypatch).
+    """
+    from kairix.agents.mcp.tools.facts_about import FactsAboutDeps as _FactsAboutDeps
+    from kairix.agents.mcp.tools.facts_about import tool_facts_about as _facts_about_use_case
+
+    resolved = deps if deps is not None else _FactsAboutDeps()
+    return _facts_about_use_case(
+        entity=entity,
+        namespace=namespace,
+        top_k=top_k,
+        paths=resolved.paths,
+        fact_store=resolved.fact_store,
+        document_repo=resolved.document_repo,
+        canonicals=resolved.canonicals,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2198,24 +2236,34 @@ def _register_operator_and_ingest_tools(
     server: Any,
     *,
     remember_deps: RememberDeps | None = None,
+    facts_about_deps: FactsAboutDeps | None = None,
 ) -> None:
     """Register operator-only escalation stubs + Plan B-parity ingest surface.
 
     Operator stubs return ``OperatorOnlyCapability`` envelopes that point the
     calling agent at the exact CLI command to surface to its admin. The
     ``ingest_chat`` / ``facts_about`` tools sit alongside because they share
-    the same out-of-band-write hygiene (warm-gated, namespace-scoped).
+    the same agent-driven ingest/recall surface; ``ingest_chat`` stays
+    warm-gated (it touches the LLM extractor), while ``facts_about`` does not.
 
-    ``memory_write`` is deliberately NOT warm-gated (PLA-257): an agent is
-    most likely to record a decision at session start, exactly when the
-    embedding model is still warming, and the write does not depend on
-    warmth. The file is always persisted and BM25-indexed immediately;
-    vector embedding follows at the next embed tick, and if immediate
-    indexing can't complete the use case returns a "saved, queued for
-    indexing" status rather than rejecting the write.
+    ``memory_write`` and ``facts_about`` are deliberately NOT warm-gated:
 
-    ``remember_deps`` is the injection seam threaded to the ``memory_write``
-    closure (see :func:`tool_remember`); production leaves it ``None``.
+    - ``memory_write`` (PLA-257): an agent is most likely to record a
+      decision at session start, exactly when the embedding model is still
+      warming, and the write does not depend on warmth. The file is always
+      persisted and BM25-indexed immediately; vector embedding follows at the
+      next embed tick, and if immediate indexing can't complete the use case
+      returns a "saved, queued for indexing" status rather than rejecting.
+    - ``facts_about`` (PLA-263): both legs it reads — the SQLite fact store
+      and the synthetic ``entity-summaries`` collection — are cheap local
+      SQLite reads with no embedding model and no network, so an agent
+      introspecting "what do you know about X?" at session start gets an
+      answer instead of a ColdStart refusal.
+
+    ``remember_deps`` / ``facts_about_deps`` are the injection seams threaded
+    to the ``memory_write`` / ``facts_about`` closures (see
+    :func:`tool_remember` and :func:`kairix.agents.mcp.tools.facts_about`);
+    production leaves them ``None``.
     """
 
     # ---- Operator-only escalation stubs ----
@@ -2338,8 +2386,10 @@ def _register_operator_and_ingest_tools(
     # ---- Plan B-parity Week 5 Stream A — agent-driven ingest + recall ----
     # ingest_chat lets the agent push JSONL transcripts into the conversation
     # store; facts_about gives the agent a direct introspection surface over
-    # the fact store. Both are warm-gated because they touch persistence and
-    # the LLM extractor — neither makes sense against a cold pipeline.
+    # the fact store + the entity-summaries collection. ingest_chat is
+    # warm-gated because it drives the LLM fact extractor against the
+    # not-yet-warm pipeline; facts_about is NOT (PLA-263) — it only runs two
+    # cheap local SQLite reads, so it must answer while kairix is still warming.
 
     @server.tool(
         description=(
@@ -2374,25 +2424,30 @@ def _register_operator_and_ingest_tools(
             no_extract=no_extract,
         )
 
+    # PLA-263 — NOT ``@warm_gate``-decorated, on purpose. facts_about reads
+    # the SQLite fact store AND the synthetic ``entity-summaries`` collection
+    # (#467); both are cheap local SQLite reads (FTS5 + an indexed lookup) with
+    # no embedding model and no network, so an agent asking "what do you know
+    # about X?" at session start gets an answer instead of a ColdStart refusal.
+    # ``facts_about_deps`` is the injection seam (see FactsAboutDeps); production
+    # leaves it ``None`` so the tool resolves the real SQLite-backed seams.
     @server.tool(
         description=(
-            "Look up what kairix knows about an entity from the fact store. Returns the "
-            "current (non-superseded) entity-attribute-value records with confidence and "
-            "source provenance. Pass a namespace to restrict the lookup to a single "
+            "Look up what kairix knows about an entity. Returns the current (non-superseded) "
+            "entity-attribute-value facts with confidence and source provenance, plus any "
+            "entity summary indexed for that name. Works even while kairix is still warming "
+            "up — it only reads local stores. Pass a namespace to restrict facts to a single "
             "engagement scope; pass null/None to search across all namespaces."
         )
     )
     @async_tool_handler
-    @warm_gate
     def facts_about(
         entity: str,
         namespace: str | None = None,
         top_k: int = 20,
     ) -> dict[str, Any]:
-        """Return fact records about an entity from the fact store."""
-        from kairix.agents.mcp.tools.facts_about import tool_facts_about
-
-        return tool_facts_about(entity=entity, namespace=namespace, top_k=top_k)
+        """Return facts + entity summaries about an entity."""
+        return tool_facts_about(entity=entity, namespace=namespace, top_k=top_k, deps=facts_about_deps)
 
     # #472 — the agent-facing memory-write verb. Same use case as the
     # ``kairix remember`` CLI (kairix/use_cases/remember.py).
@@ -2435,6 +2490,7 @@ def build_server(
     readiness_check: Callable[[], bool] | None = None,
     mark_ready: Callable[[], None] | None = None,
     remember_deps: RememberDeps | None = None,
+    facts_about_deps: FactsAboutDeps | None = None,
 ) -> Any:
     """Construct the FastMCP server with every kairix tool registered.
 
@@ -2455,6 +2511,13 @@ def build_server(
                        so the registered tool writes to a temp knowledge store
                        — the F1/F2-clean way to prove the cold-write path
                        through the live dispatch surface.
+        facts_about_deps: Optional ``FactsAboutDeps`` injection seam for the
+                       ``facts_about`` tool. Production leaves it ``None`` (the
+                       tool resolves the real SQLite fact store + document
+                       repository); an integration test passes fakes so it can
+                       prove the cold-read path — fact + entity summary served
+                       while kairix is still warming — through the live
+                       dispatch surface (F1/F2-clean).
 
     Raises ImportError when the ``mcp`` package is not installed.
     Install via: pip install kairix[agents]
@@ -2471,5 +2534,5 @@ def build_server(
     server = FastMCP("kairix", host=host, port=port)
     _register_retrieval_tools(server, readiness_check)
     _register_synthesis_and_diagnostic_tools(server, readiness_check, mark_ready)
-    _register_operator_and_ingest_tools(server, remember_deps=remember_deps)
+    _register_operator_and_ingest_tools(server, remember_deps=remember_deps, facts_about_deps=facts_about_deps)
     return server

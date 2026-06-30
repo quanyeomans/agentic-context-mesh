@@ -8,16 +8,19 @@ Pins the contract the agent sees:
   - Unknown entity returns an empty hits list — not an error.
   - Namespace filtering is honoured (engagement isolation).
   - Superseded facts are filtered out (Protocol default).
-  - No-fact_store-injected path resolves a real SQLiteFactStore against
-    the supplied KairixPaths (covers the production-wiring branch).
+  - The synthetic ``entity-summaries`` collection (#467 / PLA-263) is
+    queried so an indexed entity summary surfaces even with no facts.
+  - No-store-injected path resolves a real SQLiteFactStore +
+    SQLiteDocumentRepository against the supplied KairixPaths (covers
+    the production-wiring branch).
   - Store-search exceptions are caught and surfaced via ``LookupFailed``
     (covers the defensive failure-envelope path).
 
 Every test carries a ``# Sabotage:`` note describing a concrete change
 to the production code that would falsify the test.
 
-F1-clean: ``fact_store`` is constructor-injected via the public seam
-on tool_facts_about — no monkeypatching.
+F1-clean: ``fact_store`` / ``document_repo`` are constructor-injected via
+the public seam on tool_facts_about — no monkeypatching.
 """
 
 from __future__ import annotations
@@ -28,12 +31,13 @@ from typing import Any
 import pytest
 
 from kairix.agents.mcp.tools.facts_about import (
+    ENTITY_SUMMARIES_COLLECTION,
     ERROR_INVALID_INPUT,
     ERROR_LOOKUP_FAILED,
     tool_facts_about,
 )
 from kairix.paths import KairixPaths
-from tests.fakes import FakeFactRecord, FakeFactStore
+from tests.fakes import FakeDocumentRepository, FakeFactRecord, FakeFactStore
 
 pytestmark = pytest.mark.unit
 
@@ -44,6 +48,23 @@ def _store_with_facts(*records: FakeFactRecord) -> FakeFactStore:
     for rec in records:
         store.add(rec)
     return store
+
+
+def _empty_doc_repo() -> FakeDocumentRepository:
+    """An empty document store so the entity-summary leg returns ``[]``.
+
+    Injected on the fact-only tests below so the call never reaches the
+    real SQLite document store (hermetic) — the tests that exercise the
+    entity-summary leg pass their own pre-loaded repo.
+    """
+    return FakeDocumentRepository()
+
+
+def _doc_repo_with_summary(*, path: str, summary: str) -> FakeDocumentRepository:
+    """A document store holding one ``entity-summaries`` chunk."""
+    return FakeDocumentRepository(
+        documents=[{"path": path, "collection": ENTITY_SUMMARIES_COLLECTION, "title": "", "content": summary}]
+    )
 
 
 def test_happy_path_returns_record_read_surface() -> None:
@@ -65,7 +86,7 @@ def test_happy_path_returns_record_read_surface() -> None:
         )
     )
 
-    out = tool_facts_about(entity="Alice", fact_store=store)
+    out = tool_facts_about(entity="Alice", fact_store=store, document_repo=_empty_doc_repo())
 
     assert out["error"] == ""
     assert out["entity"] == "Alice"
@@ -109,7 +130,7 @@ def test_read_surface_exposes_evidence_at_id_and_namespace() -> None:
         )
     )
 
-    out = tool_facts_about(entity="Acme HQ", fact_store=store)
+    out = tool_facts_about(entity="Acme HQ", fact_store=store, document_repo=_empty_doc_repo())
 
     assert out["error"] == ""
     assert len(out["hits"]) == 1
@@ -129,10 +150,11 @@ def test_empty_entity_is_rejected() -> None:
     the call reaches ``fact_store.search("")`` and the assertion below
     fails because ``out["error"]`` is "" not "InvalidInput".
     """
-    out = tool_facts_about(entity="", fact_store=FakeFactStore())
+    out = tool_facts_about(entity="", fact_store=FakeFactStore(), document_repo=_empty_doc_repo())
 
     assert out["error"] == ERROR_INVALID_INPUT
     assert out["hits"] == []
+    assert out["entity_summaries"] == []
 
 
 def test_unknown_entity_returns_empty_hits_not_error() -> None:
@@ -144,7 +166,7 @@ def test_unknown_entity_returns_empty_hits_not_error() -> None:
     """
     store = _store_with_facts(FakeFactRecord(id="f-1", entity="Bob", attribute="role", value="engineer"))
 
-    out = tool_facts_about(entity="Charlie", fact_store=store)
+    out = tool_facts_about(entity="Charlie", fact_store=store, document_repo=_empty_doc_repo())
 
     assert out["error"] == ""
     assert out["hits"] == []
@@ -174,7 +196,9 @@ def test_namespace_filter_restricts_hits() -> None:
         ),
     )
 
-    out = tool_facts_about(entity="Alice", namespace="engagement-alpha", fact_store=store)
+    out = tool_facts_about(
+        entity="Alice", namespace="engagement-alpha", fact_store=store, document_repo=_empty_doc_repo()
+    )
 
     assert out["error"] == ""
     assert len(out["hits"]) == 1
@@ -198,7 +222,7 @@ def test_superseded_facts_are_filtered_out() -> None:
     )
     store.supersede(old_id="f-old", new_id="f-new")
 
-    out = tool_facts_about(entity="Alice", fact_store=store)
+    out = tool_facts_about(entity="Alice", fact_store=store, document_repo=_empty_doc_repo())
 
     assert out["error"] == ""
     values = [h["value"] for h in out["hits"]]
@@ -217,10 +241,150 @@ def test_top_k_bounds_result_count() -> None:
         *(FakeFactRecord(id=f"f-{i}", entity="Project", attribute="status", value=f"phase-{i}") for i in range(5))
     )
 
-    out = tool_facts_about(entity="Project", top_k=2, fact_store=store)
+    out = tool_facts_about(entity="Project", top_k=2, fact_store=store, document_repo=_empty_doc_repo())
 
     assert out["error"] == ""
     assert len(out["hits"]) <= 2
+
+
+# ---------------------------------------------------------------------------
+# #467 / PLA-263 — the entity-summaries collection is queried
+# ---------------------------------------------------------------------------
+
+
+def test_entity_summary_is_surfaced_from_the_collection() -> None:
+    """An entity with a summary chunk but NO extracted facts still gets an
+    answer — the entity summary comes back in ``entity_summaries``.
+
+    This is the headline PLA-263 bug: ``facts_about`` ignored the
+    ``entity-summaries`` collection that ``entity_summary_indexing_enabled``
+    populates, so a query about an entity that only had a Wikidata-style
+    summary returned nothing.
+
+    Sabotage-proof: delete the ``entity_summaries = _query_entity_summaries(...)``
+    line in tool_facts_about (or stop passing the result into the response)
+    → ``out["entity_summaries"]`` is empty and the assertions below fail.
+    Mutate-confirmed by replacing the call with ``entity_summaries = []``.
+    """
+    summary = "Acme Corp is a fictional manufacturing company."
+    repo = _doc_repo_with_summary(path="entity://Q-acme#0", summary=summary)
+
+    out = tool_facts_about(entity="Acme Corp", fact_store=FakeFactStore(), document_repo=repo)
+
+    assert out["error"] == ""
+    assert out["hits"] == []  # no facts — the summary is the only signal
+    assert len(out["entity_summaries"]) == 1
+    surfaced = out["entity_summaries"][0]
+    assert surfaced["summary"] == summary
+    assert surfaced["source"] == "entity://Q-acme#0"
+    assert "score" in surfaced
+
+
+def test_entity_summary_query_is_scoped_to_the_entity_summaries_collection() -> None:
+    """The summary leg searches ONLY the ``entity-summaries`` collection.
+
+    Sabotage-proof: change the ``collections=[ENTITY_SUMMARIES_COLLECTION]``
+    arg in ``_query_entity_summaries`` to ``None`` (search-all) → the
+    recorded call no longer carries the scoped collection list and the
+    assertion below fails. Mutate-confirmed.
+    """
+    repo = _doc_repo_with_summary(path="entity://Q-acme#0", summary="Acme Corp makes widgets.")
+
+    tool_facts_about(entity="Acme Corp", top_k=7, fact_store=FakeFactStore(), document_repo=repo)
+
+    assert repo.calls == [("Acme Corp", [ENTITY_SUMMARIES_COLLECTION], 7)]
+
+
+def test_entity_summary_projection_reads_production_bm25_row_fields() -> None:
+    """A production-shaped BM25 row (``snippet`` / ``file`` / ``score`` present,
+    NO ``content`` / ``path``) projects each field from its primary key.
+
+    Sabotage-proof: flip the FIRST ``or`` in any of the three
+    ``_entity_summary_to_dict`` fallback chains to ``and`` (e.g.
+    ``row.get("snippet") or row.get("content")`` → ``... and ...``) → the
+    projected field collapses to the absent fallback operand
+    (``str(None)`` == "None", or score 0.0) and the exact-value assertion
+    below fails. Mutate-confirmed for the snippet, file, and score chains.
+    """
+    repo = FakeDocumentRepository(
+        bm25_rows=[
+            {
+                "file": "entity://Q-acme#0",
+                "snippet": "Acme Corp is a manufacturing company.",
+                "score": 0.42,
+                "collection": ENTITY_SUMMARIES_COLLECTION,
+            }
+        ]
+    )
+
+    out = tool_facts_about(entity="Acme Corp", fact_store=FakeFactStore(), document_repo=repo)
+
+    assert len(out["entity_summaries"]) == 1
+    surfaced = out["entity_summaries"][0]
+    assert surfaced["summary"] == "Acme Corp is a manufacturing company."
+    assert surfaced["source"] == "entity://Q-acme#0"
+    assert surfaced["score"] == pytest.approx(0.42)
+
+
+def test_entity_summary_projection_falls_back_to_fake_row_fields() -> None:
+    """A fake-shaped row (``content`` / ``path`` present, NO ``snippet`` /
+    ``file``) projects via the SECOND operand of each fallback chain.
+
+    Sabotage-proof: flip the SECOND ``or`` in the snippet/file chains to
+    ``and`` (e.g. ``row.get("content") or ""`` → ``row.get("content") and ""``)
+    → the projection collapses to ``""`` and the exact-value assertions
+    below fail. Pairs with the production-row test above so BOTH ``or``
+    operators on each chain are pinned. Mutate-confirmed.
+    """
+    repo = FakeDocumentRepository(
+        bm25_rows=[
+            {
+                "content": "Globex builds gadgets.",
+                "path": "entity://Q-globex#0",
+                "collection": ENTITY_SUMMARIES_COLLECTION,
+            }
+        ]
+    )
+
+    out = tool_facts_about(entity="Globex", fact_store=FakeFactStore(), document_repo=repo)
+
+    assert len(out["entity_summaries"]) == 1
+    surfaced = out["entity_summaries"][0]
+    assert surfaced["summary"] == "Globex builds gadgets."
+    assert surfaced["source"] == "entity://Q-globex#0"
+
+
+def test_entity_summaries_empty_when_no_summary_matches() -> None:
+    """No matching summary chunk → ``entity_summaries == []`` with no error.
+
+    Sabotage: make ``_entity_summary_to_dict`` fabricate a row on empty
+    input → the empty-collection case would report a spurious summary and
+    this assertion fails.
+    """
+    repo = _doc_repo_with_summary(path="entity://Q-other#0", summary="Globex builds gadgets.")
+
+    out = tool_facts_about(entity="Acme Corp", fact_store=FakeFactStore(), document_repo=repo)
+
+    assert out["error"] == ""
+    assert out["entity_summaries"] == []
+
+
+def test_entity_summary_lookup_failure_is_isolated_from_facts() -> None:
+    """A document-store outage degrades to facts-only — it never sinks the call.
+
+    Sabotage: remove the ``try/except`` around ``document_repo.search_fts``
+    in ``_query_entity_summaries`` → the raised error propagates out of the
+    tool and this test fails with the bare exception instead of the
+    facts-only envelope. Mutate-confirmed.
+    """
+    store = _store_with_facts(FakeFactRecord(id="f-1", entity="Acme Corp", attribute="industry", value="widgets"))
+    failing_repo = FakeDocumentRepository(raises=RuntimeError("document store offline"))
+
+    out = tool_facts_about(entity="Acme Corp", fact_store=store, document_repo=failing_repo)
+
+    assert out["error"] == ""
+    assert out["entity_summaries"] == []
+    assert [h["value"] for h in out["hits"]] == ["widgets"]
 
 
 def _paths(tmp_path: Path) -> KairixPaths:
@@ -233,19 +397,20 @@ def _paths(tmp_path: Path) -> KairixPaths:
     )
 
 
-def test_no_fact_store_injected_resolves_production_sqlite_store(tmp_path: Path) -> None:
-    """When ``fact_store`` is None, the tool builds a SQLiteFactStore.
+def test_no_store_injected_resolves_production_sqlite_stores(tmp_path: Path) -> None:
+    """When ``fact_store`` AND ``document_repo`` are None, the tool builds
+    a real ``SQLiteFactStore`` + ``SQLiteDocumentRepository``.
 
-    Drives the production-wiring branch — when an operator omits
-    the DI kwargs, the tool resolves ``KairixPaths`` and constructs a
-    real SQLite-backed store. Against a fresh tmp db_path the store has
-    no facts, so the lookup returns an empty hits list with no error.
+    Drives the production-wiring branch — when an operator omits the DI
+    kwargs, the tool resolves ``KairixPaths`` and constructs both real
+    SQLite-backed seams. Against a fresh tmp db_path both stores are empty,
+    so the lookup returns empty ``hits`` and ``entity_summaries`` with no
+    error.
 
-    Sabotage: remove the ``if fact_store is None:`` block in
-    ``tool_facts_about`` (lines 106-113) — the call reaches
-    ``fact_store.search(...)`` on ``None`` and raises AttributeError,
-    failing this test with the unhandled exception. Mutate-confirmed
-    against lines 110-113.
+    Sabotage: remove the ``if fact_store is None:`` (or ``if document_repo
+    is None:``) block in ``tool_facts_about`` — the corresponding seam stays
+    ``None`` and the call raises AttributeError when it is used, failing this
+    test with the unhandled exception. Mutate-confirmed.
     """
     paths = _paths(tmp_path)
 
@@ -254,9 +419,28 @@ def test_no_fact_store_injected_resolves_production_sqlite_store(tmp_path: Path)
     assert out["error"] == ""
     assert out["entity"] == "Alice"
     assert out["hits"] == []
-    # The SQLite db file may not be touched until a write happens (the
-    # store defers schema creation to first ``add``); we don't assert on
-    # its presence — only that the call returned a clean envelope.
+    assert out["entity_summaries"] == []
+
+
+def test_missing_fact_store_is_resolved_when_only_document_repo_injected(tmp_path: Path) -> None:
+    """When ONLY ``document_repo`` is injected, the tool still resolves the
+    fact store from ``paths`` — the resolution guard fires if EITHER seam is
+    missing, not only when BOTH are.
+
+    Sabotage-proof: change the ``or`` to ``and`` in the resolution guard
+    (``if fact_store is None or document_repo is None``). With ``document_repo``
+    injected the guard becomes ``True and False`` → False → the block is
+    skipped, ``fact_store`` stays ``None``, and ``fact_store.search(...)``
+    raises ``AttributeError`` — which is NOT in the caught
+    ``(OSError, ValueError, RuntimeError)`` tuple — so it propagates and this
+    test errors. Mutate-confirmed (``or`` → ``and`` at the guard).
+    """
+    paths = _paths(tmp_path)
+
+    out = tool_facts_about(entity="Alice", paths=paths, document_repo=_empty_doc_repo())
+
+    assert out["error"] == ""
+    assert out["hits"] == []
 
 
 class _RaisingFactStore(FakeFactStore):
@@ -281,22 +465,23 @@ class _RaisingFactStore(FakeFactStore):
 def test_lookup_failure_is_wrapped_in_lookupfailed_envelope() -> None:
     """A RuntimeError out of ``FactStore.search`` is caught and surfaced.
 
-    Drives the except branch — lines 117-126 — which builds the
-    canonical ``LookupFailed`` envelope so the agent reads ``error`` and
-    branches without seeing a traceback.
+    Drives the except branch which builds the canonical ``LookupFailed``
+    envelope so the agent reads ``error`` and branches without seeing a
+    traceback.
 
     Sabotage: remove the ``try/except`` around the ``fact_store.search``
     call in tool_facts_about → the RuntimeError propagates out of the
     tool, this test fails with the bare RuntimeError instead of the
-    LookupFailed assertion. Mutate-confirmed against lines 117-119.
+    LookupFailed assertion. Mutate-confirmed.
     """
     store = _RaisingFactStore(message="db is missing")
 
-    out = tool_facts_about(entity="Alice", fact_store=store)
+    out = tool_facts_about(entity="Alice", fact_store=store, document_repo=_empty_doc_repo())
 
     assert out["error"] == ERROR_LOOKUP_FAILED
     assert "db is missing" in out["detail"]
     assert out["hits"] == []
+    assert out["entity_summaries"] == []
     assert out["entity"] == "Alice"
 
 
@@ -336,6 +521,7 @@ def test_facts_about_carries_canonical_payload_when_entity_matches_declaration()
     out = tool_facts_about(
         entity="Acme Corp",
         fact_store=_FakeStoreWithHits(),
+        document_repo=_empty_doc_repo(),
         canonicals=canonicals,
     )
     assert out["canonical"] is not None
@@ -358,8 +544,12 @@ def test_facts_about_canonical_match_is_alias_aware_and_case_insensitive() -> No
             aliases=("Acme",),
         ),
     ]
-    via_alias = tool_facts_about(entity="acme", fact_store=_FakeStoreWithHits(), canonicals=canonicals)
-    via_name_case = tool_facts_about(entity="ACME CORP", fact_store=_FakeStoreWithHits(), canonicals=canonicals)
+    via_alias = tool_facts_about(
+        entity="acme", fact_store=_FakeStoreWithHits(), document_repo=_empty_doc_repo(), canonicals=canonicals
+    )
+    via_name_case = tool_facts_about(
+        entity="ACME CORP", fact_store=_FakeStoreWithHits(), document_repo=_empty_doc_repo(), canonicals=canonicals
+    )
     assert via_alias["canonical"]["name"] == "Acme Corp"
     assert via_name_case["canonical"]["name"] == "Acme Corp"
 
@@ -373,6 +563,7 @@ def test_facts_about_canonical_field_is_none_for_unknown_entity() -> None:
     out = tool_facts_about(
         entity="Some other company",
         fact_store=_FakeStoreWithHits(),
+        document_repo=_empty_doc_repo(),
         canonicals=canonicals,
     )
     assert out["canonical"] is None
@@ -382,7 +573,9 @@ def test_facts_about_empty_canonicals_yields_canonical_none() -> None:
     """An empty canonicals list (no operator declarations) → response
     carries ``canonical: None`` for any entity — the no-canonicals
     deployment sees baseline behaviour."""
-    out = tool_facts_about(entity="Anything", fact_store=_FakeStoreWithHits(), canonicals=[])
+    out = tool_facts_about(
+        entity="Anything", fact_store=_FakeStoreWithHits(), document_repo=_empty_doc_repo(), canonicals=[]
+    )
     assert out["canonical"] is None
     assert out["error"] == ""
 
@@ -391,10 +584,12 @@ def test_facts_about_error_branches_carry_canonical_none() -> None:
     """The InvalidInput + LookupFailed envelopes both carry
     ``canonical: None`` so agents reading the field always find it
     present (not KeyError-prone)."""
-    invalid_out = tool_facts_about(entity="", fact_store=_FakeStoreWithHits())
+    invalid_out = tool_facts_about(entity="", fact_store=_FakeStoreWithHits(), document_repo=_empty_doc_repo())
     assert invalid_out["error"] == ERROR_INVALID_INPUT
     assert invalid_out["canonical"] is None
 
-    failed_out = tool_facts_about(entity="X", fact_store=_RaisingFactStore(message="oops"))
+    failed_out = tool_facts_about(
+        entity="X", fact_store=_RaisingFactStore(message="oops"), document_repo=_empty_doc_repo()
+    )
     assert failed_out["error"] == ERROR_LOOKUP_FAILED
     assert failed_out["canonical"] is None

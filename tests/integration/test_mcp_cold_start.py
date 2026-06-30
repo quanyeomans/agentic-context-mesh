@@ -33,8 +33,10 @@ from typing import Any
 import pytest
 
 from kairix.agents.mcp.server import build_server
+from kairix.agents.mcp.tools.facts_about import FactsAboutDeps
 from kairix.platform.warm.state import reset_warm_state
 from kairix.use_cases.remember import RememberDeps
+from tests.fakes import FakeDocumentRepository, FakeFactRecord, FakeFactStore
 
 pytestmark = pytest.mark.integration
 
@@ -66,12 +68,14 @@ GATED_TOOLS: list[tuple[str, dict[str, Any]]] = [
     ("bootstrap", {"agent": "anyone"}),
     ("entity_suggest", {"text": "anything"}),
     ("entity_validate", {"name": "anything"}),
-    # Plan B-parity Week 5 Stream A — agent-driven ingest + recall
+    # Plan B-parity Week 5 Stream A — agent-driven ingest + recall.
+    # ingest_chat stays gated (it drives the LLM fact extractor); facts_about
+    # moved to UNGATED_TOOLS below (PLA-263 — both its legs are cheap local
+    # SQLite reads, so it must answer while cold).
     (
         "ingest_chat",
         {"jsonl_content": "{}\n", "conversation_id": "anything", "namespace": "anything"},
     ),
-    ("facts_about", {"entity": "anything"}),
 ]
 
 # Tools that must STILL serve real responses while cold — they exist to
@@ -87,6 +91,14 @@ UNGATED_TOOLS: list[tuple[str, dict[str, Any]]] = [
     # is only that the body RAN (returned its own validation error) rather
     # than the ColdStart short-circuit.
     (_MEMORY_WRITE, {"agent": _ALPHA, "content": ""}),
+    # PLA-263 — facts_about is NOT warm-gated: it reads only the SQLite fact
+    # store + the entity-summaries collection (no embedding model, no network),
+    # so an agent asking "what do you know about X?" at session start gets an
+    # answer. With no injected deps the body resolves the real (empty/fresh)
+    # SQLite index and returns error="" (or a LookupFailed envelope on a db
+    # fault) — never the ColdStart short-circuit. The dedicated test below
+    # proves a real fact + summary are SERVED while cold via injected fakes.
+    ("facts_about", {"entity": "anything"}),
 ]
 
 
@@ -275,3 +287,56 @@ def test_memory_write_cold_returns_queued_status_when_indexing_unavailable(tmp_p
     assert payload["indexed"] is False
     assert "next: run kairix embed" in payload["detail"]
     assert Path(payload["path"]).exists()
+
+
+# ---------------------------------------------------------------------------
+# facts_about serves real answers on a cold container (PLA-263)
+# ---------------------------------------------------------------------------
+#
+# The parametrised UNGATED case above proves facts_about doesn't return the
+# ColdStart envelope. This goes one step further: it drives a real lookup
+# through the live MCP dispatch surface while cold and asserts BOTH a fact and
+# an entity summary come back — the answer the warm gate used to refuse.
+# ``facts_about_deps`` is the build_server injection seam (F1/F2-clean — a
+# constructor seam, no monkeypatch, no env vars) so the read targets scripted
+# fakes, never the live tree.
+
+
+def test_facts_about_serves_fact_and_summary_while_cold() -> None:
+    """A facts_about call on a NOT-yet-warm kairix returns the entity's fact
+    AND its indexed entity summary, through the live MCP dispatch path,
+    instead of refusing with the ColdStart envelope.
+
+    Sabotage-proof: re-add ``@warm_gate`` above ``facts_about`` in
+    ``build_server``; the cold gate short-circuits before the body runs, so
+    ``error`` becomes ``"ColdStart"``, no ``hits`` / ``entity_summaries`` are
+    returned, and every assertion below fails. Mutate-confirmed.
+    """
+    reset_warm_state()  # genuine cold — a present gate would fire here
+    fact_store = FakeFactStore()
+    fact_store.add(FakeFactRecord(id="f-1", entity="Acme Corp", attribute="industry", value="manufacturing"))
+    document_repo = FakeDocumentRepository(
+        documents=[
+            {
+                "path": "entity://Q-acme#0",
+                "collection": "entity-summaries",
+                "title": "",
+                "content": "Acme Corp is a fictional manufacturing company.",
+            }
+        ]
+    )
+    server = build_server(
+        host="127.0.0.1",
+        port=18099,
+        facts_about_deps=FactsAboutDeps(fact_store=fact_store, document_repo=document_repo, canonicals=[]),
+    )
+
+    payload = _call_tool(server, "facts_about", {"entity": "Acme Corp"})
+
+    assert payload.get("error") == "", f"cold facts_about must serve, not refuse; got {payload!r}"
+    values = [h["value"] for h in payload["hits"]]
+    assert "manufacturing" in values
+    summaries = [s["summary"] for s in payload["entity_summaries"]]
+    assert any("manufacturing company" in s for s in summaries), (
+        f"expected the entity summary served while cold; got {summaries!r}"
+    )
