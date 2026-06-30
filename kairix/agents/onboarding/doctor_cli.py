@@ -92,6 +92,7 @@ def _surface_health_to_envelope(sh: SurfaceHealth) -> dict[str, object]:
         "path": str(sh.path),
         "label": sh.label,
         "exists": sh.exists,
+        "writable": sh.writable,
         "file_count": sh.file_count,
         "most_recent_mtime": sh.most_recent_mtime,
         "issues": list(sh.issues),
@@ -155,7 +156,8 @@ def _render_text_report(report: DoctorReport) -> str:
             lines.append(f"    ! {issue}")
         for sh in agent.surfaces:
             lines.append(
-                f"    surface[{sh.label}] path={sh.path} exists={sh.exists} file_count={sh.file_count}",
+                f"    surface[{sh.label}] path={sh.path} exists={sh.exists} "
+                f"writable={sh.writable} file_count={sh.file_count}",
             )
             for issue in sh.issues:
                 lines.append(f"      ! {issue}")

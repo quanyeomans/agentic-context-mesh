@@ -31,6 +31,7 @@ agents a structured envelope and the CLI can map it to exit code 1.
 from __future__ import annotations
 
 import dataclasses
+import errno
 import json
 import logging
 import sqlite3
@@ -241,6 +242,54 @@ def _classify_advisory(content: str, agent: str, config: dict[str, object] | Non
         return "unknown"
 
 
+def _in_root_error(agent: str, write_dir: Path, document_root: Path) -> str:
+    """Return an F21 error when ``write_dir`` escapes the scanned root, else ``""``.
+
+    The document scanner only indexes files beneath ``document_root``, so a
+    memory written to a surface that resolves OUTSIDE it would be saved but
+    never indexed — permanently unsearchable, with no later ``kairix embed``
+    able to rescue it (the scanner never walks there). Reuse the canonical
+    :func:`kairix.paths.confine_to` confinement guard to detect the escape
+    (absolute config surface, ``..`` traversal, or symlink-out) and reject
+    BEFORE writing rather than leave a silent orphan behind (PLA-259).
+    """
+    from kairix.paths import PathTraversalError, confine_to
+
+    try:
+        confine_to(document_root, write_dir)
+    except PathTraversalError:
+        return (
+            f"MemoryUnreachable: the memory surface for agent {agent!r} ({write_dir}) "
+            f"resolves outside the scanned knowledge store ({document_root}); a memory "
+            f"saved there is never indexed, so search can't find it. "
+            f"fix: point the agent's memory surface at a path inside the knowledge store "
+            f"(for example 04-Agent-Knowledge/{agent} under {document_root}). "
+            f"next: edit the agent's surfaces in kairix.config.yaml, then re-run "
+            f"kairix doctor agent --name {agent}."
+        )
+    return ""
+
+
+def _write_failed_error(agent: str, write_dir: Path, exc: OSError) -> str:
+    """Build the F21 ``WriteFailed`` envelope naming the path + permission + fix.
+
+    Reuses :func:`kairix.paths.write_access_fix_hint` so the live write
+    failure speaks the same remediation language as the ``doctor`` preflight:
+    a read-only mount (``EROFS``) and a wrong-ownership directory (``EACCES``)
+    each get their concrete fix instead of an opaque ``OSError`` (PLA-259).
+    """
+    from kairix.paths import write_access_fix_hint
+
+    errno_name = errno.errorcode.get(exc.errno or 0, "")
+    reason = exc.strerror or type(exc).__name__
+    detail = f"{reason} [{errno_name}]" if errno_name else reason
+    return (
+        f"WriteFailed: cannot write under {write_dir} — {detail}. "
+        f"{write_access_fix_hint(errno_name)}. "
+        f"next: kairix doctor agent --name {agent}."
+    )
+
+
 def remember(
     agent: str,
     content: str,
@@ -283,6 +332,11 @@ def remember(
 
     document_root = d.document_root_fn()
     write_dir = _resolve_write_dir(agent, config, document_root)
+
+    in_root_error = _in_root_error(agent, write_dir, document_root)
+    if in_root_error:
+        return _failure(agent, kind, in_root_error)
+
     now = d.now_fn()
     target = _build_target_path(write_dir, now.date().isoformat(), content, kind)
     body = _render_markdown(agent, kind, classified_as, now, content)
@@ -292,13 +346,7 @@ def remember(
         target.write_text(body, encoding="utf-8")
     except OSError as exc:
         logger.warning("remember: failed to write %s — %s", target, exc)
-        return _failure(
-            agent,
-            kind,
-            f"WriteFailed: {type(exc).__name__} writing under {write_dir}. "
-            f"fix: check the directory exists and is writable. "
-            f"next: kairix doctor agent --name {agent}.",
-        )
+        return _failure(agent, kind, _write_failed_error(agent, write_dir, exc))
 
     from kairix.knowledge.reflib.dedup import hash_content
 

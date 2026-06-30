@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -279,6 +280,66 @@ def test_write_failure_returns_writefailed_envelope(tmp_path: Path) -> None:
     assert result.error.startswith("WriteFailed:")
     assert "fix:" in result.error and "next:" in result.error
     assert result.path == ""
+
+
+def test_out_of_root_write_surface_is_rejected_with_actionable_error(tmp_path: Path) -> None:
+    """A configured memory surface resolving OUTSIDE the document root is
+    rejected BEFORE any write. The scanner only walks the document root, so a
+    memory saved outside it would be permanently unsearchable — the envelope
+    is an F21 MemoryUnreachable message naming both paths, and NO file is
+    written (PLA-259).
+
+    Sabotage-proof (executed): removed the ``_in_root_error`` guard call from
+    ``remember`` → a file was written under the outside dir and both the
+    error-prefix and no-file assertions failed; restored.
+    """
+    outside = tmp_path / "outside-the-store" / "mem"
+    config = _scope_config("agent-alpha", str(outside))  # absolute path OUTSIDE the vault
+    result = remember(
+        "agent-alpha",
+        "decided: adopt the new release checklist",
+        kind="decision",
+        deps=_deps(tmp_path, config=config),
+    )
+
+    assert result.error.startswith("MemoryUnreachable:")
+    assert str(outside) in result.error  # names the escaping surface
+    assert str(tmp_path / "vault") in result.error  # names the scanned root
+    assert "fix:" in result.error and "next:" in result.error
+    assert result.path == ""
+    assert not outside.exists(), "no memory file may be written outside the scanned root"
+
+
+def test_write_failed_names_path_permission_and_fix(tmp_path: Path) -> None:
+    """A read-only / wrong-owned memory surface yields an F21 WriteFailed that
+    names WHICH path, WHICH permission, and HOW to fix — not an opaque OSError
+    (PLA-259). Simulated with a 0o500 surface dir; skips on hosts where mode
+    bits do not block writes (e.g. CI run as root — the /run/secrets lesson).
+
+    Sabotage-proof (executed): reverted ``_write_failed_error`` to the bare
+    ``type(exc).__name__`` message → the permission/errno + fix-hint
+    assertions failed; restored.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("permission denial cannot be simulated as root (write succeeds despite 0o500)")
+    vault = tmp_path / "vault"
+    write_dir = vault / "04-Agent-Knowledge" / "builder"
+    write_dir.mkdir(parents=True)
+    write_dir.chmod(0o500)  # r-x: the agent's memory dir exists but is not writable
+    try:
+        result = remember("builder", "rule: never skip the gate", deps=_deps(tmp_path))
+        if result.error == "":
+            pytest.skip("filesystem ignores mode bits (write succeeded despite 0o500)")
+        assert result.error.startswith("WriteFailed:")
+        assert str(write_dir) in result.error  # which path
+        # which permission — both the symbolic errno (errno.errorcode mapping)
+        # and the OS strerror are named, pinning both fallback expressions.
+        assert "[EACCES]" in result.error
+        assert "Permission denied" in result.error
+        assert "fix:" in result.error and "next:" in result.error  # how to fix
+        assert result.path == ""
+    finally:
+        write_dir.chmod(0o700)
 
 
 def test_production_index_seam_makes_memory_bm25_searchable(tmp_path: Path) -> None:
