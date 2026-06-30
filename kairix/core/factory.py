@@ -99,7 +99,7 @@ def _lookup_cached_pipeline(cfg: RetrievalConfig, flag_reader: Any) -> SearchPip
     return _PIPELINE_CACHE.get(cfg)
 
 
-def _auto_wire_fact_retriever(db_path: Any) -> Any:
+def _auto_wire_fact_retriever(db_path: Any, embedder: Any = None) -> Any:
     """Return a SQLiteFactStore when the DB has a ``facts`` table; else None.
 
     Plan B-parity Capability #5 — opt-in fact federation. Vault-only
@@ -107,6 +107,15 @@ def _auto_wire_fact_retriever(db_path: Any) -> Any:
     behaviour is preserved. When the operator has run
     ``kairix ingest-chat``, the table exists and federation activates
     automatically.
+
+    ``embedder`` is the production ``EmbeddingService`` the factory has
+    already built for the chunk vector backend. Threading the SAME
+    instance into the fact store lets ``FactStore.search`` embed the query
+    for vector/RRF-fused recall (PLA-262, #340) — previously the auto-wired
+    store got no embedder, so the fused path was dead even where the code
+    existed. The fact vector INDEX is the remaining wiring (PLA-262
+    follow-up); until it is injected the embedder-equipped store still runs
+    BM25-only, so passing the embedder is a no-op for current deployments.
 
     Best-effort — any exception (missing DB, schema mismatch) returns
     None so the chunk-only path keeps shipping.
@@ -123,7 +132,7 @@ def _auto_wire_fact_retriever(db_path: Any) -> Any:
                 conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='facts' LIMIT 1").fetchone()
             )
         if has_facts:
-            return SQLiteFactStore(db_path=db_path)
+            return SQLiteFactStore(db_path=db_path, embedder=embedder)
     except Exception:
         return None
     return None
@@ -1187,8 +1196,13 @@ def _build_search_pipeline_uncached(
     # operators have no facts table → fact_retriever stays None → today's
     # chunk-only behaviour preserved. Explicit ``fact_retriever=`` kwarg
     # still wins (tests + future config-driven opt-in).
+    #
+    # PLA-262 (#340) — thread the SAME ``embed_service`` built above into the
+    # fact store so ``FactStore.search`` can embed the query for vector/RRF
+    # fusion. The auto-wired store previously got no embedder, so the fused
+    # recall path was structurally dead.
     resolved_fact_retriever = (
-        fact_retriever if fact_retriever is not None else _auto_wire_fact_retriever(resolved_db_path)
+        fact_retriever if fact_retriever is not None else _auto_wire_fact_retriever(resolved_db_path, embed_service)
     )
 
     # Query cache: ``QUERY_CACHE_DISABLED`` sentinel wires ``None``;
