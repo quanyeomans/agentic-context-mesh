@@ -65,6 +65,11 @@ _REGISTERED_SURFACES: tuple[tuple[str, str], ...] = (
     # SourceRef citations (``sources: tuple[SourceRef, ...]`` — the EMBED
     # option), so a brief is now self-citing like every other surface.
     ("kairix/use_cases/brief.py", "BriefOutput"),
+    # PLA-268 — the chunk-expansion surface returns one row per expanded
+    # chunk; each carries the shared breadcrumb via a ``source_ref()``
+    # accessor (the RETURN option) so an agent can cite/re-open every chunk
+    # in the window uniformly.
+    ("kairix/use_cases/expand.py", "ExpandedChunk"),
 )
 
 # The shared breadcrumb type name. A field whose annotation references this

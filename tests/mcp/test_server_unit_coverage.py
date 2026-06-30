@@ -116,6 +116,8 @@ def test_build_server_constructs_fastmcp_with_all_tools_registered_under_unit() 
         "timeline",
         "research",
         "contradict",
+        # PLA-268 — chunk-expansion: neighbour chunks around a search hit
+        "expand",
         "usage_guide",
         "brief",
         "entity_suggest",
@@ -192,6 +194,8 @@ def test_build_server_each_wrapper_dispatches_to_tool_function_under_unit() -> N
         ("timeline", {"query": "x"}),
         ("research", {"query": "x", "max_turns": 1}),
         ("contradict", {"content": "x"}),
+        # PLA-268 — ungated; resolves the real (empty) index and returns a miss envelope.
+        ("expand", {"source_uri": "kairix://x", "seq": 0}),
         ("usage_guide", {"topic": ""}),
         ("brief", {"agent": "shape"}),
         ("entity_suggest", {"text": "x"}),

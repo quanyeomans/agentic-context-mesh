@@ -6,6 +6,7 @@ Subcommands:
   features    Inspect registered feature flags (status + effective values)
   embed       Embed documents into the kairix vector index
   search      Hybrid search: BM25 + vector via RRF
+  expand      Pull a search hit's neighbouring chunks (preceding/following) within a token budget
   entity      Entity management: suggest (NER), validate (Wikidata), audit, purge
   curator     Curator agent: entity health monitoring and enrichment (CA-1)
   contradict  Contradiction detection: check new content against existing knowledge
@@ -90,6 +91,8 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "entity": ("kairix.knowledge.entities.cli", "main", True),
     "curator": ("kairix.agents.curator.cli", "main", True),
     "search": ("kairix.core.search.cli", "main", True),
+    # F45-feature: tests/bdd/features/cli_expand.feature
+    "expand": ("kairix.use_cases.expand", "main", True),
     "benchmark": ("kairix.quality.benchmark.cli", "main", True),
     "probe-config": ("kairix.quality.probe.config_cli", "main", True),
     "mcp-calls": ("kairix.quality.probe.mcp_calls_cli", "main", True),

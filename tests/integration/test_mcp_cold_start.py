@@ -99,6 +99,12 @@ UNGATED_TOOLS: list[tuple[str, dict[str, Any]]] = [
     # fault) — never the ColdStart short-circuit. The dedicated test below
     # proves a real fact + summary are SERVED while cold via injected fakes.
     ("facts_about", {"entity": "anything"}),
+    # PLA-268 — expand is NOT warm-gated: it reads neighbouring chunks by key
+    # from the local SQLite index (no embedding model, no network), so an
+    # agent expanding a hit while kairix is still warming gets its answer.
+    # With no injected deps the body resolves the real (empty) index and
+    # returns an actionable miss — never the ColdStart short-circuit.
+    ("expand", {"source_uri": "kairix://anything", "seq": 0}),
 ]
 
 
