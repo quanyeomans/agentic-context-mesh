@@ -12,10 +12,12 @@ Resolution order (highest wins):
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import sys
 import tempfile
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -1954,3 +1956,123 @@ def confine_to_roots(candidate: str | Path, roots: Sequence[Path]) -> Path:
         f"fix: pass a path under your working directory, home, or temp dir. "
         f"next: re-run with a path inside one of those roots."
     )
+
+
+# ---------------------------------------------------------------------------
+# Write-access probing — the canonical "can kairix actually write here?" check
+# ---------------------------------------------------------------------------
+#
+# A memory write (``kairix remember`` / the ``memory_write`` MCP tool) only
+# helps an agent if the target directory is actually writable. On hardened /
+# least-privilege deployments the agent surface can be a ``:ro`` bind-mount
+# (``EROFS``) or owned by another uid (``EACCES``) — the write then fails at
+# the worst possible moment. :func:`probe_write_access` is the shared probe the
+# ``doctor`` preflight uses to surface that BEFORE an agent tries to write, and
+# :func:`write_access_fix_hint` renders the matching F21 ``fix:`` line so both
+# the preflight verdict and the live ``remember`` failure speak the same
+# actionable language (which path, which permission, how to fix).
+
+
+@dataclass(frozen=True)
+class WriteAccessProbe:
+    """Outcome of a write-access probe against a directory (PLA-259).
+
+    Attributes:
+        path:       The directory the probe targeted.
+        writable:   True when a file could be created (and removed) there.
+        reason:     Human-readable cause when ``writable`` is False — the
+                    OS ``strerror`` (e.g. ``"Read-only file system"``),
+                    or ``""`` on success.
+        errno_name: The symbolic errno of the failure (e.g. ``"EROFS"``,
+                    ``"EACCES"``, ``"ENOENT"``), or ``""`` on success — lets
+                    callers tailor the F21 fix line via
+                    :func:`write_access_fix_hint`.
+    """
+
+    path: Path
+    writable: bool
+    reason: str = ""
+    errno_name: str = ""
+
+
+def _probe_failure(target: Path, exc: OSError) -> WriteAccessProbe:
+    """Build the not-writable result from an :class:`OSError` (never raises)."""
+    code = exc.errno or 0
+    return WriteAccessProbe(
+        path=target,
+        writable=False,
+        reason=exc.strerror or str(exc),
+        errno_name=errno.errorcode.get(code, ""),
+    )
+
+
+def probe_write_access(path: str | Path, *, create: bool = True) -> WriteAccessProbe:
+    """Probe whether kairix can actually create a file under ``path``.
+
+    Attempts to create (then immediately remove) a uniquely-named probe
+    file inside ``path``. Returns a structured :class:`WriteAccessProbe`
+    rather than raising, so a preflight can render an F21-actionable
+    verdict (which path, which permission, how to fix) instead of a silent
+    green or an opaque ``OSError`` surfacing later at write time.
+
+    Args:
+        path:   The directory to probe.
+        create: When True (default), ``mkdir(parents=True)`` the directory
+                first — the live ``remember`` write surface is created on
+                demand, so this mirrors that. When False (the ``doctor``
+                preflight, a non-mutating validator) a missing directory is
+                reported as ``ENOENT`` rather than created.
+
+    Returns:
+        A :class:`WriteAccessProbe`; ``writable`` is True only when the
+        probe file was created and removed cleanly.
+    """
+    target = Path(path)
+    if create:
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return _probe_failure(target, exc)
+    elif not target.is_dir():
+        return WriteAccessProbe(
+            path=target,
+            writable=False,
+            reason="directory does not exist",
+            errno_name=errno.errorcode[errno.ENOENT],
+        )
+    # A uuid-named probe file avoids collisions and symlink races; it is
+    # created in the kairix-owned target dir (not a shared temp dir) and
+    # removed immediately. A create OR cleanup failure both read as
+    # not-writable, so the probe never raises and leaves no debris on the
+    # happy path.
+    probe_file = target / f".kairix-write-probe-{uuid.uuid4().hex}"
+    try:
+        probe_file.touch()
+        probe_file.unlink()
+    except OSError as exc:
+        return _probe_failure(target, exc)
+    return WriteAccessProbe(path=target, writable=True)
+
+
+def write_access_fix_hint(errno_name: str) -> str:
+    """Return the F21 ``fix:`` line tailored to a write failure's errno (PLA-259).
+
+    Shared by the live ``remember`` failure envelope and the ``doctor``
+    preflight so both speak the same remediation language. The hint names the
+    concrete action for the common least-privilege failure shapes
+    (``EROFS`` read-only mount, ``EACCES`` / ``EPERM`` wrong ownership) and
+    falls back to a generic-but-actionable line otherwise.
+    """
+    if errno_name == errno.errorcode[errno.EROFS]:
+        return (
+            "fix: this path is on a read-only mount — mount it read-write "
+            "(the standard compose overlays ./documents/04-Agent-Knowledge as a "
+            "writable mount) or point the agent surface at a writable path"
+        )
+    if errno_name in {errno.errorcode[errno.EACCES], errno.errorcode[errno.EPERM]}:
+        return (
+            "fix: grant the kairix process write access to this directory "
+            "(chown/chmod it to the kairix user) or point the agent surface at a "
+            "path it owns"
+        )
+    return "fix: ensure the directory exists and the kairix process can write to it"

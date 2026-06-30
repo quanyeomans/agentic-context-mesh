@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -350,3 +351,60 @@ def test_module_main_guard_imports_cleanly(tmp_path: Path) -> None:
         importlib.reload(sys.modules["kairix.agents.onboarding.doctor_cli"])
     assert out.getvalue() == ""
     assert err.getvalue() == ""
+
+
+# ---------------------------------------------------------------------------
+# Write-access probe surfacing (PLA-259)
+# ---------------------------------------------------------------------------
+
+
+def test_surface_envelope_carries_writable(tmp_path: Path) -> None:
+    """The per-surface envelope exposes the ``writable`` probe so the --json /
+    MCP surface carries write-access state alongside the disk-state fields
+    (PLA-259).
+
+    Sabotage-proof (executed): dropped the ``"writable"`` key from
+    ``_surface_health_to_envelope`` → the key-presence assertion failed;
+    restored.
+    """
+    from kairix.agents.onboarding.doctor import doctor_check_agent
+
+    cfg = _write_config(tmp_path)
+    config = yaml.safe_load(cfg.read_text())
+    health = doctor_check_agent("agent-alpha", config=config)
+
+    envelope = agent_health_to_envelope(health)
+    assert envelope["surfaces"], "expected at least one surface in the envelope"
+    surface = envelope["surfaces"][0]
+    assert "writable" in surface
+    assert surface["writable"] is True
+
+
+def test_cmd_doctor_flags_unwritable_surface_with_actionable_error(tmp_path: Path) -> None:
+    """``kairix doctor agent`` (direct handler, F30 outcome) exits 1 and prints
+    an actionable not-writable verdict when a configured surface exists but
+    kairix cannot write to it (PLA-259). Skips on hosts where mode bits do not
+    block writes (e.g. CI run as root).
+
+    Sabotage-proof (executed): removed the not-writable branch from
+    ``_rollup_overall`` → overall stayed warn, rc was 0, and the rc==1
+    assertion failed; restored.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("permission denial cannot be simulated as root (touch succeeds despite 0o500)")
+    cfg = _write_config(tmp_path)
+    surface = tmp_path / "agent-alpha"  # the dir _write_config populated
+    surface.chmod(0o500)
+    try:
+        args = _ns(config=str(cfg), all=True)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = cmd_doctor(args)
+        rendered = out.getvalue()
+        if "writable=False" not in rendered:
+            pytest.skip("filesystem ignores mode bits (write probe succeeded despite 0o500)")
+        assert rc == 1
+        assert "not writable" in rendered
+        assert "fix:" in rendered and "next:" in rendered
+    finally:
+        surface.chmod(0o700)

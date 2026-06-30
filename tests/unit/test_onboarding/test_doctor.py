@@ -96,7 +96,15 @@ def test_populated_recent_scope_returns_ok(tmp_path: Path) -> None:
 # assertion failed; restored.
 def test_missing_surface_dir_flags_path_missing(tmp_path: Path) -> None:
     """Surface dir does not exist → overall="error" and surface
-    carries "path missing" issue naming `kairix onboard agent`."""
+    carries "path missing" issue naming `kairix onboard agent`.
+
+    Also pins the write-access probe's non-mutating contract (PLA-259): a
+    missing surface reports writable=False and the doctor must NOT create it.
+
+    Sabotage-proof (executed): flipped ``create=False`` to True in
+    ``_probe_surface`` → the missing dir was created and probed writable, so
+    ``not surface.exists()`` and ``writable is False`` both failed; restored.
+    """
     surface = tmp_path / "no-such-dir"
     config = _make_agent_config("agent-alpha", surface)
     report = doctor_check_all(config=config)
@@ -104,6 +112,8 @@ def test_missing_surface_dir_flags_path_missing(tmp_path: Path) -> None:
     assert report.agents[0].overall == "error"
     surface_health = report.agents[0].surfaces[0]
     assert not surface_health.exists
+    assert surface_health.writable is False  # a missing surface is not writable
+    assert not surface.exists(), "doctor must not create the surface while probing it"
     joined_issues = " ".join(surface_health.issues)
     assert "path missing" in joined_issues
     assert "kairix onboard agent" in joined_issues
@@ -433,3 +443,55 @@ def test_overlap_promotes_overall_to_warn(tmp_path: Path) -> None:
     assert report.overall == "warn"
     for agent in report.agents:
         assert agent.overall == "warn"
+
+
+# ---------------------------------------------------------------------------
+# Write-access probe (PLA-259)
+# ---------------------------------------------------------------------------
+
+
+def test_writable_surface_reports_writable_true(tmp_path: Path) -> None:
+    """A normal populated surface probes writable=True and stays overall=ok —
+    the write-access probe does not regress the healthy path (PLA-259).
+
+    Sabotage-proof (executed): hardcoded ``writable=False`` in
+    ``_probe_surface`` → overall flipped to error and this assertion failed;
+    restored.
+    """
+    surface = tmp_path / "agent-alpha-mem"
+    _seed_recent_md_files(surface, 2)
+
+    health = doctor_check_agent("agent-alpha", config=_make_agent_config("agent-alpha", surface))
+
+    assert health.surfaces[0].writable is True
+    assert health.overall == "ok"
+
+
+def test_unwritable_surface_is_flagged_error_with_actionable_issue(tmp_path: Path) -> None:
+    """An existing surface kairix cannot write to (``:ro`` mount / wrong
+    ownership, simulated with 0o500) rolls up to overall=error and carries an
+    F21 issue naming WHICH path, WHICH permission, and HOW to fix (PLA-259).
+    Skips on hosts where mode bits do not block writes (e.g. CI run as root).
+
+    Sabotage-proof (executed): removed the not-writable branch from
+    ``_rollup_overall`` → overall stayed warn and the ``== "error"``
+    assertion failed; restored.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("permission denial cannot be simulated as root (touch succeeds despite 0o500)")
+    surface = tmp_path / "agent-alpha-mem"
+    _seed_recent_md_files(surface, 2)
+    surface.chmod(0o500)  # r-x: readable + listable, but not writable
+    try:
+        health = doctor_check_agent("agent-alpha", config=_make_agent_config("agent-alpha", surface))
+        sh = health.surfaces[0]
+        if sh.writable:
+            pytest.skip("filesystem ignores mode bits (write probe succeeded despite 0o500)")
+        assert sh.writable is False
+        assert health.overall == "error"
+        joined = " ".join(sh.issues)
+        assert "not writable" in joined
+        assert str(surface) in joined  # which path
+        assert "fix:" in joined and "next:" in joined  # how to fix
+    finally:
+        surface.chmod(0o700)

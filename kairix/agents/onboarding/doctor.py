@@ -42,6 +42,7 @@ from kairix.core.agents.scope import (
     get_agent_scope,
     load_agent_scopes,
 )
+from kairix.paths import WriteAccessProbe, probe_write_access, write_access_fix_hint
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +69,12 @@ class SurfaceHealth:
 
     ``path`` and ``label`` echo the configured surface so operators
     can map issues back to the yaml block. ``exists``, ``file_count``,
-    ``most_recent_mtime`` carry the disk-state probe. ``issues`` is
-    the tuple of operator-facing strings — empty when the surface is
-    healthy.
+    ``most_recent_mtime`` carry the disk-state probe. ``writable`` is the
+    write-access probe (PLA-259) — False when the surface exists but kairix
+    cannot create a file there (``:ro`` mount, wrong ownership), so the
+    operator sees an unwritable memory surface BEFORE an agent tries to write
+    to it. ``issues`` is the tuple of operator-facing strings — empty when
+    the surface is healthy.
     """
 
     path: Path
@@ -79,6 +83,7 @@ class SurfaceHealth:
     file_count: int
     most_recent_mtime: float | None
     issues: tuple[str, ...]
+    writable: bool = True
 
 
 @dataclass(frozen=True)
@@ -170,12 +175,28 @@ def _walk_surface_disk_state(
 # ---------------------------------------------------------------------------
 
 
+def _write_access_issue(agent_name: str, probe: WriteAccessProbe) -> str:
+    """Build the F21 issue for an existing-but-unwritable surface (PLA-259).
+
+    Names WHICH path, WHICH permission (the errno + strerror), and HOW to fix
+    (via :func:`kairix.paths.write_access_fix_hint`) so a ``:ro`` mount / wrong
+    ownership surfaces as an actionable verdict, not a silent green.
+    """
+    detail = f"{probe.reason} [{probe.errno_name}]" if probe.errno_name else probe.reason
+    return (
+        f"not writable — {probe.path} ({detail}). "
+        f"{write_access_fix_hint(probe.errno_name)}. "
+        f"next: re-run `kairix doctor agent --name {agent_name}` after fixing the mount or ownership"
+    )
+
+
 def _classify_surface_issues(
     *,
     agent_name: str,
     exists: bool,
     file_count: int,
     most_recent_mtime: float | None,
+    write_issue: str = "",
 ) -> tuple[str, ...]:
     """Apply the per-surface validation rules and return the issue tuple."""
     issues: list[str] = []
@@ -184,6 +205,8 @@ def _classify_surface_issues(
             f"path missing — {_ONBOARD_REMEDIATION.format(name=agent_name)}",
         )
         return tuple(issues)
+    if write_issue:
+        issues.append(write_issue)
     if file_count == 0:
         issues.append("no files matching glob — check glob pattern and dir contents")
         return tuple(issues)
@@ -197,13 +220,32 @@ def _classify_surface_issues(
 
 
 def _probe_surface(agent_name: str, path: Path, glob: str, label: str) -> SurfaceHealth:
-    """Probe one surface and return its :class:`SurfaceHealth`."""
+    """Probe one surface and return its :class:`SurfaceHealth`.
+
+    Beyond the disk-state walk (exists / file_count / mtime), probe whether
+    kairix can actually write to an existing surface — a non-mutating
+    (``create=False``) write-access probe so a ``:ro`` mount or wrong-owned
+    directory is flagged before an agent's memory write fails (PLA-259).
+    """
     exists, file_count, mtime = _walk_surface_disk_state(path, glob)
+    # Write-access probe runs ONLY for an existing surface: a missing dir is
+    # already an "path missing"/error via the disk-state walk, and probing a
+    # missing path could otherwise create it. The dir exists here, so the
+    # probe's default mkdir(exist_ok=True) is a no-op and only touches (then
+    # removes) a probe file inside it (PLA-259).
+    write_issue = ""
+    writable = False
+    if exists:
+        probe = probe_write_access(path)
+        writable = probe.writable
+        if not probe.writable:
+            write_issue = _write_access_issue(agent_name, probe)
     issues = _classify_surface_issues(
         agent_name=agent_name,
         exists=exists,
         file_count=file_count,
         most_recent_mtime=mtime,
+        write_issue=write_issue,
     )
     return SurfaceHealth(
         path=path,
@@ -212,6 +254,7 @@ def _probe_surface(agent_name: str, path: Path, glob: str, label: str) -> Surfac
         file_count=file_count,
         most_recent_mtime=mtime,
         issues=issues,
+        writable=writable,
     )
 
 
@@ -284,6 +327,7 @@ def _apply_overlap_issues(
                 file_count=sh.file_count,
                 most_recent_mtime=sh.most_recent_mtime,
                 issues=merged,
+                writable=sh.writable,
             ),
         )
     return tuple(out)
@@ -305,6 +349,11 @@ def _rollup_overall(
     has_warn = bool(agent_issues)
     for sh in surfaces:
         if not sh.exists:
+            has_error = True
+            continue
+        if not sh.writable:
+            # An existing-but-unwritable memory surface cannot satisfy a
+            # write at all — that is a hard error, not a warning (PLA-259).
             has_error = True
             continue
         if sh.issues:

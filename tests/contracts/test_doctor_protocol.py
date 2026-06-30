@@ -49,9 +49,10 @@ def test_surface_health_is_frozen_dataclass() -> None:
 # Sabotage-proof (executed): renamed `file_count` to `files` on
 # SurfaceHealth → field-name set assertion failed; restored.
 def test_surface_health_carries_expected_fields() -> None:
-    """The six load-bearing fields callers read are present in name
-    and in order — operators see them per-surface in the validation
-    report."""
+    """The load-bearing fields callers read are present in name and in
+    order — operators see them per-surface in the validation report.
+    ``writable`` (PLA-259) carries the write-access probe so an unwritable
+    surface surfaces in the same envelope as the disk-state fields."""
     field_names = [f.name for f in dataclasses.fields(SurfaceHealth)]
     assert field_names == [
         "path",
@@ -60,6 +61,7 @@ def test_surface_health_carries_expected_fields() -> None:
         "file_count",
         "most_recent_mtime",
         "issues",
+        "writable",
     ]
 
 
