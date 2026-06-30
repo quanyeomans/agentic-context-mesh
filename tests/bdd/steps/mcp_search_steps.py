@@ -162,3 +162,71 @@ def then_no_search_exception():
 def then_response_is_valid_dict():
     assert isinstance(_state["response"], dict)
     assert "error" in _state["response"]
+
+
+# ---------------------------------------------------------------------------
+# PLA-270 — tiered-context request + typed chunk handle for expansion
+# ---------------------------------------------------------------------------
+
+
+@given(parsers.re(r'the hybrid search returns a chunk hit with seq (?P<seq>\d+) and source uri "(?P<uri>.*)"'))
+def given_chunk_hit_with_seq(seq, uri):
+    fr = FusedResult(
+        path=f"{uri}#{seq}",
+        collection="default",
+        title="report",
+        snippet="report findings body",
+        rrf_score=0.9,
+        boosted_score=0.9,
+        in_bm25=True,
+        source_uri=uri,
+        seq=int(seq),
+    )
+    _state["mock_result"] = SearchResult(
+        query="report findings",
+        intent=QueryIntent.KEYWORD,
+        results=[BudgetedResult(result=fr, tier="L0", token_estimate=10, content="report abstract")],
+        bm25_count=1,
+        fused_count=1,
+        total_tokens=10,
+        latency_ms=10.0,
+    )
+    _state["search_raises"] = False
+
+
+@when(parsers.re(r'the agent calls tool_search with query "(?P<query>.*)" and max tier "(?P<tier>.*)"'))
+def when_agent_calls_search_with_tier(query, tier):
+    """Drive ``tool_search`` with a ``max_tier`` request, capturing what
+    retrieval received so the scenario can assert the ceiling threaded through."""
+    from kairix.agents.mcp.server import tool_search
+    from kairix.use_cases.search import SearchDeps
+
+    _state["exception"] = None
+    _state["search_kwargs"] = {}
+
+    def _search_fn(**kwargs):
+        _state["search_kwargs"] = kwargs
+        return _state["mock_result"]
+
+    deps = SearchDeps(
+        search_fn=_search_fn,
+        entity_card_fn=lambda name: None,
+        classify_fn=lambda q: _state["mock_result"].intent,
+    )
+    try:
+        _state["response"] = tool_search(query=query, max_tier=tier, deps=deps)
+    except Exception as exc:
+        _state["exception"] = exc
+        _state["response"] = {}
+
+
+@then(parsers.re(r'the search retrieval received max tier "(?P<tier>.*)"'))
+def then_retrieval_received_max_tier(tier):
+    assert _state["search_kwargs"].get("max_tier") == tier
+
+
+@then(parsers.re(r'the first search result carries seq (?P<seq>\d+) and source uri "(?P<uri>.*)"'))
+def then_first_result_carries_seq_and_uri(seq, uri):
+    first = _state["response"]["results"][0]
+    assert first["seq"] == int(seq)
+    assert first["source_uri"] == uri

@@ -19,6 +19,7 @@ from kairix.core.search.budget import (
     L2_SCORE_THRESHOLD,
     BudgetedResult,
     apply_budget,
+    coerce_tier,
 )
 from kairix.core.search.rrf import FusedResult
 from tests.fakes import FakeSummaryLoader
@@ -263,3 +264,83 @@ class TestApplyBudgetPhase2Content:
         )
         assert budgeted[0].tier == "L1"
         assert budgeted[0].content == "safe fallback"
+
+
+# ---------------------------------------------------------------------------
+# PLA-270 — max_tier ceiling: agents request the cheapest sufficient tier
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestApplyBudgetMaxTier:
+    """The ``max_tier`` ceiling clamps the score/budget selection DOWN."""
+
+    def test_max_tier_l0_clamps_a_would_be_l2_to_l0(self) -> None:
+        """A high-score/high-budget row that would be L2 is served as L0 when capped."""
+        loader = FakeSummaryLoader(l0_by_path={"doc.md": "l0 abstract"})
+        budgeted = apply_budget(
+            [_fused(score=L2_SCORE_THRESHOLD + 0.5)],
+            budget=L2_BUDGET_MIN,
+            summary_loader=loader,
+            max_tier="L0",
+        )
+        assert budgeted[0].tier == "L0"
+        assert budgeted[0].content == "l0 abstract"
+
+    def test_max_tier_l1_clamps_a_would_be_l2_to_l1(self) -> None:
+        loader = FakeSummaryLoader(l1_by_path={"doc.md": "l1 overview"})
+        budgeted = apply_budget(
+            [_fused(score=L2_SCORE_THRESHOLD + 0.5)],
+            budget=L2_BUDGET_MIN,
+            summary_loader=loader,
+            max_tier="L1",
+        )
+        assert budgeted[0].tier == "L1"
+        assert budgeted[0].content == "l1 overview"
+
+    def test_default_max_tier_l2_leaves_selection_unchanged(self) -> None:
+        """The default ceiling is L2 — a would-be-L2 row stays L2."""
+        loader = FakeSummaryLoader()
+        budgeted = apply_budget(
+            [_fused(score=L2_SCORE_THRESHOLD + 0.5)],
+            budget=L2_BUDGET_MIN,
+            summary_loader=loader,
+        )
+        assert budgeted[0].tier == "L2"
+
+    def test_max_tier_never_promotes_a_cheaper_selection(self) -> None:
+        """A would-be-L0 row stays L0 even when the ceiling permits L2 — clamp is one-way."""
+        loader = FakeSummaryLoader(l0_by_path={"doc.md": "l0 abstract"})
+        budgeted = apply_budget(
+            [_fused(score=0.0)],
+            budget=L2_BUDGET_MIN,
+            summary_loader=loader,
+            max_tier="L2",
+        )
+        assert budgeted[0].tier == "L0"
+
+    def test_max_tier_has_no_effect_without_a_loader(self) -> None:
+        """Phase 1 has no summaries to serve, so a ceiling can't demote below L2."""
+        budgeted = apply_budget([_fused(score=0.9)], budget=L2_BUDGET_MIN, max_tier="L0")
+        assert budgeted[0].tier == "L2"
+
+
+@pytest.mark.unit
+class TestCoerceTier:
+    """``coerce_tier`` is the single tier-vocabulary validation site."""
+
+    def test_uppercases_and_accepts_known_tiers(self) -> None:
+        assert coerce_tier("l0") == "L0"
+        assert coerce_tier("L1") == "L1"
+        assert coerce_tier(" l2 ") == "L2"
+
+    def test_unknown_value_degrades_to_default(self) -> None:
+        assert coerce_tier("L9") == "L2"
+        assert coerce_tier("garbage") == "L2"
+
+    def test_none_and_empty_degrade_to_default(self) -> None:
+        assert coerce_tier(None) == "L2"
+        assert coerce_tier("") == "L2"
+
+    def test_explicit_default_is_honoured(self) -> None:
+        assert coerce_tier(None, default="L0") == "L0"

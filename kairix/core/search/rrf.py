@@ -92,6 +92,29 @@ def canonical_path(raw: str) -> str:
     return raw
 
 
+def parse_chunk_seq(path: str) -> int | None:
+    """Parse the trailing ``#<seq>`` chunk index off a chunk path (PLA-270).
+
+    Connector / archive chunks are keyed ``<source_uri>#<seq>`` — the chunk
+    writer enumerates a document's chunks 0-based (see
+    ``kairix.worker._SqliteChunkWriter.upsert``). This returns that ``seq``
+    as a typed ``int`` so downstream chunk-expansion (PLA-268) has a clean,
+    typed key instead of re-parsing ``#N`` off the path with no document
+    handle — the drift PLA-270 closes.
+
+    Returns ``None`` when the path carries no numeric chunk suffix:
+    passthrough vault / markdown rows (no ``#``), synthetic ``entity://`` /
+    ``facts://`` rows, and heading-anchor fragments (``note#section`` →
+    ``None``, not a seq). A non-negative integer otherwise.
+    """
+    if not path:
+        return None
+    _head, sep, tail = path.rpartition("#")
+    if not sep or not tail.isdigit():
+        return None
+    return int(tail)
+
+
 # ---------------------------------------------------------------------------
 # Entity slug helpers (for secondary name-based lookup)
 # ---------------------------------------------------------------------------
@@ -160,6 +183,13 @@ class FusedResult:
     # always resolvable. Carried through to SearchHit + the MCP envelope so
     # every surface cites the canonical source, not the munged ``path``.
     source_uri: str = ""
+
+    # PLA-270 — the chunk sequence index (0-based) parsed from the chunk
+    # path's trailing ``#<seq>``. ``None`` for passthrough vault notes and
+    # synthetic (``entity://`` / ``facts://``) rows. Carried through to
+    # SearchHit + the MCP envelope so chunk-expansion (PLA-268) keys on a
+    # typed field instead of re-parsing ``#N`` off the path.
+    seq: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +272,7 @@ def _rrf_impl(
                 snippet=result["snippet"],
                 source_page=_extract_source_page(result),
                 source_uri=_extract_source_uri(result),
+                seq=parse_chunk_seq(path),
             )
         fused[path].in_bm25 = True
         fused[path].bm25_rank = rank
@@ -260,6 +291,7 @@ def _rrf_impl(
                 snippet=result["snippet"],
                 source_page=_extract_source_page(result),
                 source_uri=_extract_source_uri(result),
+                seq=parse_chunk_seq(path),
             )
         fused[path].in_vec = True
         fused[path].vec_rank = rank
@@ -359,6 +391,7 @@ def _bm25_primary_impl(
             rrf_score=1.0 / rank,
             source_page=_extract_source_page(result),
             source_uri=_extract_source_uri(result),
+            seq=parse_chunk_seq(path),
         )
         fr.boosted_score = fr.rrf_score
         results.append(fr)
@@ -385,6 +418,7 @@ def _bm25_primary_impl(
             rrf_score=1.0 / (base_rank + rank),
             source_page=_extract_source_page(result),
             source_uri=_extract_source_uri(result),
+            seq=parse_chunk_seq(path),
         )
         fr.boosted_score = fr.rrf_score
         results.append(fr)

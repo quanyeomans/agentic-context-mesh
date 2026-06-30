@@ -33,7 +33,7 @@ from kairix.core.protocols import (
     SearchLogger,
 )
 from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
-from kairix.core.search.budget import apply_budget
+from kairix.core.search.budget import SummaryLoader, apply_budget, coerce_tier
 from kairix.core.search.config import RetrievalConfig
 from kairix.core.search.intent import QueryIntent
 from kairix.core.search.query_cache import QueryResultCache, make_cache_key
@@ -210,6 +210,14 @@ class SearchPipeline:
     # the legacy fixed 2-worker ceiling (PLA-272). Tests inject a known-size
     # pool here to exercise sizing without touching process env (F2-clean).
     dispatch_pool: ThreadPoolExecutor | None = None
+    # PLA-270 — optional tiered-context summary source (a ``SummaryLoader``).
+    # When ``None`` (the default the factory and every direct test construct)
+    # the budget stage serves the full ``L2`` snippet for every row —
+    # byte-identical to the pre-tiering behaviour. When wired (operator
+    # generated L0/L1 summaries), the budget stage serves the cheapest
+    # sufficient tier per the score/budget selection AND honours a caller's
+    # ``max_tier`` ceiling.
+    tier_summaries: SummaryLoader | None = None
 
     def search(
         self,
@@ -220,6 +228,7 @@ class SearchPipeline:
         collections: list[str] | None = None,
         namespace: str | None = None,
         intent: QueryIntent | None = None,
+        max_tier: str = "L2",
     ) -> SearchResult:
         """Execute the full search pipeline using composed components.
 
@@ -243,7 +252,7 @@ class SearchPipeline:
         # the entire pipeline including the dominant Azure embed HTTP cost.
         cache_key: tuple[Any, ...] | None = None
         if self.query_cache is not None:
-            cache_key = make_cache_key(query, scope, agent, collections)
+            cache_key = make_cache_key(query, scope, agent, collections, coerce_tier(max_tier))
             cached = self.query_cache.get(cache_key)
             if cached is not None:
                 return cached
@@ -316,9 +325,17 @@ class SearchPipeline:
         fused = self._maybe_rerank(query, fused, intent)
         _stage("rerank", t)
 
-        # 7. Budget
+        # 7. Budget — tier each row to the cheapest sufficient representation
+        # (PLA-270). ``summary_loader`` activates L0/L1 serving; ``max_tier``
+        # is the caller's "no richer than this" ceiling, coerced once here so
+        # an unknown request degrades to the full snippet.
         t = time.monotonic()
-        budgeted = apply_budget(fused, budget=budget)
+        budgeted = apply_budget(
+            fused,
+            budget=budget,
+            summary_loader=self.tier_summaries,
+            max_tier=coerce_tier(max_tier),
+        )
         _stage("budget", t)
         total_tokens = sum(getattr(r, "token_estimate", 0) for r in budgeted)
         tiers_used = sorted({getattr(r, "tier", "L2") for r in budgeted})

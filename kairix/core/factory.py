@@ -547,6 +547,12 @@ class FactoryDeps:
     resolver_override: Any = None
     query_cache_override: Any = None  # QueryResultCache | QUERY_CACHE_DISABLED | None
     reranker_override: Any = None  # reranker closure | RERANK_DISABLED | None
+    # PLA-270 — tiered-context summary loader. ``None`` keeps Phase-1
+    # behaviour (every hit served as the full L2 snippet — default-safe).
+    # Integration tests inject ``FakeSummaryLoader`` here to exercise the
+    # composed L0/L1 tiering + ``max_tier`` ceiling through the factory;
+    # production stays None until summaries are generated + activated.
+    summary_loader_override: Any = None  # SummaryLoader | None
 
 
 class _QueryCacheDisabledSentinel:
@@ -1092,6 +1098,7 @@ def _is_default_deps(deps: FactoryDeps) -> bool:
         and deps.resolver_override is None
         and deps.query_cache_override is None
         and deps.reranker_override is None
+        and deps.summary_loader_override is None
     )
     return (
         deps.vec_index_factory is _default_vec_index_factory
@@ -1260,6 +1267,11 @@ def _build_search_pipeline_uncached(
         # Issue 2 — production cross-encoder rerank closure. The pipeline
         # decides per-call whether to invoke it based on config + intent.
         reranker=pipeline_reranker,
+        # PLA-270 — tiered-context summary source. ``None`` (production
+        # default) serves the full L2 snippet for every hit; integration
+        # tests inject FakeSummaryLoader so the composed path exercises
+        # L0/L1 tiering + the ``max_tier`` ceiling.
+        tier_summaries=deps.summary_loader_override,
     )
 
 
