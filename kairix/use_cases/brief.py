@@ -184,9 +184,9 @@ def _default_generate(agent: str, **kwargs: Any) -> str:
 
 
 def _default_briefing_dir() -> Path:
-    from kairix.agents.briefing.writer import BRIEFING_DIR
+    from kairix.paths import briefing_dir
 
-    return BRIEFING_DIR
+    return briefing_dir()
 
 
 def _default_brief_config() -> dict[str, object] | None:

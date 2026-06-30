@@ -361,7 +361,19 @@ def generate_briefing(
     # Token estimate for output
     token_estimate = estimate_tokens(briefing_body)
 
-    # Step 8: Write to file
+    # Build the full briefing inline — the same header the writer prepends
+    # to the file, single-sourced via build_briefing_header. This is the
+    # authoritative return value; the disk write below is best-effort.
+    from kairix.agents.briefing.writer import build_briefing_header
+
+    full_content = (
+        build_briefing_header(agent, sources_count=sources_count, token_estimate=token_estimate) + briefing_body
+    )
+
+    # Step 8: Write to file (best-effort). On failure we return the
+    # freshly-synthesised content above — never a stale prior brief read
+    # back from disk (the retired write-then-read-back returned the
+    # previous run's file when this run's write failed). #PLA-267.
     try:
         out_path = write_briefing(
             agent=agent,
@@ -376,29 +388,8 @@ def generate_briefing(
         )
     except OSError:
         logger.exception("pipeline: could not write briefing file")
-        # Return the content anyway
 
-    # Read back what was written (includes header added by writer)
-    try:
-        from kairix.agents.briefing.writer import BRIEFING_DIR
-
-        out_path = BRIEFING_DIR / f"{agent}-latest.md"
-        if out_path.exists():
-            return out_path.read_text(encoding="utf-8")
-    except Exception as _exc:
-        logger.debug("pipeline: could not read back briefing file — %s", _exc)
-
-    # Fallback: build content inline
-    from datetime import datetime, timezone
-
-    now = datetime.now(timezone.utc)
-    ts = now.strftime("%Y-%m-%d %H:%M UTC")
-    date_str = now.strftime("%Y-%m-%d")
-    header = (
-        f"# Agent Briefing — {agent} — {date_str}\n"
-        f"_Generated: {ts} | Sources: {sources_count} | Tokens: ~{token_estimate}_\n\n"
-    )
-    return header + briefing_body
+    return full_content
 
 
 # ---------------------------------------------------------------------------

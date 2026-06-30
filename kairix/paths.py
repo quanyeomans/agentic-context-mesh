@@ -1428,6 +1428,40 @@ def cache_dir(mode: Mode | None = None) -> Path:
     return Path(_FHS_CACHE_DIR)
 
 
+def briefing_dir(mode: Mode | None = None, *, environ: Mapping[str, str] | None = None) -> Path:
+    """Resolve the agent-briefing output directory (PLA-267).
+
+    ``<cache_dir>/briefing`` — paths-routed and resolved at call time,
+    never at import. The retired writer evaluated ``Path.home()`` at
+    module import, which crashed the briefing import on a hardened
+    no-HOME deploy; routing through this lazy resolver removes that.
+
+    When ``mode`` is supplied (installer + contract surface) the per-mode
+    FHS/XDG cache dir is used with no env read —
+    ``/var/cache/kairix/briefing`` for ``system`` / ``container`` (needs
+    no HOME), ``$XDG_CACHE_HOME/kairix/briefing`` (fallback
+    ``~/.cache/kairix/briefing``) for ``user``.
+
+    When ``mode`` is ``None`` (runtime default) the operator override
+    ``KAIRIX_BRIEFING_DIR`` wins when set, else the auto-detected per-mode
+    cache dir. The env read lives here in :mod:`kairix.paths` so F4 holds
+    — the retired writer read a MISSPELLED ``KAIRIXBRIEFING_DIR`` that
+    both bypassed paths.py and evaded the F4 ``KAIRIX_*`` lint.
+
+    ``environ`` mirrors :func:`mcp_endpoint`'s F2-clean test seam:
+    production callers leave it ``None`` and the live ``os.environ`` is
+    read at this paths boundary; tests pass an explicit mapping so the
+    override branch is exercised without mutating process env.
+    """
+    if mode is not None:
+        return cache_dir(mode) / "briefing"
+    env = environ if environ is not None else os.environ
+    raw = env.get("KAIRIX_BRIEFING_DIR")
+    if raw:
+        return Path(raw).expanduser()
+    return cache_dir() / "briefing"
+
+
 def runtime_secrets_dir(mode: Mode | None = None) -> Path:
     """Per-mode runtime-secrets directory resolver (Plan 1).
 
