@@ -62,10 +62,11 @@ __all__ = [
     "resolve_memory_dirs",
 ]
 
-# Cache keys for the 5 cheap fetchers — one logical name per fetcher so
-# the cache's ``(source_name, agent)`` tuple stays unambiguous.
-_CACHE_KEY_MEMORY_LOGS = "memory_logs"
-_CACHE_KEY_RECENT_MEMORY = "recent_memory"
+# Cache keys for the slow-moving fetchers — one logical name per fetcher
+# so the cache's ``(source_name, agent)`` tuple stays unambiguous. The two
+# time-sensitive fetchers (memory_logs, recent_memory) deliberately do NOT
+# cache (PLA-267): they surface today's pending/blocked items, and a 1h TTL
+# would cap the freshness of the very thing the brief exists to show.
 _CACHE_KEY_ENTITY_STUB = "entity_stub"
 _CACHE_KEY_KNOWLEDGE_RULES = "knowledge_rules"
 _CACHE_KEY_RECENT_DECISIONS = "recent_decisions"
@@ -171,21 +172,13 @@ def fetch_memory_logs(
     via :meth:`kairix.core.agents.scope.AgentScope.memory_paths` using
     the on-disk ``kairix.config.yaml``.
 
-    Cached for 1h per ``(memory_logs, agent)``; explicit ``memory_dirs=``
-    or ``config=`` overrides bypass the cache so test fixtures stay
-    isolated.
+    NOT cached (PLA-267): this source surfaces today's
+    ``[pending]``/``[blocked]``/TODO items, so it reads fresh on every
+    call. Caching it for 1h capped the freshness of the very items the
+    brief exists to show — a line added minutes ago stayed invisible for
+    up to an hour. (The slow-moving sources — entity stub, knowledge
+    rules, recent decisions — still cache.)
     """
-    # Cache check — production path only (both seams=None). Tests
-    # passing an explicit override bypass the cache so per-tmp_path
-    # state stays isolated across runs.
-    if memory_dirs is None and config is None:
-        cache = get_brief_source_cache()
-        cached = cache.get(_CACHE_KEY_MEMORY_LOGS, agent)
-        if cached is not None:
-            return cached
-        result = fetch_memory_logs_via_scope(agent, max_tokens, config=None)
-        cache.put(_CACHE_KEY_MEMORY_LOGS, agent, result)
-        return result
     if memory_dirs is not None:
         return _fetch_memory_logs_impl(agent, max_tokens, list(memory_dirs))
     return fetch_memory_logs_via_scope(agent, max_tokens, config=config)
@@ -315,18 +308,13 @@ def fetch_recent_memory(
     and surfaces are resolved via
     :meth:`kairix.core.agents.scope.AgentScope.memory_paths`.
 
-    Cached for 1h per ``(recent_memory, agent)``; explicit ``memory_dirs=``
-    overrides bypass the cache.
+    NOT cached (PLA-267): today's + yesterday's memory is the freshest,
+    most time-sensitive source, so it reads fresh on every call rather
+    than serving a value cached for up to an hour.
     """
-    if memory_dirs is None:
-        cache = get_brief_source_cache()
-        cached = cache.get(_CACHE_KEY_RECENT_MEMORY, agent)
-        if cached is not None:
-            return cached
-        result = _fetch_recent_memory_via_scope(agent, max_tokens, config=None)
-        cache.put(_CACHE_KEY_RECENT_MEMORY, agent, result)
-        return result
-    return _fetch_recent_memory_impl(agent, max_tokens, list(memory_dirs))
+    if memory_dirs is not None:
+        return _fetch_recent_memory_impl(agent, max_tokens, list(memory_dirs))
+    return _fetch_recent_memory_via_scope(agent, max_tokens, config=None)
 
 
 def _fetch_recent_memory_via_scope(
@@ -626,9 +614,10 @@ def _collect_focus_signals(agent: str) -> list[str]:
 
     Returns the non-empty text blocks the brief's other sources already
     produce for this agent — memory logs, recent memory, and the entity
-    stub. These fetchers are cached for 1h per ``(source, agent)``, so when
-    the concurrent fan-out has already run them this is a cache hit rather
-    than a second disk/scope read.
+    stub. memory_logs + recent_memory read fresh each call (PLA-267 — they
+    are the time-sensitive sources and are no longer cached); the entity
+    stub is cached for 1h, so its read here is a cache hit when the
+    concurrent fan-out has already run it.
     """
     blocks: list[str] = []
     for block in (fetch_memory_logs(agent), fetch_recent_memory(agent), fetch_entity_stub(agent)):

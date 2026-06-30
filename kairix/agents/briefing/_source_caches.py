@@ -1,10 +1,14 @@
-"""In-process cache for cheap brief source fetchers (#396 W-B C5).
+"""In-process cache for slow-moving brief source fetchers (#396 W-B C5).
 
-The 5 cheap brief sources (memory_logs, recent_memory, entity_stub,
-knowledge_rules, recent_decisions) each touch the operator's filesystem
-under the agent's knowledge directory. None of the bytes they return
-change at query-scale — every agent's session-scope knowledge file
-moves on minute-to-hour cadence, not second-by-second.
+The slow-moving brief sources (entity_stub, knowledge_rules,
+recent_decisions) each touch the operator's filesystem under the agent's
+knowledge directory. None of the bytes they return change at
+query-scale — these knowledge files move on a daily-to-monthly cadence.
+
+The two time-sensitive sources (memory_logs, recent_memory) deliberately
+do NOT use this cache (PLA-267): they surface today's pending/blocked
+items, so a 1h TTL would cap the freshness of the very thing the brief
+exists to show. They read fresh on every call.
 
 This single shared :class:`BriefSourceCache` instance turns repeat
 ``(source_name, agent)`` lookups into memory hits. 1-hour TTL is the

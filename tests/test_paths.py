@@ -7,6 +7,8 @@ import pytest
 
 from kairix.paths import (
     KairixPaths,
+    Mode,
+    briefing_dir,
     bundled_suites_root,
     clear_cache,
     default_cache_dir,
@@ -1172,3 +1174,49 @@ class TestRechunkSweepPerTickCap:
         assert rechunk_sweep_per_tick_cap() == 200
         monkeypatch.setenv("KAIRIX_RECHUNK_SWEEP_PER_TICK_CAP", "-5")
         assert rechunk_sweep_per_tick_cap() == 200
+
+
+# ---------------------------------------------------------------------------
+# briefing_dir() (PLA-267)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestBriefingDir:
+    """``briefing_dir`` is paths-routed, lazy, and HOME-free on FHS deploys.
+
+    The retired writer evaluated ``Path.home()`` at module import, which
+    crashed the briefing import on a hardened no-HOME VM. These tests drive
+    the deployment shape by INJECTING the mode / an explicit env mapping —
+    never by clearing HOME (F2) — and prove the resolver routes through the
+    per-mode cache dir.
+    """
+
+    @pytest.mark.unit
+    def test_container_and_system_modes_are_home_free(self) -> None:
+        """A hardened no-HOME container/system install resolves to the FHS
+        cache path with no ``Path.home()`` / ``expanduser`` — so importing +
+        writing a brief never depends on HOME being set."""
+        assert briefing_dir(Mode.container) == Path("/var/cache/kairix/briefing")
+        assert briefing_dir(Mode.system) == Path("/var/cache/kairix/briefing")
+
+    @pytest.mark.unit
+    def test_user_mode_routes_through_xdg_cache(self, monkeypatch) -> None:
+        """User-mode sits under the XDG cache root (XDG_CACHE_HOME is a POSIX
+        spec var, not a kairix internal — F2/F4-clean)."""
+        monkeypatch.setenv("XDG_CACHE_HOME", "/custom/xdg-cache")
+        assert briefing_dir(Mode.user) == Path("/custom/xdg-cache/kairix/briefing")
+
+    @pytest.mark.unit
+    def test_env_override_wins_on_runtime_path(self) -> None:
+        """``KAIRIX_BRIEFING_DIR`` overrides the default — exercised through the
+        F2-clean ``environ=`` seam (no process-env mutation)."""
+        result = briefing_dir(environ={"KAIRIX_BRIEFING_DIR": "/srv/briefs"})
+        assert result == Path("/srv/briefs")
+
+    @pytest.mark.unit
+    def test_runtime_default_is_under_briefing_subdir(self) -> None:
+        """With no override, the runtime path is the auto-detected cache dir
+        with a ``briefing`` leaf."""
+        result = briefing_dir(environ={})
+        assert result.name == "briefing"

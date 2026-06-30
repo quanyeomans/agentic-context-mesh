@@ -66,6 +66,52 @@ class TestSynthesise:
         assert "synthesis" in result.lower() or "failed" in result.lower()
 
     @pytest.mark.unit
+    def test_offline_synthesis_degrades_to_non_llm_brief(self):
+        """PLA-267: when the chat call fails (provider offline), the brief
+        degrades to the gathered non-LLM context — the 5/6 sources that need
+        no LLM still surface their content, instead of empty
+        '(synthesis unavailable)' placeholders.
+
+        Sabotage-proof (executed): reverting the synthesiser's offline branch
+        to ``fallback_briefing`` drops the gathered content and the three
+        content assertions below fail. Restored.
+        """
+        context = {
+            "memory_logs": "[pending] ship the connector refactor",
+            "recent_decisions": "ADR-007: adopt RRF fusion",
+            "knowledge_rules": "Never write credentials to disk",
+        }
+        result = synthesise(
+            "builder",
+            context,
+            llm_backend=_make_backend(side_effect=RuntimeError("provider offline")),
+        )
+
+        # The gathered (non-LLM) content survives the offline path.
+        assert "ship the connector refactor" in result
+        assert "ADR-007: adopt RRF fusion" in result
+        assert "Never write credentials to disk" in result
+        # It is NOT the empty placeholder brief.
+        assert "synthesis unavailable - check memory logs manually" not in result
+
+    @pytest.mark.unit
+    def test_whitespace_only_context_falls_back_to_empty_brief(self):
+        """When the gathered context is only whitespace (no real content to
+        surface), the offline degrade returns the empty-placeholder fallback
+        rather than a 'showing gathered context' note over blank sections —
+        there is genuinely nothing to show.
+
+        Pins the all-empty guard in ``_degrade_to_non_llm_brief``: mutating
+        its ``value and value.strip()`` to ``value or value.strip()`` treats a
+        whitespace-only value as content and emits the section brief instead
+        of the fallback, which this assertion then catches. No ``llm_backend``
+        is passed so the provider-unconfigured degrade path runs (mirrors
+        ``test_empty_context_returns_fallback``).
+        """
+        result = synthesise("builder", {"memory_logs": "   ", "knowledge_rules": "\n\t "})
+        assert "synthesis unavailable - check memory logs manually" in result
+
+    @pytest.mark.unit
     def test_context_is_included_in_prompt(self):
         """Verify context content is passed to the LLM."""
         context = {"memory_logs": "UNIQUE_MARKER_12345"}

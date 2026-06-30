@@ -7,7 +7,7 @@ of the MCP performance sprint:
 * ``scope_collection_cache`` — topology_v2 collection resolver cache
 * ``prep_summary_cache`` — LLM ``chat()`` synthesis cache for ``run_prep``
 * ``brief_output_cache`` — assembled ``BriefOutput`` cache for ``run_brief``
-* ``brief_source_cache`` — per-source TTL cache for the 5 cheap brief fetchers
+* ``brief_source_cache`` — per-source TTL cache for the slow-moving brief fetchers
 * ``health_probe_cache`` — ``probe_health`` snapshot cache
 
 The CLI shape::
