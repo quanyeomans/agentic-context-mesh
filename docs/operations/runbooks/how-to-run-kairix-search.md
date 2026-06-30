@@ -48,6 +48,31 @@ kairix search "query" --verbose
 
 ---
 
+## kairix expand
+
+Pulls the chunks around a search hit — the part before, the part after, and the section it belongs to — up to a token budget. Use it after a search hit when the excerpt isn't enough and you need the surrounding context, instead of re-reading the whole document.
+
+```bash
+# Pull the neighbouring chunks around a hit, by its source link + position
+kairix expand "<source_uri>" <seq>
+
+# Example: expand around chunk 4 of a document the search returned
+# (use the source_uri exactly as the search hit reports it — for a plain
+#  markdown note that's the document path; for connector content it's the
+#  connector URI, e.g. sharepoint://...)
+kairix expand "01-Projects/some-project/BRIEF.md" 4
+
+# Widen or tighten how much surrounding text to pull (tokens; default 2000)
+kairix expand "01-Projects/some-project/BRIEF.md" 4 --token-budget 4000
+
+# Output: the matched chunk plus its neighbours, in reading order, each with
+# its own source link and token count. The matched chunk is always included.
+```
+
+**When to use:** right after a `kairix search` hit whose excerpt is too thin to act on. Pass the `source_uri` and `seq` from the search result — no re-search, no whole-file re-read.
+
+---
+
 ## kairix brief
 
 Generates a synthesised briefing for a specific agent. First call after TTL expiry takes 2-10s (LLM synthesis); subsequent calls < 500ms (cached).

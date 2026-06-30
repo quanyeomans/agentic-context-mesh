@@ -12,6 +12,7 @@ Operational procedures and incident runbooks for kairix deployments.
 | `kairix search` returns `vec=0, vec_failed=True` | [runbook-vector-search-failure](runbook-vector-search-failure.md) |
 | `kairix entity suggest` returns junk, agents miss known entities, or reflib recall regresses | [kairix-entity-audit](kairix-entity-audit.md) |
 | New documents not appearing in search after the embed cycle | [runbook-embedding-lag](runbook-embedding-lag.md) |
+| Agent memory saves silently fail, or a memory surface won't write after you point kairix at a new location (`:ro` mount, wrong ownership) | Run `kairix doctor` — its write-access preflight names the unwritable path, the exact permission problem, and a plain-language fix, so you catch it before an agent's write fails |
 | BM25 silently returning vector-only results, documents present but unsearchable | [integrity-and-preflight](integrity-and-preflight.md) — run `kairix worker preflight` |
 | Every `mcp-kairix__*` tool returns `-32602 Invalid request parameters` | [MCP-CLIENT-MIGRATION](../MCP-CLIENT-MIGRATION.md) — your client is on `/sse` and needs to move to `/mcp` |
 | NDCG@10 dropped after a config or index change | [runbook-benchmark-regression](runbook-benchmark-regression.md) |
@@ -47,7 +48,7 @@ Operational procedures and incident runbooks for kairix deployments.
 | [how-to-upgrade-kairix](how-to-upgrade-kairix.md) | Install tagged release, verify, run onboard check |
 | [secrets-configuration](../secrets-configuration.md) | Cross-provider secrets setup — Docker / pip × Azure KV / AWS Secrets Manager / GCP Secret Manager / 1Password / ECS / Cloud Run / AKS / plain .env; canonical naming convention; rotation + verification |
 | [how-to-run-benchmark](how-to-run-benchmark.md) | Run benchmark suite, interpret results, compare before/after |
-| [how-to-run-kairix-search](how-to-run-kairix-search.md) | Quick reference for the main query commands — `kairix search` / `brief` / `timeline` / `entity` / `curator health` / `onboard check`, with examples and healthy/broken output interpretation |
+| [how-to-run-kairix-search](how-to-run-kairix-search.md) | Quick reference for the main query commands — `kairix search` / `expand` (pull the chunks around a hit) / `brief` / `timeline` / `entity` / `curator health` / `onboard check`, with examples and healthy/broken output interpretation |
 | [how-to-debug-search-ranking](how-to-debug-search-ranking.md) | Query intent dispatch, RRF weights, category-specific tuning |
 | [how-to-rebuild-entity-graph](how-to-rebuild-entity-graph.md) | Drop and rebuild the Neo4j entity graph from the document store |
 | [how-to-set-up-the-linear-connector](how-to-set-up-the-linear-connector.md) | Turn on the Linear connector — store the API key, add the topology_v2 block, flip `connector_linear`, verify ingestion; troubleshooting (auth / rate-limit / nothing-ingested / flag-still-off) |

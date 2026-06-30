@@ -39,19 +39,32 @@ Specific triggers — when you see any of these in the conversation, search befo
 
 **What to do:** search before answering. If your search returns zero results, say so explicitly to your human — do not fabricate from prior context.
 
+**Every result carries a source link.** Each hit comes back with a `source_uri` — an openable pointer to the original. The same pointer is on results from search, briefings, fact lookups, timelines, research, and contradiction checks, so you can always show your human where an answer came from, and feed a hit's `source_uri` to `tool_expand` (next section) to read more around it.
+
 ---
 
-## 3. When you need a synthesised view of a topic: call `tool_brief`
+## 3. When a search snippet isn't enough: call `tool_expand`
+
+A search hit points at one part of a document. When the snippet doesn't give you enough to answer with confidence, call `tool_expand` to pull the parts around it — the part before, the part after, the section it belongs to — up to a token budget. It reads the surrounding text straight from the index, so you get the context **without** re-running search or re-reading the whole file.
+
+**CLI form:** `kairix expand "<source_uri>" <seq>`
+**MCP form:** `tool_expand(source_uri="<the hit's source_uri>", seq=<the hit's seq>, token_budget=2000)`
+
+**What to do:** after a search hit, if you need what comes before or after it, call `tool_expand` with the hit's `source_uri` and `seq` (both come back on the search result). Each returned chunk carries its own openable `source_uri`. Prefer this over re-searching for the same document.
+
+---
+
+## 4. When you need a synthesised view of a topic: call `tool_brief`
 
 `tool_brief` runs a small research loop across the knowledge store and returns a structured briefing — what's known, what's open, what the most recent relevant material says. Use it when you would otherwise be tempted to summarise from memory.
 
 **MCP form:** `tool_brief(agent="<your-agent-name>", topic="<topic>")`
 
-**What to do:** call `tool_brief` when a human asks you to "brief me on X", "catch me up on Y", or "what's the state of Z". Do not write the briefing from your context window. Run the loop, return the structured briefing, and add your interpretation on top.
+**What to do:** call `tool_brief` when a human asks you to "brief me on X", "catch me up on Y", or "what's the state of Z". Do not write the briefing from your context window. Run the loop, return the structured briefing, and add your interpretation on top. The briefing ends with a `## Sources` footer listing the sources behind it (and the response carries a matching `sources` field) — keep those citations so your human can open them and check the work.
 
 ---
 
-## 4. When you need facts about a specific named entity: call `tool_entity`
+## 5. When you need facts about a specific named entity: call `tool_entity`
 
 `tool_entity` is a direct knowledge-graph lookup — faster than search for "who is X" or "what does the team know about company Y". It returns the entity's identity, related entities, and the documents that mention it.
 
@@ -61,7 +74,7 @@ Specific triggers — when you see any of these in the conversation, search befo
 
 ---
 
-## 5. Health degradation contract
+## 6. Health degradation contract
 
 Every kairix tool response includes a `health` envelope:
 
@@ -95,7 +108,7 @@ Every kairix tool response includes a `health` envelope:
 
 ---
 
-## 6. When `kairix onboard check` returns non-zero
+## 7. When `kairix onboard check` returns non-zero
 
 `kairix onboard check` is the canonical "is kairix healthy" probe. It runs its checks in dependency order (PATH → wrapper → secrets → document root → vector search → Neo4j → agent memory → chunk dates → MCP service → …). A green run reports every check passed.
 
@@ -129,7 +142,7 @@ The exit code is `0` when `fully_passed` is `true`, `1` otherwise. Use this from
 
 ---
 
-## 7. Manual bootstrap fallback
+## 8. Manual bootstrap fallback
 
 For the pre-W1 case (where `kairix bootstrap` is not yet available) or when `kairix bootstrap` fails, fall back to reading these files directly. This is the minimum context you need to operate; **flag to your human that `kairix bootstrap` is offline** so they can chase the underlying cause.
 
@@ -143,17 +156,18 @@ If your deployment uses a different document root, replace `/data/obsidian-vault
 
 ---
 
-## 8. Quick reference card
+## 9. Quick reference card
 
 | Situation | Call this |
 |-----------|----------|
 | Session start | `kairix bootstrap <your-agent-name>` (W1) |
 | Factual question about prior work | `tool_search` |
-| "Brief me on X" / "catch me up" | `tool_brief` |
+| Search snippet isn't enough — need the surrounding text | `tool_expand` (pass the hit's `source_uri` + `seq`) |
+| "Brief me on X" / "catch me up" | `tool_brief` (ends with a `## Sources` footer) |
 | "Who is X" / "what's company Y" | `tool_entity` |
 | Health envelope says degraded | Surface `degraded_reason` + `next_action` to your human |
 | `kairix onboard check` returns non-zero | Surface the failure block + `remediation` strings; refer admin to `ADMIN-CONVERSATION.md` |
-| `kairix bootstrap` not available yet | Manual fallback (section 7); flag to your human |
+| `kairix bootstrap` not available yet | Manual fallback (section 8); flag to your human |
 
 ---
 

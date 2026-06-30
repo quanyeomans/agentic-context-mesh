@@ -22,6 +22,8 @@ Kairix gives your agents a shared knowledge layer they can search, write to, and
 
 **Your agents find answers instead of guessing.** One tool call returns ranked, relevant content — ~1,500 tokens instead of dumping 10,000–50,000 tokens of full documents into the prompt. In a 200K context window, that's 58 searches per session instead of 5. Your agents can actually research a topic instead of running out of room after the first question.
 
+**Agents pull just the context around a hit, and can always cite it.** When a result points at one part of a document, your agent pulls the parts around it — the part before, the part after, the section it sits in — with `expand` / `tool_expand`, instead of re-reading the whole file. And every result, from search to briefings to fact lookups, comes with a source link you can open, so you and your agents can trace any answer back to where it came from.
+
 **Agents stop putting documents in the wrong place.** The classifier knows the difference between a decision, a runbook, a meeting note, and a research output. When an agent writes something new, kairix routes it to the right location in your knowledge store — no filing instructions needed.
 
 **Agents stop contradicting what you've already decided.** Before writing a new fact or decision, agents can check it against existing knowledge. Kairix flags conflicts: "this contradicts what was agreed in Q1" — before it gets saved, not after you discover the mess.

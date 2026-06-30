@@ -12,6 +12,8 @@ These tools are the agent-facing surface for the same use cases the operator run
 
 Submit a transcript for chunking + fact extraction. Returns counts and the operator-facing summary string.
 
+> **Read-only document roots are fine.** `ingest_chat` writes the conversation into a separate writable area, so it no longer fails on deployments where the document-root is mounted read-only. You don't need to make the document root writable just to import a chat.
+
 **Arguments:**
 
 | Name | Type | Required | Default | Notes |
@@ -55,34 +57,38 @@ Query the fact store for everything known about an entity. Returns a small list 
 | Name | Type | Required | Default | Notes |
 |------|------|----------|---------|-------|
 | `entity` | string | yes | — | Canonical entity name (kebab-case, e.g. `agent-alpha`). Aliases resolve via the entity graph. |
-| `namespace` | string | no | `shared` | Limits facts to this namespace scope plus `shared`. |
-| `include_superseded` | bool | no | `false` | If `true`, returns historical facts marked superseded — useful for "how did our decision evolve?" |
-| `max_results` | int | no | `25` | Soft cap on returned rows; the tool always returns highest-confidence first. |
+| `namespace` | string | no | `null` (all namespaces) | Restrict fact hits to one engagement scope; omit to search across all namespaces. Matches the `namespace` parameter documented in [`mcp-tools.md`](../user-guide/mcp-tools.md). |
+| `top_k` | int | no | `20` | Soft cap on returned rows; the tool always returns highest-confidence first. Superseded facts are filtered out automatically — there is no separate toggle. |
 
 **Return envelope:**
 
 ```json
 {
-  "ok": true,
-  "result": {
-    "entity": "agent-alpha",
-    "facts": [
-      {
-        "attribute": "current-project",
-        "value": "project-atlas",
-        "confidence": 0.92,
-        "evidence_turn_ids": ["s001-t003", "s001-t005"],
-        "namespace": "team-alpha",
-        "extracted_at": "2026-05-12T09:14:22Z"
-      }
-    ],
-    "count": 1
-  },
-  "health": { ... }
+  "entity": "agent-alpha",
+  "namespace": null,
+  "top_k": 20,
+  "canonical": null,
+  "entity_summaries": [],
+  "hits": [
+    {
+      "attribute": "current-project",
+      "value": "project-atlas",
+      "confidence": 0.92,
+      "source_turn_ids": ["s001-t003", "s001-t005"],
+      "conversation_id": "s001",
+      "source_uri": "04-Agent-Knowledge/conversations/s001.md",
+      "namespace": "team-alpha",
+      "extracted_at": "2026-05-12T09:14:22Z",
+      "score": 0.81
+    }
+  ],
+  "error": ""
 }
 ```
 
-When the entity is unknown the tool returns `result.facts: []` plus `result.count: 0` — not an error. Agents that need stricter not-found semantics should check `count == 0`.
+Each fact hit now carries a `source_uri` — a real, openable pointer back to the conversation document the fact came from — alongside the raw `source_turn_ids`. So an agent can cite or re-open the evidence behind a fact instead of being handed turn ids that mean nothing on their own. (`source_uri` resolves to the ingested conversation's document path, or to a connector URI for federated facts; a matching `source_ref` breadcrumb is included for callers that want the structured form.)
+
+When the entity is unknown the tool returns `hits: []` plus `entity_summaries: []` and `error: ""` — not an error. Agents that need stricter not-found semantics should check whether `hits` is empty.
 
 ## Namespace scoping
 
@@ -146,7 +152,7 @@ The LLM backend is still warming. `fix:` retry in ~5 seconds — the warm-gate e
 
 **Agent says `facts_about` returns more rows than expected.**
 
-`include_superseded` defaults to `false`, so historical contradictions are already excluded. `fix:` lower `max_results` (default 25) if the agent's token budget is tight. `next:` if rows look duplicated, the fact-id-collision check failed — check the kairix log for `add(): duplicate id` WARNINGs.
+Superseded facts are filtered out automatically, so historical contradictions are already excluded. `fix:` lower `top_k` (default 20) if the agent's token budget is tight. `next:` if rows look duplicated, the fact-id-collision check failed — check the kairix log for `add(): duplicate id` WARNINGs.
 
 **Agent submits a transcript and `facts_added: 0` despite `windows_extracted > 0`.**
 

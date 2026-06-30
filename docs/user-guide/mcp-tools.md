@@ -1,12 +1,14 @@
 # Kairix MCP Tools
 
-Kairix exposes its full capability surface via MCP (Model Context Protocol). Any MCP-compatible agent or IDE can use these tools to search, research, look up information, record what it learns, and inspect the running server's setup. The server registers **37 tools** in total; this reference documents every one, grouped by job.
+Kairix exposes its full capability surface via MCP (Model Context Protocol). Any MCP-compatible agent or IDE can use these tools to search, research, look up information, record what it learns, and inspect the running server's setup. The server registers **38 tools** in total; this reference documents every one, grouped by job.
 
 Every tool response carries a `health` envelope (`vector_search` / `bm25` / `chat` / `secrets_loaded` / `degraded_reason` / `next_action`) so an agent can tell what's online before it trusts a result. Tools that touch a cold pipeline may return an `error_code=KAIRIX_COLD_START` envelope with a `retry_after_ms` — when you see that, wait and retry the same call rather than answering from memory.
 
+Every retrieval and synthesis result row carries a source link you can open — the same kind of pointer on every tool — so you and your agents can trace any answer back to where it came from and re-open the original.
+
 The groups below map to how you'll actually reach for them:
 
-- **Retrieval + synthesis** — what agents call to find answers (`search`, `research`, `entity`, `prep`, `timeline`, `contradict`, `brief`, `bootstrap`).
+- **Retrieval + synthesis** — what agents call to find answers (`search`, `research`, `entity`, `prep`, `timeline`, `contradict`, `brief`, `bootstrap`, `expand`).
 - **Agent memory + recall** — what agents call to write back and introspect knowledge (`memory_write`, `ingest_chat`, `facts_about`, `entity_suggest`, `entity_validate`).
 - **Help + discovery** — finding the right surface (`usage_guide`, `capabilities`, `recommend_capabilities`).
 - **Setup + diagnostics** — operator-facing health and config checks (`onboard_check`, `onboard_scan`, `onboard_agent`, `doctor_check_all`, `doctor_check_agent`, `worker_status`, `features_status`, `secrets_verify`, `dead_letter_status`, `caches_status`, `warm`, `probe_search`, `maintenance_analyze`).
@@ -28,9 +30,25 @@ Find answers in your knowledge base. Just pass your question — the system hand
 | `budget` | No | 3000 | Token budget for the result set |
 | `limit` | No | 10 | Maximum number of results |
 
-**Returns:** Ranked results with file paths, relevance scores, content snippets, and token counts.
+**Returns:** Ranked results with file paths, relevance scores, content snippets, and token counts. Each result carries a source link you can open.
 
 **When to use:** Most questions. This is the default tool for finding information.
+
+---
+
+### expand
+
+Pull the text around a search hit. A search result points at one part of a document; `expand` returns that part plus the parts on either side of it — the section it belongs to — up to a token budget. It reads the surrounding context straight from the index, so you don't have to re-read or re-ingest the whole file.
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `source_uri` | Yes | — | The source link from the search hit you want to expand |
+| `seq` | Yes | — | The hit's position marker within its document (the `seq` on the search result) |
+| `token_budget` | No | 2000 | How much surrounding text to pull, in tokens |
+
+**Returns:** The matched part plus its neighbouring parts, in reading order, each with its own openable source link and a token count. The matched part is always included, even if it alone is over the budget.
+
+**When to use:** Right after a search hit, when the snippet isn't enough and you need the surrounding context — what comes before and after — to answer with confidence.
 
 ---
 
@@ -123,7 +141,7 @@ Get a synthesised view of a topic — kairix runs a small research loop across t
 |-----------|----------|---------|-------------|
 | `agent` | Yes | — | Agent name the briefing is for |
 
-**Returns:** A structured briefing (content + the on-disk path it was written to).
+**Returns:** A structured briefing (content + the on-disk path it was written to). The briefing ends with a `## Sources` footer listing the sources behind it, and the response also carries a `sources` field with the same citations as openable source links — so you can check the work behind any part of the summary.
 
 **When to use:** When you want a current synthesised view of where things stand instead of recalling from memory.
 
@@ -190,7 +208,7 @@ Look up what kairix knows about an entity from the fact store. Returns the curre
 | `namespace` | No | None | Restrict to one engagement scope; omit to search across all namespaces |
 | `top_k` | No | 20 | Maximum number of fact records to return |
 
-**Returns:** Fact records with attribute, value, confidence, and source provenance.
+**Returns:** Fact records with attribute, value, confidence, and source provenance. Each fact now carries a source link you can open back to where it came from, instead of an internal reference that meant nothing on its own.
 
 ---
 
@@ -445,6 +463,7 @@ These tools represent heavy or mutating operations that an agent must not run un
 | Situation | Tool to use |
 |-----------|------------|
 | "Find documents about X" | **search** |
+| "Give me the chunks around this hit" | **expand** |
 | "Research X in depth" | **research** |
 | "Who is X?" / "What is Company Y?" | **entity** |
 | "Quick summary of X" | **prep** |

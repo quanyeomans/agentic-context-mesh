@@ -7,6 +7,37 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.7.1] - 2026-07-01
+
+> **Upgrading?** Nothing breaks. Your searches, briefings, and agents keep working the way they do today. This release makes agents faster, and makes their answers easier to trust and follow up on.
+
+### Pull in the context around a result, without re-reading
+
+- **Grab the text around a search hit.** When a result points at one part of a document, an agent can now ask for the parts around it — the part before, the part after, or the section it belongs to — with the new `kairix expand` command and a matching `expand` tool. Before, an agent had to re-read the whole file to see the surrounding text; now it pulls only what it needs. Faster answers, less wasted work.
+
+### Cite and re-open any result
+
+- **Every result shows where it came from.** Search hits, briefings, fact lookups, timelines, research, and claim checks now all carry a clear pointer back to the original source you can open. The same breadcrumb appears everywhere, so you and your agents can trace any claim to its source.
+- **Briefings end with their sources.** Each briefing now finishes with a short "Sources" list of at least three citations, so you can check the work behind a summary at a glance.
+- **Fact answers point to something you can open.** When you ask what's known about a person or topic, each fact now links to a real, openable source instead of an internal reference that meant nothing on its own.
+
+### Faster, safer memory
+
+- **Saving a memory is much faster.** When an agent saves something, kairix now updates just that entry instead of re-scanning everything and rebuilding the whole search index. Large stores feel quick again.
+- **What you save is always findable.** A saved memory now always lands somewhere that is both writable and searchable, so it turns up in your next search every time.
+- **kairix tells you up front when it can't save.** `kairix doctor` now checks whether kairix can actually write where it's been pointed, and gives you a plain-language fix when it can't.
+- **Saving a conversation works on locked-down setups.** Importing a chat no longer fails on read-only deployments — conversations are written to a separate writable area.
+
+### Sharper answers, quicker starts
+
+- **Better fact recall.** Fact lookups now blend keyword and meaning-based matching, and lead with a short summary of the thing you asked about.
+- **Briefings built from real signal** and aware of the agents you've set up.
+- **Quick first results after a restart.** kairix warms up the model that ranks your results and sizes its worker pool at startup, so the first search isn't sluggish. Result previews now center on the part that actually matched your query.
+
+### Safer by default
+
+- **Tighter handling of file paths.** Paths supplied by an operator or an agent are now checked and kept inside their allowed area, so a stray or crafted path can't reach somewhere it shouldn't.
+
 ## [2026.6.28] - 2026-06-29
 
 ### For operators
