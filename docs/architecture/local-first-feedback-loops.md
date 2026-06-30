@@ -18,6 +18,16 @@ that touch lint / type / Sonar / coverage gates.
    to feed an agent batch. Drop `--all` to scope the check to the files
    changed in this change (the default safe-commit behaviour).
 
+   > **No `SONAR_TOKEN` is required.** The `three-cubes_kairix` project is
+   > public, so this script — and `--capture`, which regenerates the
+   > baselines — queries SonarCloud's public API **anonymously** (`urllib`,
+   > no auth header). Do **not** gate on a `$SONAR_TOKEN` env check: it will
+   > read "unset" and is the wrong signal. To *see* a finding, just run
+   > `--all`. (The `sonar` CLI auth, when needed, lives in the OS keychain —
+   > `sonar auth status` — not an env var; and the `sonarqube:sonar-*`
+   > skills additionally need the SonarQube **MCP server** registered via
+   > `sonarqube:sonar-integrate`.)
+
 2. **Map each finding to a local rule** (see §"Rule map" below).
    If a finding has no local mapping, add one to the script and to the
    rule map in this doc in the same commit.
