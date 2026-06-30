@@ -219,12 +219,22 @@ class SearchPipeline:
         agent: str | None = None,
         collections: list[str] | None = None,
         namespace: str | None = None,
+        intent: QueryIntent | None = None,
     ) -> SearchResult:
         """Execute the full search pipeline using composed components.
 
         ``namespace`` is the engagement-scoped recall key threaded through
         to the optional ``fact_retriever`` (Capability #5). When the
         pipeline has no fact retriever wired, ``namespace`` is ignored.
+
+        ``intent`` lets a caller that has *already* classified the query
+        (e.g. ``run_search``, which classifies once to size the token
+        budget) hand the result in so the pipeline doesn't redundantly
+        re-classify the same query on the warm path (#436 / PLA-273). When
+        ``None`` (every existing caller + every direct test) the pipeline
+        classifies internally as before. A supplied intent is treated as
+        fully confident (confidence ``1.0``) — which matches production's
+        rule classifier, whose ``classify`` surface already yields ``1.0``.
 
         Never raises — returns SearchResult with empty results on any failure.
         """
@@ -245,9 +255,15 @@ class SearchPipeline:
             """Record one stage's wall-clock duration into the stages dict."""
             stages[name] = round((time.monotonic() - start) * 1000.0, 2)
 
-        # 1. Classify intent
+        # 1. Classify intent — reuse a caller-supplied intent when present
+        # (PLA-273 warm-path dedup) so the query isn't classified twice
+        # across run_search + the pipeline. Production's rule classifier
+        # already reports confidence 1.0, so a supplied intent matches it.
         t = time.monotonic()
-        intent, intent_confidence = self._classify_with_confidence(query)
+        if intent is None:
+            intent, intent_confidence = self._classify_with_confidence(query)
+        else:
+            intent_confidence = 1.0
         _stage("classify", t)
 
         # 2. Entity intent requires graph

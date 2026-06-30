@@ -86,6 +86,12 @@ class ProbeResult:
     p95_threshold_ms: float = DEFAULT_P95_THRESHOLD_MS
     passed: bool = True
     bottleneck: tuple[str, str] | None = None
+    # One-time cold-build latency (ms) — the warm-up query that pays the
+    # factory build + first-query model load, measured and reported
+    # SEPARATELY so it never inflates the steady-state ``overall`` p95 the
+    # gate compares against (#436 / PLA-273). ``0.0`` when ``warmup=False``.
+    # ``overall`` / ``per_category`` / ``passed`` reflect steady-state only.
+    cold_build_ms: float = 0.0
     # Mean per-stage wall-clock (ms) across every successful query (#282).
     # Keys: classify, resolve, dispatch, fuse, enrich, boost, budget,
     # bm25, vector, embed_http, vector_ann. Empty when no stage data was
@@ -118,6 +124,7 @@ class ProbeResult:
             "bottleneck": (
                 {"kind": self.bottleneck[0], "recommended_action": self.bottleneck[1]} if self.bottleneck else None
             ),
+            "cold_build_ms": self.cold_build_ms,
             "stage_means_ms": self.stage_means_ms,
             "per_query_stages": list(self.per_query_stages),
         }
@@ -255,6 +262,19 @@ def _per_query_stages(
     return out
 
 
+def _run_warmup(fn: Callable[[SampledQuery], Any], warm_query: SampledQuery) -> float:
+    """Run one warm-up query and return its latency (ms).
+
+    The warm-up pays the one-time factory build + first-query model load so
+    the measured steady-state sample reflects WARM latency, not a
+    cold-build-contaminated first query (#436). Errors are captured by the
+    executor (never raised) — a cold build that errors still yields a
+    measured duration, so the cold/steady separation holds either way.
+    """
+    warm_run = run_concurrent([lambda: fn(warm_query)], concurrency=1)
+    return round(warm_run.results[0].duration_ms, 2) if warm_run.results else 0.0
+
+
 def run_probe_search(
     suite: str,
     queries: int = 100,
@@ -264,6 +284,7 @@ def run_probe_search(
     *,
     suite_loader: Callable[[str], list[Any]] | None = None,
     searcher: Callable[[SampledQuery], Any] | None = None,
+    warmup: bool = True,
 ) -> ProbeResult:
     """Run a weighted sample of suite queries at the requested concurrency.
 
@@ -277,10 +298,19 @@ def run_probe_search(
             docs/architecture/teaming-concurrency-strategy.md).
         suite_loader: test seam — returns list[BenchmarkCase] for a suite name.
         searcher: test seam — runs one SampledQuery through a search pipeline.
+        warmup: when True (default) run one extra warm-up query BEFORE the
+            measured sample to absorb the one-time factory build + model
+            load, recording its latency separately in
+            ``ProbeResult.cold_build_ms``. The steady-state ``overall`` /
+            ``per_category`` / ``passed`` then reflect warm latency only —
+            the cold build no longer inflates the p95 the gate reads (#436).
+            False reproduces the legacy single-pass behaviour
+            (``cold_build_ms == 0.0``).
 
     Returns:
-        ProbeResult with overall + per-category latency stats, mean
-        concurrency, error count, and a bottleneck recommendation.
+        ProbeResult with steady-state overall + per-category latency stats,
+        the separated ``cold_build_ms``, mean concurrency, error count, and
+        a bottleneck recommendation.
 
     Raises:
         ValueError: when queries<1 or concurrency<1.
@@ -295,6 +325,12 @@ def run_probe_search(
 
     cases = loader(suite)
     sampled = _build_sampled_queries(cases, queries, seed)
+
+    # Cold-build warm-up (PLA-273): one query before the measured sample so
+    # the factory build + first-query model load is paid (and reported)
+    # separately rather than folded into the steady-state p95.
+    cold_build_ms = _run_warmup(fn, sampled[0]) if (warmup and sampled) else 0.0
+
     tasks = [(lambda q=sq: fn(q)) for sq in sampled]
     run = run_concurrent(tasks, concurrency=concurrency)
 
@@ -328,6 +364,7 @@ def run_probe_search(
         p95_threshold_ms=p95_threshold_ms,
         passed=passed,
         bottleneck=bottleneck,
+        cold_build_ms=cold_build_ms,
         stage_means_ms=stage_means_ms,
         per_query_stages=per_query_stages,
     )

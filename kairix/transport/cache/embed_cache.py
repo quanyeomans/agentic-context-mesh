@@ -194,6 +194,13 @@ class EmbedCache:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             # F77-allow: query-embed cache DB; MCP-only writer; #391.
             conn = sqlite3.connect(str(self._path), check_same_thread=False)
+            # WAL keeps a cache-miss embed off the full-fsync path (#408 /
+            # PLA-273): a write-through put() appends to the WAL and the
+            # main-db fsync is batched at checkpoint time, so the warm search
+            # path doesn't pay a synchronous fsync per cache write. WAL is a
+            # persistent property of the DB file, so it survives reopen by any
+            # connection.
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(_CREATE_SQL)
             conn.commit()
             self._conn = conn

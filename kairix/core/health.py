@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -258,6 +259,91 @@ def probe_health(
         degraded_reason=degraded_reason,
         next_action=next_action,
     )
+
+
+# ---------------------------------------------------------------------------
+# Process-shared health-probe TTL cache (promoted from kairix.use_cases.brief
+# so search / brief / prep all share ONE canonical cache — PLA-273)
+# ---------------------------------------------------------------------------
+# Each ``probe_health`` call fans four dependency probes (secrets, embed,
+# BM25, neo4j) across daemon threads + stats the filesystem. Under typical
+# tool-call volume that costs 200-400 ms on EVERY invocation even though the
+# signals barely change second-to-second. Caching the assembled
+# :class:`KairixHealth` for a short TTL turns a tight burst of MCP calls into
+# a memory lookup. The 10s TTL is the deliberate consistency tradeoff — long
+# enough to absorb a burst, short enough that an operator restoring creds
+# sees the refreshed snapshot within a few requests.
+#
+# Module-level explicit state (not ``functools.lru_cache``) mirrors the
+# ``_QUERY_CACHE_LOCK`` pattern in ``kairix.core.factory`` so tests inject a
+# clock via the public accessor. The cache is single-slot + deps-agnostic by
+# design; the per-test ``_reset_workstream_b_caches`` autouse fixture clears
+# it so an injected-deps health assertion never reads a prior test's snapshot.
+
+_HEALTH_PROBE_CACHE_LOCK = threading.Lock()
+_HEALTH_PROBE_CACHE_TTL_S = 10.0
+
+# Slot layout: ``(inserted_at, KairixHealth)`` or ``None`` when cold.
+_HEALTH_PROBE_CACHE_ENTRY: tuple[float, KairixHealth] | None = None
+# Clock seam — production uses :func:`time.time`; tests inject a controllable
+# callable so TTL-expiry assertions don't need real sleep.
+_HEALTH_PROBE_CACHE_CLOCK: Callable[[], float] = time.time
+
+
+def reset_health_probe_cache() -> None:
+    """Drop the cached :class:`KairixHealth`. Tests + operator reload paths call this."""
+    global _HEALTH_PROBE_CACHE_ENTRY
+    with _HEALTH_PROBE_CACHE_LOCK:
+        _HEALTH_PROBE_CACHE_ENTRY = None
+
+
+def set_health_probe_cache_clock(clock: Callable[[], float]) -> None:
+    """Public DI seam for the health-probe TTL clock.
+
+    Tests pass a controllable callable so a synthetic "11s elapsed" advance
+    triggers the refresh branch without real sleep. Production never calls
+    this — the default :func:`time.time` is wired at module load. Mirrors the
+    ``clock=`` constructor kwarg pattern used by :class:`QueryResultCache`.
+    """
+    global _HEALTH_PROBE_CACHE_CLOCK
+    with _HEALTH_PROBE_CACHE_LOCK:
+        _HEALTH_PROBE_CACHE_CLOCK = clock
+
+
+def get_health_probe_cache_age_s() -> float | None:
+    """Return how long the cached entry has been live, or None when cold.
+
+    Public accessor for the probe-caches CLI so operators can see the age of
+    the in-process snapshot.
+    """
+    with _HEALTH_PROBE_CACHE_LOCK:
+        if _HEALTH_PROBE_CACHE_ENTRY is None:
+            return None
+        inserted_at, _ = _HEALTH_PROBE_CACHE_ENTRY
+        return max(0.0, _HEALTH_PROBE_CACHE_CLOCK() - inserted_at)
+
+
+def cached_probe_health(deps: HealthDeps) -> KairixHealth:
+    """Return :class:`KairixHealth` from cache when fresh; else re-probe.
+
+    The single canonical warm-path entry point for the health snapshot:
+    ``run_search`` / ``run_brief`` / ``run_prep`` all route through it so the
+    4-probe fan-out runs at most once per TTL window instead of once per
+    request (PLA-273). The lock serialises miss-path probes so two MCP worker
+    threads racing into a cold cache don't both pay the probe cost.
+    """
+    global _HEALTH_PROBE_CACHE_ENTRY
+    with _HEALTH_PROBE_CACHE_LOCK:
+        if _HEALTH_PROBE_CACHE_ENTRY is not None:
+            inserted_at, value = _HEALTH_PROBE_CACHE_ENTRY
+            if (_HEALTH_PROBE_CACHE_CLOCK() - inserted_at) <= _HEALTH_PROBE_CACHE_TTL_S:
+                return value
+        # Miss / expired: re-probe + store. The probe runs under the lock
+        # because it's daemon-thread-based and tight (sub-second); serialising
+        # the rare miss path is cheaper than coordinating un-locked re-entry.
+        snapshot = probe_health(deps)
+        _HEALTH_PROBE_CACHE_ENTRY = (_HEALTH_PROBE_CACHE_CLOCK(), snapshot)
+        return snapshot
 
 
 def _collect_degradation_reasons(

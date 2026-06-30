@@ -144,7 +144,7 @@ def _collect_health_probe_cache() -> CacheRow:
     compatible row shape — operators read this as "snapshot freshness"
     rather than a true hit-rate.
     """
-    from kairix.use_cases.brief import get_health_probe_cache_age_s
+    from kairix.core.health import get_health_probe_cache_age_s
 
     age = get_health_probe_cache_age_s()
     size = 1 if age is not None else 0

@@ -26,8 +26,8 @@ from typing import Any
 from kairix.core.health import (
     HealthDeps,
     KairixHealth,
+    cached_probe_health,
     health_to_envelope,
-    probe_health,
     search_next_action,
 )
 from kairix.core.search.intent import QueryIntent
@@ -60,6 +60,7 @@ def _default_search(
     scope: Scope,
     agent: str | None,
     collections: list[str] | None = None,
+    intent: QueryIntent | None = None,
 ) -> Any:
     """Lazy-load the production search pipeline.
 
@@ -72,12 +73,18 @@ def _default_search(
     is passed to ``pipeline.search`` so retrieval is restricted to the
     listed collection set. Default ``None`` preserves scope-based
     resolution.
+
+    ``intent``: when ``run_search`` has already classified the query (to
+    size the token budget) it threads the result through so the pipeline
+    reuses it instead of classifying the same query a second time
+    (PLA-273 warm-path dedup). ``None`` preserves the pipeline's internal
+    classification.
     """
     from kairix.core.factory import build_search_pipeline
     from kairix.core.search.config_loader import load_config
 
     pipeline = build_search_pipeline(config=load_config())
-    return pipeline.search(query=query, budget=budget, scope=scope, agent=agent, collections=collections)
+    return pipeline.search(query=query, budget=budget, scope=scope, agent=agent, collections=collections, intent=intent)
 
 
 def _default_entity_card(name: str) -> dict[str, Any] | None:
@@ -246,26 +253,43 @@ _DEFAULT_BUDGET = 3000
 def _infer_budget(
     query: str,
     explicit_budget: int,
-    classify: Callable[[str], QueryIntent],
+    intent: QueryIntent | None,
 ) -> int:
     """Adjust the budget based on query intent.
 
     Quick lookups (entity / keyword) get the small budget; the caller's
     explicit non-default value overrides everything.
+
+    ``intent`` is the single classification ``run_search`` already
+    performed for this request (``None`` when the classifier failed) —
+    reused here instead of re-classifying so the query is classified once
+    per request, not twice (PLA-273 warm-path dedup).
     """
     if explicit_budget != _DEFAULT_BUDGET:
         return explicit_budget
-    try:
-        intent = classify(query)
-        if intent in (QueryIntent.ENTITY, QueryIntent.KEYWORD):
-            return _LOOKUP_BUDGET
-    except Exception:
-        logger.debug("intent classification failed; using heuristic budget", exc_info=True)
+    if intent in (QueryIntent.ENTITY, QueryIntent.KEYWORD):
+        return _LOOKUP_BUDGET
     import re
 
     if re.search(r"\b(research|compare|analyse|analyze|comprehensive|detailed)\b", query, re.IGNORECASE):
         return _RESEARCH_WORDS_DEFAULT_BUDGET
     return _DEFAULT_BUDGET
+
+
+def _classify_for_request(query: str, classify: Callable[[str], QueryIntent]) -> QueryIntent | None:
+    """Classify ``query`` once per request; ``None`` on classifier failure.
+
+    The single classification site for ``run_search``: its result sizes
+    the token budget AND threads into the pipeline so the pipeline reuses
+    it rather than re-classifying the same query (PLA-273). Failure is
+    isolated to ``None`` so the budget falls back to its heuristic and the
+    pipeline classifies internally.
+    """
+    try:
+        return classify(query)
+    except Exception:
+        logger.debug("intent classification failed; using heuristic budget", exc_info=True)
+        return None
 
 
 _ENTITY_PREFIX_RE = None
@@ -453,12 +477,18 @@ def run_search(
     """
     if deps is None:  # pragma: no cover — production lazy default; tests pass deps=SearchDeps(...)
         deps = SearchDeps()
-    health = _tool_health(probe_health(deps.health_deps), tool=_search_next_action)
+    # TTL-cached on the warm path (the canonical kairix.core.health cache, also
+    # used by run_brief/run_prep) so repeated/concurrent searches don't each
+    # re-stat the filesystem + respawn the 4 probe threads per request (PLA-273).
+    health = _tool_health(cached_probe_health(deps.health_deps), tool=_search_next_action)
 
     started = time.monotonic()
     try:
-        effective_budget = _infer_budget(query, budget, deps.classify_fn)
-        sr = deps.search_fn(query=query, agent=agent, scope=scope, budget=effective_budget)
+        # Classify ONCE per request, then reuse for budget sizing AND the
+        # pipeline so the query isn't classified twice (PLA-273).
+        intent = _classify_for_request(query, deps.classify_fn)
+        effective_budget = _infer_budget(query, budget, intent)
+        sr = deps.search_fn(query=query, agent=agent, scope=scope, budget=effective_budget, intent=intent)
         intent_value = _intent_value(sr)
         hits: list[SearchHit] = [_budgeted_to_hit(b) for b in getattr(sr, "results", [])[:limit]]
         _maybe_prepend_entity_card(hits, query, intent_value, deps.entity_card_fn, include_entity_card)
