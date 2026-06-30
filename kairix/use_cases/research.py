@@ -14,9 +14,11 @@ the use-case version, which delegates to the orchestrator.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
+
+from kairix.core.protocols import SourceRef
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +43,54 @@ def _default_research(**kwargs: Any) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
+class ResearchChunk:
+    """One piece of retrieved evidence the research orchestrator considered.
+
+    PLA-274 — pre-fix the orchestrator reduced each chunk to a bare
+    ``{path, snippet}`` dict and the surface cited path-only, so an agent
+    couldn't re-open the connector source behind a synthesised claim. The
+    chunk now EMBEDS the shared :class:`SourceRef` (``ref``) so the full
+    canonical breadcrumb (source_uri / page / collection / locator) rides
+    through synthesis to the citation. F97 enforces the embed.
+    """
+
+    ref: SourceRef
+    snippet: str = ""
+
+    @classmethod
+    def from_orchestrator(cls, raw: Mapping[str, Any] | Any) -> ResearchChunk:
+        """Build a ``ResearchChunk`` from one orchestrator chunk.
+
+        The orchestrator emits JSON-shaped dicts carrying a ``source_ref``
+        breadcrumb (post-PLA-274). Tolerant of the legacy ``{path, snippet}``
+        shape — ``SourceRef.from_envelope`` reads the embedded breadcrumb
+        when present, else falls back to the flat ``path`` on the dict
+        itself, so an older orchestrator result still yields a resolvable ref.
+        """
+        if isinstance(raw, Mapping):
+            breadcrumb = raw.get("source_ref")
+            ref = SourceRef.from_envelope(breadcrumb if isinstance(breadcrumb, Mapping) else raw)
+            return cls(ref=ref, snippet=str(raw.get("snippet", "") or ""))
+        return cls(ref=SourceRef.of(path=str(raw)), snippet="")
+
+    def to_envelope(self) -> dict[str, Any]:
+        """Project to the JSON chunk dict callers receive.
+
+        Keeps the flat ``path`` + ``snippet`` keys (legacy readers) AND the
+        nested ``source_ref`` breadcrumb so the round-trip is lossless.
+        """
+        return {"path": self.ref.path, "snippet": self.snippet, "source_ref": self.ref.to_envelope()}
+
+
+@dataclass(frozen=True)
 class ResearchOutput:
     """Outcome of one ``run_research_use_case`` invocation.
 
     Attributes:
         query: The caller's query, unchanged.
         synthesis: LLM-synthesised answer drawn from retrieved evidence.
-        retrieved_chunks: Up to 10 chunks the orchestrator considered.
+        retrieved_chunks: Up to 10 ``ResearchChunk``s the orchestrator
+            considered, each embedding a resolvable ``SourceRef`` (PLA-274).
         gaps: List of unresolved sub-questions or missing facts.
         confidence: 0.0-1.0 self-assessed confidence in the synthesis.
         turns: Number of search/refine cycles consumed.
@@ -57,7 +100,7 @@ class ResearchOutput:
 
     query: str
     synthesis: str = ""
-    retrieved_chunks: list[Any] = field(default_factory=list)
+    retrieved_chunks: list[ResearchChunk] = field(default_factory=list)
     gaps: list[str] = field(default_factory=list)
     confidence: float = 0.0
     turns: int = 0
@@ -80,10 +123,11 @@ class ResearchOutput:
         coerced with the same ``float``/``int`` casts the use case uses
         when reading the orchestrator's raw result.
         """
+        raw_chunks = envelope.get(_KEY_RETRIEVED_CHUNKS, []) or []
         return cls(
             query=str(envelope.get("query", "")),
             synthesis=str(envelope.get("synthesis", "")),
-            retrieved_chunks=list(envelope.get(_KEY_RETRIEVED_CHUNKS, []) or []),
+            retrieved_chunks=[ResearchChunk.from_orchestrator(c) for c in raw_chunks],
             gaps=list(envelope.get("gaps", []) or []),
             confidence=float(envelope.get(_KEY_CONFIDENCE, 0.0) or 0.0),
             turns=int(envelope.get("turns", 0) or 0),
@@ -128,10 +172,13 @@ def run_research_use_case(
 
     try:
         result = research(query=query, max_turns=clamped)
+        raw_chunks = list(result.get(_KEY_RETRIEVED_CHUNKS, []) or [])[:10]
         return ResearchOutput(
             query=str(result.get("query", query)),
             synthesis=str(result.get("synthesis", "") or ""),
-            retrieved_chunks=list(result.get(_KEY_RETRIEVED_CHUNKS, []) or [])[:10],
+            # PLA-274 — map the orchestrator's chunk dicts into typed
+            # ResearchChunks, each embedding a resolvable SourceRef.
+            retrieved_chunks=[ResearchChunk.from_orchestrator(c) for c in raw_chunks],
             gaps=list(result.get("gaps", []) or []),
             confidence=float(result.get(_KEY_CONFIDENCE, 0.0) or 0.0),
             turns=int(result.get("turns", 0) or 0),
@@ -147,7 +194,8 @@ def research_output_to_envelope(out: ResearchOutput) -> dict[str, Any]:
     return {
         "query": out.query,
         "synthesis": out.synthesis,
-        _KEY_RETRIEVED_CHUNKS: out.retrieved_chunks,
+        # PLA-274 — each chunk serialises its embedded SourceRef breadcrumb.
+        _KEY_RETRIEVED_CHUNKS: [c.to_envelope() for c in out.retrieved_chunks],
         "gaps": out.gaps,
         _KEY_CONFIDENCE: out.confidence,
         "turns": out.turns,

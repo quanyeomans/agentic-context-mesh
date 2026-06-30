@@ -49,7 +49,7 @@ def _create_db_with_doc(tmp_path: Path, doc_text: str, *, path: str = "doc.md") 
             title TEXT,
             hash TEXT NOT NULL,
             active INTEGER DEFAULT 1,
-            source_page INTEGER,
+            source_page INTEGER, source_uri TEXT,
             UNIQUE(collection, path)
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);

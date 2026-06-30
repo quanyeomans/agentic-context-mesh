@@ -25,9 +25,17 @@ from __future__ import annotations
 import pytest
 
 from kairix.agents.research.cli import format_text
-from kairix.use_cases.research import ResearchOutput, research_output_to_envelope
+from kairix.core.protocols import SourceRef
+from kairix.use_cases.research import ResearchChunk, ResearchOutput, research_output_to_envelope
 
 pytestmark = pytest.mark.contract
+
+
+def _chunk(path: str) -> ResearchChunk:
+    """A ResearchChunk embedding a resolvable SourceRef (PLA-274 — chunks
+    are typed and carry the breadcrumb, no longer bare ``{path}`` dicts).
+    source_uri falls back to ``path`` so the rendered label is ``path``."""
+    return ResearchChunk(ref=SourceRef.of(path=path))
 
 
 def _roundtrip(out: ResearchOutput) -> ResearchOutput:
@@ -59,7 +67,7 @@ def test_roundtrip_preserves_text_with_gaps_and_chunks() -> None:
         query="q",
         synthesis="answer body",
         gaps=["what about edge case X?", "missing dataset Y"],
-        retrieved_chunks=[{"path": "/c1"}, {"path": "/c2"}, {"path": "/c3"}],
+        retrieved_chunks=[_chunk("/c1"), _chunk("/c2"), _chunk("/c3")],
         turns=2,
         confidence=0.55,
     )
@@ -81,7 +89,7 @@ def test_roundtrip_preserves_text_with_chunk_truncation_footer() -> None:
     original = ResearchOutput(
         query="q",
         synthesis="s",
-        retrieved_chunks=[{"path": f"/c{i}"} for i in range(8)],
+        retrieved_chunks=[_chunk(f"/c{i}") for i in range(8)],
         turns=1,
         confidence=0.4,
     )
@@ -136,7 +144,7 @@ def test_roundtrip_preserves_structural_fields() -> None:
     original = ResearchOutput(
         query="q",
         synthesis="s",
-        retrieved_chunks=[{"path": "/c1"}],
+        retrieved_chunks=[_chunk("/c1")],
         gaps=["g1"],
         confidence=0.42,
         turns=2,

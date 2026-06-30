@@ -138,6 +138,7 @@ def test_bootstrap_render_emits_markdown_from_result() -> None:
 # Restored the format_text delegation.
 def test_prep_render_renders_query_from_result() -> None:
     """The prep render shim must invoke prep's format_text."""
+    from kairix.core.protocols import SourceRef
     from kairix.use_cases.prep import PrepOutput, prep_output_to_envelope
 
     result = PrepOutput(
@@ -145,7 +146,7 @@ def test_prep_render_renders_query_from_result() -> None:
         tier="l0",
         summary="Lightweight context for topic-x.",
         tokens=12,
-        sources=["doc-alpha"],
+        sources=[SourceRef.of(path="doc-alpha")],
     )
     envelope = prep_output_to_envelope(result)
     composer = get_composer("prep")

@@ -23,9 +23,18 @@ from __future__ import annotations
 import pytest
 
 from kairix.agents.prep.cli import format_text
+from kairix.core.protocols import SourceRef
 from kairix.use_cases.prep import PrepOutput, prep_output_to_envelope
 
 pytestmark = pytest.mark.contract
+
+
+def _src(name: str) -> SourceRef:
+    """A SourceRef whose source_uri == path == ``name`` (PLA-274 — prep
+    sources are now resolvable breadcrumbs, not bare title strings). The
+    label the renderer shows is ``name`` so the ordering anchors below
+    still locate it by substring."""
+    return SourceRef.of(path=name)
 
 
 def _roundtrip(out: PrepOutput) -> PrepOutput:
@@ -43,7 +52,7 @@ def test_roundtrip_preserves_text_with_summary_and_sources() -> None:
         tier="l0",
         summary="Alpha is a sample document discussing the topic in detail.",
         tokens=12,
-        sources=["doc-alpha", "doc-beta"],
+        sources=[_src("doc-alpha"), _src("doc-beta")],
     )
     rebuilt = _roundtrip(original)
     assert format_text(original) == format_text(rebuilt)
@@ -58,7 +67,7 @@ def test_roundtrip_preserves_text_with_sources_list_ordering() -> None:
         tier="l1",
         summary="A structured overview of the ordering invariant.",
         tokens=20,
-        sources=["doc-z", "doc-a", "doc-m"],
+        sources=[_src("doc-z"), _src("doc-a"), _src("doc-m")],
     )
     rebuilt = _roundtrip(original)
     rendered_original = format_text(original)
@@ -122,7 +131,7 @@ def test_roundtrip_preserves_structural_fields() -> None:
         tier="l1",
         summary="body",
         tokens=99,
-        sources=["s1", "s2"],
+        sources=[_src("s1"), _src("s2")],
         error="",
     )
     rebuilt = _roundtrip(original)

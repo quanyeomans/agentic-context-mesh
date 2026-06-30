@@ -30,6 +30,7 @@ from kairix.core.health import (
     health_to_envelope,
     search_next_action,
 )
+from kairix.core.protocols import SourceRef
 from kairix.core.search.intent import QueryIntent
 from kairix.core.search.scope import Scope
 from kairix.text import estimate_tokens
@@ -52,6 +53,10 @@ _KEY_TOTAL_TOKENS = "total_tokens"
 _KEY_LATENCY_MS = "latency_ms"
 _KEY_COLLECTION = "collection"
 _KEY_SOURCE_PAGE = "source_page"
+# PLA-274 — breadcrumb envelope keys; read by the writer
+# (``search_output_to_envelope``) AND the reader (``SearchHit.from_envelope``).
+_KEY_SOURCE_URI = "source_uri"
+_KEY_LOCATOR = "locator"
 
 
 def _default_search(
@@ -124,6 +129,28 @@ class SearchHit:
     source: str = ""
     entity: dict[str, str] = field(default_factory=dict)
     source_page: int | None = None
+    # PLA-274 — the canonical resolvable breadcrumb (``documents.source_uri``)
+    # threaded from the fused result. ``""`` for passthrough vault rows;
+    # ``source_ref()`` falls that back to ``path`` so the pointer always
+    # resolves. ``locator`` is the within-document anchor for non-paged docs.
+    source_uri: str = ""
+    locator: str | None = None
+
+    def source_ref(self) -> SourceRef:
+        """Return the shared :class:`SourceRef` breadcrumb for this hit (F97).
+
+        The canonical, resolvable pointer an agent cites or re-opens. Built
+        through ``SourceRef.of`` so the source_uri→path fallback and the
+        non-paged locator derivation apply uniformly across every surface.
+        """
+        return SourceRef.of(
+            path=self.path,
+            source_uri=self.source_uri,
+            title=self.title or None,
+            collection=self.collection or None,
+            source_page=self.source_page,
+            locator=self.locator,
+        )
 
     @classmethod
     def from_envelope(cls, hit: dict[str, Any]) -> SearchHit:
@@ -145,6 +172,7 @@ class SearchHit:
         # through JSON preserves types, but downstream consumers should
         # not assume the dict was untouched.
         entity = {str(k): str(v) for k, v in entity_raw.items()}
+        raw_locator = hit.get(_KEY_LOCATOR)
         return cls(
             path=str(hit.get("path", "")),
             title=str(hit.get("title", "")),
@@ -156,6 +184,8 @@ class SearchHit:
             source=str(hit.get("source", "")),
             entity=entity,
             source_page=int(raw_page) if isinstance(raw_page, int) else None,
+            source_uri=str(hit.get(_KEY_SOURCE_URI, "") or ""),
+            locator=str(raw_locator) if raw_locator else None,
         )
 
 
@@ -323,6 +353,8 @@ def _budgeted_to_hit(b: Any) -> SearchHit:
         tokens=int(getattr(b, "token_estimate", 0)),
         collection=str(getattr(inner, "collection", "") or ""),
         source_page=int(raw_page) if isinstance(raw_page, int) else None,
+        # PLA-274 — carry the canonical breadcrumb off the fused result.
+        source_uri=str(getattr(inner, "source_uri", "") or ""),
     )
 
 
@@ -349,6 +381,13 @@ def search_output_to_envelope(out: SearchOutput) -> dict[str, Any]:
                 # MM-3 — per-page citation surfaced to MCP / CLI callers.
                 # ``None`` for non-paged documents.
                 _KEY_SOURCE_PAGE: h.source_page,
+                # PLA-274 — the canonical resolvable breadcrumb. ``path`` stays
+                # for display; ``source_uri`` is what an agent cites/re-opens.
+                # ``locator`` is the within-document anchor for non-paged docs.
+                # These keys mirror ``SourceRef`` so the per-hit dict round-trips
+                # through ``SourceRef.from_envelope`` losslessly.
+                _KEY_SOURCE_URI: h.source_ref().source_uri,
+                _KEY_LOCATOR: h.source_ref().locator,
                 **({"source": h.source, "entity": h.entity} if h.source else {}),
                 # ADR-036 §Q7 — entity-summary chunks from the projector
                 # carry source_uri='entity://<QID>'; the MCP renderer + any

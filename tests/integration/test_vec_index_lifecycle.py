@@ -39,7 +39,7 @@ def _make_db(tmp_path: Path, *, n_docs: int = 5) -> Path:
         CREATE TABLE documents (
             id INTEGER PRIMARY KEY, collection TEXT, path TEXT,
             title TEXT, hash TEXT, active INTEGER DEFAULT 1,
-            source_page INTEGER,
+            source_page INTEGER, source_uri TEXT,
             UNIQUE(collection, path)
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);

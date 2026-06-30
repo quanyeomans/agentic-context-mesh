@@ -21,6 +21,7 @@ from kairix.core.health import (
     health_to_envelope,
     probe_health,
 )
+from kairix.core.protocols import SourceRef
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +44,12 @@ class EntityGetOutput:
         summary: Human-readable summary built from type-specific fields
             (role, org, tier, industry, …). Empty when no fields were
             populated.
-        vault_path: On-disk path to the entity's markdown file in the
-            vault. Empty when the entity has no associated file.
+        path: On-disk path to the entity's markdown file in the knowledge
+            store. Empty when the entity has no associated file. PLA-274
+            renamed this from ``vault_path`` so EVERY agent surface names
+            the display pointer ``path`` consistently — drift between
+            ``vault_path`` (entity) and ``path`` (everywhere else) is the
+            exact per-surface divergence the breadcrumb contract closes.
         error: Empty on success; ``"EntityNotFound: <name>"`` when
             the lookup returned no rows; structured ``"<Class>: <msg>"``
             on top-level failure (#165: every error string is
@@ -55,9 +60,29 @@ class EntityGetOutput:
     name: str = ""
     type: str = ""
     summary: str = ""
-    vault_path: str = ""
+    path: str = ""
     health: KairixHealth = field(default_factory=KairixHealth)
     error: str = ""
+
+    @property
+    def vault_path(self) -> str:
+        """Deprecated alias for :attr:`path` (PLA-274 renamed the field).
+
+        Retained as a read-only alias so the existing entities CLI text
+        renderer keeps working without editing it; new code reads ``path``
+        or the canonical ``source_ref()`` breadcrumb.
+        """
+        return self.path
+
+    def source_ref(self) -> SourceRef:
+        """Return the shared :class:`SourceRef` breadcrumb for this entity (F97).
+
+        The canonical breadcrumb is ``entity://<id>`` (ADR-036) so an agent
+        can re-resolve the entity card; it falls back to ``path`` (the
+        markdown file) when the node has no id. ``title`` is the entity name.
+        """
+        entity_uri = f"entity://{self.id}" if self.id else None
+        return SourceRef.of(path=self.path, source_uri=entity_uri, title=self.name or None)
 
 
 @dataclass(frozen=True)
@@ -109,7 +134,9 @@ def run_entity_get(
         name=str(card.get("name", "") or ""),
         type=str(card.get("type", "") or ""),
         summary=str(card.get("summary", "") or ""),
-        vault_path=str(card.get("vault_path", "") or ""),
+        # The card key stays ``vault_path`` (the Neo4j node property name);
+        # the output field is ``path`` per the PLA-274 rename.
+        path=str(card.get("vault_path", "") or ""),
         health=health,
     )
 
@@ -160,12 +187,17 @@ def _entity_health(base: KairixHealth, *, neo4j_available: bool) -> KairixHealth
 
 def entity_get_output_to_envelope(out: EntityGetOutput) -> dict[str, Any]:
     """Project an ``EntityGetOutput`` to the JSON envelope MCP callers receive."""
+    ref = out.source_ref()
     return {
         "id": out.id,
         "name": out.name,
         "type": out.type,
         "summary": out.summary,
-        "vault_path": out.vault_path,
+        # PLA-274 — renamed from ``vault_path`` to ``path`` for cross-surface
+        # consistency; ``source_uri`` (entity://<id>) is the canonical
+        # resolvable breadcrumb an agent re-resolves the card with.
+        "path": out.path,
+        "source_uri": ref.source_uri,
         "health": dict(health_to_envelope(out.health)),
         "error": out.error,
     }

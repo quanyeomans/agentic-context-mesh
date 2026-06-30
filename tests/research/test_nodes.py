@@ -102,6 +102,37 @@ class TestRetrieve:
         assert len(result["retrieved_chunks"]) == 1
 
     @pytest.mark.unit
+    def test_chunk_carries_full_sourceref_breadcrumb(self) -> None:
+        """PLA-274 — the retrieve node carries the canonical breadcrumb
+        (source_uri / title / collection / source_page) off each fused result
+        into the chunk dict, distinct from the display path.
+
+        Sabotage-proof (executed): flipping any ``or`` default in
+        ``_budgeted_to_research_chunk`` (e.g. source_uri ``or ""`` -> ``and ""``)
+        blanks the carried field and these assertions fire."""
+        from types import SimpleNamespace
+
+        fused = SimpleNamespace(
+            path="archive/handbook.zip#7",
+            source_uri="sharepoint://acme/handbook.zip",
+            title="Acme Handbook",
+            collection="shared",
+            source_page=4,
+        )
+        budgeted = SimpleNamespace(result=fused, content="deployment runbook body")
+        sr = SimpleNamespace(results=[budgeted])
+        mock_search = MagicMock(return_value=sr)
+
+        result = retrieve(_state(), deps=RetrieveDeps(search_fn=mock_search))
+        chunk = result["retrieved_chunks"][0]
+        ref = chunk["source_ref"]
+        assert ref["source_uri"] == "sharepoint://acme/handbook.zip"
+        assert ref["path"] == "archive/handbook.zip#7"
+        assert ref["title"] == "Acme Handbook"
+        assert ref["collection"] == "shared"
+        assert ref["source_page"] == 4
+
+    @pytest.mark.unit
     def test_higher_budget_on_refinement(self) -> None:
         mock_search = MagicMock(return_value=_mock_search_result([]))
         retrieve(_state(turns=2), deps=RetrieveDeps(search_fn=mock_search))

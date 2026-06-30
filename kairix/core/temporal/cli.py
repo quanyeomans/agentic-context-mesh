@@ -142,7 +142,16 @@ def format_results(result: TimelineResult) -> str:
         preview = hit.snippet.replace("\n", " ")[:200]
         if len(hit.snippet) > 200:
             preview += "…"
-        lines.extend([header_line, f"     Source: {hit.path}", f"     {preview}", ""])
+        # PLA-274 — surface the per-page citation + canonical breadcrumb so
+        # the timeline text output is at parity with the search surface.
+        ref = hit.source_ref()
+        page_suffix = f" · p.{hit.source_page}" if hit.source_page is not None else ""
+        source_line = f"     Source: {hit.path}{page_suffix}"
+        lines.append(header_line)
+        lines.append(source_line)
+        if ref.source_uri and ref.source_uri != hit.path:
+            lines.append(f"     ↳ {ref.source_uri}")
+        lines.extend([f"     {preview}", ""])
     return "\n".join(lines)
 
 

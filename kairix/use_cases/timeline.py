@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
+from kairix.core.protocols import SourceRef
 from kairix.core.search.scope import Scope
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,13 @@ logger = logging.getLogger(__name__)
 # the reader side (``TimelineResult.from_envelope``), and the
 # ``_chunk_to_hit`` projector.
 _HIT_KEY_CHUNK_TYPE = "chunk_type"
+
+# PLA-274 breadcrumb keys — read on the envelope writer, the envelope
+# reader (``from_envelope``), and both hit projectors; F17 extracts the
+# ≥10-char keys to one edit site.
+_HIT_KEY_SOURCE_URI = "source_uri"
+_HIT_KEY_COLLECTION = "collection"
+_HIT_KEY_SOURCE_PAGE = "source_page"
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +104,12 @@ class TimelineHit:
     The temporal-chunks backend populates ``date`` and ``chunk_type``;
     the search-pipeline fallback leaves them empty. Both populate
     ``path``, ``title``, ``snippet``, ``score``.
+
+    PLA-274 — ``collection`` + ``source_page`` were dropped pre-fix (the
+    timeline envelope omitted them entirely, so an agent couldn't tell
+    which collection a hit came from or cite a specific page). They are
+    now carried, alongside the canonical ``source_uri`` breadcrumb +
+    within-document ``locator``, via :meth:`source_ref`.
     """
 
     path: str
@@ -104,6 +118,21 @@ class TimelineHit:
     score: float
     date: str = ""
     chunk_type: str = ""
+    collection: str = ""
+    source_page: int | None = None
+    source_uri: str = ""
+    locator: str | None = None
+
+    def source_ref(self) -> SourceRef:
+        """Return the shared :class:`SourceRef` breadcrumb for this hit (F97)."""
+        return SourceRef.of(
+            path=self.path,
+            source_uri=self.source_uri,
+            title=self.title or None,
+            collection=self.collection or None,
+            source_page=self.source_page,
+            locator=self.locator,
+        )
 
 
 @dataclass(frozen=True)
@@ -152,6 +181,8 @@ class TimelineResult:
         for hit in raw_results:
             if not isinstance(hit, dict):
                 continue
+            raw_page = hit.get(_HIT_KEY_SOURCE_PAGE)
+            raw_locator = hit.get("locator")
             rebuilt_hits.append(
                 TimelineHit(
                     path=str(hit.get("path", "")),
@@ -160,6 +191,10 @@ class TimelineResult:
                     score=float(hit.get("score", 0.0)),
                     date=str(hit.get("date", "")),
                     chunk_type=str(hit.get(_HIT_KEY_CHUNK_TYPE, "")),
+                    collection=str(hit.get(_HIT_KEY_COLLECTION, "") or ""),
+                    source_page=int(raw_page) if isinstance(raw_page, int) else None,
+                    source_uri=str(hit.get(_HIT_KEY_SOURCE_URI, "") or ""),
+                    locator=str(raw_locator) if raw_locator else None,
                 )
             )
         raw_window = envelope.get("time_window", {}) or {}
@@ -201,6 +236,13 @@ def timeline_output_to_envelope(result: TimelineResult) -> dict[str, Any]:
                 "score": h.score,
                 "date": h.date,
                 _HIT_KEY_CHUNK_TYPE: h.chunk_type,
+                # PLA-274 — collection + per-page citation were dropped pre-fix;
+                # carried now alongside the canonical source_uri breadcrumb +
+                # within-document locator (keys mirror SourceRef).
+                _HIT_KEY_COLLECTION: h.collection,
+                _HIT_KEY_SOURCE_PAGE: h.source_page,
+                _HIT_KEY_SOURCE_URI: h.source_ref().source_uri,
+                "locator": h.source_ref().locator,
             }
             for h in result.results
         ],
@@ -248,6 +290,10 @@ def _chunk_to_hit(chunk: Any) -> TimelineHit:
     chunk_date = getattr(chunk, "date", None)
     metadata = getattr(chunk, "metadata", {}) or {}
     title = metadata.get("section_heading") or metadata.get("card_id") or metadata.get("title") or ""
+    # PLA-274 — surface collection + per-page citation + canonical breadcrumb
+    # from the temporal-chunk metadata when available; SourceRef.of falls
+    # source_uri back to the source_path so the pointer stays resolvable.
+    raw_page = metadata.get(_HIT_KEY_SOURCE_PAGE)
     return TimelineHit(
         path=str(getattr(chunk, "source_path", "")),
         title=str(title),
@@ -255,6 +301,9 @@ def _chunk_to_hit(chunk: Any) -> TimelineHit:
         score=float(metadata.get("score", 0.0)),
         date=chunk_date.isoformat() if chunk_date else "",
         chunk_type=str(getattr(chunk, _HIT_KEY_CHUNK_TYPE, "")),
+        collection=str(metadata.get(_HIT_KEY_COLLECTION, "") or ""),
+        source_page=int(raw_page) if isinstance(raw_page, int) else None,
+        source_uri=str(metadata.get(_HIT_KEY_SOURCE_URI, "") or ""),
     )
 
 
@@ -266,12 +315,19 @@ def _search_to_hits(search_result: Any, limit: int) -> list[TimelineHit]:
         if inner is None:
             continue
         snippet = getattr(budgeted, "content", "") or getattr(inner, "snippet", "")
+        raw_page = getattr(inner, _HIT_KEY_SOURCE_PAGE, None)
         out.append(
             TimelineHit(
                 path=str(getattr(inner, "path", "")),
                 title=str(getattr(inner, "title", "")),
                 snippet=snippet[:300],
                 score=float(getattr(inner, "boosted_score", getattr(inner, "score", 0.0))),
+                # PLA-274 — carry collection + per-page citation + breadcrumb
+                # off the fused result so the timeline fallback path is at
+                # parity with the search surface.
+                collection=str(getattr(inner, _HIT_KEY_COLLECTION, "") or ""),
+                source_page=int(raw_page) if isinstance(raw_page, int) else None,
+                source_uri=str(getattr(inner, _HIT_KEY_SOURCE_URI, "") or ""),
             )
         )
     return out

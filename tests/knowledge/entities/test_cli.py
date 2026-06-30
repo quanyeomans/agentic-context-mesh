@@ -316,9 +316,11 @@ def test_cmd_validate_use_case_error_exits_one() -> None:
 
 
 def test_format_get_output_renders_entity_with_summary() -> None:
-    out = EntityGetOutput(
-        id="acme", name="Acme", type="Organisation", summary="supplier — Tier A", vault_path="/Acme.md"
-    )
+    # PLA-274 — the output field is now ``path``; ``vault_path`` stays a
+    # back-compat read-only alias the existing CLI renderer reads.
+    out = EntityGetOutput(id="acme", name="Acme", type="Organisation", summary="supplier — Tier A", path="/Acme.md")
+    assert out.vault_path == "/Acme.md"  # alias resolves to the renamed field
+    assert out.source_ref().source_uri == "entity://acme"
     text = format_get_output(out)
     assert "Entity:     Acme" in text
     assert "Type:       Organisation" in text

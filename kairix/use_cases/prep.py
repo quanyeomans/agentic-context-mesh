@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from kairix.core.protocols import SourceRef
 from kairix.core.search.prep_summary_cache import (
     DEFAULT_MAX_AGE_S as _PREP_DEFAULT_MAX_AGE_S,
 )
@@ -213,7 +214,11 @@ class PrepOutput:
         summary: LLM-generated summary grounded in retrieved documents.
             Empty when no relevant documents were found, or on error.
         tokens: Estimated token count of ``summary``.
-        sources: Up to 5 source titles/paths used as context.
+        sources: Up to 5 ``SourceRef`` breadcrumbs for the documents used
+            as context. PLA-274 / #437 — pre-fix this was a list of human
+            TITLE strings (not resolvable), so an agent reading a prep
+            summary couldn't re-open the grounding sources. It is now a
+            list of resolvable ``SourceRef``s (source_uri / path / page).
         error: Empty on success; structured ``"<Class>: <msg>"`` on
             top-level failure.
     """
@@ -222,7 +227,7 @@ class PrepOutput:
     tier: str
     summary: str = ""
     tokens: int = 0
-    sources: list[str] = field(default_factory=list)
+    sources: list[SourceRef] = field(default_factory=list)
     error: str = ""
 
     @classmethod
@@ -235,13 +240,14 @@ class PrepOutput:
         already consumes, so the in-process and warm paths render
         byte-identical text.
 
-        ``sources`` is coerced through ``list(...)`` because JSON has
-        no tuple/list distinction — callers that pass the raw envelope
-        get the same list-shaped attribute the dataclass default
-        produces, so ``format_text`` iterates either way.
+        ``sources`` is rebuilt into ``SourceRef``s (PLA-274). Each source
+        dict round-trips through ``SourceRef.from_envelope``; a legacy
+        envelope that carried bare title strings degrades gracefully —
+        ``from_envelope`` of a non-mapping yields an empty ref, so the
+        renderer never crashes on an older worker's output.
         """
-        sources_raw = envelope.get("sources", [])
-        sources: list[str] = [str(s) for s in sources_raw] if sources_raw else []
+        sources_raw = envelope.get("sources", []) or []
+        sources: list[SourceRef] = [SourceRef.from_envelope(s) for s in sources_raw if isinstance(s, Mapping)]
         return cls(
             query=str(envelope.get("query", "")),
             tier=str(envelope.get("tier", "")),
@@ -335,9 +341,15 @@ class _ContextCounters:
     facts_kept: int = 0
 
 
-def _classify_row(budgeted: Any, counters: _ContextCounters) -> tuple[str, str] | None:
-    """Apply the per-tier snippet floor; return ``(title, formatted_snippet)``
+def _classify_row(budgeted: Any, counters: _ContextCounters) -> tuple[SourceRef, str] | None:
+    """Apply the per-tier snippet floor; return ``(source_ref, formatted_snippet)``
     or ``None`` when the row should be dropped from LLM context.
+
+    PLA-274 / #437 — the first element is now a resolvable :class:`SourceRef`
+    (built off the fused result's source_uri / path / page), not a bare
+    title string, so prep emits citeable sources instead of unresolvable
+    human titles. The LLM-context label still prefers the human title for
+    readability, falling back to the path.
 
     Bumps the right counter on ``counters`` for both totals and kept rows
     — keeping the trace log accurate even when ``_format_context`` is
@@ -346,9 +358,10 @@ def _classify_row(budgeted: Any, counters: _ContextCounters) -> tuple[str, str] 
     inner = getattr(budgeted, "result", None)
     if inner is None:
         return None
-    title = getattr(inner, "title", "") or getattr(inner, "path", "")
+    path = str(getattr(inner, "path", "") or "")
+    title = str(getattr(inner, "title", "") or "") or path
     snippet = (getattr(budgeted, "content", "") or "").strip()
-    is_fact = str(getattr(inner, "path", "")).startswith("facts://")
+    is_fact = path.startswith("facts://")
     if is_fact:
         counters.facts_total += 1
         floor = _MIN_FACT_SNIPPET_CHARS
@@ -361,11 +374,19 @@ def _classify_row(budgeted: Any, counters: _ContextCounters) -> tuple[str, str] 
         counters.facts_kept += 1
     else:
         counters.chunks_kept += 1
-    return str(title), f"[{title}]\n{snippet[:500]}"
+    raw_page = getattr(inner, "source_page", None)
+    ref = SourceRef.of(
+        path=path,
+        source_uri=str(getattr(inner, "source_uri", "") or ""),
+        title=(title if title != path else None),
+        collection=str(getattr(inner, "collection", "") or "") or None,
+        source_page=int(raw_page) if isinstance(raw_page, int) else None,
+    )
+    return ref, f"[{title}]\n{snippet[:500]}"
 
 
-def _format_context(search_result: Any) -> tuple[str, list[str]]:
-    """Project a SearchResult's top 5 hits into a context string + source titles.
+def _format_context(search_result: Any) -> tuple[str, list[SourceRef]]:
+    """Project a SearchResult's top 5 hits into a context string + source refs.
 
     Chunk hits need ``_MIN_USEFUL_SNIPPET_CHARS`` of snippet content to
     earn LLM context inclusion — anything shorter is title-equivalent
@@ -376,7 +397,8 @@ def _format_context(search_result: Any) -> tuple[str, list[str]]:
 
     Returns ``("", [])`` when no hit has usable snippet content — the
     caller treats this as "no relevant documents" rather than calling
-    the LLM.
+    the LLM. The second element is a list of resolvable ``SourceRef``s
+    (PLA-274 / #437), not human title strings.
 
     Emits a single ``KAIRIX_TRACE``-gated INFO log capturing how many
     chunk vs fact hits were considered vs kept and the resulting LLM
@@ -385,14 +407,14 @@ def _format_context(search_result: Any) -> tuple[str, list[str]]:
     the chunk floor) obvious in seconds rather than two days.
     """
     parts: list[str] = []
-    sources: list[str] = []
+    sources: list[SourceRef] = []
     counters = _ContextCounters()
     for budgeted in getattr(search_result, "results", [])[:5]:
         classified = _classify_row(budgeted, counters)
         if classified is None:
             continue
-        title, formatted = classified
-        sources.append(title)
+        ref, formatted = classified
+        sources.append(ref)
         parts.append(formatted)
     context = "\n\n---\n\n".join(parts) if parts else ""
     if trace_enabled():
@@ -486,6 +508,7 @@ def prep_output_to_envelope(out: PrepOutput) -> dict[str, Any]:
         "tier": out.tier,
         "summary": out.summary,
         "tokens": out.tokens,
-        "sources": out.sources,
+        # PLA-274 / #437 — each source is a resolvable SourceRef breadcrumb.
+        "sources": [s.to_envelope() for s in out.sources],
         "error": out.error,
     }

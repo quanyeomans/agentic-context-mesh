@@ -85,7 +85,11 @@ _LONG_SNIPPET = (
 
 @given(parsers.parse('a prep result with summary "{summary}" and sources "{sources_csv}"'))
 def _seed_prep_result(prep_warm_ctx: _PrepWarmCtx, summary: str, sources_csv: str) -> None:
-    sources = [s.strip() for s in sources_csv.split(",") if s.strip()]
+    # PLA-274 — prep sources are resolvable SourceRef breadcrumbs; build one
+    # per CSV entry (the entry is both the display path and the breadcrumb).
+    from kairix.core.protocols import SourceRef
+
+    sources = [SourceRef.of(path=s.strip()) for s in sources_csv.split(",") if s.strip()]
     prep_warm_ctx.original = PrepOutput(
         query="alpha topic",
         tier="l0",

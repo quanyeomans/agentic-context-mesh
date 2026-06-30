@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from kairix.agents.prep.cli import build_parser, format_text, main
+from kairix.core.protocols import SourceRef
 from kairix.use_cases.prep import PrepDeps, PrepOutput
 
 pytestmark = pytest.mark.unit
@@ -54,7 +55,9 @@ def test_format_text_with_summary_and_sources() -> None:
         tier="l0",
         summary="brief summary",
         tokens=12,
-        sources=["doc-a", "doc-b"],
+        # PLA-274 / #437 — sources are resolvable SourceRef breadcrumbs; the
+        # renderer shows the title (falling back to source_uri / path).
+        sources=[SourceRef.of(path="doc-a", title="doc-a"), SourceRef.of(path="doc-b", title="doc-b")],
     )
     text = format_text(out)
     assert "Query: q" in text
@@ -62,6 +65,29 @@ def test_format_text_with_summary_and_sources() -> None:
     assert "brief summary" in text
     assert "Sources:" in text
     assert "- doc-a" in text
+
+
+def test_format_text_shows_breadcrumb_only_when_uri_differs_from_label() -> None:
+    """PLA-274 — the ``↳ {source_uri}`` line appears only when the canonical
+    URI differs from the displayed label (``if source_uri and source_uri != label``).
+
+    Sabotage-proof (executed): flipping ``and`` -> ``or`` or ``!=`` -> ``==``
+    in that guard emits (or suppresses) the ↳ line for the wrong case and one
+    of these two assertions fires."""
+    # Connector source: title differs from the canonical URI → ↳ line shown.
+    connector = PrepOutput(
+        query="q",
+        tier="l0",
+        summary="s",
+        sources=[SourceRef.of(path="archive/h.zip#7", source_uri="sharepoint://acme/h.zip", title="Handbook")],
+    )
+    connector_text = format_text(connector)
+    assert "- Handbook" in connector_text
+    assert "↳ sharepoint://acme/h.zip" in connector_text
+
+    # Vault source: label == source_uri == path → NO ↳ line (would be redundant).
+    vault = PrepOutput(query="q", tier="l0", summary="s", sources=[SourceRef.of(path="notes/x.md")])
+    assert "↳" not in format_text(vault)
 
 
 def test_format_text_no_sources_omits_section() -> None:

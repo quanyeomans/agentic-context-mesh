@@ -403,7 +403,7 @@ def test_vector_index_meta_conn_opens_once_across_many_searches(tmp_path: Any) -
         """
         CREATE TABLE documents (
             id INTEGER PRIMARY KEY, collection TEXT, path TEXT,
-            title TEXT, hash TEXT, active INTEGER DEFAULT 1, source_page INTEGER,
+            title TEXT, hash TEXT, active INTEGER DEFAULT 1, source_page INTEGER, source_uri TEXT,
             UNIQUE(collection, path)
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
@@ -458,7 +458,7 @@ def test_vector_index_meta_conn_returns_same_rows_across_calls(tmp_path: Any) ->
         """
         CREATE TABLE documents (
             id INTEGER PRIMARY KEY, collection TEXT, path TEXT,
-            title TEXT, hash TEXT, active INTEGER DEFAULT 1, source_page INTEGER,
+            title TEXT, hash TEXT, active INTEGER DEFAULT 1, source_page INTEGER, source_uri TEXT,
             UNIQUE(collection, path)
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
@@ -510,7 +510,7 @@ def test_vector_index_meta_conn_thread_safe(tmp_path: Any) -> None:
         """
         CREATE TABLE documents (
             id INTEGER PRIMARY KEY, collection TEXT, path TEXT,
-            title TEXT, hash TEXT, active INTEGER DEFAULT 1, source_page INTEGER,
+            title TEXT, hash TEXT, active INTEGER DEFAULT 1, source_page INTEGER, source_uri TEXT,
             UNIQUE(collection, path)
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);

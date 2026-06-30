@@ -99,7 +99,14 @@ def format_text(out: PrepOutput) -> str:
         lines.append("")
         lines.append("Sources:")
         for src in out.sources:
-            lines.append(f"  - {src}")
+            # PLA-274 / #437 — sources are resolvable SourceRefs; show the
+            # canonical breadcrumb (with title + page when present) so the
+            # operator can re-open the grounding source, not just read a title.
+            label = src.title or src.source_uri or src.path
+            page_suffix = f" · p.{src.source_page}" if src.source_page is not None else ""
+            lines.append(f"  - {label}{page_suffix}")
+            if src.source_uri and src.source_uri != label:
+                lines.append(f"    ↳ {src.source_uri}")
     return "\n".join(lines)
 
 

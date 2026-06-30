@@ -37,6 +37,13 @@ class BM25Result(TypedDict):
     # this from ``documents.source_page`` for PDF / PPTX / XLSX rows so
     # downstream renderers can quote a specific page back to the operator.
     source_page: int | None
+    # PLA-274 — the CANONICAL resolvable breadcrumb (``documents.source_uri``).
+    # The connector/archive URI a chunk was written under; ``""`` for
+    # passthrough vault/markdown rows whose source_uri column is NULL (the
+    # downstream ``SourceRef.of`` falls those back to ``file``). Carried
+    # through fusion → SearchHit → envelope so every surface can cite the
+    # canonical source, not the sometimes-munged ``documents.path``.
+    source_uri: str
 
 
 FTS_STOP_WORDS: frozenset[str] = frozenset(
@@ -224,6 +231,7 @@ def _build_bm25_query(
                    d.path,
                    d.title,
                    d.source_page,
+                   d.source_uri,
                    snippet(documents_fts, 2, '', '', ' … ', 32) AS snippet,
                    bm25(documents_fts, 1.0, 1.0, 0.5) AS bm25_score
             FROM documents_fts
@@ -241,6 +249,7 @@ def _build_bm25_query(
                    d.path,
                    d.title,
                    d.source_page,
+                   d.source_uri,
                    snippet(documents_fts, 2, '', '', ' … ', 32) AS snippet,
                    bm25(documents_fts, 1.0, 1.0, 0.5) AS bm25_score
             FROM documents_fts
@@ -299,6 +308,10 @@ def _bm25_via_doc_repo(
                     score=_coerce_finite_score(r.get("score", 0.0), path=file_path),
                     collection=r.get("collection", ""),
                     source_page=page_value,
+                    # PLA-274 — carry the canonical breadcrumb. Repos that
+                    # pre-date the field surface "" here; SourceRef.of falls
+                    # that back to ``file`` so the pointer stays resolvable.
+                    source_uri=str(r.get("source_uri", "") or ""),
                 )
             )
         if date_filter_paths:
@@ -337,6 +350,14 @@ def _row_to_bm25_result(row: Any) -> BM25Result:
         raw_page = row["source_page"]
     except (KeyError, IndexError):
         raw_page = None
+    # PLA-274 — canonical breadcrumb; same defensive read for legacy DBs
+    # that pre-date the source_uri column. "" defers the path-fallback to
+    # SourceRef.of downstream.
+    source_uri: Any = ""
+    try:
+        source_uri = row["source_uri"]
+    except (KeyError, IndexError):
+        source_uri = ""
     return BM25Result(
         file=path,
         # FTS5 ``snippet()`` window centred on the match (PLA-269), not a
@@ -347,6 +368,7 @@ def _row_to_bm25_result(row: Any) -> BM25Result:
         score=_normalise_bm25_score(raw_score, path=path),
         collection=str(row["collection"]),
         source_page=int(raw_page) if isinstance(raw_page, int) else None,
+        source_uri=str(source_uri or ""),
     )
 
 

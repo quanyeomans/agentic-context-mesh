@@ -71,7 +71,13 @@ def format_text(out: ContradictOutput, top_k: int, threshold: float) -> str:
 
     lines: list[str] = [f"⚠ {len(out.contradictions)} contradiction(s) found:", ""]
     for h in out.contradictions:
-        lines.append(f"  Category: {h.category}  Score: {h.score:.2f}  Path: {h.path}")
+        # PLA-274 — surface the per-page citation + canonical breadcrumb so
+        # the operator can cite the exact contradicting source.
+        ref = h.source_ref()
+        page_suffix = f" · p.{h.source_page}" if h.source_page is not None else ""
+        lines.append(f"  Category: {h.category}  Score: {h.score:.2f}  Path: {h.path}{page_suffix}")
+        if ref.source_uri and ref.source_uri != h.path:
+            lines.append(f"  Source: {ref.source_uri}")
         lines.append(f"  Reason: {h.reason}")
         lines.append(f"  Snippet: {h.snippet[:120]}...")
         lines.append("")

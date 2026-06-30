@@ -322,6 +322,7 @@ _Generated from `scripts/checks/_rule_catalogue.py` — do not edit by hand._
 | no-hardcoded-user-paths | repo-hygiene | per-file | shipped | F31: no hardcoded /Users/ or /home/<dev>/ paths |
 | F95 | production-safety | per-file | shipped | Neo4j write-mode selection lives at ONE chokepoint — only kairix/knowledge/graph/client.py may name `default_access_mode` / the `_is_write_query` derivation, so no caller re-derives read-vs-write and silently opens a READ session for a write query (the #628 silent-write class) |
 | F96 | production-safety | per-file | shipped | embed-discovery completeness queries that LEFT JOIN content_vectors ... IS NULL must reference a state column (model / embedded_at), never presence alone — a presence-only join counts an un-promoted placeholder as 'done' (the chunk-0 #627 class, where seq=0 placeholders were never embedded) |
+| F97 | agent-affordance | per-class | shipped | every agent-facing result surface embeds or returns the shared SourceRef breadcrumb — each registered result-row dataclass (search / timeline / entity / prep / research / contradict) declares a SourceRef-typed field OR a source_ref() accessor, so the canonical resolvable source_uri is surfaced uniformly and the per-surface pointer drift can't re-accrue (PLA-274) |
 | G1 | go-discipline | per-file | shipped | every Go binary exposes --version |
 | G6 | go-discipline | per-file | shipped | no panic outside main/init |
 | G8 | go-discipline | per-file | shipped | logging via log/slog (no log.Println or fmt.Println in service code) |

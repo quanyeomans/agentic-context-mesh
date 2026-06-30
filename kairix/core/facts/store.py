@@ -424,6 +424,10 @@ class SQLiteFactStore:
                     score=float(hit.score),
                     collection=_FUSION_COLLECTION,
                     source_page=None,
+                    # PLA-274 — the fact id plays both the path AND the
+                    # canonical breadcrumb here (it is the resolvable pointer
+                    # back to the fact record).
+                    source_uri=record.id,
                 )
             )
         vec_rows: list[VecResult] = []
@@ -438,6 +442,8 @@ class SQLiteFactStore:
                     title=record.entity,
                     snippet=record.value,
                     source_page=None,
+                    # PLA-274 — the fact id is the resolvable breadcrumb (== path).
+                    source_uri=record.id,
                 )
             )
 

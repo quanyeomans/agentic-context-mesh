@@ -1417,6 +1417,25 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         # so the legitimately presence-only integrity check is excluded. Always run.
         staged_class="always-run",
     ),
+    RuleEntry(
+        id="F97",
+        gate="f97",
+        check="f97_source_ref_contract",
+        category="agent-affordance",
+        scope="per-class",
+        summary=(
+            "every agent-facing result surface embeds or returns the shared SourceRef "
+            "breadcrumb — each registered result-row dataclass (search / timeline / entity / "
+            "prep / research / contradict) declares a SourceRef-typed field OR a source_ref() "
+            "accessor, so the canonical resolvable source_uri is surfaced uniformly and the "
+            "per-surface pointer drift can't re-accrue (PLA-274)"
+        ),
+        adr_origin="PLA-274 — source-breadcrumb contract",
+        tags=("agent-affordance",),
+        # AST scan of a FIXED registry of agent-surface modules under
+        # kairix/use_cases/**; any could drop the contract. Always run.
+        staged_class="always-run",
+    ),
     # ----- go-discipline (active when services/*/go.mod exists) -----------
     RuleEntry(
         id="G1",

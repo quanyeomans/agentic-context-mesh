@@ -92,7 +92,13 @@ def test_tool_prep_envelope_carries_summary_sources_and_tokens() -> None:
     assert envelope["query"] == "topic alpha", f"query mismatch: {envelope['query']!r}"
     assert envelope["tier"] == "l0", f"tier mismatch: {envelope['tier']!r}"
     assert envelope["summary"] == "Brief summary of topic alpha.", f"summary mismatch: {envelope['summary']!r}"
-    assert envelope["sources"] == ["doc-alpha"], f"sources mismatch: {envelope['sources']!r}"
+    # PLA-274 / #437 — sources are resolvable SourceRef breadcrumb dicts, not
+    # bare title strings. The human title rides on ``title``; the resolvable
+    # pointer is ``path`` / ``source_uri`` (source_uri falls back to path here).
+    assert [s["title"] for s in envelope["sources"]] == ["doc-alpha"], (
+        f"source titles mismatch: {envelope['sources']!r}"
+    )
+    assert [s["source_uri"] for s in envelope["sources"]] == ["/a"], f"source uris mismatch: {envelope['sources']!r}"
     assert envelope["tokens"] > 0, f"tokens must be positive for non-empty summary: {envelope['tokens']}"
     assert envelope["error"] == "", f"error must be empty on happy path: {envelope['error']!r}"
 

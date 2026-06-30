@@ -20,7 +20,7 @@ def _make_test_db(tmp_path: Path, n_docs: int = 20) -> sqlite3.Connection:
         CREATE TABLE documents (
             id INTEGER PRIMARY KEY, collection TEXT, path TEXT,
             title TEXT, hash TEXT, active INTEGER DEFAULT 1,
-            source_page INTEGER,
+            source_page INTEGER, source_uri TEXT,
             UNIQUE(collection, path)
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
@@ -274,7 +274,7 @@ def test_search_returns_empty_when_db_has_no_matching_documents(
         CREATE TABLE documents (
             id INTEGER PRIMARY KEY, collection TEXT, path TEXT,
             title TEXT, hash TEXT, active INTEGER DEFAULT 1,
-            source_page INTEGER
+            source_page INTEGER, source_uri TEXT
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
     """)
@@ -493,7 +493,7 @@ def _seed_metadata_db(tmp_path: Path, rows: list[dict[str, Any]]) -> Path:
         CREATE TABLE documents (
             id INTEGER PRIMARY KEY, collection TEXT, path TEXT,
             title TEXT, hash TEXT, active INTEGER DEFAULT 1,
-            source_page INTEGER
+            source_page INTEGER, source_uri TEXT
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
         """
@@ -957,7 +957,7 @@ def test_force_embed_invokes_vec_index_clear(tmp_path: Path) -> None:
     db.executescript("""
         CREATE TABLE documents (
             hash TEXT PRIMARY KEY, path TEXT,
-            active INTEGER DEFAULT 1, source_modified_at TEXT
+            active INTEGER DEFAULT 1, source_modified_at TEXT, source_uri TEXT
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
         CREATE TABLE content_vectors (
@@ -1027,7 +1027,7 @@ def test_incremental_embed_does_not_invoke_vec_index_clear(tmp_path: Path) -> No
     db.executescript("""
         CREATE TABLE documents (
             hash TEXT PRIMARY KEY, path TEXT,
-            active INTEGER DEFAULT 1, source_modified_at TEXT
+            active INTEGER DEFAULT 1, source_modified_at TEXT, source_uri TEXT
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
         CREATE TABLE content_vectors (

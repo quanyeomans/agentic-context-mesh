@@ -772,14 +772,18 @@ def _fused_from_fact_hit(hit: Any, fact_weight: float, *, denom: float = 1.0) ->
     record = hit.record
     score = (float(hit.score) / denom) * fact_weight if denom else 0.0
     snippet = f"{record.entity} {record.attribute}: {record.value}"
+    fact_uri = f"facts://{record.id}"
     return FusedResult(
-        path=f"facts://{record.id}",
+        path=fact_uri,
         collection="facts",
         title=f"{record.entity} — {record.attribute}",
         snippet=snippet,
         rrf_score=score,
         in_bm25=False,
         in_vec=False,
+        # PLA-274 — the synthesised fact URI is itself the canonical
+        # breadcrumb; carry it so downstream SourceRefs resolve to the fact.
+        source_uri=fact_uri,
     )
 
 
