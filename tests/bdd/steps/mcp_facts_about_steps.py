@@ -39,6 +39,25 @@ def _given_fact(_facts_state: _State, entity: str, attr: str, value: str) -> Non
     _facts_state.fact_store.add(FakeFactRecord(id=f"f-{entity}-{attr}", entity=entity, attribute=attr, value=value))
 
 
+@given(
+    parsers.parse(
+        'the fact store has a conversation-grounded fact about "{entity}" in conversation "{cid}" '
+        'with attribute "{attr}" and value "{value}"'
+    )
+)
+def _given_fact_from_conversation(_facts_state: _State, entity: str, cid: str, attr: str, value: str) -> None:
+    _facts_state.fact_store.add(
+        FakeFactRecord(
+            id=f"f-{entity}-{attr}",
+            entity=entity,
+            attribute=attr,
+            value=value,
+            source_turn_ids=("t-1",),
+            conversation_id=cid,
+        )
+    )
+
+
 @given(parsers.parse('the fact store has no facts about "{entity}"'))
 def _given_no_facts(_facts_state: _State, entity: str) -> None:
     # Intentionally no-op; the default FakeFactStore is empty. The Given
@@ -67,6 +86,15 @@ def _then_hit_value(_facts_state: _State, value: str) -> None:
     hits = _facts_state.response["hits"]
     assert hits, "expected at least one hit"
     assert hits[0]["value"] == value
+
+
+@then(parsers.parse('the facts response hit has a resolvable source uri "{source_uri}"'))
+def _then_hit_source_uri(_facts_state: _State, source_uri: str) -> None:
+    hits = _facts_state.response["hits"]
+    assert hits, "expected at least one hit"
+    assert hits[0]["source_uri"] == source_uri
+    # The shared breadcrumb envelope carries the same resolvable pointer.
+    assert hits[0]["source_ref"]["source_uri"] == source_uri
 
 
 @then("the facts response error is empty")

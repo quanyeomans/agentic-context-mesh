@@ -70,6 +70,11 @@ _REGISTERED_SURFACES: tuple[tuple[str, str], ...] = (
     # accessor (the RETURN option) so an agent can cite/re-open every chunk
     # in the window uniformly.
     ("kairix/use_cases/expand.py", "ExpandedChunk"),
+    # PLA-261 — the facts_about fact-store result row now resolves its opaque
+    # turn-ids to a re-openable ``source_uri`` and returns the shared
+    # breadcrumb via ``FactView.source_ref()`` (the RETURN option), so memory
+    # recall cites/re-opens its source like every other surface.
+    ("kairix/agents/mcp/tools/facts_about.py", "FactView"),
 )
 
 # The shared breadcrumb type name. A field whose annotation references this

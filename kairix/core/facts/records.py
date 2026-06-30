@@ -19,6 +19,10 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kairix.core.protocols import FactRecord
 
 
 @dataclass(frozen=True)
@@ -45,6 +49,16 @@ class StoredFactRecord:
     # ``extracted_at``). ``None`` for legacy rows or sessions ingested
     # without ``session_metadata`` carrying ``date_time``.
     evidence_at: str | None = None
+    # PLA-261 — actionable provenance. ``conversation_id`` is the
+    # grouping key of the transcript the fact was grounded in (populated
+    # at extraction from the source turns); ``source_uri`` is the
+    # resolvable pointer an agent can re-open to verify the fact
+    # (populated at ingest from the conversation document path, or carried
+    # through from a connector for federated provenance #429). Both are
+    # ``None`` on legacy rows ingested before the breadcrumb shipped — the
+    # read-time :func:`resolve_fact_source_uri` falls back gracefully.
+    conversation_id: str | None = None
+    source_uri: str | None = None
 
     @classmethod
     def mint_id(
@@ -71,3 +85,36 @@ class StoredFactRecord:
         payload = entity + "|" + attribute + "|" + "|".join(sorted_turns)
         digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
         return digest[:16]
+
+
+def resolve_fact_source_uri(record: FactRecord) -> str:
+    """Return the canonical, resolvable ``source_uri`` for one fact (PLA-261).
+
+    The single read-time breadcrumb resolver, shared by the ``facts_about``
+    read surface and the SearchPipeline fact-federation path so neither
+    hand-rolls its own pointer (F17). Resolution order, each step a
+    *resolvable* pointer:
+
+    1. ``record.source_uri`` when stored — the authoritative provenance
+       (the conversation document path stamped at ingest, or a connector
+       URI carried through for federated facts #429).
+    2. ``record.conversation_id`` → the conversation document's relative
+       path via :func:`kairix.paths.agent_conversation_doc_rel_path`. Covers
+       facts that carry the grouping key but were never ingest-stamped
+       (e.g. a direct extractor call).
+    3. ``facts://<id>`` — the last-resort self-pointer for legacy rows that
+       predate the breadcrumb. Still namespaces the fact distinctly; never
+       empty, so the SLO "100% of results carry a source_uri" holds.
+
+    ``getattr`` reads keep the resolver tolerant of duck-typed
+    FactRecord-shaped objects that predate the provenance fields.
+    """
+    explicit = (getattr(record, "source_uri", None) or "").strip()
+    if explicit:
+        return explicit
+    conversation_id = getattr(record, "conversation_id", None)
+    if conversation_id:
+        from kairix.paths import agent_conversation_doc_rel_path
+
+        return agent_conversation_doc_rel_path(str(conversation_id))
+    return f"facts://{record.id}"

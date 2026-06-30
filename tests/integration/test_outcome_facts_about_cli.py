@@ -59,7 +59,14 @@ def _seed(db_path: Path) -> None:
     finally:
         db.close()
     SQLiteFactStore(db_path=db_path).add(
-        FakeFactRecord(id="f-acme", entity="Acme Corp", attribute="industry", value="manufacturing")
+        FakeFactRecord(
+            id="f-acme",
+            entity="Acme Corp",
+            attribute="industry",
+            value="manufacturing",
+            source_turn_ids=("t-1",),
+            conversation_id="session-acme",
+        )
     )
 
 
@@ -96,6 +103,11 @@ def test_facts_about_cli_subprocess_surfaces_fact_and_summary(tmp_path: Path) ->
     assert envelope["error"] == "", f"unexpected error envelope: {envelope!r}"
     assert envelope["entity"] == "Acme Corp"
     assert [h["value"] for h in envelope["hits"]] == ["manufacturing"]
+    # PLA-261 — the recalled fact carries a resolvable source breadcrumb
+    # through the subprocess surface, not just opaque turn-ids.
+    hit = envelope["hits"][0]
+    assert hit["source_uri"] == "04-Agent-Knowledge/conversations/session-acme.md"
+    assert hit["source_ref"]["source_uri"] == "04-Agent-Knowledge/conversations/session-acme.md"
     summaries = [s["summary"] for s in envelope["entity_summaries"]]
     assert any("manufacturing company" in s for s in summaries), f"entity summary missing: {summaries!r}"
     assert proc.returncode == 0

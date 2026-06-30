@@ -22,3 +22,8 @@ def test_happy_path_known_entity() -> None:
 @scenario(FEATURE, "Unknown entity returns an empty list, not an error")
 def test_unknown_entity_empty_list() -> None:
     """Body populated by @scenario from the .feature file."""
+
+
+@scenario(FEATURE, "A recalled fact carries a re-openable source breadcrumb")
+def test_recalled_fact_carries_source_breadcrumb() -> None:
+    """Body populated by @scenario from the .feature file."""

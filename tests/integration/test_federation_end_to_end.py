@@ -76,6 +76,8 @@ def _mint(
     namespace: str,
     extracted_at: str,
     confidence: float = 0.9,
+    conversation_id: str | None = None,
+    source_uri: str | None = None,
 ) -> StoredFactRecord:
     """Build a StoredFactRecord whose id is derived deterministically."""
     fid = StoredFactRecord.mint_id(entity=entity, attribute=attribute, source_turn_ids=(turn,))
@@ -89,6 +91,8 @@ def _mint(
         extracted_at=extracted_at,
         superseded_by=None,
         namespace=namespace,
+        conversation_id=conversation_id,
+        source_uri=source_uri,
     )
 
 
@@ -215,3 +219,45 @@ def test_backcompat_no_fact_retriever_ignores_facts(tmp_path) -> None:
     # The standalone store still has the data; it just wasn't wired into
     # the pipeline.
     assert len(standalone_store.search("acme headquarters", namespace="engagement-alpha")) >= 1
+
+
+@pytest.mark.integration
+def test_federated_fact_row_carries_real_source_uri(tmp_path) -> None:
+    """A fact federated into search results carries its REAL provenance — the
+    re-openable conversation document path — not an un-openable ``facts://``
+    self-pointer (#429 / PLA-261).
+
+    The synthesised ``path`` keeps its ``facts://`` type tag (downstream
+    dedup + prep's fact-snippet floor depend on it), but ``source_uri`` is
+    the resolvable breadcrumb prep/search cite.
+
+    Sabotage-proof (executed): revert ``_fused_from_fact_hit`` to
+    ``source_uri=fact_uri`` (the old ``facts://<id>``) → the source_uri
+    assertion below fails because the un-openable self-pointer is back.
+    """
+    db_path = tmp_path / "facts.sqlite"
+    store = SQLiteFactStore(db_path=db_path)
+    store.add(
+        _mint(
+            entity="acme",
+            attribute="headquarters",
+            value="1 Pier Lane Sydney",
+            turn="turn-1",
+            namespace="engagement-alpha",
+            extracted_at="2026-05-19T10:00:00Z",
+            conversation_id="session-acme",
+        )
+    )
+
+    pipeline = _build_pipeline(intent=QueryIntent.ATTRIBUTE_FACT, fact_retriever=store)
+    result = pipeline.search("acme headquarters", namespace="engagement-alpha")
+
+    fact_rows = [
+        r.result
+        for r in result.results
+        if str(getattr(getattr(r, "result", r), "path", "") or "").startswith("facts://")
+    ]
+    assert fact_rows, "expected a federated fact row in the fused results"
+    row = fact_rows[0]
+    assert row.path.startswith("facts://"), "the facts:// type tag must remain on path"
+    assert row.source_uri == "04-Agent-Knowledge/conversations/session-acme.md"
