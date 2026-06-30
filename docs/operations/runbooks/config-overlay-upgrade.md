@@ -55,7 +55,7 @@ The `docker-compose.example.yml` in the repo carries the canonical shape.
 docker compose up -d --force-recreate --wait kairix
 ```
 
-`--force-recreate` is important: without it, compose treats a running unhealthy container as "running" and skips the restart, so your config change doesn't take effect. The `alpha-deploy-webhook` does this automatically from `v2026.5.18` onward.
+`--force-recreate` is important: without it, compose treats a running unhealthy container as "running" and skips the restart, so your config change doesn't take effect. The box-side deploy script (`scripts/deploy/apply-alpha.sh`) does this automatically.
 
 ### 5. Verify
 

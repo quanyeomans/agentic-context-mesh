@@ -9,7 +9,7 @@ These are the **VM-facing** runbooks. Docker-compose and how-to-style operationa
 | Search wrong / empty, recall canary regressed, `kairix onboard check` reports failures | [kairix-retrieval-health](kairix-retrieval-health.md) | Diagnosis tree by failed subsystem (secrets → vector → BM25/FTS → agent knowledge → chunk_date → Neo4j); per-failure recovery; full reset; recall-canary regression triage |
 | Package upgrade, unit-file change, secrets-fetcher change on a systemd-managed VM | [kairix-systemd-update](kairix-systemd-update.md) | Safe update sequence, in-flight drain, rollback, verification |
 | `systemctl status kairix.service` reports `failed` but containers respond on `:8080/health` | [kairix-service-failed-containers-healthy](kairix-service-failed-containers-healthy.md) | Diagnosis by journal headline (226/NAMESPACE, StartLimit warning, preflight FAIL, missing script); per-cause recovery; why systemd state and container state can disagree |
-| Alpha-tag gate from `release-vm-deploy.yml` failing or stuck pending | `kairix-alpha-deploy-webhook` runbook (lives in your sibling infrastructure repo, alongside the systemd unit + apply script for the webhook) | Bootstrap, install, triage for the VM-side webhook that runs onboard-check + benchmark on each alpha tag |
+| Alpha-tag gate from `release-vm-deploy.yml` failing or stuck pending | Read the `release-vm-deploy.yml` run logs — the `deploy-vm` job's apply output (a `FAIL apply-alpha:` line on a compose/onboard/regression failure, or `KAIRIX_REFLIB verdict=regress` on a reflib regression) | The box-side `scripts/deploy/apply-alpha.sh` runs onboard-check + reflib benchmark on each alpha tag; `post-reflib-status` posts the `vm-reflib-regression` commit status |
 
 ## Pre-flight before any recovery
 

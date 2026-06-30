@@ -1,6 +1,6 @@
 # Go in the kairix repo — integration plan
 
-> **Status**: Implemented — scaffolding landed. The CI / fitness (G1–G10 checks under `scripts/checks/check_go_*.py`) / conventions / docs are in place, and `services/` now holds both the `hello` sample binary and the `alpha-deploy-webhook` service (the [#272](https://github.com/three-cubes/kairix/issues/272) Phase 4 webhook handler — the first user of this pipeline).
+> **Status**: Implemented — scaffolding landed. The CI / fitness (G1–G10 checks under `scripts/checks/check_go_*.py`) / conventions / docs are in place, and `services/` holds the `hello` sample binary. (The `alpha-deploy-webhook` service — [#272](https://github.com/three-cubes/kairix/issues/272) Phase 4, the original first user of this pipeline — was retired 2026-06-29 per PLA-252; the alpha deploy now runs box-side via `scripts/deploy/apply-alpha.sh`.)
 
 ## Why a second language at all
 
@@ -137,7 +137,7 @@ Security:
 - [ ] CI pass: `go fmt` clean, `go vet` clean, `golangci-lint` clean, `go test -race -cover` clean, build matrix all four targets compile.
 
 **Phase 3 — first real binary (kicks off [#272](https://github.com/three-cubes/kairix/issues/272) Phase 4)**
-- [ ] `services/alpha-deploy-webhook/` — receives signed POSTs from `release-vm-deploy.yml`, pulls alpha Docker image, runs onboard check + reflib benchmark, posts back via GitHub commit status.
+- [x] `services/alpha-deploy-webhook/` (#272 Phase 4) — built, then **retired 2026-06-29** (PLA-252); the alpha deploy now runs box-side via `scripts/deploy/apply-alpha.sh`, driven by `release-vm-deploy.yml`.
 - [ ] Deploy to VM via systemd unit. Cross-repo: your sibling infrastructure repo owns the deploy mechanics (e.g. a separate ops repo with systemd units + apply scripts); this repo owns the binary.
 
 **Phase 4 — additional fitness functions (rolled in as the Go surface grows)**

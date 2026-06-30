@@ -255,9 +255,9 @@ is the source-of-truth; the others fill in detail.
 > by the App, not `github-actions[bot]`. The **VM deploy uses the canonical
 > tc-pipelines `azure-vm-deploy.yml@v1`** (WIF → disk snapshot → `az vm
 > run-command` the box-side `scripts/deploy/apply-alpha.sh` → smoke
-> `systemctl is-active`), replacing the bespoke HMAC-webhook. The Go webhook
-> under `services/alpha-deploy-webhook/` is retained as a documented fallback
-> only — the workflow no longer depends on it. Same "canonical in
+> `systemctl is-active`), replacing the bespoke HMAC-webhook (retired — the box-side
+> apply logic is now the single source in `scripts/deploy/apply-alpha.sh`; the manual
+> fallback when CI is down is to run that script directly on the box). Same "canonical in
 > tc-pipelines, don't reinvent" rule as the agent-token note: use the shared
 > action/workflow, don't re-implement WIF/login/deploy here.
 

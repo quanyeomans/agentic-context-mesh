@@ -221,26 +221,4 @@ for canonical_name in "${canonical_names[@]}"; do
     fi
 done
 
-# Webhook file-only secrets — read by the alpha-deploy webhook process
-# (kairix-webhook group), not by the kairix containers. Kept on the
-# convention-driven path because their names already follow the
-# canonical schema; they don't go through the bundle file because the
-# webhook uses WEBHOOK_SECRET_PATH / KAIRIX_GITHUB_PAT_PATH file paths.
-WEBHOOK_SECRETS=( kairix-alpha-deploy-webhook-secret kairix-alpha-deploy-webhook-pat )
-WEBHOOK_GROUP="${KAIRIX_WEBHOOK_GROUP:-kairix-webhook}"
-for secret_name in "${WEBHOOK_SECRETS[@]}"; do
-    value=$(az keyvault secret show \
-        --vault-name "$VAULT_NAME" \
-        --name "$secret_name" \
-        --query value -o tsv 2>/dev/null || true)
-    if [[ -z "$value" ]]; then
-        echo "fetch-secrets: WARN — ${secret_name} empty or missing in KV" >&2
-        continue
-    fi
-    target="${OUT_DIR}/${secret_name}"
-    printf %s "$value" > "$target"
-    chmod 640 "$target"
-    chown "root:${WEBHOOK_GROUP}" "$target"
-done
-
 echo "fetch-secrets: wrote ${canonical_count} canonical secret(s) + ${legacy_count} legacy alias(es) to ${OUT_FILE} ($(stat -c '%U:%G %a' "$OUT_FILE" 2>/dev/null || echo 'perms?'))"

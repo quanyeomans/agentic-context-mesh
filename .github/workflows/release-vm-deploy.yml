@@ -12,10 +12,10 @@ name: "2b · Release (VM alpha-deploy + reflib gate)"
 # HMAC-webhook POST. Snapshot is skipped (skip-snapshot: 'true') because the
 # kairix CI identity lacks Disk Snapshot Contributor; rollback is by
 # re-pinning the previous KAIRIX_IMAGE_TAG, not a disk snapshot.
-# The box-side apply logic lives in scripts/deploy/apply-alpha.sh, which
-# faithfully replicates the (retained, fallback) Go webhook's deploy.go.
-# This is the "canonical in tc-pipelines, don't reinvent" pattern: WIF +
-# the shared deploy workflow, no kairix-stored HMAC/CF secrets.
+# The box-side apply logic is the single source in
+# scripts/deploy/apply-alpha.sh (the bespoke Go HMAC-webhook it replaced is
+# retired). This is the "canonical in tc-pipelines, don't reinvent" pattern:
+# WIF + the shared deploy workflow, no kairix-stored HMAC/CF secrets.
 #
 # All untrusted inputs (inputs.tag, github.event.release.tag_name) are
 # bound to env: variables before being used in run: scripts, per the

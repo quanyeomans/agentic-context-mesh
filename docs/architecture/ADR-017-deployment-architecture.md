@@ -27,11 +27,11 @@ secret), so tags, releases, and dispatches are authored by the App.
 The **VM deploy uses the canonical tc-pipelines reusable workflow
 `azure-vm-deploy.yml@v1`** (WIF Azure login → OS-disk snapshot → `az vm
 run-command` the box-side apply script → smoke `systemctl is-active`),
-**replacing the bespoke HMAC-webhook**. The box-side apply logic lives in
-[`scripts/deploy/apply-alpha.sh`](../../scripts/deploy/apply-alpha.sh), which
-faithfully replicates the prior webhook's deploy sequence. The Go webhook under
-`services/alpha-deploy-webhook/` is **retained as a documented fallback only**;
-the workflow no longer depends on it. This follows the org "canonical in
+**replacing the bespoke HMAC-webhook** (retired 2026-06-29, PLA-252). The
+box-side apply logic is now the **single source** in
+[`scripts/deploy/apply-alpha.sh`](../../scripts/deploy/apply-alpha.sh); the
+manual fallback, when CI is unavailable, is to run that script directly on the
+box (`sh apply-alpha.sh <tag>` from the compose dir). This follows the org "canonical in
 tc-pipelines, don't reinvent" rule — use the shared deploy workflow and WIF
 login rather than re-implementing them per repo.
 
