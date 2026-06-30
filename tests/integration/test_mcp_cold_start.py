@@ -222,7 +222,7 @@ def _cold_remember_deps(tmp_path: Path, *, indexed: bool) -> RememberDeps:
         document_root_fn=lambda: tmp_path / "vault",
         db_path_fn=lambda: tmp_path / "index.sqlite",
         now_fn=lambda: _COLD_NOW,
-        index_fn=lambda _db, _root, _hash: indexed,
+        index_fn=lambda _db, _root, _target, _hash: indexed,
     )
 
 

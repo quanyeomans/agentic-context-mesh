@@ -67,6 +67,7 @@ from kairix.core.embed.schema import save_run_log  # noqa: E402
 from kairix.core.embed.use_cases import (  # noqa: E402
     PipelineDeps,
     UseCaseDeps,
+    default_index_file,
     default_scan_documents,
     run_incremental_embed_pipeline,
 )
@@ -227,19 +228,19 @@ def _composed_first_index(world: _WizardWorld) -> None:
     )
 
 
-def _index_memory_via_scan(world: _WizardWorld, db_path: Path, content_hash: str) -> bool:
+def _index_memory_via_scan(world: _WizardWorld, db_path: Path, target: Path, content_hash: str) -> bool:
     """The remember use case's immediate-index leg, tmp-pinned.
 
     Same composition as the production default (``open_db`` →
-    ``create_schema`` → ``default_scan_documents`` → active-hash
-    check), with the scan deps pinned to the tmp corpus for the same
-    reason as :func:`_scan_deps`.
+    ``create_schema`` → ``default_index_file`` for the one written file →
+    active-hash check), with the scan deps pinned to the tmp corpus for the
+    same reason as :func:`_scan_deps`.
     """
     db = open_db(db_path)
     try:
         create_schema(db)
         diagnostics: list[str] = []
-        default_scan_documents(db, diagnostics, deps=_scan_deps(world))
+        default_index_file(db, diagnostics, target, deps=_scan_deps(world))
         row = db.execute(
             "SELECT 1 FROM documents WHERE hash = ? AND active = 1 LIMIT 1",
             (content_hash,),
@@ -264,7 +265,9 @@ def _wizard_service_deps(world: _WizardWorld) -> SetupServiceDeps:
         config_fn=lambda: None,
         document_root_fn=lambda: world.docs,
         db_path_fn=lambda: world.db_path,
-        index_fn=lambda db_path, _root, content_hash: _index_memory_via_scan(world, db_path, content_hash),
+        index_fn=lambda db_path, _root, target, content_hash: _index_memory_via_scan(
+            world, db_path, target, content_hash
+        ),
     )
     return SetupServiceDeps(
         # Provider HTTP boundary — one fake plugin behind the factory seam.

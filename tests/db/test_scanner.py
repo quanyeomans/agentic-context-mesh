@@ -307,3 +307,100 @@ def test_scan_with_no_resolver_leaves_agent_owner_null(
 
     row = db.execute("SELECT agent_owner FROM documents WHERE active = 1").fetchone()
     assert row[0] is None
+
+
+# ---------------------------------------------------------------------------
+# Single-file incremental index (PLA-258) — scan_file
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_scan_file_indexes_only_the_named_file(
+    tmp_path: __import__("pathlib").Path,
+) -> None:
+    """scan_file upserts ONLY the one file it is given — it never globs the
+    tree, so a sibling file present on disk stays out of the index.
+
+    Sabotage-prove: if scan_file globbed the collection (the full-scan
+    behaviour) the sibling would be indexed and ``new == 1`` / the
+    single-row assertion would fail.
+    """
+    vault = tmp_path / "vault"
+    area = vault / "02-Areas"
+    area.mkdir(parents=True)
+    target = area / "new.md"
+    target.write_text("# Fresh\n\nbrand new memory content")
+    (area / "sibling.md").write_text("# Sibling\n\nthis file must not be touched")
+
+    db = sqlite3.connect(":memory:")
+    _setup_schema(db)
+
+    scanner = DocumentScanner(db, vault)
+    report, touched = scanner.scan_file(target, [CollectionConfig(name="areas", path="02-Areas")])
+
+    assert report.new == 1
+    assert len(touched) == 1
+    rows = db.execute("SELECT path FROM documents WHERE active = 1").fetchall()
+    assert rows == [("02-Areas/new.md",)]
+
+
+@pytest.mark.unit
+def test_scan_file_skips_a_file_outside_every_collection(
+    tmp_path: __import__("pathlib").Path,
+) -> None:
+    """A file that no collection's walk would reach is not indexed.
+
+    Sabotage-prove: if scan_file ignored the collection membership test it
+    would index the out-of-scope file and ``touched`` would be non-empty.
+    """
+    vault = tmp_path / "vault"
+    (vault / "02-Areas").mkdir(parents=True)
+    other = vault / "99-Outside" / "stray.md"
+    other.parent.mkdir(parents=True)
+    other.write_text("# Stray\n\noutside any configured collection")
+
+    db = sqlite3.connect(":memory:")
+    _setup_schema(db)
+
+    scanner = DocumentScanner(db, vault)
+    report, touched = scanner.scan_file(other, [CollectionConfig(name="areas", path="02-Areas")])
+
+    assert report.new == 0
+    assert touched == []
+    assert db.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
+
+
+@pytest.mark.unit
+def test_scan_file_skips_duplicate_content_already_active(
+    tmp_path: __import__("pathlib").Path,
+) -> None:
+    """scan_file honours the same cross-path dedup as the full scan: identical
+    content already active under another path is not re-indexed at the new
+    path.
+
+    Sabotage-prove: if scan_file passed an empty dedup set, the duplicate
+    would be inserted as a second row and ``new == 0`` would fail.
+    """
+    vault = tmp_path / "vault"
+    area = vault / "docs"
+    area.mkdir(parents=True)
+    content = "# Shared\n\nthis exact content already lives in the store"
+    original = area / "original.md"
+    original.write_text(content)
+
+    db = sqlite3.connect(":memory:")
+    _setup_schema(db)
+
+    scanner = DocumentScanner(db, vault)
+    scanner.scan([CollectionConfig(name="docs", path="docs")])
+    assert db.execute("SELECT COUNT(*) FROM documents WHERE active = 1").fetchone()[0] == 1
+
+    # A NEW path with byte-identical content — the full scan would skip it
+    # (already-indexed hash); scan_file must too.
+    duplicate = area / "duplicate.md"
+    duplicate.write_text(content)
+    report, touched = scanner.scan_file(duplicate, [CollectionConfig(name="docs", path="docs")])
+
+    assert report.new == 0
+    assert touched == []
+    assert db.execute("SELECT COUNT(*) FROM documents WHERE active = 1").fetchone()[0] == 1

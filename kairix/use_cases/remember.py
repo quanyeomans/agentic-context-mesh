@@ -15,11 +15,13 @@ Both call :func:`remember`, which:
 3. writes a markdown file named ``YYYY-MM-DD-<slug>.md`` under the
    agent's write surface (:meth:`AgentScope.writable_path`, resolved
    beneath the document root when relative);
-4. indexes the new file immediately through the same document-scan +
-   FTS-rebuild step the embed pipeline and worker run, so BM25 search
-   finds it now rather than at the next worker tick. Vector embedding
-   stays out-of-band — the next ``kairix embed`` / worker tick picks
-   the document up as pending.
+4. indexes the new file immediately and incrementally — only the file
+   just written is upserted (reusing the scanner's per-file processing)
+   and the FTS index is updated for that one document, so BM25 search
+   finds it now rather than at the next worker tick, WITHOUT re-reading
+   or re-hashing the rest of the document tree (PLA-258). Vector
+   embedding stays out-of-band — the next ``kairix embed`` / worker tick
+   picks the document up as pending.
 
 The use case never raises: every failure mode is reported through the
 ``error`` field on :class:`RememberResult` so the MCP surface can hand
@@ -116,26 +118,32 @@ def _real_classify(
     return classify_content(content, agent=agent, config=config)
 
 
-def _index_via_scan(db_path: Path, document_root: Path, content_hash: str) -> bool:
-    """Production immediate-index step — the canonical scan + FTS rebuild.
+def _index_single_file(db_path: Path, document_root: Path, target: Path, content_hash: str) -> bool:
+    """Production immediate-index step — incremental single-file index (PLA-258).
 
-    Runs :func:`kairix.core.embed.use_cases.default_scan_documents` (the
-    exact step ``kairix embed`` and the worker run) against ``document_root``,
-    then reports whether a document with ``content_hash`` is active in the
-    store. True means BM25 search finds the new memory now; the vector leg
-    follows at the next embed run, which sees the document as pending.
+    Indexes ONLY ``target`` (the file ``remember`` just wrote) via
+    :func:`kairix.core.embed.use_cases.default_index_file`, then reports
+    whether a document with ``content_hash`` is active in the store. This
+    is the latency-sensitive memory-write path: it reuses the scanner's
+    per-file processing for the one known path and an incremental FTS
+    update, so it does NOT re-read or re-hash the rest of the document tree
+    (the old full-rescan cost was O(corpus) — multiple seconds on a vault
+    of thousands of files). True means BM25 search finds the new memory
+    now; the vector leg follows at the next embed run, which sees the
+    document as pending.
     """
     from kairix.core.db import open_db
     from kairix.core.db.schema import create_schema
-    from kairix.core.embed.use_cases import UseCaseDeps, default_scan_documents
+    from kairix.core.embed.use_cases import UseCaseDeps, default_index_file
 
     db = open_db(db_path)
     try:
         create_schema(db)
         diagnostics: list[str] = []
-        default_scan_documents(
+        default_index_file(
             db,
             diagnostics,
+            target,
             deps=UseCaseDeps(document_root_fn=lambda: document_root),
         )
         row = db.execute(
@@ -162,7 +170,7 @@ class RememberDeps:
     db_path_fn: Callable[[], Path] = field(default_factory=lambda: _real_db_path)
     now_fn: Callable[[], datetime] = field(default_factory=lambda: _real_now)
     classify_fn: Callable[..., Any] = field(default_factory=lambda: _real_classify)
-    index_fn: Callable[[Path, Path, str], bool] = field(default_factory=lambda: _index_via_scan)
+    index_fn: Callable[[Path, Path, Path, str], bool] = field(default_factory=lambda: _index_single_file)
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +305,7 @@ def remember(
     indexed = False
     detail = ""
     try:
-        indexed = d.index_fn(d.db_path_fn(), document_root, hash_content(body))
+        indexed = d.index_fn(d.db_path_fn(), document_root, target, hash_content(body))
     except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
         logger.warning("remember: immediate indexing failed — %s", exc)
     if not indexed:

@@ -105,6 +105,67 @@ def test_sync_fts_empty_list() -> None:
 
 
 @pytest.mark.unit
+def test_sync_fts_indexes_only_named_documents_not_a_full_rebuild() -> None:
+    """sync_fts is incremental: it (re)indexes ONLY the named document ids,
+    never the whole active set — the O(1)-in-corpus path PLA-258 relies on.
+
+    A second active document that is NOT named must stay out of the index.
+
+    Sabotage-prove: revert sync_fts to the old rebuild-based body (which
+    calls rebuild_fts and indexes EVERY active doc) → doc2 would appear in
+    the FTS index and the ``== 1`` count assertion fails.
+    """
+    db = _create_test_db()  # doc1/doc2 active, doc3 inactive; no FTS yet
+    db.execute("CREATE VIRTUAL TABLE documents_fts USING fts5(filepath, title, doc, tokenize='porter unicode61')")
+
+    synced = sync_fts(db, [1])  # only doc1
+
+    assert synced == 1
+    total = db.execute("SELECT COUNT(*) FROM documents_fts").fetchone()[0]
+    assert total == 1, "only the named document may be indexed — sync_fts must not rebuild the whole index"
+    assert db.execute("SELECT rowid FROM documents_fts WHERE documents_fts MATCH 'fox'").fetchall()
+    assert not db.execute("SELECT rowid FROM documents_fts WHERE documents_fts MATCH 'knowledge'").fetchall()
+
+
+@pytest.mark.unit
+def test_sync_fts_does_not_count_inactive_or_missing_documents() -> None:
+    """A document id that maps to no active row (inactive, or simply absent)
+    is NOT counted as synced — its ``INSERT … SELECT`` matches nothing.
+
+    Sabotage-prove: relax the ``inserted > 0`` guard in sync_fts to
+    ``inserted >= 0`` and both ids would be tallied, so ``== 0`` fails.
+    """
+    db = _create_test_db()  # id=3 is inactive in the fixture; id=999 does not exist
+    db.execute("CREATE VIRTUAL TABLE documents_fts USING fts5(filepath, title, doc, tokenize='porter unicode61')")
+
+    assert sync_fts(db, [3, 999]) == 0
+    assert db.execute("SELECT COUNT(*) FROM documents_fts").fetchone()[0] == 0
+
+
+@pytest.mark.unit
+def test_sync_fts_adds_new_document_without_disturbing_existing_rows() -> None:
+    """A brand-new active document is added incrementally; rows already in
+    the index for other documents are left in place.
+
+    Sabotage-prove: drop the INSERT…SELECT from sync_fts → the new doc3
+    never becomes searchable and the 'removed' MATCH assertion fails.
+    """
+    db = _create_test_db()
+    rebuild_fts(db)  # doc1, doc2 indexed
+    # doc3 exists in `documents`/`content` (the fixture) but is inactive; flip it active.
+    db.execute("UPDATE documents SET active = 1 WHERE id = 3")
+
+    synced = sync_fts(db, [3])
+
+    assert synced == 1
+    # doc3's content ("...has been removed.") is now searchable ...
+    assert db.execute("SELECT rowid FROM documents_fts WHERE documents_fts MATCH 'removed'").fetchall()
+    # ... and the pre-existing rows are untouched.
+    assert db.execute("SELECT rowid FROM documents_fts WHERE documents_fts MATCH 'fox'").fetchall()
+    assert db.execute("SELECT rowid FROM documents_fts WHERE documents_fts MATCH 'knowledge'").fetchall()
+
+
+@pytest.mark.unit
 def test_rebuild_fts_is_atomic_under_failure() -> None:
     """If an INSERT fails mid-rebuild, the OLD documents_fts must still exist.
 

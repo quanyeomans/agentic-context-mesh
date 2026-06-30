@@ -53,7 +53,7 @@ def _deps_from(state: _MemoryWriteState) -> RememberDeps:
         document_root_fn=lambda: state.document_root,
         db_path_fn=lambda: state.db_path,
         now_fn=lambda: _BDD_NOW,
-        index_fn=lambda _db, _root, _hash: state.index_ready,
+        index_fn=lambda _db, _root, _target, _hash: state.index_ready,
     )
 
 
