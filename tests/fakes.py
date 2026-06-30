@@ -5317,7 +5317,7 @@ class FakeOAuth2Flow:
 
         return ClientCredentials(client_id=self._client_id, client_secret=self._client_secret)
 
-    def authorize(self, *, listener: Any) -> Any:
+    def authorize(self, *, listener: Any, timeout_s: float = 120.0) -> Any:
         from kairix.connect.protocols import CapturedTokens
 
         self.redirect_uris.append(listener.redirect_uri)
@@ -5326,7 +5326,7 @@ class FakeOAuth2Flow:
         if self._raises is not None:
             raise self._raises
         if self._wait_for_listener:
-            self.callback_results.append(listener.wait_for_callback())
+            self.callback_results.append(listener.wait_for_callback(timeout_s=timeout_s))
         if self._tokens is not None:
             return self._tokens
         return CapturedTokens(

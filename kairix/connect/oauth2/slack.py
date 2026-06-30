@@ -178,13 +178,14 @@ class SlackOAuth2Flow:
         """
         return ClientCredentials(client_id=self._client_id, client_secret=self._client_secret)
 
-    def authorize(self, *, listener: CallbackListener) -> CapturedTokens:
+    def authorize(self, *, listener: CallbackListener, timeout_s: float = 120.0) -> CapturedTokens:
         """Run the consent dance + token exchange against ``listener``.
 
         Steps:
           1. Build the authorize URL with the listener's ``redirect_uri``.
           2. Open the operator's browser to the consent screen.
-          3. Block on ``listener.wait_for_callback`` for the code.
+          3. Block on ``listener.wait_for_callback`` for the code, honouring
+             the operator-supplied ``timeout_s`` (``kairix connect --timeout``).
           4. Exchange the code for tokens via Slack's
              ``oauth.v2.access`` endpoint.
           5. Return the typed :class:`CapturedTokens` — ``bot_token``
@@ -194,7 +195,7 @@ class SlackOAuth2Flow:
         redirect_uri = listener.redirect_uri
         authorize_url = self._build_authorize_url(client, redirect_uri)
         self._browser.open(authorize_url)
-        callback = listener.wait_for_callback()
+        callback = listener.wait_for_callback(timeout_s=timeout_s)
         return self._exchange_code(client, callback.code, redirect_uri)
 
     def _build_authorize_url(self, client: ClientCredentials, redirect_uri: str) -> str:

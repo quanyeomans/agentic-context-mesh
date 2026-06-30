@@ -200,7 +200,7 @@ class GitHubAppFlow:
         pem = _read_private_key(self._private_key_path)
         return ClientCredentials(client_id=self._app_id, client_secret=pem)
 
-    def authorize(self, *, listener: CallbackListener) -> CapturedTokens:
+    def authorize(self, *, listener: CallbackListener, timeout_s: float = 120.0) -> CapturedTokens:
         """Open the App install URL, capture the installation_id from callback.
 
         Steps:
@@ -209,8 +209,9 @@ class GitHubAppFlow:
           2. Build the install URL (configurable via ``app_slug``).
           3. Open the operator's browser to the install URL.
           4. Block on ``listener.wait_for_callback`` for the GitHub
-             install redirect; capture ``installation_id`` from
-             ``CallbackResult.params``.
+             install redirect (honouring the operator-supplied ``timeout_s``
+             from ``kairix connect --timeout``); capture ``installation_id``
+             from ``CallbackResult.params``.
           5. Sign a JWT with the App's private key and exchange it for
              an initial installation access token (cached for the
              connector's first API call).
@@ -223,7 +224,7 @@ class GitHubAppFlow:
         client = self.discover_client_credentials()
         install_url = self._build_install_url()
         self._browser.open(install_url)
-        callback = listener.wait_for_callback()
+        callback = listener.wait_for_callback(timeout_s=timeout_s)
         installation_id = callback.params.get("installation_id") or callback.code
         if not installation_id:
             raise ValueError(

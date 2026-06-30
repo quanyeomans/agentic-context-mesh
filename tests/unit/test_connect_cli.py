@@ -18,7 +18,7 @@ from kairix.connect.cli import (
     ConnectDeps,
     main,
 )
-from kairix.connect.oauth2.google import GOOGLE_TOKEN_URI
+from kairix.connect.oauth2.google import GOOGLE_TOKEN_URI, GoogleOAuth2Flow
 from kairix.connect.protocols import (
     CapturedTokens,
     ClientCredentials,
@@ -28,6 +28,7 @@ from kairix.connect.store.azure_kv_store import AzureKeyVaultTokenStore
 from kairix.connect.store.file_store import FileTokenStore
 from kairix.connect.store.stdout_store import StdoutTokenStore
 from tests.fakes import (
+    FakeBrowserLauncher,
     FakeCallbackListener,
     FakeTokenStore,
 )
@@ -60,7 +61,7 @@ class _FakeFlow:
     def discover_client_credentials(self) -> ClientCredentials:
         return self._client
 
-    def authorize(self, *, listener: Any) -> CapturedTokens:
+    def authorize(self, *, listener: Any, timeout_s: float = 120.0) -> CapturedTokens:
         return self._tokens
 
 
@@ -131,8 +132,8 @@ def test_cli_consent_denied_returns_nonzero(tmp_path: Path) -> None:
         def discover_client_credentials(self) -> ClientCredentials:
             return ClientCredentials(client_id="x", client_secret="y")
 
-        def authorize(self, *, listener: Any) -> CapturedTokens:
-            listener.wait_for_callback(timeout_s=1.0)  # raises
+        def authorize(self, *, listener: Any, timeout_s: float = 120.0) -> CapturedTokens:
+            listener.wait_for_callback(timeout_s=timeout_s)  # raises
             raise AssertionError("should not reach here")
 
     deps_real = ConnectDeps(
@@ -166,8 +167,8 @@ def test_cli_timeout_returns_nonzero(tmp_path: Path) -> None:
         def discover_client_credentials(self) -> ClientCredentials:
             return ClientCredentials(client_id="x", client_secret="y")
 
-        def authorize(self, *, listener: Any) -> CapturedTokens:
-            listener.wait_for_callback(timeout_s=1.0)
+        def authorize(self, *, listener: Any, timeout_s: float = 120.0) -> CapturedTokens:
+            listener.wait_for_callback(timeout_s=timeout_s)
             raise AssertionError("should not reach")
 
     deps = ConnectDeps(
@@ -186,6 +187,54 @@ def test_cli_timeout_returns_nonzero(tmp_path: Path) -> None:
     assert "timeout" in err or "within" in err, f"expected time-out indication in stderr, got: {err!r}"
     assert "fix:" in err and "next:" in err and "run:" in err, (
         f"expected F21 fix/next/run markers in stderr, got: {err!r}"
+    )
+
+
+def test_cli_timeout_flag_threads_into_wait_for_callback(tmp_path: Path) -> None:
+    """``--timeout N`` is honoured: it reaches ``listener.wait_for_callback``.
+
+    Regression for #498 — the flag was parsed but silently ignored. Drives
+    the production :class:`GoogleOAuth2Flow.authorize` path (browser +
+    authorize-url-builder + token-exchanger injected via the constructor
+    seams) so the assertion proves the CLI threads ``args.timeout`` →
+    ``flow.authorize(timeout_s=...)`` → ``listener.wait_for_callback(timeout_s=...)``.
+
+    The :class:`FakeCallbackListener` records every ``timeout_s`` it was
+    called with in ``wait_calls``; an operator-supplied ``--timeout 7``
+    must land there as ``7.0``.
+
+    Sabotage-proof: revert ``kairix/connect/cli.py`` to
+    ``flow.authorize(listener=listener)`` (dropping the ``timeout_s=``
+    argument) — the default 120.0 flows through instead and
+    ``wait_calls == [120.0] != [7.0]`` fails the assertion.
+    """
+    cs = _make_client_secret(tmp_path / "cs.json")
+    listener = FakeCallbackListener()
+    flow = GoogleOAuth2Flow(
+        service_area="gmail",
+        client_secret_path=cs,
+        browser=FakeBrowserLauncher(),
+        authorize_url_builder=lambda _client, _redirect, _scopes: "https://accounts.example/auth",
+        token_exchanger=lambda _client, _code, _redirect: CapturedTokens(
+            refresh_token="rt",
+            access_token="at",
+            token_uri=GOOGLE_TOKEN_URI,
+        ),
+    )
+    deps = ConnectDeps(
+        listener_factory=lambda _h, _p: listener,
+        oauth2_flow_factory=lambda _args: flow,
+        token_store_factory=lambda _spec: FakeTokenStore(),
+        stdout=io.StringIO(),
+        stderr=io.StringIO(),
+    )
+    rc = main(
+        ["google-gmail", "--client-secret-path", str(cs), "--timeout", "7"],
+        deps=deps,
+    )
+    assert rc == 0
+    assert listener.wait_calls == [7.0], (
+        f"expected the operator --timeout to thread into wait_for_callback as [7.0], got {listener.wait_calls!r}"
     )
 
 

@@ -200,13 +200,14 @@ class OAuth2Flow(Protocol):
         """
         ...
 
-    def authorize(self, *, listener: CallbackListener) -> CapturedTokens:
+    def authorize(self, *, listener: CallbackListener, timeout_s: float = 120.0) -> CapturedTokens:
         """Run the full authorize-and-exchange dance using ``listener``.
 
         Steps:
           1. Build the authorize URL with the listener's ``redirect_uri``.
           2. Open the operator's browser to that URL.
-          3. Block on ``listener.wait_for_callback`` for the code.
+          3. Block on ``listener.wait_for_callback`` for the code, honouring
+             ``timeout_s`` (the operator-supplied ``kairix connect --timeout``).
           4. Exchange the code for tokens via the service's token endpoint.
           5. Return the typed :class:`CapturedTokens`.
         """

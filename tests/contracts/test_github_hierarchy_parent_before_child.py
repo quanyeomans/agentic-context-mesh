@@ -102,8 +102,8 @@ class _ScriptedClient:
 def test_github_hierarchy_parent_before_child_orgs_then_repos_then_dirs() -> None:
     """Every emitted HierarchyNode's parent must be in the prior-emitted set.
 
-    Post-cutover (task #132 — ``topology_v2_github`` retired) the
-    connector always emits the full Org → repo → top-level-dir tree.
+    Post-cutover (the ``topology``-pilot flag retired) the connector
+    always emits the full Org → repo → top-level-dir tree.
     The contract under test:
 
       * Every ``raw_parent_id`` that is not None must reference a

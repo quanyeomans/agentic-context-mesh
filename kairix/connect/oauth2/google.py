@@ -179,7 +179,7 @@ class GoogleOAuth2Flow:
         blob = _parse_client_secret_file(self._client_secret_path)
         return ClientCredentials(client_id=blob.client_id, client_secret=blob.client_secret)
 
-    def authorize(self, *, listener: CallbackListener) -> CapturedTokens:
+    def authorize(self, *, listener: CallbackListener, timeout_s: float = 120.0) -> CapturedTokens:
         """Run the consent dance + token exchange against ``listener``.
 
         The default token exchanger uses ``google-auth-oauthlib``'s
@@ -187,12 +187,16 @@ class GoogleOAuth2Flow:
         component (we own the listener) — specifically the
         ``fetch_token(code=...)`` call. Tests inject a recording
         exchanger to avoid pulling the Google library in unit tests.
+
+        ``timeout_s`` is the operator-supplied ``kairix connect --timeout``
+        value, threaded into ``listener.wait_for_callback`` so the flag is
+        honoured rather than silently ignored.
         """
         client = self.discover_client_credentials()
         redirect_uri = listener.redirect_uri
         authorize_url = self._build_authorize_url(client, redirect_uri)
         self._browser.open(authorize_url)
-        callback = listener.wait_for_callback()
+        callback = listener.wait_for_callback(timeout_s=timeout_s)
         return self._exchange_code(client, callback.code, redirect_uri)
 
     def _build_authorize_url(self, client: ClientCredentials, redirect_uri: str) -> str:
