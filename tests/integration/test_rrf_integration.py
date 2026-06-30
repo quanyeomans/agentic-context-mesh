@@ -29,7 +29,7 @@ from typing import Any
 
 import pytest
 
-from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
+from kairix.core.factory import QUERY_CACHE_DISABLED, RERANK_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.search.boosts import EntityBoost, ProceduralBoost, TemporalDateBoost
 from kairix.core.search.budget import BudgetedResult
 from kairix.core.search.config import (
@@ -126,6 +126,11 @@ def _build_pipeline(
             logger_override=_NullLogger(),
             resolver_override=FakeCollectionResolver(),
             query_cache_override=QUERY_CACHE_DISABLED,
+            # These tests assert RRF fusion + boost scores/order, never the
+            # reranked order. RERANK_DISABLED wires reranker=None so the score
+            # assertions hold whether or not the `rerank` extra (cross-encoder)
+            # is installed — CI omits it, a full-extras worktree wires it (PLA-283).
+            reranker_override=RERANK_DISABLED,
         ),
     )
 
