@@ -11,9 +11,12 @@ Detection:
   1. Import ``kairix.core.features.registry.REGISTRY``. If the module is
      not yet present (PR-2 has not landed), exit 0 — vacuous-green per
      the cross-PR dependency convention.
-  2. Determine current version via ``setuptools-scm`` (``get_version``).
-  3. Add 6 months to the current version's date component (versions are
-     CalVer-shaped ``vYYYY.M.D`` in this repo).
+  2. Determine current version via ``setuptools-scm`` (``get_version``),
+     falling back to ``git describe --tags`` when scm is not importable
+     (it is only a build dependency). A tagless checkout skips the check.
+  3. Add 6 months to the current version's date component. Versions are
+     CalVer-shaped ``vYYYY.M.D`` with an optional PEP-440 pre-release tail
+     (``v2026.6.28a5``) or scm dev tail (``2026.6.29.dev3``).
   4. For each flag, compare ``target_retire_in`` against the deadline.
      If past, scan the registry source for an adjacent
      ``# retire-extension: <reason>`` comment; if absent, record a
@@ -67,15 +70,25 @@ Forbidden example:
       ),
   }"""
 
-_VERSION_RE = re.compile(r"^v?(\d{4})\.(\d{1,2})\.(\d{1,2})(?:[.\-+].*)?$")
+# Accepts the CalVer ``vYYYY.M.D`` head plus the tails this repo's tags and
+# ``setuptools-scm`` actually emit:
+#   * a PEP-440 pre-release tail attached WITHOUT a separator (``v2026.6.28a5``,
+#     the shape ``release-alpha.yml`` cuts) — ``(?:[a-z]\d+)?``;
+#   * a ``setuptools-scm`` dev / local / extra-segment tail introduced by a
+#     separator (``2026.6.29.dev3``, ``v2026.6.28-3-gabc``) — ``(?:[.\-+].*)?``.
+# Pre-PLA-277 the first tail had no alternative, so every alpha tag and every
+# ``aN.devM`` scm version parsed to None and F51 was permanently vacuous.
+_VERSION_RE = re.compile(r"^v?(\d{4})\.(\d{1,2})\.(\d{1,2})(?:[a-z]\d+)?(?:[.\-+].*)?$")
 
 
 def _parse_calver(version: str) -> date | None:
     """Parse a CalVer ``vYYYY.M.D`` string to a date.
 
-    Returns None when the version does not match the CalVer shape (e.g.
-    a ``setuptools-scm``-generated PEP-440 dev version mid-cycle); the
-    caller treats None as "skip deadline check, gate stays green".
+    Tolerates the PEP-440 pre-release tail (``v2026.6.28a5``) and the
+    ``setuptools-scm`` dev tail (``2026.6.29.dev3``) — only the
+    year/month/day head is used. Returns None when the version does not
+    match the CalVer shape at all; the caller treats None as "can't
+    resolve a version, skip deadline check".
     """
     match = _VERSION_RE.match(version.strip())
     if match is None:
@@ -100,22 +113,53 @@ def _add_six_months(d: date) -> date:
     return date(year, month, 28)
 
 
-def _current_version() -> str | None:
-    """Return ``setuptools-scm`` current version or None on failure."""
+def _run_for_version(cmd: list[str], cwd: Path) -> str | None:
+    """Run ``cmd`` in ``cwd`` and return trimmed stdout, or None on failure."""
     try:
         result = subprocess.run(
-            [sys.executable, "-c", "from setuptools_scm import get_version; print(get_version())"],
+            cmd,
             capture_output=True,
             text=True,
             check=False,
-            cwd=REPO_ROOT,
+            cwd=cwd,
         )
-    except (OSError, FileNotFoundError):
+    except OSError:
         return None
     if result.returncode != 0:
         return None
     out = result.stdout.strip()
     return out or None
+
+
+def _version_from_scm() -> str | None:
+    """Return the ``setuptools-scm`` version, or None when scm is unavailable."""
+    return _run_for_version(
+        [sys.executable, "-c", "from setuptools_scm import get_version; print(get_version())"],
+        REPO_ROOT,
+    )
+
+
+def _version_from_git_describe(cwd: Path = REPO_ROOT) -> str | None:
+    """Return the nearest git tag (``git describe`` fallback), or None.
+
+    setuptools-scm is a *build* dependency, so a runtime venv (or a
+    box-side checkout) frequently has no ``setuptools_scm`` importable —
+    in which case :func:`_version_from_scm` returns None and the deadline
+    never evaluated. ``git describe --tags`` resolves the same CalVer head
+    from the tag graph, so F51 fires on a tagged checkout even with no scm
+    install. A truly tagless checkout returns None (deadline skipped).
+
+    ``cwd`` defaults to the repository root and exists so the resolver can
+    be pointed at any working tree — the F51 check tests exercise the
+    fallback against a hermetic fixture repo rather than depending on the
+    CI checkout having fetched tags.
+    """
+    return _run_for_version(["git", "describe", "--tags", "--abbrev=0"], cwd)
+
+
+def _current_version() -> str | None:
+    """Resolve the current version: ``setuptools-scm`` first, git tag fallback."""
+    return _version_from_scm() or _version_from_git_describe()
 
 
 def _find_extension_comment_lines(registry_text: str) -> set[str]:
