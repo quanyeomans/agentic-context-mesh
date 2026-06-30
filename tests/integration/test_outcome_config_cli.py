@@ -47,16 +47,27 @@ def _write_config(root: Path, body: str) -> Path:
 
 def test_config_validate_subprocess_reports_ok_on_valid_yaml(tmp_path: Path) -> None:
     """Valid YAML → exit 0 + ``OK: <path> is valid.`` on stdout."""
+    # Declare collection paths as absolute directories under tmp_path so the
+    # validator's path-existence check is home-dir-independent. `kairix config
+    # validate` resolves the document root via KairixPaths, which anchors a
+    # *relative* collection path against the operator's real ~/Documents — on a
+    # dev machine where ~/Documents/docs is absent that path check fails and the
+    # subprocess exits 1. Absolute, tmp_path-rooted dirs resolve the same way
+    # regardless of the host's home directory (PLA-283).
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    research_dir = tmp_path / "research"
+    research_dir.mkdir()
     config_path = _write_config(
         tmp_path,
-        """
+        f"""
         collections:
           shared:
             - name: docs
-              path: docs
+              path: {docs_dir}
             - name: research
-              path: research
-          agent_pattern: "{agent}-memory"
+              path: {research_dir}
+          agent_pattern: "{{agent}}-memory"
         agents:
           - name: agent-alpha
             write_path: agents/agent-alpha

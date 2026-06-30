@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
+from kairix.core.factory import QUERY_CACHE_DISABLED, RERANK_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.search.boosts import (
     ChunkDateBoost,
     EntityBoost,
@@ -104,6 +104,11 @@ def _build_pipeline(
             logger_override=FakeSearchLogger(),
             resolver_override=FakeCollectionResolver(),
             query_cache_override=QUERY_CACHE_DISABLED,
+            # These tests assert boost-chain scores/order, never the reranked
+            # order. RERANK_DISABLED wires reranker=None so the assertions hold
+            # whether or not the `rerank` extra (cross-encoder) is installed —
+            # CI omits it, a full-extras worktree wires it (PLA-283).
+            reranker_override=RERANK_DISABLED,
         ),
     )
 
@@ -403,6 +408,7 @@ class TestFullBoostStackSmoke:
                 logger_override=logger,
                 resolver_override=FakeCollectionResolver(),
                 query_cache_override=QUERY_CACHE_DISABLED,
+                reranker_override=RERANK_DISABLED,
             ),
         )
         pipe.search("anything")
