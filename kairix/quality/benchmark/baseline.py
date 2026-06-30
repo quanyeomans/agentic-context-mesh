@@ -28,6 +28,8 @@ import logging
 import sys
 from pathlib import Path
 
+from kairix.paths import agent_cli_roots, confine_to_roots
+
 logger = logging.getLogger(__name__)
 
 REGRESSION_THRESHOLD: float = 0.02  # fail if weighted_total drops more than this
@@ -36,8 +38,13 @@ CATEGORY_WARN_THRESHOLD: float = 0.01  # warn if any category drops more than th
 
 
 def load_result(path: str | Path) -> dict:
-    """Load a benchmark result JSON file. Raises FileNotFoundError or ValueError."""
-    p = Path(path)
+    """Load a benchmark result JSON file. Raises FileNotFoundError or ValueError.
+
+    S8707: ``path`` is the agent/operator-supplied benchmark-result flag. Confine
+    it to the working-area allow-list before any read so a crafted escape raises
+    ``PathTraversalError`` (a ``ValueError``) instead of reading off-tree.
+    """
+    p = confine_to_roots(path, agent_cli_roots())
     if not p.exists():
         raise FileNotFoundError(f"Benchmark result not found: {p}")
     with p.open(encoding="utf-8") as f:

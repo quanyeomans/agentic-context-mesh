@@ -27,9 +27,21 @@ from __future__ import annotations
 
 import logging
 import re
-from pathlib import Path
+
+# Path confinement converged onto the canonical home in ``kairix.paths`` so the
+# eval module and every CLI share ONE auditable allow-list sanitiser. Re-exported
+# here for backward compatibility — existing importers of
+# ``kairix.quality.eval.security.confine_to`` keep working unchanged.
+from kairix.paths import PathTraversalError, confine_to
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "DEFAULT_PROMPT_SNIPPET_CAP",
+    "PathTraversalError",
+    "confine_to",
+    "sanitise_document_content",
+]
 
 # Default cap for any single document snippet interpolated into a prompt.
 # 1000 chars is long enough to capture relevance signal for the judge,
@@ -47,49 +59,6 @@ _ROLE_MARKER_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\[INST\]|\[/INST\]"),  # Llama-2 instruction markers
     re.compile(r"<\|endoftext\|>"),  # OpenAI legacy EOT
 )
-
-
-class PathTraversalError(ValueError):
-    """Raised when a candidate path resolves outside its allowed root.
-
-    Subclass of ``ValueError`` so existing ``except ValueError`` blocks
-    around path resolution catch it without code churn, while callers that
-    care about the distinction can ``except PathTraversalError``.
-    """
-
-
-def confine_to(root: Path, candidate: str | Path) -> Path:
-    """Resolve ``candidate`` against ``root`` and verify it stays inside ``root``.
-
-    ``candidate`` may be absolute or relative. Symlinks are followed via
-    ``Path.resolve()``, so a symlink inside ``root`` that points outside is
-    detected. Raises :class:`PathTraversalError` on escape; the caller
-    decides whether to log, abort, or fall back.
-
-    Args:
-        root:      The allowed root directory. Must exist for ``.resolve()``
-                   to canonicalise correctly; the function does not create it.
-        candidate: A user-supplied path string or ``Path`` object.
-
-    Returns:
-        The resolved absolute ``Path`` inside ``root``.
-
-    Raises:
-        PathTraversalError: when the resolved candidate is not inside
-                            the resolved root.
-    """
-    root_resolved = Path(root).resolve()
-    cand = Path(candidate)
-    # When candidate is absolute, the / operator returns it unchanged; when
-    # relative, it's joined onto root. Either way, ``.resolve()`` then
-    # canonicalises so ``..`` segments are collapsed before the check.
-    combined = cand if cand.is_absolute() else (root_resolved / cand)
-    resolved = combined.resolve()
-    try:
-        resolved.relative_to(root_resolved)
-    except ValueError as e:
-        raise PathTraversalError(f"Path {str(candidate)!r} escapes allowed root {str(root_resolved)!r}") from e
-    return resolved
 
 
 def sanitise_document_content(text: str, *, cap: int = DEFAULT_PROMPT_SNIPPET_CAP) -> str:

@@ -79,6 +79,11 @@ Canonical examples reference real code in this repo where available.
   ```
 - Note: the gate reads the project's *current* per-file open-issue counts and compares them to the committed baseline. A main-branch BLOCKER on an existing file only fails the ratchet if it pushes that file *above* its grandfathered baseline count; once the fix lands and SonarCloud re-scans, regenerate the baseline with `--capture` so the lowered count becomes the new floor. There is no skip flag — the ratchet is deterministic. CI's quality gate remains the authoritative confirmation.
 
+### `pythonsecurity:S8707` agentic path injection (and `S8705` shell / `S8706` DB siblings)
+- Local detector: none (taint analysis is server-side only) — the per-file ratchet is the local parity check.
+- Recipe: same shape as `S2083` above, but the source is an LLM-driven CLI/use-case path argument rather than a generic user input. Route the path through the canonical allow-list sanitiser `kairix.paths.confine_to_roots(candidate, agent_cli_roots())` (resolve + collapse `..` + verify under cwd/home/tempdir, raise `PathTraversalError` before any `open()`); for a path with a single natural base use `confine_to(root, candidate)`. When the agent-controlled component is already validated upstream (e.g. `kairix remember`'s `agent` against the `valid_agents` allowlist) the finding is a genuine false positive — document that instead. Then add a `sonar.issue.ignore.multicriteria` entry per file with an F14 rationale, because Sonar's taint engine does not recognise the allow-list sanitiser. Canonical examples: `confine_to_roots` / `agent_cli_roots` in `kairix/paths.py` and the `s8707-*` exclusions in `sonar-project.properties`, sabotage-proven by `tests/test_s8707_confinement.py`.
+- Note: S8707 rolled out AFTER the ratchet baseline, so a drifted file fails `check_sonar_new_code.py` locally even though the finding is pre-existing — `--capture` re-floors it; the orchestrator re-captures to 0 after the confinement lands and main is re-scanned.
+
 ### `python:S5886` / `python:S5890` DataclassInstance return / assign
 - Local detector: mypy strict + this script
 - Recipe: construct the dataclass explicitly with field-by-field copy. Canonical example: `_replace_document_root` in `kairix/knowledge/wikilinks/cli.py`.

@@ -35,6 +35,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from kairix.paths import PathTraversalError, agent_cli_roots, confine_to_roots
 from kairix.providers import (
     Provider,
     ProviderNotRegistered,
@@ -219,6 +220,24 @@ def _invalid_args(message: str) -> int:
     return 2
 
 
+def _validate_output_path(output: str | None) -> int | None:
+    """Confine an operator-supplied ``--output`` path to the working-area allow-list.
+
+    S8707: ``--output`` is agent/operator-supplied and flows to a ``write_text``
+    sink in both the config-report (``_emit_report``) and perf (``_emit_perf_report``)
+    paths. Validating it once at the CLI entry rejects a crafted escape as
+    invalid args (exit 2) before any write. Returns the invalid-args exit code
+    on escape, else ``None`` when the path is absent or in-bounds.
+    """
+    if output is None:
+        return None
+    try:
+        confine_to_roots(output, agent_cli_roots())
+    except PathTraversalError as exc:
+        return _invalid_args(str(exc))
+    return None
+
+
 def _default_env_provider_lookup() -> str | None:
     """Default env-var lookup — delegates to :func:`kairix.paths.provider_name`.
 
@@ -277,7 +296,13 @@ def _load_baseline(path_str: str) -> tuple[dict[str, Any] | None, int]:
     silently skipping the comparison — operators expect the
     comparison to be in the report when they passed ``--compare``.
     """
-    path = Path(path_str)
+    # S8707 confinement: ``--compare`` is an operator-supplied path. Confine it
+    # to the working-area allow-list before any read so a crafted escape is
+    # rejected as invalid args rather than read off-tree.
+    try:
+        path = confine_to_roots(path_str, agent_cli_roots())
+    except PathTraversalError as exc:
+        return None, _invalid_args(str(exc))
     if not path.exists():
         return None, _invalid_args(
             f"--compare path does not exist: {path_str}. fix: pass a previously-saved probe-config JSON report"
@@ -468,6 +493,12 @@ def main(
     if env_provider_lookup is None:
         env_provider_lookup = _default_env_provider_lookup
     args = _build_parser().parse_args(argv)
+
+    # S8707: confine the operator-supplied --output write target before either
+    # dispatch path (config-report or --perf) reaches its write_text sink.
+    output_err = _validate_output_path(args.output)
+    if output_err is not None:
+        return output_err
 
     # --perf is a separate dispatch path that bypasses provider probing —
     # the perf sweep measures end-to-end capability latency, not provider

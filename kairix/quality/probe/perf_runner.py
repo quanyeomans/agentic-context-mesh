@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kairix.paths import agent_cli_roots, confine_to_roots
 from kairix.quality.probe.stats import LatencyStats, latency_stats
 
 __all__ = [
@@ -147,7 +148,13 @@ def load_budgets(path: Path) -> dict[str, dict[str, float]]:
     Raises ``ValueError`` if the file is malformed (missing keys / wrong
     types) so the CLI can surface an actionable error rather than
     silently treating every op as ``within_budget=True``.
+
+    S8707: ``path`` is the agent/operator-supplied ``--perf-budgets`` flag.
+    Confine it to the working-area allow-list before any read; the raised
+    ``PathTraversalError`` is a ``ValueError`` subclass, so the CLI's existing
+    malformed-budgets handler surfaces it as actionable invalid-args.
     """
+    path = confine_to_roots(path, agent_cli_roots())
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError(f"perf budgets file is not a JSON object: {path}")

@@ -15,7 +15,8 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from collections.abc import Mapping
+import tempfile
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
@@ -1815,3 +1816,113 @@ def agent_memory_glob(*, config: dict[str, Any] | None = None) -> str:
 # config from ``agents:`` / ``agent_defaults:`` in ``kairix.config.yaml``.
 # The regression guard against re-adding the legacy helpers lives at
 # ``tests/contracts/`` — see the no-legacy-helper contract test there.
+
+
+# ---------------------------------------------------------------------------
+# Path confinement — the canonical home for the allow-list sanitiser pattern
+# ---------------------------------------------------------------------------
+#
+# Two threat shapes share one mechanism:
+#
+#   * S2083 / S8707 (agentic) path traversal — a CLI flag, MCP tool arg, or
+#     suite-YAML field carries ``../../etc/passwd`` (or an absolute escape) and
+#     an LLM driving the CLI is tricked into reading/writing outside the
+#     legitimate working area.
+#
+# ``confine_to`` (single root) and ``confine_to_roots`` (allow-list) resolve
+# the candidate, collapse ``..`` segments via ``Path.resolve()`` (so a symlink
+# inside the root that points out is also caught), and verify the result sits
+# under an allowed root — raising :class:`PathTraversalError` BEFORE any
+# filesystem call. This is the single canonical implementation;
+# ``kairix.quality.eval.security`` re-exports it so the eval module and every
+# CLI share one auditable guard. (``kairix.secrets.store`` keeps its own
+# secrets-specific allow-list policy.)
+
+
+class PathTraversalError(ValueError):
+    """Raised when a candidate path resolves outside its allowed root(s).
+
+    Subclass of ``ValueError`` so existing ``except ValueError`` blocks around
+    path resolution catch it without code churn, while callers that care about
+    the distinction can ``except PathTraversalError``.
+    """
+
+
+def confine_to(root: Path, candidate: str | Path) -> Path:
+    """Resolve ``candidate`` against ``root`` and verify it stays inside ``root``.
+
+    ``candidate`` may be absolute or relative. Symlinks are followed via
+    ``Path.resolve()``, so a symlink inside ``root`` that points outside is
+    detected. Raises :class:`PathTraversalError` on escape; the caller decides
+    whether to log, abort, or fall back.
+
+    Args:
+        root:      The allowed root directory. Must exist for ``.resolve()`` to
+                   canonicalise correctly; the function does not create it.
+        candidate: A user-supplied path string or ``Path`` object.
+
+    Returns:
+        The resolved absolute ``Path`` inside ``root``.
+
+    Raises:
+        PathTraversalError: when the resolved candidate is not inside the
+                            resolved root.
+    """
+    root_resolved = Path(root).resolve()
+    cand = Path(candidate)
+    # When candidate is absolute, the / operator returns it unchanged; when
+    # relative, it's joined onto root. Either way, ``.resolve()`` then
+    # canonicalises so ``..`` segments are collapsed before the check.
+    combined = cand if cand.is_absolute() else (root_resolved / cand)
+    resolved = combined.resolve()
+    try:
+        resolved.relative_to(root_resolved)
+    except ValueError as e:
+        raise PathTraversalError(f"Path {str(candidate)!r} escapes allowed root {str(root_resolved)!r}") from e
+    return resolved
+
+
+def agent_cli_roots(*extra: str | Path) -> tuple[Path, ...]:
+    """The roots an agent-invoked CLI may legitimately read/write under.
+
+    Defaults to the current working directory, the operator's home, and the
+    system temp dir (where ``pytest``'s ``tmp_path`` lives, so outcome tests
+    pass unchanged). Pass ``extra`` roots for a surface with an additional
+    legitimate base (e.g. the resolved document root). All roots are
+    canonicalised so the membership test in :func:`confine_to_roots` is exact.
+    """
+    roots: list[Path] = [Path.cwd(), Path.home(), Path(tempfile.gettempdir())]
+    roots.extend(Path(e) for e in extra)
+    return tuple(r.expanduser().resolve() for r in roots)
+
+
+def confine_to_roots(candidate: str | Path, roots: Sequence[Path]) -> Path:
+    """Canonicalise ``candidate`` and verify it sits under one of ``roots``.
+
+    The allow-list generalisation of :func:`confine_to` — the canonical shape
+    mirrored from ``kairix.secrets.store._confine_to_allowed_root``. Resolves
+    the candidate (collapsing ``..`` and following symlinks) and returns it
+    only when it equals, or sits beneath, one of the allowed roots. Raises
+    :class:`PathTraversalError` BEFORE any filesystem access otherwise.
+
+    Args:
+        candidate: A user-supplied path string or ``Path`` object.
+        roots:     Allowed roots; typically :func:`agent_cli_roots`.
+
+    Returns:
+        The resolved absolute ``Path`` under one of ``roots``.
+
+    Raises:
+        PathTraversalError: when the resolved candidate escapes every root.
+    """
+    resolved = Path(candidate).expanduser().resolve()
+    for root in roots:
+        root_resolved = Path(root).expanduser().resolve()
+        if resolved == root_resolved or root_resolved in resolved.parents:
+            return resolved
+    roots_repr = ", ".join(str(r) for r in roots)
+    raise PathTraversalError(
+        f"Path {str(candidate)!r} escapes the allowed roots ({roots_repr}). "
+        f"fix: pass a path under your working directory, home, or temp dir. "
+        f"next: re-run with a path inside one of those roots."
+    )
