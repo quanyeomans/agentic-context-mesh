@@ -30,7 +30,15 @@ from tests.fakes import FakeDocumentRepository
 
 
 def _create_db_with_doc(tmp_path: Path, doc_text: str, *, path: str = "doc.md") -> Path:
-    """Create a single-doc SQLite DB with the given doc content."""
+    """Create a single-doc SQLite DB with the given doc content.
+
+    Mirrors the production FTS5 schema (``filepath, title, doc`` — a
+    content-storing, NOT ``content=''`` contentless table) so that the
+    FTS5 ``snippet()`` auxiliary function used by ``_build_bm25_query``
+    behaves exactly as it does against the real index (PLA-269). A
+    contentless table makes ``snippet()`` return NULL and a 2-column
+    table has no column index 2 — both would silently break the snippet.
+    """
     db_path = tmp_path / "single.sqlite"
     db = sqlite3.connect(str(db_path))
     db.executescript(f"""
@@ -46,15 +54,15 @@ def _create_db_with_doc(tmp_path: Path, doc_text: str, *, path: str = "doc.md") 
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
         CREATE VIRTUAL TABLE documents_fts USING fts5(
-            title, doc, content='', tokenize='porter unicode61'
+            filepath, title, doc, tokenize='porter unicode61'
         );
         INSERT INTO documents (collection, path, title, hash, active)
         VALUES ('vault', '{path}', 'Test Doc', 'h1', 1);
     """)
     db.execute("INSERT INTO content (hash, doc) VALUES ('h1', ?)", (doc_text,))
     db.execute(
-        "INSERT INTO documents_fts(rowid, title, doc) "
-        "SELECT d.id, d.title, c.doc FROM documents d JOIN content c ON c.hash = d.hash"
+        "INSERT INTO documents_fts(rowid, filepath, title, doc) "
+        "SELECT d.id, d.path, d.title, c.doc FROM documents d JOIN content c ON c.hash = d.hash"
     )
     db.commit()
     db.close()
@@ -95,58 +103,67 @@ def test_score_is_normalised_to_zero_one_range(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Frontmatter stripping contract
+# Snippet = matched region, not a fixed chunk prefix (PLA-269)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-def test_snippet_strips_yaml_frontmatter_when_doc_starts_with_triple_dash(tmp_path: Path) -> None:
-    """Per impl: when doc starts with ``---``, the snippet is the body
-    (after the closing ``---``), not the frontmatter block.
+def test_snippet_is_centred_on_the_match_not_the_chunk_prefix(tmp_path: Path) -> None:
+    """PLA-269: when the match term appears LATE in a long chunk, the
+    snippet is the window AROUND the match — not a fixed prefix of the
+    chunk opening — and the truncated leading edge carries the ``…`` marker.
+
+    Sabotage proof: under the old ``doc_text[:300]`` prefix slice the term
+    ``zelkova`` (absent from the first 300 chars — asserted below) never
+    appears in the snippet, so ``"zelkova" in snippet`` would fail.
     """
-    doc = "---\ntitle: Test\ntags: [foo]\n---\nThis is the body content with kairix."
+    prefix = "Opening filler about unrelated background material. " * 12
+    tail = "The pivotal keyword zelkova surfaces only here near the chunk tail."
+    doc = prefix + tail
+    # Guard: the fixture must put the match outside the old prefix window,
+    # otherwise the test could not tell the new behaviour from the old.
+    assert "zelkova" not in doc[:300]
     db_path = _create_db_with_doc(tmp_path, doc)
-    results = bm25_search("kairix", db_path=db_path)
+
+    results = bm25_search("zelkova", db_path=db_path)
+
     assert results
     snippet = results[0]["snippet"]
-    # Body content present.
-    assert "body content" in snippet
-    # YAML keys NOT in the snippet (otherwise we leaked frontmatter).
-    assert "title:" not in snippet
-    assert "tags:" not in snippet
+    assert "zelkova" in snippet, "snippet must contain the matched region"
+    assert " … " in snippet, "a truncated-edge snippet must carry the ellipsis marker"
 
 
 @pytest.mark.unit
-def test_snippet_does_not_strip_when_doc_does_not_start_with_triple_dash(tmp_path: Path) -> None:
-    """Docs without frontmatter keep their full content (truncated to 300)."""
+def test_short_chunk_snippet_returned_whole_without_ellipsis(tmp_path: Path) -> None:
+    """A chunk shorter than the snippet window is returned whole — the
+    match is visible and there is no truncation, so no ellipsis is added.
+    """
     doc = "Plain content about kairix without any frontmatter delimiter."
     db_path = _create_db_with_doc(tmp_path, doc)
     results = bm25_search("kairix", db_path=db_path)
     assert results
-    assert results[0]["snippet"].startswith("Plain content")
+    snippet = results[0]["snippet"]
+    assert snippet.startswith("Plain content")
+    assert " … " not in snippet
 
 
 @pytest.mark.unit
-def test_snippet_falls_back_when_frontmatter_is_malformed(tmp_path: Path) -> None:
-    """A doc starting with ``---`` but missing the closing delimiter
-    should fall back to a 300-char prefix rather than raising.
+def test_long_chunk_snippet_is_a_bounded_window_with_ellipsis(tmp_path: Path) -> None:
+    """A chunk far longer than the snippet window yields a bounded window
+    (much shorter than the full chunk) ending in the ``…`` truncation marker.
+
+    Sabotage proof: the old prefix slice ``doc[:300]`` carried no ellipsis
+    marker, so ``" … " in snippet`` distinguishes the new windowed snippet
+    from the retired prefix behaviour.
     """
-    doc = "---\nthis frontmatter has no closer and contains kairix"
-    db_path = _create_db_with_doc(tmp_path, doc)
-    results = bm25_search("kairix", db_path=db_path)
-    assert results
-    # Falls back to first-300 chars (which start with ---).
-    assert results[0]["snippet"].startswith("---")
-
-
-@pytest.mark.unit
-def test_snippet_truncated_to_300_chars(tmp_path: Path) -> None:
-    """Both fallback paths cap snippet at 300 chars."""
-    long = "kairix " + ("filler text " * 200)  # >> 300 chars
+    long = "kairix " + ("filler text " * 200)  # >> the 32-token window
     db_path = _create_db_with_doc(tmp_path, long)
     results = bm25_search("kairix", db_path=db_path)
     assert results
-    assert len(results[0]["snippet"]) <= 300
+    snippet = results[0]["snippet"]
+    assert "kairix" in snippet
+    assert " … " in snippet
+    assert len(snippet) < len(long), "snippet must be a window, not the full chunk"
 
 
 # ---------------------------------------------------------------------------
