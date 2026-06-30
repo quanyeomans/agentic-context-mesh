@@ -8,9 +8,13 @@ import pytest
 from kairix.paths import (
     KairixPaths,
     Mode,
+    PathTraversalError,
+    agent_cli_roots,
     briefing_dir,
     bundled_suites_root,
     clear_cache,
+    confine_to,
+    confine_to_roots,
     default_cache_dir,
     default_data_dir,
     default_document_root,
@@ -1317,3 +1321,63 @@ class TestBriefingDir:
         with a ``briefing`` leaf."""
         result = briefing_dir(environ={})
         assert result.name == "briefing"
+
+
+@pytest.mark.unit
+class TestPathConfinement:
+    """The canonical allow-list sanitiser (S2083 / S8707 confinement).
+
+    Lives here (same-module as ``kairix/paths.py``) so mutation-parity always
+    runs it against ``confine_to`` / ``confine_to_roots`` mutants — a widely
+    imported module's own tests are guaranteed in-window where a topical test
+    module would be evicted by the impacted-test cap.
+    """
+
+    @pytest.mark.unit
+    def test_confine_to_accepts_relative_inside_root(self, tmp_path: Path) -> None:
+        (tmp_path / "suites").mkdir()
+        resolved = confine_to(tmp_path, "suites/canary.yaml")
+        assert resolved == (tmp_path / "suites" / "canary.yaml").resolve()
+
+    @pytest.mark.unit
+    def test_confine_to_rejects_dotdot_escape(self, tmp_path: Path) -> None:
+        with pytest.raises(PathTraversalError) as excinfo:
+            confine_to(tmp_path, "../../../etc/passwd")
+        assert "escapes allowed root" in str(excinfo.value)
+
+    @pytest.mark.unit
+    def test_confine_to_roots_accepts_path_inside_a_root(self, tmp_path: Path) -> None:
+        target = tmp_path / "report.json"
+        target.write_text("{}", encoding="utf-8")
+        # Pins the ``root in resolved.parents`` arm (killed by the or->and mutant).
+        assert confine_to_roots(target, [tmp_path]) == target.resolve()
+
+    @pytest.mark.unit
+    def test_confine_to_roots_accepts_the_root_itself(self, tmp_path: Path) -> None:
+        # Pins the ``resolved == root`` arm: a dir is not in its own .parents,
+        # so without the equality check this case is wrongly rejected
+        # (kills the ==->!= mutant).
+        assert confine_to_roots(tmp_path, [tmp_path]) == tmp_path.resolve()
+
+    @pytest.mark.unit
+    def test_confine_to_roots_rejects_dotdot_traversal(self, tmp_path: Path) -> None:
+        with pytest.raises(PathTraversalError) as excinfo:
+            confine_to_roots(tmp_path / ".." / ".." / "etc" / "passwd", [tmp_path])
+        assert "escapes the allowed roots" in str(excinfo.value)
+
+    @pytest.mark.unit
+    def test_confine_to_roots_rejects_absolute_path_outside_every_root(self, tmp_path: Path) -> None:
+        with pytest.raises(PathTraversalError):
+            confine_to_roots("/etc/passwd", [tmp_path])
+
+    @pytest.mark.unit
+    def test_agent_cli_roots_admits_tempdir_and_extra_roots(self, tmp_path: Path) -> None:
+        # tmp_path lives under the system temp dir → admitted by the defaults.
+        probe = tmp_path / "probe.txt"
+        probe.write_text("ok", encoding="utf-8")
+        assert confine_to_roots(probe, agent_cli_roots()) == probe.resolve()
+        # An extra root widens the allow-list for a surface with its own base.
+        nested = tmp_path / "vault" / "deep" / "f.md"
+        nested.parent.mkdir(parents=True)
+        nested.write_text("x", encoding="utf-8")
+        assert confine_to_roots(nested, agent_cli_roots(tmp_path / "vault")) == nested.resolve()

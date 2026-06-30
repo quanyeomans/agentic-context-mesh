@@ -49,7 +49,7 @@ from kairix.core.protocols import (
 )
 from kairix.core.search.pipeline import SearchPipeline
 from kairix.corpus.ingest import IngestRequest, SessionPayload, ingest_corpus
-from kairix.paths import KairixPaths
+from kairix.paths import KairixPaths, agent_cli_roots, confine_to_roots
 from kairix.platform.llm.protocol import LLMBackend
 
 logger = logging.getLogger(__name__)
@@ -182,7 +182,15 @@ class SuiteRunner:
         Raises:
             ValueError: with actionable ``fix:`` / ``next:`` markers
                 if a required file is missing.
+            PathTraversalError: when ``suite_path`` (the operator-supplied
+                ``--suite`` argument) escapes the working-area allow-list.
+
+        S8707: ``suite_path`` is the agent/operator-supplied entry point; every
+        ground-truth file read (``_load_json_list``) derives from it. Confine it
+        to the working-area allow-list HERE, before any glob/read, so a crafted
+        ``--suite ../../etc`` is rejected rather than scanned off-tree.
         """
+        suite_path = confine_to_roots(suite_path, agent_cli_roots())
         if not suite_path.exists() or not suite_path.is_dir():
             raise ValueError(
                 f"Suite path {suite_path!r} does not exist or is not a directory. "

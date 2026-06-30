@@ -83,11 +83,14 @@ def cmd_suggest(
 
     text = args.text
     if args.file:
-        from pathlib import Path
+        # S8707: --file is an agent/operator-supplied read path. Confine it to
+        # the working-area allow-list before reading so a crafted escape is
+        # rejected (PathTraversalError is a ValueError) rather than read off-tree.
+        from kairix.paths import PathTraversalError, agent_cli_roots, confine_to_roots
 
         try:
-            text = Path(args.file).read_text(encoding="utf-8")
-        except OSError as exc:
+            text = confine_to_roots(args.file, agent_cli_roots()).read_text(encoding="utf-8")
+        except (PathTraversalError, OSError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
 
@@ -596,10 +599,13 @@ def cmd_audit(
     rendered = format_report_json(report) if args.format == "json" else format_report_text(report)
     if args.output:
         try:
-            from pathlib import Path
+            # S8707: --output is an agent/operator-supplied write path. Confine
+            # it to the working-area allow-list before writing so a crafted
+            # escape is rejected rather than written off-tree.
+            from kairix.paths import PathTraversalError, agent_cli_roots, confine_to_roots
 
-            Path(args.output).write_text(rendered, encoding="utf-8")
-        except OSError as exc:
+            confine_to_roots(args.output, agent_cli_roots()).write_text(rendered, encoding="utf-8")
+        except (PathTraversalError, OSError) as exc:
             print(f"ERROR: could not write output file: {exc}", file=sys.stderr)
             return 1
         print(f"Wrote {report.total} row(s) to {args.output}")

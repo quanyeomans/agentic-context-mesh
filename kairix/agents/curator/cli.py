@@ -89,7 +89,16 @@ def _health_cmd(
     output = format_report_json(report) if args.format == "json" else format_report_text(report)
 
     if args.output:
-        Path(args.output).write_text(output, encoding="utf-8")
+        # S8707: --output is an agent/operator-supplied write path. Confine it
+        # to the working-area allow-list before writing so a crafted escape is
+        # rejected rather than written off-tree.
+        from kairix.paths import PathTraversalError, agent_cli_roots, confine_to_roots
+
+        try:
+            confine_to_roots(args.output, agent_cli_roots()).write_text(output, encoding="utf-8")
+        except PathTraversalError as exc:
+            print(f"ERROR: could not write output file: {exc}", file=sys.stderr)
+            sys.exit(1)
         print(f"Health report written to {args.output}")
     else:
         print(output, end="")

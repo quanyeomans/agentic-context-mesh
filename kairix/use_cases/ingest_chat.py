@@ -46,7 +46,7 @@ from kairix.core.facts.consolidation import (
     default_contradict,
 )
 from kairix.core.protocols import FactExtractor, FactStore
-from kairix.paths import KairixPaths
+from kairix.paths import KairixPaths, agent_cli_roots, confine_to_roots
 
 logger = logging.getLogger(__name__)
 
@@ -355,6 +355,12 @@ def ingest_chat(
         function looks for a sidecar ``<jsonl_path>.metadata.json`` and
         loads it if present.
     """
+    # S8707 confinement: the transcript path is an agent/operator-supplied CLI
+    # argument with no upstream validation. Canonicalise + confine it to the
+    # working-area allow-list BEFORE any open() so a crafted ``../../etc/passwd``
+    # (or an absolute escape) is rejected rather than read. Covers both
+    # ``_read_turns`` and the derived ``_read_sidecar_metadata`` path.
+    jsonl_path = confine_to_roots(jsonl_path, agent_cli_roots())
     turns = _read_turns(jsonl_path)
     grouped = _group_by_conversation(turns)
     resolved_metadata = session_metadata if session_metadata is not None else _read_sidecar_metadata(jsonl_path)
