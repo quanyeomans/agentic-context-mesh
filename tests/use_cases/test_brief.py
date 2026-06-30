@@ -25,14 +25,32 @@ def _healthy_health_deps() -> HealthDeps:
     )
 
 
+# Documented role labels the brief used to hardcode. They now resolve via
+# the injected ``agents:`` config below, not a module-level allow-list.
+_DOCUMENTED_AGENTS = ("builder", "shape", "growth", "consultant")
+
+
+def _config_defining(*agents: str) -> dict[str, object]:
+    """Build a parsed-config dict declaring each agent with one surface.
+
+    This is the F2-clean ``config_fn`` seam: instead of writing a
+    ``kairix.config.yaml`` to disk, tests hand ``run_brief`` the parsed
+    mapping that AgentScope resolution consumes. A non-empty surface
+    means the agent resolves and is briefable.
+    """
+    return {"agents": {name: {"surfaces": [{"path": f"memory/{name}", "label": "memory"}]} for name in agents}}
+
+
 def _build_deps(
     *,
     content: str = "",
     raises: bool = False,
     out_dir: Path = Path("/tmp/brief"),
     health_deps: HealthDeps | None = None,
+    config: dict[str, object] | None = None,
 ) -> tuple[BriefDeps, dict[str, list]]:
     captured: dict[str, list] = {"generate": [], "dir": []}
+    effective_config = config if config is not None else _config_defining(*_DOCUMENTED_AGENTS)
 
     def fake_generate(agent: str, **kwargs: object) -> str:
         captured["generate"].append((agent, kwargs))
@@ -48,6 +66,7 @@ def _build_deps(
         BriefDeps(
             generate_fn=fake_generate,
             briefing_dir_fn=fake_dir,
+            config_fn=lambda: effective_config,
             health_deps=health_deps or _healthy_health_deps(),
         ),
         captured,
@@ -97,11 +116,39 @@ def test_agent_name_lowercased_and_stripped() -> None:
 
 
 @pytest.mark.unit
-def test_unknown_agent_returns_error_envelope() -> None:
-    deps, captured = _build_deps()
-    out = run_brief("rogue", deps=deps)
+def test_agent_with_no_surfaces_returns_error_envelope() -> None:
+    """An agent whose config entry resolves to zero surfaces is rejected.
+
+    This is the only InvalidAgent shape that survives PLA-265: a name
+    the operator declared but left with no surface to read. The
+    generator must never run for it.
+    """
+    deps, captured = _build_deps(config={"agents": {"ghost": {"surfaces": []}}})
+    out = run_brief("ghost", deps=deps)
     assert out.error.startswith("InvalidAgent")
     assert captured["generate"] == []  # never reached the generator
+
+
+@pytest.mark.unit
+def test_config_onboarded_custom_agent_is_accepted() -> None:
+    """The PLA-265 fix: an operator-onboarded custom agent name is briefable.
+
+    ``agent-alpha`` is not one of the legacy four names; before the fix
+    the hardcoded ``_VALID_AGENTS`` allow-list rejected it even though it
+    is declared in ``agents:``. Now its configured surface resolves and
+    the brief runs through to the generator.
+
+    Sabotage-proof (executed): re-adding the
+    ``if normalised not in {"builder","shape","growth","consultant"}``
+    guard makes this test fail — ``agent-alpha`` returns an InvalidAgent
+    envelope and the generator is never called.
+    """
+    deps, captured = _build_deps(content="alpha briefing body", config=_config_defining("agent-alpha"))
+    out = run_brief("agent-alpha", deps=deps)
+    assert out.error == ""
+    assert out.agent == "agent-alpha"
+    assert out.content == "alpha briefing body"
+    assert captured["generate"][0][0] == "agent-alpha"
 
 
 @pytest.mark.unit
@@ -230,8 +277,11 @@ def test_brief_envelope_includes_health_dict() -> None:
 
 @pytest.mark.unit
 def test_brief_invalid_agent_still_carries_health_snapshot() -> None:
-    deps, _ = _build_deps(health_deps=_chat_offline_health_deps())
-    out = run_brief("rogue", deps=deps)
+    deps, _ = _build_deps(
+        health_deps=_chat_offline_health_deps(),
+        config={"agents": {"ghost": {"surfaces": []}}},
+    )
+    out = run_brief("ghost", deps=deps)
     assert out.error.startswith("InvalidAgent")
     # Even on validation failure the agent gets a health snapshot.
     assert out.health.chat == "offline"

@@ -90,11 +90,11 @@ def test_roundtrip_preserves_text_with_full_print_mode() -> None:
 # equality fired; restored.
 def test_roundtrip_preserves_text_with_empty_content_error_envelope() -> None:
     original = BriefOutput(
-        agent="rogue",
+        agent="ghost",
         content="",
         path="",
         preview="",
-        error="InvalidAgent: 'rogue'. Must be one of: ['builder', 'consultant', 'growth', 'shape']",
+        error="InvalidAgent: 'ghost' resolves to no configured surface. fix: run `kairix onboard agent --name <name>`.",
     )
     rebuilt = _roundtrip(original)
     # Empty content -> format_output returns "" on both sides.
