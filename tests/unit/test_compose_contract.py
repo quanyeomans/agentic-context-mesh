@@ -199,3 +199,70 @@ def test_env_example_neo4j_password_stays_non_empty(rel_path: str) -> None:
     env = _env_example_lines(rel_path)
     password = env.get("KAIRIX_NEO4J_PASSWORD", "")
     assert password, f"{rel_path}: KAIRIX_NEO4J_PASSWORD must be a non-empty sentinel"
+
+
+# ---------------------------------------------------------------------------
+# PLA-276 / #486 — docker-compose.example.yml (the shared-host / VM template)
+# must mount the same FHS data + cache volumes and point KAIRIX_DOCUMENT_ROOT
+# at the same bind target as the canonical docker-compose.yml. A stale
+# ``kairix-data:/data/kairix`` mount (with no cache volume and no document-root
+# override) left the SQLite index + caches on the container's EPHEMERAL
+# writable layer and made ``kairix embed`` scan the empty baked document dir —
+# a broken, non-persistent install for anyone following the example.
+# ---------------------------------------------------------------------------
+
+_FHS_DATA_MOUNT = "kairix-data:/var/lib/kairix"
+_FHS_CACHE_MOUNT = "kairix-cache:/var/cache/kairix"
+
+
+def _load_example_compose() -> dict:
+    """Parse the repo-root docker-compose.example.yml."""
+    parsed = yaml.safe_load((_REPO_ROOT / "docker-compose.example.yml").read_text())
+    assert isinstance(parsed, dict), "docker-compose.example.yml must parse to a mapping"
+    return parsed
+
+
+def _service_volumes(service: dict) -> list[str]:
+    return [str(volume) for volume in service.get("volumes", [])]
+
+
+def _kairix_image_services(parsed: dict) -> dict[str, dict]:
+    """Services running the kairix image (every one needs the FHS mounts +
+    document root); skips the neo4j sidecar."""
+    return {name: svc for name, svc in parsed["services"].items() if "three-cubes/kairix" in str(svc.get("image", ""))}
+
+
+@pytest.mark.unit
+def test_example_compose_document_root_matches_canonical() -> None:
+    """Every kairix-image service in the example sets KAIRIX_DOCUMENT_ROOT to
+    the same bind target as the canonical compose, so ``kairix embed`` scans
+    the mounted docs rather than the empty baked dir (#486 / PLA-276)."""
+    canonical_doc_root = _environment_as_dict(_kairix_service()).get("KAIRIX_DOCUMENT_ROOT")
+    assert canonical_doc_root == "/data/documents", "canonical compose document-root drifted"
+    example_services = _kairix_image_services(_load_example_compose())
+    assert example_services, "example compose must declare at least one kairix-image service"
+    for name, svc in example_services.items():
+        assert _environment_as_dict(svc).get("KAIRIX_DOCUMENT_ROOT") == canonical_doc_root, name
+
+
+@pytest.mark.unit
+def test_example_compose_mounts_match_canonical_fhs_volumes() -> None:
+    """Every kairix-image service in the example mounts the SAME persistent
+    data + cache named volumes as the canonical compose
+    (``kairix-data:/var/lib/kairix`` + ``kairix-cache:/var/cache/kairix``),
+    and both volumes are declared. The retired ``kairix-data:/data/kairix``
+    mount that put the index on the ephemeral layer is gone (#486 / #447)."""
+    canonical_named = {
+        volume for volume in _service_volumes(_kairix_service()) if volume.startswith(("kairix-data:", "kairix-cache:"))
+    }
+    assert canonical_named == {_FHS_DATA_MOUNT, _FHS_CACHE_MOUNT}, "canonical compose volumes drifted"
+
+    example = _load_example_compose()
+    for name, svc in _kairix_image_services(example).items():
+        example_named = {
+            volume for volume in _service_volumes(svc) if volume.startswith(("kairix-data:", "kairix-cache:"))
+        }
+        assert example_named == canonical_named, name
+        assert "kairix-data:/data/kairix" not in _service_volumes(svc), name
+    assert "kairix-cache" in (example.get("volumes") or {})
+    assert "kairix-data" in (example.get("volumes") or {})
