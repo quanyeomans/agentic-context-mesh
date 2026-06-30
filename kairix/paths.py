@@ -1807,6 +1807,34 @@ def agent_memory_glob(*, config: dict[str, Any] | None = None) -> str:
     return str(paths_cfg.get("agent_memory_glob") or "**/*.md")
 
 
+def agent_conversations_dir(document_root_arg: str | Path | None = None) -> Path:
+    """Writable directory for agent-ingested conversation transcripts (PLA-275).
+
+    Conversation markdown written by ``kairix ingest-chat`` / the
+    ``ingest_chat`` MCP tool lands under the agent-knowledge submount
+    (``{document_root}/04-Agent-Knowledge/conversations``) rather than the
+    bare document root. On the standard compose the operator's documents
+    bind-mount read-only (``./documents:/data/documents:ro``) while the
+    agent-knowledge subtree is overlaid as a *separate writable* mount
+    (``./documents/04-Agent-Knowledge:/data/documents/04-Agent-Knowledge``)
+    — the one place kairix itself writes (ADR-017). Writing conversations
+    here means the ingest succeeds on the stock deploy instead of crashing
+    with ``OSError: [Errno 30] Read-only file system``.
+
+    The ``04-Agent-Knowledge`` segment is fixed (not the configurable
+    :func:`agent_knowledge_dir_name`) on purpose: the compose writable
+    submount is literally that path, so a renamed agent-knowledge dir
+    would still land conversations on the read-only base.
+
+    ``document_root_arg`` pins the path against a per-invocation document
+    root (typically the injected ``KairixPaths.document_root``); when
+    ``None`` the cached default resolves. F94: the path is composed here at
+    the paths boundary, never hardcoded as a system path by callers.
+    """
+    base = Path(document_root_arg) if document_root_arg is not None else document_root()
+    return base / _AGENT_KNOWLEDGE_DIR / "conversations"
+
+
 # PR 1.2 / #420 — the legacy memory-root helpers (and their backing env var)
 # have been deleted. The hardcoded ``<root>/<agent>/memory`` convention no
 # longer reflects production vault shapes (operators run flat ``<agent>/``

@@ -2,9 +2,10 @@
 
 Reads a JSONL transcript (one line = one turn), groups turns by
 ``conversation_id``, writes one markdown chunk per conversation under
-``document_root/conversations/``, and (optionally) feeds each sliding
-window of turns through a :class:`FactExtractor` whose emitted records
-are persisted via a :class:`FactStore`.
+the writable agent-knowledge submount
+(``document_root/04-Agent-Knowledge/conversations/``), and (optionally)
+feeds each sliding window of turns through a :class:`FactExtractor` whose
+emitted records are persisted via a :class:`FactStore`.
 
 Design contract:
 
@@ -46,7 +47,12 @@ from kairix.core.facts.consolidation import (
     default_contradict,
 )
 from kairix.core.protocols import FactExtractor, FactStore
-from kairix.paths import KairixPaths, agent_cli_roots, confine_to_roots
+from kairix.paths import (
+    KairixPaths,
+    agent_cli_roots,
+    agent_conversations_dir,
+    confine_to_roots,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -314,8 +320,9 @@ def ingest_chat(
 
     1. Parse the JSONL file (skip malformed lines with a warning).
     2. Group turns by ``conversation_id``.
-    3. Write one markdown file per conversation under
-       ``paths.document_root / "conversations"``.
+    3. Write one markdown file per conversation under the writable
+       agent-knowledge submount
+       (``paths.document_root / "04-Agent-Knowledge" / "conversations"``).
     4. If ``no_extract=False``, slice each conversation into
        ``window_turns``-sized windows, run ``fact_extractor.extract`` on
        each window, persist returned records via ``fact_store.add``, then
@@ -365,7 +372,7 @@ def ingest_chat(
     grouped = _group_by_conversation(turns)
     resolved_metadata = session_metadata if session_metadata is not None else _read_sidecar_metadata(jsonl_path)
 
-    conversations_dir = paths.document_root / "conversations"
+    conversations_dir = agent_conversations_dir(paths.document_root)
     conversations_dir.mkdir(parents=True, exist_ok=True)
     ingested_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 

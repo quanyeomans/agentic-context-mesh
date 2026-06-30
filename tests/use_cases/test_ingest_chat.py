@@ -3,7 +3,7 @@
 Every test is sabotage-proven (mutate prod → fail → restore → pass).
 The test corpus exercises the documented surface:
 
-- Markdown is written under ``document_root/conversations/<cid>.md``
+- Markdown is written under ``document_root/04-Agent-Knowledge/conversations/<cid>.md``
 - File content includes the role + content of each turn
 - Result counts match the input shape
 - Empty + malformed JSONL is tolerated (warnings, not exceptions)
@@ -48,6 +48,11 @@ def _paths(tmp_path: Path) -> KairixPaths:
     )
 
 
+def _conversations_dir(document_root: Path) -> Path:
+    """The writable agent-knowledge submount conversations land under (PLA-275)."""
+    return document_root / "04-Agent-Knowledge" / "conversations"
+
+
 def _write_jsonl(path: Path, turns: list[dict[str, object]]) -> None:
     """Write ``turns`` as a JSONL transcript at ``path``."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -83,7 +88,7 @@ def test_writes_markdown_under_conversations_dir(tmp_path: Path) -> None:
         fact_extractor=FakeFactExtractor(),
     )
 
-    written = tmp_path / "vault" / "conversations" / "c1.md"
+    written = _conversations_dir(tmp_path / "vault") / "c1.md"
     assert written.exists()
 
 
@@ -106,7 +111,7 @@ def test_markdown_body_includes_role_and_content(tmp_path: Path) -> None:
         fact_extractor=FakeFactExtractor(),
     )
 
-    body = (tmp_path / "vault" / "conversations" / "c1.md").read_text(encoding="utf-8")
+    body = (_conversations_dir(tmp_path / "vault") / "c1.md").read_text(encoding="utf-8")
     assert "**user**: hello there" in body
     assert "**assistant**: oh hi" in body
 
@@ -227,7 +232,7 @@ def test_missing_conversation_id_falls_back_to_filename_stem(tmp_path: Path) -> 
     assert result.turns_ingested == 1
     assert result.conversations_processed == 1
     # File written under the filename-stem conversation id
-    assert (tmp_path / "vault" / "conversations" / "session-001.md").exists()
+    assert (_conversations_dir(tmp_path / "vault") / "session-001.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +252,7 @@ def test_re_ingest_does_not_rewrite_unchanged_file(tmp_path: Path) -> None:
     )
 
     ingest_chat(transcript, **deps)
-    written = tmp_path / "vault" / "conversations" / "c1.md"
+    written = _conversations_dir(tmp_path / "vault") / "c1.md"
     first_mtime = written.stat().st_mtime_ns
 
     ingest_chat(transcript, **deps)
@@ -397,7 +402,7 @@ def test_markdown_frontmatter_carries_turn_count(tmp_path: Path) -> None:
         fact_extractor=FakeFactExtractor(),
     )
 
-    body = (tmp_path / "vault" / "conversations" / "c1.md").read_text(encoding="utf-8")
+    body = (_conversations_dir(tmp_path / "vault") / "c1.md").read_text(encoding="utf-8")
     assert body.startswith("---\n")
     assert "conversation_id: c1" in body
     assert "turn_count: 4" in body
@@ -427,7 +432,7 @@ def test_cli_main_runs_use_case_with_injected_deps(tmp_path: Path) -> None:
     )
 
     assert exit_code == 0
-    assert (tmp_path / "vault" / "conversations" / "c1.md").exists()
+    assert (_conversations_dir(tmp_path / "vault") / "c1.md").exists()
     assert "kairix ingest-chat: complete" in out.getvalue()
 
 
@@ -483,7 +488,7 @@ def test_cli_main_resolves_production_sqlite_fact_store(tmp_path: Path) -> None:
     )
 
     assert exit_code == 0, f"production resolution should succeed; stderr={err.getvalue()!r}"
-    assert (tmp_path / "vault" / "conversations" / "c1.md").exists(), "ingest must write the conversation file"
+    assert (_conversations_dir(tmp_path / "vault") / "c1.md").exists(), "ingest must write the conversation file"
 
 
 def test_cli_main_argparse_window_turns_default(tmp_path: Path) -> None:
@@ -604,7 +609,7 @@ def test_strip_frontmatter_passes_through_non_frontmatter_text(tmp_path: Path) -
     _write_jsonl(transcript, [_turn("c1", 0)])
 
     # Pre-seed a file with NO frontmatter at the target path.
-    target_dir = tmp_path / "vault" / "conversations"
+    target_dir = _conversations_dir(tmp_path / "vault")
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / "c1.md"
     target.write_text("plain body, no frontmatter\n", encoding="utf-8")
@@ -914,7 +919,7 @@ def test_session_date_appears_in_markdown_body_and_frontmatter(tmp_path: Path) -
         session_metadata={"date_time": "2023-05-04 14:30"},
     )
 
-    written = (tmp_path / "vault" / "conversations" / "c1.md").read_text(encoding="utf-8")
+    written = (_conversations_dir(tmp_path / "vault") / "c1.md").read_text(encoding="utf-8")
     assert "date_time: 2023-05-04 14:30" in written  # frontmatter
     assert "**Session date:** 2023-05-04 14:30" in written  # body anchor
 
@@ -936,7 +941,7 @@ def test_no_metadata_omits_date_lines(tmp_path: Path) -> None:
         fact_extractor=FakeFactExtractor(),
     )
 
-    written = (tmp_path / "vault" / "conversations" / "c1.md").read_text(encoding="utf-8")
+    written = (_conversations_dir(tmp_path / "vault") / "c1.md").read_text(encoding="utf-8")
     assert "Session date:" not in written
     assert "date_time:" not in written
 
