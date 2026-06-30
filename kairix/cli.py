@@ -32,6 +32,7 @@ Subcommands:
   worker      Background worker: run loop, pause/resume operator controls
   config      Validate kairix.config.yaml against the schema and print errors
   ingest-chat Ingest JSONL chat transcripts into the document + fact stores
+  facts-about Look up what kairix knows about an entity (facts + entity summary)
   remember    Save a memory for an agent (dated markdown file + immediate BM25 index)
   recommend   Recommend which kairix tool or local skill fits a described task (ranked)
   cc-pair     Operator surface over topology_cc_pairs (list/create/pause/resume/delete)
@@ -114,6 +115,8 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "worker": ("kairix.worker_cli", "main", True),
     "config": ("kairix.core.search.config_validator", "main", True),
     "ingest-chat": ("kairix.use_cases.ingest_chat", "main", True),
+    # F45-feature: tests/bdd/features/cli_facts_about.feature
+    "facts-about": ("kairix.agents.mcp.tools.facts_about_cli", "main", True),
     # F45-feature: tests/bdd/features/cli_remember.feature
     "remember": ("kairix.use_cases.remember", "main", True),
     # F45-feature: tests/bdd/features/cli_recommend.feature
