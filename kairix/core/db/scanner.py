@@ -18,6 +18,7 @@ Usage::
     print(report)
 """
 
+import fnmatch
 import logging
 import sqlite3
 from collections.abc import Callable
@@ -112,6 +113,102 @@ class DocumentScanner:
         self._db.commit()
         logger.info("db.scanner: %s", report)
         return report
+
+    def scan_file(self, file_path: Path, collections: list[CollectionConfig]) -> tuple[ScanReport, list[int]]:
+        """Incrementally index a SINGLE file — the latency-sensitive write path (PLA-258).
+
+        Reuses :meth:`_process_file` for the one ``file_path`` instead of
+        globbing and re-hashing the whole document tree, so the cost is
+        O(1) in corpus size (a single small-file read + two index probes),
+        not O(corpus). Used by the ``remember`` memory-write path so a new
+        memory is BM25-searchable now without paying the full-rescan
+        latency on every write.
+
+        Args:
+            file_path: Absolute path of the file to index.
+            collections: The resolved collection list (same shape the full
+                :meth:`scan` walk uses). The file is indexed under every
+                collection whose walk would include it — mirroring the
+                full scan, which would process the file once per matching
+                collection.
+
+        Returns:
+            ``(report, touched_ids)`` — the per-file :class:`ScanReport`
+            counters and the ``documents.id`` values upserted, so the
+            caller can run an incremental FTS update for exactly those
+            rows rather than a full rebuild.
+        """
+        report = ScanReport()
+        touched: list[int] = []
+        matches = self._collections_for_file(file_path, collections)
+        if not matches:
+            return report, touched
+
+        # Read+hash the one file once to make the SAME cross-path dedup
+        # decision the full scan makes (its ``all_indexed_hashes`` set),
+        # but via an indexed existence probe rather than materialising
+        # every active hash — that keeps the write O(1) in corpus size.
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning("db.scanner: cannot read %s — %s", file_path, e)
+            report.errors += 1
+            return report, touched
+        content_hash = _hash_content(text)
+        already_active = (
+            self._db.execute(
+                "SELECT 1 FROM documents WHERE hash = ? AND active = 1 LIMIT 1",
+                (content_hash,),
+            ).fetchone()
+            is not None
+        )
+        all_indexed_hashes: set[str] = {content_hash} if already_active else set()
+
+        now = datetime.now(tz=timezone.utc).isoformat()
+        for config, rel_path in matches:
+            old = self._db.execute(
+                "SELECT hash FROM documents WHERE collection = ? AND path = ? AND active = 1",
+                (config.name, rel_path),
+            ).fetchone()
+            existing = {rel_path: old[0]} if old else {}
+            self._process_file(file_path, rel_path, config, existing, all_indexed_hashes, now, report)
+            row = self._db.execute(
+                "SELECT id FROM documents WHERE collection = ? AND path = ? AND active = 1",
+                (config.name, rel_path),
+            ).fetchone()
+            if row is not None:
+                touched.append(int(row[0]))
+
+        self._db.commit()
+        logger.info("db.scanner: single-file index of %s — %s", file_path, report)
+        return report, touched
+
+    def _collections_for_file(
+        self, file_path: Path, collections: list[CollectionConfig]
+    ) -> list[tuple[CollectionConfig, str]]:
+        """Collections whose :meth:`scan` walk would include ``file_path``.
+
+        Mirrors the membership test in :meth:`_scan_collection` (file under
+        the collection root, filename matches the collection glob, not
+        excluded) and computes the same ``rel_path`` — without globbing the
+        tree. Returns ``(config, rel_path)`` for each matching collection.
+        """
+        matches: list[tuple[CollectionConfig, str]] = []
+        for config in collections:
+            is_absolute = Path(config.path).is_absolute()
+            collection_path = Path(config.path) if is_absolute else self._document_root / config.path
+            try:
+                file_path.relative_to(collection_path)
+            except ValueError:
+                continue  # file is not under this collection's root
+            if not fnmatch.fnmatch(file_path.name, Path(config.glob).name):
+                continue  # filename does not match the collection glob (e.g. **/*.txt)
+            rel_base = collection_path.parent if is_absolute else self._document_root
+            rel_path = str(file_path.relative_to(rel_base))
+            if any(pattern in rel_path for pattern in set(config.exclude)):
+                continue
+            matches.append((config, rel_path))
+        return matches
 
     def _process_file(
         self,

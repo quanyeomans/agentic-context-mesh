@@ -61,10 +61,10 @@ class _RecordingIndexer:
     def __init__(self, result: bool = True, raises: BaseException | None = None) -> None:
         self.result = result
         self.raises = raises
-        self.calls: list[tuple[Path, Path, str]] = []
+        self.calls: list[tuple[Path, Path, Path, str]] = []
 
-    def __call__(self, db_path: Path, document_root: Path, content_hash: str) -> bool:
-        self.calls.append((db_path, document_root, content_hash))
+    def __call__(self, db_path: Path, document_root: Path, target: Path, content_hash: str) -> bool:
+        self.calls.append((db_path, document_root, target, content_hash))
         if self.raises is not None:
             raise self.raises
         return self.result
@@ -206,9 +206,12 @@ def test_filename_collision_appends_counter(tmp_path: Path) -> None:
     assert Path(first.path).exists() and Path(second.path).exists()
 
 
-def test_index_seam_receives_db_path_root_and_content_hash(tmp_path: Path) -> None:
+def test_index_seam_receives_db_path_root_target_and_content_hash(tmp_path: Path) -> None:
     """The injected index step gets the configured db path, the document
-    root, and the hash of the written body.
+    root, the path of the file just written, and the hash of its body.
+
+    The ``target`` is what lets the index step touch ONLY the new file
+    instead of re-scanning the whole tree (PLA-258).
 
     Sabotage: stop calling ``d.index_fn`` in ``remember`` → the calls
     list stays empty and ``indexed`` flips to False.
@@ -218,9 +221,10 @@ def test_index_seam_receives_db_path_root_and_content_hash(tmp_path: Path) -> No
 
     assert result.indexed is True
     assert len(indexer.calls) == 1
-    db_path, droot, content_hash = indexer.calls[0]
+    db_path, droot, target, content_hash = indexer.calls[0]
     assert db_path == tmp_path / "index.sqlite"
     assert droot == tmp_path / "vault"
+    assert target == Path(result.path)
     from kairix.knowledge.reflib.dedup import hash_content
 
     assert content_hash == hash_content(Path(result.path).read_text(encoding="utf-8"))
@@ -283,10 +287,10 @@ def test_production_index_seam_makes_memory_bm25_searchable(tmp_path: Path) -> N
     index returns the document. This is the "findable now, not at the
     next worker tick" outcome (#472).
 
-    Hermetic: sqlite + filesystem only — the scan step never calls the
+    Hermetic: sqlite + filesystem only — the index step never calls the
     embedding provider.
 
-    Sabotage: make the default ``index_fn`` skip ``default_scan_documents``
+    Sabotage: make the default ``index_fn`` skip ``default_index_file``
     → ``indexed`` is False and the FTS MATCH returns no rows.
     """
     deps = RememberDeps(
@@ -311,6 +315,61 @@ def test_production_index_seam_makes_memory_bm25_searchable(tmp_path: Path) -> N
     finally:
         db.close()
     assert row is not None, "BM25 FTS must find the freshly remembered content"
+
+
+def test_remember_indexes_only_the_new_file_not_the_whole_tree(tmp_path: Path) -> None:
+    """A single ``remember()`` indexes ONLY the file it just wrote — it
+    does NOT re-read and re-hash the rest of the vault (PLA-258).
+
+    Seeds a multi-file corpus under the document root, then remembers one
+    memory through the PRODUCTION index seam. The new memory is searchable
+    now, AND the index holds exactly that one document — none of the
+    pre-existing seeded files are pulled in. The old full-tree rescan
+    would have ingested every seeded file (O(corpus) latency on the most
+    latency-sensitive agent path); the incremental single-file index does
+    not touch them.
+
+    Hermetic: sqlite + filesystem only — no embedding provider.
+
+    Sabotage: revert ``_index_single_file`` to the full-tree
+    ``default_scan_documents`` → every seeded file lands in ``documents``
+    and the ``doc_count == 1`` / ``seeded_in_index == 0`` assertions fail.
+    """
+    vault = tmp_path / "vault"
+    seeded = vault / "02-Areas"
+    seeded.mkdir(parents=True)
+    for i in range(25):
+        (seeded / f"seeded-{i}.md").write_text(f"# Seeded {i}\n\nprior vault content number {i}\n", encoding="utf-8")
+
+    deps = RememberDeps(
+        config_fn=lambda: {},
+        document_root_fn=lambda: vault,
+        db_path_fn=lambda: tmp_path / "index.sqlite",
+        now_fn=lambda: _FIXED_NOW,
+        classify_fn=_RecordingClassifier(),
+        # index_fn left at the production default on purpose.
+    )
+    result = remember("builder", "decided: the quarterly osprey migration plan is approved", deps=deps)
+
+    assert result.error == ""
+    assert result.indexed is True, f"expected immediate indexing; detail={result.detail!r}"
+
+    db = sqlite3.connect(str(tmp_path / "index.sqlite"))
+    try:
+        active_docs = db.execute("SELECT COUNT(*) FROM documents WHERE active = 1").fetchone()[0]
+        seeded_in_index = db.execute(
+            "SELECT COUNT(*) FROM documents WHERE path LIKE '02-Areas/%' AND active = 1"
+        ).fetchone()[0]
+        fts_hit = db.execute(
+            "SELECT 1 FROM documents_fts WHERE documents_fts MATCH ? LIMIT 1",
+            ("osprey",),
+        ).fetchone()
+    finally:
+        db.close()
+
+    assert fts_hit is not None, "the new memory must be BM25-searchable now"
+    assert active_docs == 1, "only the remembered file may be indexed — the tree must not be rescanned"
+    assert seeded_in_index == 0, "no pre-existing seeded vault file may be pulled into the index"
 
 
 def test_list_schema_agent_falls_back_to_conventional_write_dir(tmp_path: Path) -> None:

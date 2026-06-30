@@ -103,42 +103,44 @@ def sync_fts(db: sqlite3.Connection, document_ids: list[int]) -> int:
     """
     Incrementally update the FTS5 index for specific documents.
 
-    Used after a vault scan to add/update only the changed documents
-    rather than rebuilding the entire index.
+    Adds/updates only the named documents rather than rebuilding the whole
+    index — the O(1)-in-corpus path the latency-sensitive ``remember``
+    memory-write uses (PLA-258), and a vault scan uses for a small changed
+    set. ``documents_fts`` is a regular (self-contained) FTS5 table, so a
+    per-row ``DELETE`` + ``INSERT`` by ``rowid`` is exact: each named
+    document's stale FTS row is dropped and its current ``documents`` /
+    ``content`` state re-inserted. A document that is missing or inactive
+    is removed from the index (its ``INSERT … SELECT`` matches no row).
+
+    The table must already exist (``create_schema`` or :func:`rebuild_fts`
+    creates it). This call does not commit — the caller owns the
+    transaction boundary.
 
     Args:
         db:           Open database connection.
         document_ids: List of document IDs (from ``documents.id``) to sync.
 
     Returns:
-        Number of documents synced.
+        Number of documents (re-)indexed into ``documents_fts``.
     """
     if not document_ids:
         return 0
 
-    # For contentless FTS5 tables, individual deletes require the original
-    # content. A targeted rebuild for specific IDs is simpler and correct.
-    # We delete matching rowids and re-insert from source tables.
     synced = 0
     for doc_id in document_ids:
-        # Fetch current state from source tables
-        row = db.execute(
+        db.execute("DELETE FROM documents_fts WHERE rowid = ?", (doc_id,))
+        inserted = db.execute(
             """
-            SELECT d.id, COALESCE(d.title, ''), COALESCE(c.doc, '')
+            INSERT INTO documents_fts(rowid, filepath, title, doc)
+            SELECT d.id, COALESCE(d.path, ''), COALESCE(d.title, ''), COALESCE(c.doc, '')
             FROM documents d
             JOIN content c ON c.hash = d.hash
             WHERE d.id = ? AND d.active = 1
             """,
             (doc_id,),
-        ).fetchone()
-
-        if row:
+        ).rowcount
+        if inserted > 0:
             synced += 1
 
-    # If we need to sync, rebuild the entire FTS (contentless FTS5 doesn't
-    # support efficient single-row updates). For small sync batches this is
-    # acceptable; for large batches the caller should use rebuild_fts().
-    if synced > 0:
-        rebuild_fts(db)
-
+    logger.info("db.fts: synced FTS5 index — %d documents", synced)
     return synced

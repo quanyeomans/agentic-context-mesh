@@ -389,7 +389,7 @@ def test_remember_path_injection_agent_is_rejected_no_escape_write(tmp_path: Pat
             config_fn=lambda: {},
             document_root_fn=lambda: document_root,
             db_path_fn=lambda: tmp_path / "db.sqlite",
-            index_fn=lambda _db, _root, _hash: False,
+            index_fn=lambda _db, _root, _target, _hash: False,
         ),
     )
     assert result.error.startswith("InvalidAgent:")

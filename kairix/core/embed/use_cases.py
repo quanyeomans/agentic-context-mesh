@@ -375,24 +375,20 @@ def _resolve_reflib_collections(
     return kept
 
 
-def default_scan_documents(  # pragma: no cover  # lazy-import DI-default delegation
+def _build_scanner(  # pragma: no cover  # lazy-import DI-default delegation
     db: Any,
     diagnostics: list[str],
-    *,
-    deps: UseCaseDeps | None = None,
-) -> tuple[int, int, int]:
-    """Scan the document root for new/changed files and rebuild FTS.
+    d: UseCaseDeps,
+) -> tuple[Any, list[Any]]:
+    """Construct the DocumentScanner + resolved scan-collection list.
 
-    Lives in the use-case module so ``PipelineDeps``' default factory
-    can wire it directly. ``deps`` injects every collaborator
-    (DocumentScanner, load_collections, resolve_config_path, agent
-    registry, reference-library probe, FTS rebuild, yaml loader) so
-    unit tests construct one ``UseCaseDeps(...)`` and drive every
-    branch without monkey-patching kairix modules.
+    Shared by :func:`default_scan_documents` (full-tree walk) and
+    :func:`default_index_file` (single-file index) so the agent-resolver
+    wiring and the collection-resolution (config collections → default
+    fallback → reference-library mode) live in ONE place. Returns
+    ``(scanner, scan_collections)``.
     """
     from kairix.core.db.scanner import CollectionConfig
-
-    d = deps if deps is not None else UseCaseDeps()
 
     droot = d.document_root_fn()
 
@@ -420,6 +416,26 @@ def default_scan_documents(  # pragma: no cover  # lazy-import DI-default delega
         scan_collections = [CollectionConfig(name="default", path=".")]
 
     scan_collections = _resolve_reflib_collections(scan_collections, d, droot)
+    return scanner, scan_collections
+
+
+def default_scan_documents(  # pragma: no cover  # lazy-import DI-default delegation
+    db: Any,
+    diagnostics: list[str],
+    *,
+    deps: UseCaseDeps | None = None,
+) -> tuple[int, int, int]:
+    """Scan the document root for new/changed files and rebuild FTS.
+
+    Lives in the use-case module so ``PipelineDeps``' default factory
+    can wire it directly. ``deps`` injects every collaborator
+    (DocumentScanner, load_collections, resolve_config_path, agent
+    registry, reference-library probe, FTS rebuild, yaml loader) so
+    unit tests construct one ``UseCaseDeps(...)`` and drive every
+    branch without monkey-patching kairix modules.
+    """
+    d = deps if deps is not None else UseCaseDeps()
+    scanner, scan_collections = _build_scanner(db, diagnostics, d)
 
     scan_report = scanner.scan(scan_collections)
     if scan_report.new > 0 or scan_report.updated > 0:
@@ -431,6 +447,42 @@ def default_scan_documents(  # pragma: no cover  # lazy-import DI-default delega
         )
         fts_count = d.rebuild_fts_fn(db)
         logger.info("FTS index rebuilt: %d documents", fts_count)
+
+    return scan_report.new, scan_report.updated, scan_report.errors
+
+
+def default_index_file(  # pragma: no cover  # lazy-import DI-default delegation
+    db: Any,
+    diagnostics: list[str],
+    file_path: Path,
+    *,
+    deps: UseCaseDeps | None = None,
+) -> tuple[int, int, int]:
+    """Incrementally index ONE file — the latency-sensitive write path (PLA-258).
+
+    Mirrors :func:`default_scan_documents` but processes only ``file_path``
+    (the file a ``remember`` write just produced) via the scanner's
+    single-file path, then runs an INCREMENTAL FTS update for exactly the
+    touched rows (:func:`kairix.core.db.fts.sync_fts`) — never a full
+    rescan or full FTS rebuild. The whole document tree is left untouched,
+    so the memory-write cost stays O(1) in corpus size. Returns
+    ``(new, updated, errors)`` for parity with the full scan.
+    """
+    from kairix.core.db.fts import sync_fts
+
+    d = deps if deps is not None else UseCaseDeps()
+    scanner, scan_collections = _build_scanner(db, diagnostics, d)
+
+    scan_report, touched = scanner.scan_file(file_path, scan_collections)
+    if touched:
+        synced = sync_fts(db, touched)
+        db.commit()
+        logger.info(
+            "Indexed single file: %d new, %d updated; FTS synced %d documents",
+            scan_report.new,
+            scan_report.updated,
+            synced,
+        )
 
     return scan_report.new, scan_report.updated, scan_report.errors
 
