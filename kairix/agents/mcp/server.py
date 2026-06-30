@@ -538,6 +538,35 @@ def tool_research(
     return research_output_to_envelope(out)
 
 
+def tool_expand(
+    source_uri: str,
+    seq: int,
+    token_budget: int = 2000,
+    *,
+    deps: Any = None,
+) -> dict[str, Any]:
+    """Expand a search hit to its neighbouring chunks within a token budget.
+
+    Thin adapter around ``kairix.use_cases.expand.run_expand``. CLI and MCP
+    both delegate to the same use case so the surfaces stay aligned (#168).
+
+    Call this after a search / recall hit when you need the surrounding
+    context: pass the hit's ``source_uri`` + ``seq`` (the typed PLA-270
+    fields on every ``SearchHit``) and expand returns the matched chunk plus
+    the preceding and following chunks — so you read context WITHOUT
+    re-ingesting the whole document.
+
+    The optional ``deps`` parameter forwards an ``ExpandDeps`` directly to the
+    use case — production callers leave it None; tests pass an ``ExpandDeps``
+    carrying a fake chunk reader to drive without touching SQLite.
+    """
+    from kairix.use_cases.expand import expand_output_to_envelope, run_expand
+
+    logger.info("mcp.expand: source_uri=%r seq=%d budget=%d", source_uri, seq, token_budget)
+    out = run_expand(source_uri, seq, token_budget=token_budget, deps=deps)
+    return expand_output_to_envelope(out)
+
+
 def tool_usage_guide(
     topic: str = "",
     *,
@@ -1566,6 +1595,13 @@ def tool_capabilities() -> dict[str, Any]:
                 category=CAP_CATEGORY_RETRIEVAL,
                 when_to_use="Trace how a topic or project changed over time, in date order.",
             ),
+            _cap(
+                name="expand",
+                mcp_tool="expand",
+                cli="kairix expand",
+                category=CAP_CATEGORY_RETRIEVAL,
+                when_to_use="Pull the chunks surrounding a search hit instead of re-reading the whole document.",
+            ),
             # Synthesis
             _cap(
                 name="prep",
@@ -1964,6 +2000,28 @@ def _register_synthesis_and_diagnostic_tools(
         Expected p99: 1s warm, 2s cold. Recommended client timeout: 10s.
         """
         return tool_usage_guide(topic=topic)
+
+    # PLA-268 — expand is NOT ``@warm_gate``-decorated, on purpose. It reads
+    # neighbouring chunks by key from the local SQLite index (no embedding
+    # model, no network), so an agent expanding a hit while kairix is still
+    # warming gets its answer — same cold-safe rationale as facts_about
+    # (PLA-263). With no injected deps the body resolves the real (empty/
+    # fresh) index and returns an actionable miss, never the ColdStart
+    # short-circuit.
+    @server.tool(
+        description=(
+            "Call after a search/recall hit when you need the surrounding context — "
+            "expand pulls the matched chunk's neighbouring chunks (the preceding and "
+            "following ones) within a token budget, so you read context WITHOUT "
+            "re-ingesting the whole document. Pass the hit's source_uri + seq (the "
+            "typed fields on every search result). Works even while kairix is still "
+            "warming up — it only reads the local index."
+        )
+    )
+    @async_tool_handler
+    def expand(source_uri: str, seq: int, token_budget: int = 2000) -> dict[str, Any]:
+        """Expand a search hit to its neighbouring chunks within a token budget."""
+        return tool_expand(source_uri=source_uri, seq=seq, token_budget=token_budget)
 
     @server.tool(
         description=(

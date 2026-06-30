@@ -34,6 +34,7 @@ _USE_CASES: list[tuple[str, str, str, str]] = [
     ("kairix.use_cases.entity_get", "run_entity_get", "EntityGetOutput", "entity_get_output_to_envelope"),
     ("kairix.use_cases.usage_guide", "run_usage_guide", "UsageGuideOutput", "usage_guide_output_to_envelope"),
     ("kairix.use_cases.recommend", "run_recommend", "RecommendOutput", "recommend_output_to_envelope"),
+    ("kairix.use_cases.expand", "run_expand", "ExpandOutput", "expand_output_to_envelope"),
 ]
 
 
@@ -114,6 +115,7 @@ def test_every_use_case_has_a_per_feature_parity_test() -> None:
         "test_cli_mcp_parity_entity_get",
         "test_cli_mcp_parity_usage_guide",
         "test_cli_mcp_parity_recommend",
+        "test_cli_mcp_parity_expand",
         "test_cli_mcp_parity_invariants",  # this file
     }
     missing = expected_tests - parity_tests

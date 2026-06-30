@@ -147,6 +147,8 @@ pytest_plugins = [
     "tests.bdd.steps.mcp_memory_write_steps",
     # Capability recommender (Spec A) — CLI + MCP recommend surfaces + flag.
     "tests.bdd.steps.recommend_cli_steps",
+    "tests.bdd.steps.expand_cli_steps",
+    "tests.bdd.steps.mcp_expand_steps",
     "tests.bdd.steps.mcp_recommend_steps",
     "tests.bdd.steps.feature_flag_recommender_steps",
     # P5 unified benchmark contract — quality + perf + stability lenses

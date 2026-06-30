@@ -32,6 +32,8 @@ _EXPECTED_TOOLS = {
     "timeline",
     "research",
     "contradict",
+    # PLA-268 — chunk-expansion: neighbour chunks around a search hit
+    "expand",
     "usage_guide",
     "brief",
     "entity_suggest",
