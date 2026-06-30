@@ -38,6 +38,7 @@ For every feature operation:
 |---|---|---|---|---|---|
 | **timeline** | timeline | `kairix timeline` | `mcp__timeline` | code-path divergence (closes #163) | ✅ Phase 1 (#179) |
 | **search** | search | `kairix search` | `mcp__search` | UX parity (limit, diagnostics, entity card) | ✅ Phase 2 (#182) |
+| **expand** | expand | `kairix expand <source_uri> <seq>` | `tool_expand` | — (shipped together; use case `kairix/use_cases/expand.py:run_expand`; PLA-268) | ✅ shipped |
 | **contradict** | check | `kairix contradict check` | `mcp__contradict` | UX parity (top_claims, category, claim) | ✅ Phase 2 (#182) |
 | **brief** | brief | `kairix brief` | — → `mcp__brief` | MCP missing | ✅ Phase 3a (#183) |
 | **entity** | suggest (NER from text) | `kairix entity suggest` | — → `mcp__entity_suggest` | MCP missing | ✅ Phase 3b (#184) |
@@ -49,10 +50,15 @@ For every feature operation:
 | **remember** | write a memory (agent allowlist → classify → dated markdown file → immediate BM25 index) | `kairix remember` | `mcp__memory_write` | — (shipped together; use case `kairix/use_cases/remember.py`) | ✅ #472 |
 | **entity** | seed (discover from index) | `kairix entity seed` | — | Operator-only — no agent-facing surface | Out of scope |
 
-**Status:** Phases 1–4 complete. MCP exposes 11 tools (was 7). Every
-agent-facing operation has both a CLI and an MCP surface, both calling
-the same use case in `kairix/use_cases/`. Cross-cutting invariants
-pinned in `tests/contracts/test_cli_mcp_parity_invariants.py`.
+**Status:** Phases 1–4 complete; the surface has since grown well past the
+original parity set (chunk-expansion, facts/memory, onboarding, probes,
+maintenance, …). The MCP server now registers far more than the original
+11 tools — see [`docs/user-guide/mcp-tools.md`](../user-guide/mcp-tools.md)
+for the live tool inventory and count rather than tracking a hardcoded
+number here. Every agent-facing operation has both a CLI and an MCP
+surface, both calling the same use case in `kairix/use_cases/`.
+Cross-cutting invariants pinned in
+`tests/contracts/test_cli_mcp_parity_invariants.py`.
 
 ## Phasing
 

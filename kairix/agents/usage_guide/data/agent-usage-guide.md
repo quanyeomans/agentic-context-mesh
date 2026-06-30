@@ -107,6 +107,8 @@ Key fields to check:
 - `vec_count > 0` — vectors returned. If 0 with `vec_failed: false`, the query had no semantic matches.
 - `results` — list of ranked documents with `path`, `score`, and `snippet`
 
+Every result carries a `source_uri` — a source link you can open back to the original. The same pointer is on results from search, briefings, fact lookups, timelines, research, and contradiction checks, so you can always show a human where an answer came from, or feed it to `expand` to read more around a hit.
+
 ---
 
 ## What to do when results are poor
@@ -160,13 +162,19 @@ The intent classifier may have routed incorrectly. Try rephrasing:
 kairix search "<query>" --agent <name> [--budget N] [--json]
 ```
 
+### expand — pull the text around a search hit
+```bash
+kairix expand "<source_uri>" <seq> [--token-budget 2000]
+```
+A search hit points at one part of a document. When the snippet isn't enough, call `expand` with the hit's `source_uri` and its `seq` (both come back on the search result) to pull the parts on either side — the section it belongs to — up to a token budget. It reads the surrounding text straight from the index, so you get the context **without** re-searching or re-reading the whole file. Also available as the `tool_expand` MCP tool. Use it right after a hit when you need what comes before and after to answer with confidence.
+
 ### brief — session briefing synthesis
 Generates a ~800-token briefing synthesising relevant knowledge store content for the start of a session.
 ```bash
 kairix brief <agent-name>
 kairix brief shape --budget 5000
 ```
-Output written to `$KAIRIX_DATA_DIR/briefing/<agent>-latest.md`.
+Output written to `$KAIRIX_DATA_DIR/briefing/<agent>-latest.md`. Each briefing ends with a `## Sources` list of the sources behind it, so you can open any of them to check the work before you rely on the summary.
 
 ### entity — entity graph lookup
 ```bash
@@ -309,6 +317,7 @@ Every kairix capability has one Python implementation with one or more bindings 
 | capability | when to use | how to invoke | surface |
 |---|---|---|---|
 | `tool_search` / `kairix search` | retrieve content from the knowledge store | MCP — direct | both |
+| `tool_expand` / `kairix expand` | pull the chunks around a search hit (before/after/section) within a token budget | MCP — direct | both |
 | `tool_entity` / `kairix entity` | named-entity lookup (person, org, project) | MCP — direct | both |
 | `tool_prep` / `kairix prep` | tiered L0/L1 context summary | MCP — direct | both |
 | `tool_contradict` / `kairix contradict` | check new content for contradictions | MCP — direct | both |
