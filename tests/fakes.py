@@ -390,20 +390,35 @@ class FakeEmbeddingService:
     When constructed with ``vector=[]`` (or any empty iterable), every call to
     ``embed`` returns ``[]`` — useful for exercising backend short-circuit
     paths that treat empty embeddings as a soft failure.
+
+    Pass ``raises=`` to make ``embed`` / ``embed_batch`` raise — covers
+    never-raises contracts in callers that wrap the embedder (e.g. the
+    fact-store fused recall path degrading to BM25-only).
     """
 
-    def __init__(self, vector: list[float] | None = None, dim: int = 1536) -> None:
+    def __init__(
+        self,
+        vector: list[float] | None = None,
+        dim: int = 1536,
+        *,
+        raises: BaseException | None = None,
+    ) -> None:
         # Treat an explicitly-passed empty list as "embed always returns []".
         # Default (None) -> a normal fixed dim-vector.
         if vector is None:
             self._vector: list[float] = [0.01] * dim
         else:
             self._vector = list(vector)
+        self._raises = raises
 
     def embed(self, text: str) -> list[float]:
+        if self._raises is not None:
+            raise self._raises
         return list(self._vector)
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        if self._raises is not None:
+            raise self._raises
         return [list(self._vector) for _ in texts]
 
 

@@ -18,14 +18,25 @@ Connection management mirrors ``kairix/core/db/__init__.py``'s pattern:
 no long-lived connection; every method opens, executes, closes. WAL
 mode is set on first connect so concurrent ingest + query is safe.
 
-Week-1 scope ships FTS-only. The constructor accepts an optional
-``embedder: EmbeddingService`` plus ``vector_index_path`` so the
-Week-2 enhancement (RRF-fused FTS + vector) can wire in without
-breaking the existing surface. Until then ``embedder`` is ignored
-inside ``search`` and the caller can rely on FTS recall alone.
+Recall is BM25-only until a vector index is wired (PLA-262, #340).
+When the constructor is given BOTH an ``embedder: EmbeddingService``
+AND a ``vector_index: VectorRepository``, ``search`` embeds the query,
+recalls semantically-related facts from the vector index, and
+RRF-fuses that list with the BM25 list — reusing the production search
+pipeline's :func:`kairix.core.search.rrf.rrf` helper, never a fresh RRF
+implementation. With either seam absent (the default), ``search`` runs
+FTS-only exactly as before, so existing deployments are unaffected.
 
-F26 clean: only imports from ``kairix.core.protocols`` — no
-``kairix.providers`` / ``kairix.transport`` reach.
+``vector_index_path`` names the on-disk fact vector index; the boundary
+(the factory) builds a ``VectorRepository`` over it and injects it as
+``vector_index=``. Populating that index + wiring it through the factory
+is the PLA-262 follow-up; this module implements + tests the fused path
+behind the injection seam so it activates the moment a vector index is
+present.
+
+F26 clean: imports only from ``kairix.core.protocols`` and the sibling
+``kairix.core.search`` package — no ``kairix.providers`` /
+``kairix.transport`` reach.
 """
 
 from __future__ import annotations
@@ -36,7 +47,7 @@ import sqlite3
 from pathlib import Path
 
 from kairix.core.facts.records import StoredFactRecord
-from kairix.core.protocols import EmbeddingService, FactHit, FactRecord
+from kairix.core.protocols import EmbeddingService, FactHit, FactRecord, VectorRepository
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +60,11 @@ _ERROR_NO_FACT_WITH_ID = "SQLiteFactStore: no fact with id"
 
 # Column name for the Stream A Lever A temporal anchor (F17).
 _COL_EVIDENCE_AT = "evidence_at"
+
+# Synthetic ``collection`` value stamped on the fusion rows handed to
+# ``rrf()`` (PLA-262). Facts carry no collection of their own; the key is
+# only present because the shared RRF row contract requires it.
+_FUSION_COLLECTION = "facts"
 
 
 # ---------------------------------------------------------------------------
@@ -129,12 +145,20 @@ class SQLiteFactStore:
 
     Args:
         db_path: SQLite database file. Parent dirs are created on open.
-        vector_index_path: Reserved for the Week-2 enhancement — a
-            companion usearch index over ``(entity, attribute, value)``.
-            Week-1 ignores this argument.
-        embedder: Optional ``EmbeddingService``. Reserved for the
-            Week-2 RRF fusion path. Week-1 ignores embedder presence
-            and runs FTS-only.
+        vector_index_path: On-disk location of the companion fact vector
+            index (a usearch index over ``(entity, attribute, value)``).
+            Documented for the boundary that builds the
+            ``VectorRepository`` over it; ``search`` consumes the repo via
+            the injected ``vector_index`` seam, not the path directly.
+        embedder: Optional ``EmbeddingService``. Used to embed the query
+            for the fused (vector + BM25) recall path. Absent → FTS-only.
+        vector_index: Optional ``VectorRepository`` (the fact vector
+            index). Injected by the factory boundary (built over
+            ``vector_index_path``) or by tests (a ``FakeVectorRepository``).
+            Its ``search`` returns rows carrying a fact ``id`` (or ``path``)
+            in best-first rank order. Absent → FTS-only. The fused path
+            fires only when BOTH ``embedder`` and ``vector_index`` are
+            present — otherwise ``search`` runs today's BM25-only recall.
     """
 
     def __init__(
@@ -143,10 +167,12 @@ class SQLiteFactStore:
         db_path: Path,
         vector_index_path: Path | None = None,
         embedder: EmbeddingService | None = None,
+        vector_index: VectorRepository | None = None,
     ) -> None:
         self._db_path = db_path
         self._vector_index_path = vector_index_path
         self._embedder = embedder
+        self._vector_index = vector_index
         self._schema_initialised = False
 
     # -- Connection management ------------------------------------------------
@@ -258,17 +284,24 @@ class SQLiteFactStore:
     ) -> list[FactHit]:
         """Recall live (non-superseded) facts matching ``query``.
 
-        Uses ``facts_fts MATCH ?`` (BM25 ranking). Honours ``namespace``
-        filtering for engagement-scoped recall and excludes records
-        carrying a ``superseded_by`` link by default.
+        Honours ``namespace`` filtering for engagement-scoped recall and
+        excludes records carrying a ``superseded_by`` link by default.
+        Returns ``[]`` if the store is empty, the schema has not yet been
+        initialised, or the query produces no matches.
 
-        Returns ``[]`` if the store is empty, the schema has not yet
-        been initialised, or the query produces no matches.
+        Two recall modes (PLA-262, #340):
 
-        BM25-only today. Vector-search + RRF fusion is tracked in
-        https://github.com/three-cubes/kairix/issues/340; the
-        ``_embedder`` + ``_vector_index_path`` are plumbed through the
-        constructor so wiring the fused path is a localised change.
+        * **BM25-only** (default) — ``facts_fts MATCH ?`` with BM25
+          ranking. Runs when no ``embedder`` / ``vector_index`` is wired,
+          or when the vector leg surfaces nothing. This is the original
+          behaviour, preserved byte-for-byte for vault-only deployments.
+        * **Fused (vector + BM25)** — when BOTH an ``embedder`` and a
+          ``vector_index`` are present, the query is embedded, the vector
+          index recalls semantically-related facts (including facts with
+          no lexical overlap with the query), and the two ranked lists are
+          combined with Reciprocal Rank Fusion via the shared
+          :func:`kairix.core.search.rrf.rrf` helper. This lifts recall on
+          conversational queries that BM25 alone misses.
         """
         if not query or not query.strip():
             return []
@@ -277,11 +310,160 @@ class SQLiteFactStore:
         try:
             if not self._table_exists(conn, "facts_fts"):
                 return []
-            rows = self._fts_query(conn, query, top_k, namespace)
+            bm25_hits: list[FactHit] = [
+                StoredFactHit(record=self._row_to_record(row), score=self._normalise_bm25(row["bm25"]))
+                for row in self._fts_query(conn, query, top_k, namespace)
+            ]
+            vec_records = self._vector_recall(conn, query, top_k, namespace)
+            if not vec_records:
+                return list(bm25_hits)
+            return self._rrf_fuse(bm25_hits, vec_records, top_k)
         finally:
             conn.close()
 
-        return [StoredFactHit(record=self._row_to_record(row), score=self._normalise_bm25(row["bm25"])) for row in rows]
+    # -- Fused recall (vector + BM25, RRF) ------------------------------------
+
+    def _vector_recall(
+        self,
+        conn: sqlite3.Connection,
+        query: str,
+        top_k: int,
+        namespace: str | None,
+    ) -> list[FactRecord]:
+        """Embed ``query`` and recall facts from the vector index.
+
+        Returns the live (non-superseded, namespace-filtered) facts the
+        vector index ranks as nearest neighbours, in best-first order.
+        Returns ``[]`` — degrading to BM25-only — whenever the fused path
+        is not wired (no embedder / no vector index) or any best-effort
+        step yields nothing. Never raises: a misbehaving embedder or
+        index must not break recall.
+        """
+        # Both seams are required for the fused path; either absent → the
+        # caller falls back to BM25-only. Kept as two independent guards
+        # (not a combined ``or``) so each early-return is observable on its
+        # own — the downstream ``try/except`` would otherwise mask a missing
+        # seam behind a swallowed attribute error.
+        if self._embedder is None:
+            return []
+        if self._vector_index is None:
+            return []
+        try:
+            query_vec = self._embedder.embed(query)
+        except Exception as exc:
+            logger.warning("SQLiteFactStore: query embed failed — vector leg skipped: %s", exc)
+            return []
+        if not query_vec:
+            return []
+        try:
+            rows = self._vector_index.search(query_vec, top_k)
+        except Exception as exc:
+            logger.warning("SQLiteFactStore: vector index search failed — vector leg skipped: %s", exc)
+            return []
+        fact_ids = [fid for fid in (self._vec_row_id(row) for row in rows) if fid]
+        if not fact_ids:
+            return []
+        return self._facts_by_ids(conn, fact_ids, namespace)
+
+    def _facts_by_ids(
+        self,
+        conn: sqlite3.Connection,
+        fact_ids: list[str],
+        namespace: str | None,
+    ) -> list[FactRecord]:
+        """Fetch live facts for ``fact_ids``, preserving the input order.
+
+        Drops superseded rows and (when ``namespace`` is set) out-of-scope
+        rows so the vector leg obeys the same visibility contract as the
+        BM25 leg. Order mirrors the vector index ranking.
+        """
+        # Only the bound-parameter COUNT is interpolated (one ``?`` per id);
+        # no user data reaches the SQL text — the established IN-clause
+        # pattern used across the repo (see core/db/repository.py).
+        placeholders = ", ".join("?" for _ in fact_ids)
+        sql = f"SELECT * FROM facts WHERE id IN ({placeholders}) AND superseded_by IS NULL"
+        params: list[object] = list(fact_ids)
+        if namespace is not None:
+            sql += " AND namespace = ?"
+            params.append(namespace)
+        # F63-bounded: ``fact_ids`` is the vector index result list, capped at ``top_k``.
+        rows_by_id = {row["id"]: row for row in conn.execute(sql, params).fetchall()}
+        return [self._row_to_record(rows_by_id[fid]) for fid in fact_ids if fid in rows_by_id]
+
+    def _rrf_fuse(
+        self,
+        bm25_hits: list[FactHit],
+        vec_records: list[FactRecord],
+        top_k: int,
+    ) -> list[FactHit]:
+        """RRF-fuse the BM25 and vector fact lists into one ranked list.
+
+        Reuses the production search pipeline's
+        :func:`kairix.core.search.rrf.rrf` — facts are adapted into its
+        ``BM25Result`` / ``VecResult`` row contract (the fact ``id`` plays
+        the document ``file`` / ``path``), and the fused rows map back to
+        ``StoredFactHit``. No RRF maths is re-implemented here. A fact
+        present in only the vector list (no lexical overlap with the query)
+        earns its score from the vector rank alone — that is how
+        semantically-related facts BM25 misses reach the result set.
+        """
+        from kairix.core.search.bm25 import BM25Result
+        from kairix.core.search.rrf import RRF_K, rrf
+        from kairix.core.search.vec_index import VecResult
+
+        records_by_id: dict[str, FactRecord] = {}
+        bm25_rows: list[BM25Result] = []
+        for hit in bm25_hits:
+            record = hit.record
+            records_by_id[record.id] = record
+            bm25_rows.append(
+                BM25Result(
+                    file=record.id,
+                    title=record.entity,
+                    snippet=record.value,
+                    score=float(hit.score),
+                    collection=_FUSION_COLLECTION,
+                    source_page=None,
+                )
+            )
+        vec_rows: list[VecResult] = []
+        for record in vec_records:
+            records_by_id[record.id] = record
+            vec_rows.append(
+                VecResult(
+                    hash_seq=record.id,
+                    distance=0.0,
+                    path=record.id,
+                    collection=_FUSION_COLLECTION,
+                    title=record.entity,
+                    snippet=record.value,
+                    source_page=None,
+                )
+            )
+
+        hits: list[FactHit] = []
+        for row in rrf(bm25_rows, vec_rows, k=RRF_K)[:top_k]:
+            fused_record = records_by_id.get(row.path)
+            if fused_record is not None:
+                hits.append(StoredFactHit(record=fused_record, score=row.rrf_score))
+        return hits
+
+    @staticmethod
+    def _vec_row_id(row: object) -> str | None:
+        """Extract the fact id from a vector-index result row.
+
+        Accepts the canonical ``id`` key first, then ``path`` (so a
+        usearch-backed ``VecResult`` row, keyed by ``path``, also works).
+        Returns ``None`` for a row carrying neither.
+        """
+        if not isinstance(row, dict):
+            return None
+        # Prefer the canonical ``id`` key; fall back to ``path`` when ``id``
+        # is absent/empty (a usearch ``VecResult`` row is keyed by ``path``).
+        raw = row.get("id")
+        if not raw:
+            raw = row.get("path")
+        return str(raw) if raw else None
 
     def find_conflicts(
         self,
