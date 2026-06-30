@@ -15,11 +15,13 @@ import pytest
 from kairix.agents.briefing.sources import (
     fetch_entity_stub,
     fetch_hybrid_search,
+    fetch_hybrid_search_sources,
     fetch_knowledge_rules,
     fetch_memory_logs,
     fetch_recent_decisions,
     fetch_recent_memory,
 )
+from kairix.core.protocols import SourceRef
 from kairix.text import estimate_tokens, truncate_to_tokens
 from tests.fakes import FakeSearchPipeline
 
@@ -464,3 +466,121 @@ class TestFetchHybridSearchQueryFromSignal:
         assert call["kwargs"]["scope"] == "shared+agent"
         # No results scripted → empty context, no raise.
         assert result == ""
+
+
+@pytest.mark.unit
+class TestFetchHybridSearchSources:
+    """PLA-266: the brief captures the retrieved chunks as resolvable
+    :class:`SourceRef` breadcrumbs (the structured citations the agent reads
+    back), not just the prose text the synthesiser collapses. Driven through
+    the FakeSearchPipeline DI seam so the structured projection is proven
+    without an index.
+    """
+
+    @staticmethod
+    def _three_chunk_pipeline() -> FakeSearchPipeline:
+        return FakeSearchPipeline(
+            scripted_results=[
+                FakeSearchPipeline.make_chunk_row(
+                    path="archive/handbook.zip#1536",
+                    title="Acme Handbook",
+                    content="deployment runbook deploy procedure",
+                    source_uri="sharepoint://acme-site/handbook.zip",
+                    collection="shared",
+                ),
+                FakeSearchPipeline.make_chunk_row(
+                    path="notes/onboarding.md",
+                    title="Onboarding",
+                    content="deployment notes for new hires",
+                    collection="shared",
+                ),
+                FakeSearchPipeline.make_chunk_row(
+                    path="decisions/2026-06-30.md",
+                    title="Deploy decision",
+                    content="we will cut over the deployment on friday",
+                    source_uri="obsidian://decisions/2026-06-30.md",
+                    collection="agent-alpha",
+                ),
+            ]
+        )
+
+    @pytest.mark.unit
+    def test_returns_one_sourceref_per_retrieved_chunk(self):
+        """Each retrieved chunk becomes a resolvable SourceRef — the SLO is
+        >=3 structured citations per brief, so three hits yields three refs.
+        """
+        refs = fetch_hybrid_search_sources(
+            "agent-alpha",
+            pipeline=self._three_chunk_pipeline(),
+            focus_signals=["[2026-06-30] [pending] ship the deployment"],
+        )
+
+        assert len(refs) == 3
+        assert all(isinstance(r, SourceRef) for r in refs)
+
+    @pytest.mark.unit
+    def test_canonical_source_uri_is_threaded_not_munged_path(self):
+        """The connector breadcrumb is the canonical ``source_uri``, distinct
+        from the synthetic ``#<seq>`` chunk-key path.
+        """
+        refs = fetch_hybrid_search_sources(
+            "agent-alpha",
+            pipeline=self._three_chunk_pipeline(),
+            focus_signals=["[pending] deployment"],
+        )
+
+        by_path = {r.path: r for r in refs}
+        connector = by_path["archive/handbook.zip#1536"]
+        assert connector.source_uri == "sharepoint://acme-site/handbook.zip"
+        assert connector.collection == "shared"
+        assert connector.title == "Acme Handbook"
+
+    @pytest.mark.unit
+    def test_passthrough_chunk_source_uri_falls_back_to_path(self):
+        """A vault note with no connector URI still yields a resolvable
+        breadcrumb — ``source_uri`` falls back to the path.
+        """
+        refs = fetch_hybrid_search_sources(
+            "agent-alpha",
+            pipeline=self._three_chunk_pipeline(),
+            focus_signals=["[pending] deployment"],
+        )
+
+        by_path = {r.path: r for r in refs}
+        vault = by_path["notes/onboarding.md"]
+        assert vault.source_uri == "notes/onboarding.md"
+
+    @pytest.mark.unit
+    def test_no_results_yields_empty_list(self):
+        """No hits → no citations, and the function never raises."""
+        refs = fetch_hybrid_search_sources(
+            "growth",
+            pipeline=FakeSearchPipeline(scripted_results=[]),
+            focus_signals=[],
+        )
+        assert refs == []
+
+    @pytest.mark.unit
+    def test_failure_returns_empty_list_never_raises(self):
+        """A pipeline whose ``search`` raises degrades to no citations."""
+
+        class _BoomPipeline:
+            def search(self, **_kwargs):
+                raise RuntimeError("backend down")
+
+        refs = fetch_hybrid_search_sources(
+            "agent-alpha",
+            pipeline=_BoomPipeline(),
+            focus_signals=["[pending] deployment"],
+        )
+        assert refs == []
+
+    @pytest.mark.unit
+    def test_production_path_builds_pipeline_and_returns_list(self):
+        """With both DI seams ``None`` the function builds the real pipeline via
+        ``build_search_pipeline`` (the production default the brief runs) and
+        returns a list — empty in a no-index/no-creds environment, never a
+        raise. Mirrors ``TestFetchHybridSearchErrorPaths`` for the text path.
+        """
+        result = fetch_hybrid_search_sources("nonexistent-agent-xyz")
+        assert isinstance(result, list)

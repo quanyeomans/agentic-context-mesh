@@ -7,10 +7,12 @@ from pathlib import Path
 import pytest
 
 from kairix.core.health import HealthDeps, KairixHealth
+from kairix.core.protocols import SourceRef
 from kairix.use_cases.brief import (
     BriefDeps,
     BriefOutput,
     brief_output_to_envelope,
+    render_sources_footer,
     run_brief,
 )
 
@@ -67,6 +69,10 @@ def _build_deps(
             generate_fn=fake_generate,
             briefing_dir_fn=fake_dir,
             config_fn=lambda: effective_config,
+            # Default the PLA-266 structured-citation seam to "no hits" so
+            # these tests never fall through to the production hybrid search;
+            # the footer + provenance tests below inject their own refs.
+            sources_fn=lambda _agent: [],
             health_deps=health_deps or _healthy_health_deps(),
         ),
         captured,
@@ -286,3 +292,169 @@ def test_brief_invalid_agent_still_carries_health_snapshot() -> None:
     # Even on validation failure the agent gets a health snapshot.
     assert out.health.chat == "offline"
     assert out.health.next_action != ""
+
+
+# ---------------------------------------------------------------------------
+# PLA-266: structured SourceRef citations + ## Sources footer
+# ---------------------------------------------------------------------------
+
+
+def _three_refs() -> list[SourceRef]:
+    """Three resolvable breadcrumbs — meets the >=3-citations-per-brief SLO."""
+    return [
+        SourceRef.of(
+            path="archive/handbook.zip#1536",
+            source_uri="sharepoint://acme-site/handbook.zip",
+            title="Acme Handbook",
+            collection="shared",
+        ),
+        SourceRef.of(path="notes/onboarding.md", title="Onboarding", collection="shared"),
+        SourceRef.of(
+            path="decisions/2026-06-30.md",
+            source_uri="obsidian://decisions/2026-06-30.md",
+            title="Deploy decision",
+            collection="agent-alpha",
+        ),
+    ]
+
+
+def _deps_with_sources(
+    *,
+    content: str,
+    sources: list[SourceRef],
+    out_dir: Path = Path("/var/lib/kairix/briefing"),
+) -> BriefDeps:
+    """A BriefDeps whose generator + structured-source seam are both faked.
+
+    ``sources_fn`` is the PLA-266 injection seam: instead of running a real
+    hybrid search, tests hand ``run_brief`` the SourceRefs directly so the
+    footer-assembly + envelope-projection are proven without an index.
+    """
+    return BriefDeps(
+        generate_fn=lambda _agent, **_kw: content,
+        briefing_dir_fn=lambda: out_dir,
+        config_fn=lambda: _config_defining("agent-alpha"),
+        sources_fn=lambda _agent: list(sources),
+        health_deps=_healthy_health_deps(),
+    )
+
+
+@pytest.mark.unit
+def test_output_carries_structured_sourcerefs() -> None:
+    """The brief result embeds the retrieved chunks as resolvable SourceRefs
+    so an MCP caller can cite or re-open any source (PLA-266).
+
+    Sabotage-proof (executed): dropping ``sources=tuple(sources)`` from the
+    ``BriefOutput`` built in ``run_brief`` makes this fail (``out.sources``
+    is empty). Restored.
+    """
+    out = run_brief("agent-alpha", deps=_deps_with_sources(content="body", sources=_three_refs()))
+
+    assert out.error == ""
+    assert len(out.sources) == 3
+    assert all(isinstance(r, SourceRef) for r in out.sources)
+    assert out.sources[0].source_uri == "sharepoint://acme-site/handbook.zip"
+
+
+@pytest.mark.unit
+def test_content_gains_deterministic_sources_footer() -> None:
+    """The ## Sources footer is appended to the brief content and renders the
+    canonical source_uri of every citation.
+
+    Sabotage-proof (executed): removing the footer append in ``run_brief``
+    makes this fail (no ``## Sources`` in content). Restored.
+    """
+    out = run_brief("agent-alpha", deps=_deps_with_sources(content="briefing body", sources=_three_refs()))
+
+    assert "## Sources" in out.content
+    # The body precedes the footer.
+    assert out.content.startswith("briefing body")
+    # Every citation's canonical breadcrumb is rendered.
+    assert "sharepoint://acme-site/handbook.zip" in out.content
+    assert "obsidian://decisions/2026-06-30.md" in out.content
+    # The passthrough note falls back to its path as the resolvable pointer.
+    assert "notes/onboarding.md" in out.content
+
+
+@pytest.mark.unit
+def test_no_sources_appends_no_footer() -> None:
+    """With zero retrieved chunks the content is left byte-identical — no
+    empty ``## Sources`` heading dangling on the brief.
+    """
+    out = run_brief("agent-alpha", deps=_deps_with_sources(content="briefing body", sources=[]))
+
+    assert out.content == "briefing body"
+    assert "## Sources" not in out.content
+    assert out.sources == ()
+
+
+@pytest.mark.unit
+def test_envelope_carries_sources_breadcrumbs() -> None:
+    """``brief_output_to_envelope`` projects each SourceRef to its breadcrumb
+    dict so MCP callers get machine-parseable provenance (PLA-266).
+
+    Sabotage-proof (executed): dropping the ``"sources"`` key from
+    ``brief_output_to_envelope`` makes this fail (KeyError). Restored.
+    """
+    out = run_brief("agent-alpha", deps=_deps_with_sources(content="body", sources=_three_refs()))
+    env = brief_output_to_envelope(out)
+
+    assert len(env["sources"]) == 3
+    assert env["sources"][0]["source_uri"] == "sharepoint://acme-site/handbook.zip"
+    assert env["sources"][0]["collection"] == "shared"
+
+
+@pytest.mark.unit
+def test_envelope_sources_round_trip_through_from_envelope() -> None:
+    """The structured citations survive the warm-MCP envelope round-trip."""
+    out = run_brief("agent-alpha", deps=_deps_with_sources(content="body", sources=_three_refs()))
+    env = brief_output_to_envelope(out)
+    rebuilt = BriefOutput.from_envelope(env)
+
+    assert len(rebuilt.sources) == 3
+    assert rebuilt.sources[0].source_uri == "sharepoint://acme-site/handbook.zip"
+    assert rebuilt.sources[2].path == "decisions/2026-06-30.md"
+
+
+@pytest.mark.unit
+def test_render_sources_footer_is_deterministic_and_empty_for_no_sources() -> None:
+    """The footer renderer is pure: same refs in, same markdown out; empty in,
+    empty string out (so the caller appends nothing).
+    """
+    refs = _three_refs()
+    first = render_sources_footer(refs)
+    second = render_sources_footer(refs)
+    assert first == second
+    assert first.lstrip().startswith("## Sources")
+    # Each citation is numbered and carries its canonical breadcrumb.
+    assert "1. " in first
+    assert "sharepoint://acme-site/handbook.zip" in first
+    assert render_sources_footer([]) == ""
+
+
+@pytest.mark.unit
+def test_footer_label_prefers_title_then_falls_back_to_path() -> None:
+    """The citation label is the human title when present, else the path —
+    pins ``label = ref.title or ref.path`` (a title-bearing source must NOT
+    render its raw path as the label).
+
+    Sabotage-proof (executed): mutating ``ref.title or ref.path`` to
+    ``ref.title and ref.path`` makes this fail — the titled source renders its
+    path instead of "Acme Handbook". Restored.
+    """
+    titled = render_sources_footer(
+        [
+            SourceRef.of(
+                path="archive/handbook.zip#1536",
+                source_uri="sharepoint://acme-site/handbook.zip",
+                title="Acme Handbook",
+            )
+        ]
+    )
+    # The human title is the label; the synthetic chunk-key path is NOT.
+    assert "Acme Handbook" in titled
+    assert "1. Acme Handbook — " in titled
+
+    # A titleless source falls back to its path as the label.
+    untitled = render_sources_footer([SourceRef.of(path="notes/loose.md")])
+    assert "1. notes/loose.md — " in untitled

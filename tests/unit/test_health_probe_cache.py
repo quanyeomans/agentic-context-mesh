@@ -110,6 +110,7 @@ def test_probe_health_cached_within_ttl() -> None:
     deps = BriefDeps(
         generate_fn=lambda agent, **_: "# brief",
         briefing_dir_fn=lambda: None,
+        sources_fn=lambda _agent: [],
         health_deps=health_deps,
     )
 
@@ -137,6 +138,7 @@ def test_probe_health_refresh_past_ttl() -> None:
     deps = BriefDeps(
         generate_fn=lambda agent, **_: "# brief",
         briefing_dir_fn=lambda: None,
+        sources_fn=lambda _agent: [],
         health_deps=health_deps,
     )
 
@@ -158,6 +160,7 @@ def test_probe_health_clear() -> None:
     deps = BriefDeps(
         generate_fn=lambda agent, **_: "# brief",
         briefing_dir_fn=lambda: None,
+        sources_fn=lambda _agent: [],
         health_deps=health_deps,
     )
 
@@ -186,6 +189,7 @@ def test_probe_health_cache_hit_at_exact_ttl_boundary() -> None:
     deps = BriefDeps(
         generate_fn=lambda agent, **_: "# brief",
         briefing_dir_fn=lambda: None,
+        sources_fn=lambda _agent: [],
         health_deps=health_deps,
     )
 

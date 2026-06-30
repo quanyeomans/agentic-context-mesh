@@ -74,6 +74,9 @@ def _healthy_deps(generate: _RecordingGenerate) -> BriefDeps:
     return BriefDeps(
         generate_fn=generate,
         briefing_dir_fn=lambda: None,
+        # Stub the PLA-266 citation seam so the cache tests never reach the
+        # production hybrid search — they assert on cache hit/miss, not refs.
+        sources_fn=lambda _agent: [],
         health_deps=health,
     )
 

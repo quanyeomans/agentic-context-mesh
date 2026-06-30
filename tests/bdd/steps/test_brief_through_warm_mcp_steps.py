@@ -23,7 +23,8 @@ from pytest_bdd import given, parsers, scenarios, then, when
 from kairix.agents.briefing.cli import format_output
 from kairix.agents.briefing.cli import main as brief_main
 from kairix.core.health import HealthDeps
-from kairix.use_cases.brief import BriefDeps, BriefOutput, brief_output_to_envelope
+from kairix.core.protocols import SourceRef
+from kairix.use_cases.brief import BriefDeps, BriefOutput, brief_output_to_envelope, run_brief
 
 pytestmark = pytest.mark.bdd
 
@@ -104,6 +105,9 @@ def _seed_brief_deps(brief_warm_ctx: _BriefWarmCtx, content: str, path: str) -> 
         generate_fn=lambda _agent, **_kw: content,
         briefing_dir_fn=lambda: out_dir,
         config_fn=lambda: {"agents": {"builder": {"surfaces": [{"path": "memory/builder", "label": "memory"}]}}},
+        # Stub the PLA-266 citation seam — this scenario asserts the --json
+        # envelope shape, not the structured sources (covered separately).
+        sources_fn=lambda _agent: [],
         health_deps=_healthy_health_deps(),
     )
 
@@ -143,3 +147,69 @@ def _assert_exit(brief_warm_ctx: _BriefWarmCtx, code: int) -> None:
         f"expected exit {code}, got {brief_warm_ctx.exit_code}; "
         f"stdout={brief_warm_ctx.stdout[:200]!r} stderr={brief_warm_ctx.stderr[:200]!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Scenario 3 — structured SourceRef citations (PLA-266)
+# ---------------------------------------------------------------------------
+
+_THREE_CITATIONS = (
+    SourceRef.of(
+        path="archive/handbook.zip#1536",
+        source_uri="sharepoint://acme-site/handbook.zip",
+        title="Acme Handbook",
+        collection="shared",
+    ),
+    SourceRef.of(path="notes/onboarding.md", title="Onboarding", collection="shared"),
+    SourceRef.of(
+        path="decisions/2026-06-30.md",
+        source_uri="obsidian://decisions/2026-06-30.md",
+        title="Deploy decision",
+        collection="agent-alpha",
+    ),
+)
+
+
+@given(parsers.parse("a brief use case that retrieves three sources for agent-alpha"))
+def _seed_brief_with_sources(brief_warm_ctx: _BriefWarmCtx) -> None:
+    surfaces = {"agents": {"agent-alpha": {"surfaces": [{"path": "memory/agent-alpha", "label": "memory"}]}}}
+    brief_warm_ctx.deps = BriefDeps(
+        generate_fn=lambda _agent, **_kw: "Today's focus is the deployment cutover.",
+        briefing_dir_fn=lambda: Path("/var/lib/kairix/briefing"),
+        config_fn=lambda: surfaces,
+        sources_fn=lambda _agent: list(_THREE_CITATIONS),
+        health_deps=_healthy_health_deps(),
+    )
+
+
+@when("the configured agent is briefed through the use case")
+def _brief_through_use_case(brief_warm_ctx: _BriefWarmCtx) -> None:
+    assert brief_warm_ctx.deps is not None
+    brief_warm_ctx.original = run_brief("agent-alpha", deps=brief_warm_ctx.deps)
+    brief_warm_ctx.parsed_envelope = brief_output_to_envelope(brief_warm_ctx.original)
+
+
+@then("the brief envelope carries the three source breadcrumbs")
+def _assert_three_breadcrumbs(brief_warm_ctx: _BriefWarmCtx) -> None:
+    sources = brief_warm_ctx.parsed_envelope.get("sources", [])
+    assert len(sources) == 3, f"expected 3 source breadcrumbs, got {len(sources)}: {sources}"
+
+
+@then("each breadcrumb exposes a resolvable source_uri")
+def _assert_resolvable_source_uri(brief_warm_ctx: _BriefWarmCtx) -> None:
+    sources = brief_warm_ctx.parsed_envelope["sources"]
+    # SourceRef.of guarantees source_uri is never empty (falls back to path).
+    assert all(s["source_uri"] for s in sources), f"a breadcrumb has an empty source_uri: {sources}"
+    assert any(s["source_uri"] == "sharepoint://acme-site/handbook.zip" for s in sources)
+
+
+@then("the brief content ends with a Sources footer listing the citations")
+def _assert_sources_footer(brief_warm_ctx: _BriefWarmCtx) -> None:
+    assert brief_warm_ctx.original is not None
+    content = brief_warm_ctx.original.content
+    heading_idx = content.find("## Sources")
+    assert heading_idx != -1, f"no ## Sources footer in brief content: {content!r}"
+    # The synthesised body precedes the footer; the footer lists each citation.
+    assert content.index("deployment cutover") < heading_idx
+    assert "sharepoint://acme-site/handbook.zip" in content
+    assert "obsidian://decisions/2026-06-30.md" in content
