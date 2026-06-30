@@ -38,6 +38,15 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 - **Tighter handling of file paths.** Paths supplied by an operator or an agent are now checked and kept inside their allowed area, so a stray or crafted path can't reach somewhere it shouldn't.
 
+### For agents
+
+- **New tool — `expand` (CLI `kairix expand`).** After a search or recall hit, pull the chunks right around it — the one before, the one after, or its parent section — within a token budget, instead of re-reading the whole document. Call it with the hit's source link and chunk number.
+- **Every result carries an openable source link.** Search, briefings, fact lookups, timelines, research, and claim checks all return a resolvable source you can cite, open, or pass straight to `expand` — so cite your sources instead of summarising from memory.
+- **Briefings are drillable.** A briefing ends with a "Sources" list and returns its sources as data — verify or expand any claim instead of re-searching from scratch.
+- **Fact lookups resolve to real sources.** `facts_about` results now carry an openable source link (not opaque turn-ids), blend keyword and meaning matching, and lead with a short summary of what you asked about.
+- **Saving memory is faster and more reliable.** Saves update just the one entry (no full re-index), work during warm-up, and always land somewhere searchable; if a save can't be written you get a plain-language reason and fix.
+- **Snappier first results.** The result-ranking model is warmed at startup, so the first query after a restart isn't slow, and result previews center on the part that matched.
+
 ## [2026.6.28] - 2026-06-29
 
 ### For operators
