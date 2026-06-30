@@ -61,6 +61,11 @@ _ERROR_NO_FACT_WITH_ID = "SQLiteFactStore: no fact with id"
 # Column name for the Stream A Lever A temporal anchor (F17).
 _COL_EVIDENCE_AT = "evidence_at"
 
+# Column names for the PLA-261 actionable-provenance breadcrumb (F17 — each
+# is read on the DDL, the migration, the INSERT and the row projection).
+_COL_CONVERSATION_ID = "conversation_id"
+_COL_SOURCE_URI = "source_uri"
+
 # Synthetic ``collection`` value stamped on the fusion rows handed to
 # ``rrf()`` (PLA-262). Facts carry no collection of their own; the key is
 # only present because the shared RRF row contract requires it.
@@ -84,6 +89,8 @@ _SCHEMA_DDL = (
         superseded_by TEXT,
         namespace TEXT NOT NULL,
         evidence_at TEXT,
+        conversation_id TEXT,
+        source_uri TEXT,
         FOREIGN KEY(superseded_by) REFERENCES facts(id)
     )
     """,
@@ -106,12 +113,29 @@ _SCHEMA_DDL = (
 
 
 # Lightweight forward-migration DDL — applied after the IF NOT EXISTS
-# create above so a pre-existing facts table (created before the
-# evidence_at column shipped) gets the new column without losing rows.
-# ``ALTER TABLE ... ADD COLUMN`` is idempotent only via the OperationalError
-# we catch in ``_ensure_schema``; SQLite has no native ``IF NOT EXISTS``
-# clause for ``ADD COLUMN`` before 3.35 (we target older versions too).
-_MIGRATIONS = ((_COL_EVIDENCE_AT, f"ALTER TABLE facts ADD COLUMN {_COL_EVIDENCE_AT} TEXT"),)
+# create above so a pre-existing facts table (created before a column
+# shipped) gets the new column without losing rows. ``ADD COLUMN`` is the
+# rollback-safe schema delta (F79): purely additive, so old code reading the
+# new schema ignores the columns and ``_row_to_record`` projects an absent
+# column as ``None`` — no data is lost or rewritten, so reverting to the
+# prior kairix version is a clean no-op. The idempotency guard in
+# ``_apply_column_migrations`` (probe ``PRAGMA table_info`` first) makes the
+# ALTER safe to re-run; SQLite has no native ``IF NOT EXISTS`` on
+# ``ADD COLUMN`` before 3.35 (we target older versions too).
+def _add_text_column_ddl(column: str) -> str:
+    """Build the additive ``ADD COLUMN <name> TEXT`` DDL for one migration.
+
+    Single-sources the ``ALTER TABLE`` prefix so the three forward
+    migrations don't each repeat the literal (F17).
+    """
+    return f"ALTER TABLE facts ADD COLUMN {column} TEXT"
+
+
+_MIGRATIONS = (
+    (_COL_EVIDENCE_AT, _add_text_column_ddl(_COL_EVIDENCE_AT)),
+    (_COL_CONVERSATION_ID, _add_text_column_ddl(_COL_CONVERSATION_ID)),
+    (_COL_SOURCE_URI, _add_text_column_ddl(_COL_SOURCE_URI)),
+)
 
 
 class StoredFactHit:
@@ -240,8 +264,8 @@ class SQLiteFactStore:
                 INSERT OR IGNORE INTO facts (
                     id, entity, attribute, value, confidence,
                     source_turn_ids, extracted_at, superseded_by, namespace,
-                    evidence_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    evidence_at, conversation_id, source_uri
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     fact.id,
@@ -254,10 +278,12 @@ class SQLiteFactStore:
                     fact.superseded_by,
                     fact.namespace,
                     # Tolerate FactRecord-shaped duck types that pre-date
-                    # the ``evidence_at`` field — they expose neither the
-                    # property nor a ``None`` default. ``getattr`` keeps
-                    # ``FactStore.add`` callable from older test fakes.
+                    # the ``evidence_at`` / provenance fields — they expose
+                    # neither the property nor a ``None`` default. ``getattr``
+                    # keeps ``FactStore.add`` callable from older test fakes.
                     getattr(fact, _COL_EVIDENCE_AT, None),
+                    getattr(fact, _COL_CONVERSATION_ID, None),
+                    getattr(fact, _COL_SOURCE_URI, None),
                 ),
             )
             # Keep the FTS index in sync. ``INSERT OR IGNORE`` above
@@ -622,17 +648,18 @@ class SQLiteFactStore:
 
     @staticmethod
     def _row_to_record(row: sqlite3.Row) -> StoredFactRecord:
-        """Translate one SQLite row into a ``StoredFactRecord``."""
+        """Translate one SQLite row into a ``StoredFactRecord``.
+
+        ``evidence_at`` (Stream A Lever A) and ``conversation_id`` /
+        ``source_uri`` (PLA-261) were each added by a forward migration;
+        rows read from a pre-migration database — e.g. via ``find_conflicts``
+        / ``search``, which do NOT call ``_ensure_schema`` — may not expose
+        the column key. Probe ``row.keys()`` before indexing so a legacy
+        SQLite file projects the absent column as ``None`` rather than
+        raising ``IndexError``.
+        """
         raw_turns = json.loads(row["source_turn_ids"])
-        # ``evidence_at`` was added in Stream A Lever A; rows from a
-        # pre-migration database may not expose the column key. Probe
-        # the row.keys() tuple before indexing so legacy SQLite files
-        # don't raise ``IndexError`` here.
-        evidence_at: str | None
-        if _COL_EVIDENCE_AT in row.keys():
-            evidence_at = row[_COL_EVIDENCE_AT]
-        else:
-            evidence_at = None
+        keys = row.keys()
         return StoredFactRecord(
             id=row["id"],
             entity=row["entity"],
@@ -643,7 +670,9 @@ class SQLiteFactStore:
             extracted_at=row["extracted_at"],
             superseded_by=row["superseded_by"],
             namespace=row["namespace"],
-            evidence_at=evidence_at,
+            evidence_at=row[_COL_EVIDENCE_AT] if _COL_EVIDENCE_AT in keys else None,
+            conversation_id=row[_COL_CONVERSATION_ID] if _COL_CONVERSATION_ID in keys else None,
+            source_uri=row[_COL_SOURCE_URI] if _COL_SOURCE_URI in keys else None,
         )
 
     @staticmethod

@@ -24,6 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
+from kairix.core.facts.records import resolve_fact_source_uri
 from kairix.core.protocols import (
     BoostStrategy,
     CollectionResolver,
@@ -778,9 +779,10 @@ def _fused_from_fact_hit(hit: Any, fact_weight: float, *, denom: float = 1.0) ->
     """Adapt a ``FactHit`` to ``FusedResult`` so the boost/budget stages consume it.
 
     Each fact's ``record.value`` becomes the snippet body and the
-    synthesised path namespaces it under ``facts://<id>`` so downstream
-    consumers (logger, MCP renderer) can tell fact rows apart from chunk
-    rows without sniffing field shapes.
+    synthesised ``path`` namespaces it under ``facts://<id>`` so downstream
+    consumers (logger, MCP renderer, dedup, prep's fact-snippet floor) can
+    tell fact rows apart from chunk rows without sniffing field shapes — the
+    ``facts://`` prefix stays the row's *type tag*.
 
     ``denom`` normalises the raw FactHit score against the strongest
     hit in this query's batch — same scale as the normalised chunk
@@ -798,9 +800,13 @@ def _fused_from_fact_hit(hit: Any, fact_weight: float, *, denom: float = 1.0) ->
         rrf_score=score,
         in_bm25=False,
         in_vec=False,
-        # PLA-274 — the synthesised fact URI is itself the canonical
-        # breadcrumb; carry it so downstream SourceRefs resolve to the fact.
-        source_uri=fact_uri,
+        # PLA-261 — carry REAL provenance (#429): the conversation the fact
+        # was grounded in resolves to a re-openable document path, not the
+        # un-openable ``facts://<id>`` self-pointer. ``path`` keeps the
+        # ``facts://`` type tag; ``source_uri`` is the resolvable breadcrumb
+        # downstream SourceRefs (prep / search) cite. Falls back to
+        # ``facts://<id>`` for legacy rows with no stored provenance.
+        source_uri=resolve_fact_source_uri(record),
     )
 
 

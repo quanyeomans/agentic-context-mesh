@@ -1837,6 +1837,25 @@ def agent_conversations_dir(document_root_arg: str | Path | None = None) -> Path
     return base / _AGENT_KNOWLEDGE_DIR / "conversations"
 
 
+def agent_conversation_doc_rel_path(conversation_id: str) -> str:
+    """Resolvable breadcrumb (document-relative path) for one conversation's markdown (PLA-261).
+
+    ``ingest_chat`` writes each conversation to
+    ``{document_root}/04-Agent-Knowledge/conversations/<conversation_id>.md`` and
+    the scanner indexes it under the SAME document-root-relative path
+    (``documents.path`` — see ``kairix/core/db/scanner.py``). Returning that
+    relative path as a fact's ``source_uri`` therefore hands an agent a pointer
+    it can actually re-open to verify a recalled fact (the recall→verify→act
+    loop #467 broke). Posix separators keep the breadcrumb stable across the
+    macOS-author / Linux-deploy split.
+
+    Single source for the ``04-Agent-Knowledge/conversations`` segment so the
+    write site (``ingest_chat``) and the read-time resolver
+    (``resolve_fact_source_uri``) can never drift (F17).
+    """
+    return f"{_AGENT_KNOWLEDGE_DIR}/conversations/{conversation_id}.md"
+
+
 # PR 1.2 / #420 — the legacy memory-root helpers (and their backing env var)
 # have been deleted. The hardcoded ``<root>/<agent>/memory`` convention no
 # longer reflects production vault shapes (operators run flat ``<agent>/``

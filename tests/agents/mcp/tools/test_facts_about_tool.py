@@ -248,6 +248,87 @@ def test_top_k_bounds_result_count() -> None:
 
 
 # ---------------------------------------------------------------------------
+# PLA-261 — actionable source breadcrumb on the read surface
+# ---------------------------------------------------------------------------
+
+
+def test_hit_carries_resolvable_source_uri_from_conversation() -> None:
+    """A fact grounded in a conversation surfaces a re-openable ``source_uri``
+    plus the shared ``source_ref`` breadcrumb — not just opaque turn-ids.
+
+    This is the headline PLA-261 contract: an agent can open the source to
+    verify/act on a recalled fact (the recall→verify→act loop #467 broke).
+
+    Sabotage-proof (executed): replace ``resolve_fact_source_uri(record)``
+    with ``""`` in ``FactView.from_hit`` → ``source_uri`` is empty and both
+    the source_uri and source_ref assertions below fail.
+    """
+    store = _store_with_facts(
+        FakeFactRecord(
+            id="f-conv",
+            entity="Alice",
+            attribute="role",
+            value="founder",
+            source_turn_ids=("t-1",),
+            conversation_id="session-001",
+        )
+    )
+
+    out = tool_facts_about(entity="Alice", fact_store=store, document_repo=_empty_doc_repo())
+
+    hit = out["hits"][0]
+    assert hit["conversation_id"] == "session-001"
+    assert hit["source_uri"] == "04-Agent-Knowledge/conversations/session-001.md"
+    # The shared SourceRef breadcrumb (F97) — same resolvable pointer.
+    assert hit["source_ref"]["source_uri"] == "04-Agent-Knowledge/conversations/session-001.md"
+    # Opaque turn-ids are still present (provenance), now joined by a pointer.
+    assert hit["source_turn_ids"] == ["t-1"]
+
+
+def test_hit_source_uri_prefers_stored_federated_provenance() -> None:
+    """A fact carrying real connector provenance (#429) surfaces that URI,
+    not the conversation fallback — federated provenance travels through.
+
+    Sabotage-proof (executed): in ``resolve_fact_source_uri`` drop the
+    ``if explicit:`` early return → the stored ``m365://`` URI is discarded
+    and this assertion fails.
+    """
+    store = _store_with_facts(
+        FakeFactRecord(
+            id="f-fed",
+            entity="Acme",
+            attribute="industry",
+            value="widgets",
+            conversation_id="session-009",
+            source_uri="m365://sites/acme/doc-42",
+        )
+    )
+
+    out = tool_facts_about(entity="Acme", fact_store=store, document_repo=_empty_doc_repo())
+
+    assert out["hits"][0]["source_uri"] == "m365://sites/acme/doc-42"
+
+
+def test_legacy_hit_without_provenance_still_carries_a_source_uri() -> None:
+    """A pre-breadcrumb fact (no conversation_id / source_uri) still gets a
+    non-empty ``source_uri`` — the ``facts://<id>`` self-pointer — so the
+    SLO "100% of memory-read results carry a source_uri" holds.
+
+    Sabotage-proof (executed): change the final fallback in
+    ``resolve_fact_source_uri`` to ``return ""`` → ``source_uri`` is empty
+    and the truthiness assertion below fails.
+    """
+    store = _store_with_facts(FakeFactRecord(id="f-legacy", entity="Bob", attribute="status", value="active"))
+
+    out = tool_facts_about(entity="Bob", fact_store=store, document_repo=_empty_doc_repo())
+
+    hit = out["hits"][0]
+    assert hit["source_uri"], "every hit must carry a non-empty resolvable source_uri"
+    assert hit["source_uri"] == "facts://f-legacy"
+    assert hit["conversation_id"] is None
+
+
+# ---------------------------------------------------------------------------
 # #467 / PLA-263 — the entity-summaries collection is queried
 # ---------------------------------------------------------------------------
 

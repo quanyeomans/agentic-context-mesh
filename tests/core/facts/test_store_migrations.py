@@ -245,3 +245,63 @@ def test_search_on_unmigrated_legacy_db_projects_evidence_at_as_none(
     assert hits[0].record.evidence_at is None, (
         f"legacy search hit must project evidence_at as None; got {hits[0].record.evidence_at!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# PLA-261 — conversation_id / source_uri columns: round-trip + legacy
+# tolerance (the rollback-safe additive-column contract, F79).
+# ---------------------------------------------------------------------------
+
+
+def test_round_trip_persists_conversation_id_and_source_uri(tmp_path: Path) -> None:
+    """A migrated store persists + reads back the provenance breadcrumb.
+
+    Sabotage-proof (executed): drop ``conversation_id`` from the INSERT
+    column list in ``SQLiteFactStore.add`` → the value never reaches the
+    row and the ``conversation_id`` assertion below fails. Likewise drop
+    the ``source_uri`` column from ``_row_to_record`` and the source_uri
+    assertion fails.
+    """
+    db = tmp_path / "facts.sqlite"
+    store = SQLiteFactStore(db_path=db)
+    store.add(
+        StoredFactRecord(
+            id="f-prov",
+            entity="agent-alpha",
+            attribute="role",
+            value="founder",
+            confidence=0.9,
+            source_turn_ids=("t1",),
+            extracted_at="2026-06-30T00:00:00Z",
+            superseded_by=None,
+            namespace="shared",
+            conversation_id="session-042",
+            source_uri="04-Agent-Knowledge/conversations/session-042.md",
+        )
+    )
+
+    record = store.find_conflicts(entity="agent-alpha", attribute="role")[0]
+    assert record.conversation_id == "session-042"
+    assert record.source_uri == "04-Agent-Knowledge/conversations/session-042.md"
+
+
+def test_legacy_db_projects_conversation_id_and_source_uri_as_none(tmp_path: Path) -> None:
+    """A legacy SQLite file (no provenance columns) projects both as ``None``.
+
+    ``find_conflicts`` does NOT call ``_ensure_schema`` — so a pre-PLA-261
+    row's ``sqlite3.Row`` exposes neither ``conversation_id`` nor
+    ``source_uri``. ``_row_to_record`` must take the ``in keys()`` else
+    branch for both rather than raising ``IndexError`` — the additive
+    columns stay rollback-safe (old rows read cleanly under new code, F79).
+
+    Sabotage-proof (executed): change ``_COL_SOURCE_URI in keys`` to
+    ``True`` in ``_row_to_record`` → the projection indexes the absent
+    column and raises ``IndexError``, erroring this test.
+    """
+    db = tmp_path / "legacy.sqlite"
+    _build_legacy_schema(db)
+    _insert_legacy_row(db, fact_id="leg-prov", entity="agent-alpha", attribute="status", value="single")
+
+    record = SQLiteFactStore(db_path=db).find_conflicts(entity="agent-alpha", attribute="status")[0]
+    assert record.conversation_id is None
+    assert record.source_uri is None

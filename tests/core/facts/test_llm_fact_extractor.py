@@ -96,6 +96,47 @@ def test_happy_path_parses_records_with_provenance() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 2b. PLA-261 — conversation_id flows from the window's turns onto the record
+# ---------------------------------------------------------------------------
+
+
+def test_extracted_record_carries_conversation_id_from_turns() -> None:
+    """The extractor stamps the window's ``conversation_id`` onto each fact
+    so its provenance later resolves to a re-openable ``source_uri``.
+
+    Sabotage-proof (executed): drop ``conversation_id=conversation_id`` from
+    the ``_record_from_payload`` call in ``LLMFactExtractor.extract`` →
+    the record carries ``None`` and the assertion below fails.
+    """
+    llm = FakeLLMBackend(chat_response=_HAPPY_PATH_RESPONSE)
+    extractor = LLMFactExtractor(llm=llm)
+    turns = [
+        {"id": "t1", "role": "user", "content": "agent-alpha runs product.", "conversation_id": "session-123"},
+        {"id": "t2", "role": "assistant", "content": "Head of Product.", "conversation_id": "session-123"},
+    ]
+
+    record = extractor.extract(turns=turns)[0]
+
+    assert record.conversation_id == "session-123"
+
+
+def test_extracted_record_conversation_id_is_none_without_turn_metadata() -> None:
+    """Turns lacking ``conversation_id`` (a non-conversation source) leave
+    the record's ``conversation_id`` as ``None`` — the read-time resolver
+    falls back gracefully rather than fabricating a pointer.
+
+    Sabotage-proof (executed): make ``_conversation_id_from_turns`` return
+    ``"x"`` unconditionally → this assertion (expecting None) fails.
+    """
+    llm = FakeLLMBackend(chat_response=_HAPPY_PATH_RESPONSE)
+    extractor = LLMFactExtractor(llm=llm)
+
+    record = extractor.extract(turns=_two_turns())[0]
+
+    assert record.conversation_id is None
+
+
+# ---------------------------------------------------------------------------
 # 3. Empty list
 # ---------------------------------------------------------------------------
 

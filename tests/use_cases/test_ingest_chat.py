@@ -339,7 +339,7 @@ def test_each_emitted_fact_added_to_store(tmp_path: Path) -> None:
 
 
 def test_namespace_flows_through_to_persisted_facts(tmp_path: Path) -> None:
-    """Sabotage-proof: drop the ``_apply_namespace`` call from the use
+    """Sabotage-proof: drop the ``_apply_provenance`` call from the use
     case and persisted facts carry the default ``"shared"`` namespace
     instead of the requested ``"eng-x"``."""
     transcript = tmp_path / "t.jsonl"
@@ -626,10 +626,16 @@ def test_strip_frontmatter_passes_through_non_frontmatter_text(tmp_path: Path) -
     assert "**user**: turn 0 of c1" in target.read_text(encoding="utf-8")
 
 
-def test_apply_namespace_no_op_when_already_matching(tmp_path: Path) -> None:
-    """Sabotage-proof: force ``_apply_namespace`` to always reconstruct
-    even when ``current == namespace`` and the FakeFactRecord identity
-    diverges (different ``id`` after reconstruction)."""
+def test_provenance_stamped_even_when_namespace_already_matches(tmp_path: Path) -> None:
+    """``_apply_provenance`` reconstructs the fact to stamp the breadcrumb
+    even when the namespace already matches — the source_uri must be applied
+    regardless, and the deterministic ``id`` is preserved on reconstruction.
+
+    Sabotage-proof (executed): drop the ``source_uri=conversation_source_uri``
+    kwarg from the ``_apply_provenance`` call in
+    ``_extract_facts_for_conversation`` → ``source_uri`` stays ``None`` and
+    the source_uri assertion below fails.
+    """
     transcript = tmp_path / "t.jsonl"
     _write_jsonl(transcript, [_turn("c1", 0)])
 
@@ -647,11 +653,40 @@ def test_apply_namespace_no_op_when_already_matching(tmp_path: Path) -> None:
 
     persisted = store.find_conflicts(entity="X", attribute="y", namespace="shared")
     assert persisted[0].id == "stable-id"
+    assert persisted[0].source_uri == "04-Agent-Knowledge/conversations/c1.md"
 
 
-def test_apply_namespace_returns_unchanged_when_fact_lacks_namespace(tmp_path: Path) -> None:
-    """Sabotage-proof: remove the ``AttributeError`` guard and the
-    use case crashes when the extractor returns minimal duck-typed facts."""
+def test_conversation_breadcrumb_stamped_on_persisted_facts(tmp_path: Path) -> None:
+    """An ingested conversation's facts carry the resolvable breadcrumb:
+    ``conversation_id`` + the conversation document ``source_uri`` that an
+    agent can re-open to verify the fact (PLA-261).
+
+    Sabotage-proof (executed): drop the ``conversation_id=cid`` kwarg from
+    the ``_extract_facts_for_conversation`` call in ``ingest_chat`` →
+    ``conversation_id`` stays ``None`` and the assertion below fails.
+    """
+    transcript = tmp_path / "t.jsonl"
+    _write_jsonl(transcript, [_turn("sess-7", 0)])
+
+    facts = [FakeFactRecord(id="f-1", entity="Alice", attribute="role", value="founder")]
+    extractor = FakeFactExtractor(scripted_facts=facts)
+    store = FakeFactStore()
+
+    ingest_chat(
+        transcript,
+        paths=_paths(tmp_path),
+        fact_store=store,
+        fact_extractor=extractor,
+    )
+
+    persisted = store.find_conflicts(entity="Alice", attribute="role")[0]
+    assert persisted.conversation_id == "sess-7"
+    assert persisted.source_uri == "04-Agent-Knowledge/conversations/sess-7.md"
+
+
+def test_apply_provenance_returns_unchanged_when_fact_lacks_namespace(tmp_path: Path) -> None:
+    """Sabotage-proof: remove the ``hasattr(fact, "namespace")`` guard and
+    the use case crashes when the extractor returns minimal duck-typed facts."""
 
     class _DuckFact:
         """A FactRecord-shaped object missing the ``namespace`` attribute."""
@@ -678,8 +713,8 @@ def test_apply_namespace_returns_unchanged_when_fact_lacks_namespace(tmp_path: P
         fact_store=store,
         fact_extractor=extractor,
     )
-    # The duck fact reached the store unmodified (AttributeError branch
-    # in _apply_namespace returned the original).
+    # The duck fact reached the store unmodified (the missing-namespace
+    # guard in _apply_provenance returned the original).
     assert result.facts_added == 1
 
 

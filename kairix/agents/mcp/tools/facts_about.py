@@ -41,12 +41,13 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from kairix.core.protocols import DocumentRepository, FactStore
+from kairix.core.facts.records import resolve_fact_source_uri
+from kairix.core.protocols import DocumentRepository, FactStore, SourceRef
 from kairix.paths import KairixPaths
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["FactsAboutDeps", "tool_facts_about"]
+__all__ = ["FactView", "FactsAboutDeps", "tool_facts_about"]
 
 
 ERROR_INVALID_INPUT = "InvalidInput"
@@ -77,25 +78,103 @@ class FactsAboutDeps:
     paths: KairixPaths | None = None
 
 
-def _hit_to_dict(hit: Any) -> dict[str, Any]:
-    """Project a :class:`FactHit` onto the agent-facing read surface.
+@dataclass(frozen=True)
+class FactView:
+    """Agent-facing ``facts_about`` result row carrying the resolvable breadcrumb (PLA-261).
 
-    Only exposes the Protocol-pinned fields — implementation extras on
-    the concrete record (e.g. SQLite rowid) stay internal.
+    The fact-store leg of ``facts_about`` historically returned only opaque
+    ``source_turn_ids`` — an agent could not open the source to verify or act
+    on a recalled fact (#467), breaking the recall→verify→act loop. ``FactView``
+    keeps the Protocol-pinned FactRecord fields AND surfaces the conversation
+    the fact was grounded in (``conversation_id``) plus the canonical,
+    re-openable ``source_uri`` resolved via the shared
+    :func:`kairix.core.facts.resolve_fact_source_uri`.
+
+    Conforms to the shared SourceRef breadcrumb contract (F97) via
+    :meth:`source_ref` (the RETURN option) so this surface cites/re-opens its
+    source the SAME way as search / timeline / entity / prep / research /
+    contradict — no per-surface pointer drift (PLA-274).
     """
-    record = hit.record
-    return {
-        "id": record.id,
-        "entity": record.entity,
-        "attribute": record.attribute,
-        "value": record.value,
-        "confidence": record.confidence,
-        "source_turn_ids": list(record.source_turn_ids),
-        "extracted_at": record.extracted_at,
-        "evidence_at": record.evidence_at,
-        "namespace": record.namespace,
-        "score": hit.score,
-    }
+
+    id: str
+    entity: str
+    attribute: str
+    value: str
+    confidence: float
+    source_turn_ids: tuple[str, ...]
+    extracted_at: str
+    evidence_at: str | None
+    namespace: str
+    conversation_id: str | None
+    source_uri: str
+    score: float
+
+    @classmethod
+    def from_hit(cls, hit: Any) -> FactView:
+        """Project a :class:`FactHit` onto the agent read surface.
+
+        ``source_uri`` is resolved through the shared breadcrumb resolver so
+        the opaque turn-ids now travel with a re-openable pointer; legacy /
+        federated records resolve via the same fallback chain.
+        """
+        record = hit.record
+        return cls(
+            id=record.id,
+            entity=record.entity,
+            attribute=record.attribute,
+            value=record.value,
+            confidence=record.confidence,
+            source_turn_ids=tuple(record.source_turn_ids),
+            extracted_at=record.extracted_at,
+            evidence_at=record.evidence_at,
+            namespace=record.namespace,
+            conversation_id=getattr(record, "conversation_id", None),
+            source_uri=resolve_fact_source_uri(record),
+            score=hit.score,
+        )
+
+    def source_ref(self) -> SourceRef:
+        """Return the shared breadcrumb (F97 RETURN option).
+
+        Built through :meth:`SourceRef.of` so the source_uri→path fallback
+        and non-paged locator derivation apply uniformly with every other
+        surface. ``path`` carries the same resolvable pointer as
+        ``source_uri`` (a fact has no separate display path); the entity +
+        attribute become the human title.
+        """
+        return SourceRef.of(
+            path=self.source_uri,
+            source_uri=self.source_uri,
+            title=f"{self.entity} — {self.attribute}",
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to the flat dict the agent reads.
+
+        Keeps every key the pre-PLA-261 surface emitted (so existing agents
+        are unaffected) and adds ``conversation_id`` + ``source_uri`` + the
+        shared ``source_ref`` breadcrumb envelope.
+        """
+        return {
+            "id": self.id,
+            "entity": self.entity,
+            "attribute": self.attribute,
+            "value": self.value,
+            "confidence": self.confidence,
+            "source_turn_ids": list(self.source_turn_ids),
+            "extracted_at": self.extracted_at,
+            "evidence_at": self.evidence_at,
+            "namespace": self.namespace,
+            "conversation_id": self.conversation_id,
+            "source_uri": self.source_uri,
+            "source_ref": self.source_ref().to_envelope(),
+            "score": self.score,
+        }
+
+
+def _hit_to_dict(hit: Any) -> dict[str, Any]:
+    """Project a :class:`FactHit` onto the agent-facing read surface (via :class:`FactView`)."""
+    return FactView.from_hit(hit).to_dict()
 
 
 def _entity_summary_to_dict(row: dict[str, Any]) -> dict[str, Any]:

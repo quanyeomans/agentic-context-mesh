@@ -25,7 +25,7 @@ from kairix.core.facts.consolidation import (
     default_contradict,
 )
 from kairix.core.facts.extractor import LLMFactExtractor
-from kairix.core.facts.records import StoredFactRecord
+from kairix.core.facts.records import StoredFactRecord, resolve_fact_source_uri
 from kairix.core.facts.store import SQLiteFactStore, StoredFactHit
 
 __all__ = [
@@ -36,4 +36,5 @@ __all__ = [
     "StoredFactHit",
     "StoredFactRecord",
     "default_contradict",
+    "resolve_fact_source_uri",
 ]

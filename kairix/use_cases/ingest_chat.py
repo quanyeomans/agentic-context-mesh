@@ -50,6 +50,7 @@ from kairix.core.protocols import FactExtractor, FactStore
 from kairix.paths import (
     KairixPaths,
     agent_cli_roots,
+    agent_conversation_doc_rel_path,
     agent_conversations_dir,
     confine_to_roots,
 )
@@ -398,6 +399,12 @@ def ingest_chat(
             conv_turns=conv_turns,
             window_turns=window_turns,
             namespace=namespace,
+            # PLA-261 — the resolvable breadcrumb for facts grounded in this
+            # conversation: the document-relative path of the markdown we just
+            # wrote, which the scanner indexes under the same path. Stamped on
+            # every extracted fact so an agent can re-open the source.
+            conversation_id=cid,
+            conversation_source_uri=agent_conversation_doc_rel_path(cid),
             session_metadata=resolved_metadata,
             fact_extractor=fact_extractor,
             fact_store=fact_store,
@@ -444,6 +451,8 @@ def _extract_facts_for_conversation(
     conv_turns: list[dict[str, Any]],
     window_turns: int,
     namespace: str,
+    conversation_id: str,
+    conversation_source_uri: str,
     session_metadata: dict[str, Any] | None,
     fact_extractor: FactExtractor,
     fact_store: FactStore,
@@ -456,15 +465,24 @@ def _extract_facts_for_conversation(
     called per fact; ``totals`` is mutated in place. Extracted so the
     parent ``ingest_chat`` orchestrator stays under F16 cognitive
     complexity (Sonar S3776).
+
+    ``conversation_id`` / ``conversation_source_uri`` are the PLA-261
+    provenance breadcrumb stamped onto every extracted fact so a recalled
+    fact resolves to a re-openable source.
     """
     for window in _window(conv_turns, window_turns):
         totals.windows_extracted += 1
         for fact in fact_extractor.extract(turns=window, session_metadata=session_metadata):
-            fact_to_add = _apply_namespace(fact, namespace)
+            fact_to_add = _apply_provenance(
+                fact,
+                namespace=namespace,
+                conversation_id=conversation_id,
+                source_uri=conversation_source_uri,
+            )
             fact_store.add(fact_to_add)
             totals.facts_added += 1
             # Defensive: a duck-typed fact may not expose the full
-            # FactRecord Protocol (e.g. ``namespace``). ``_apply_namespace``
+            # FactRecord Protocol (e.g. ``namespace``). ``_apply_provenance``
             # already tolerates that branch; consolidation skips it too
             # rather than crashing the ingest pipeline on a Protocol-
             # incomplete fact. The Protocol contract still requires
@@ -499,39 +517,47 @@ def _read_sidecar_metadata(jsonl_path: Path) -> dict[str, Any] | None:
     return parsed
 
 
-def _apply_namespace(fact: Any, namespace: str) -> Any:
-    """Stamp ``namespace`` onto a fact when the extractor returned the default.
+def _apply_provenance(
+    fact: Any,
+    *,
+    namespace: str,
+    conversation_id: str,
+    source_uri: str,
+) -> Any:
+    """Stamp engagement ``namespace`` + the conversation breadcrumb onto a fact.
 
-    Most extractors will not know which engagement scope to tag — the
-    use case has that context and applies it at persistence time.
-    Falls back to returning the original fact if the namespace already
-    matches or the fact doesn't expose a settable namespace.
+    The extractor knows neither the engagement scope nor where the
+    conversation was written; the use case has both, so it stamps them at
+    persistence time (PLA-261). ``namespace`` tags the engagement;
+    ``conversation_id`` + ``source_uri`` are the resolvable breadcrumb an
+    agent re-opens to verify a recalled fact.
+
+    Reconstructs through the public surface (``dataclasses.replace`` for a
+    frozen ``StoredFactRecord``; the kwarg path for a ``FakeFactRecord``)
+    rather than reaching past the boundary (F1 — no attribute reassignment).
+    A fact that doesn't expose ``namespace`` (a minimal duck type) is
+    returned unchanged so a Protocol-incomplete fact never crashes ingest.
     """
-    try:
-        current = fact.namespace
-    except AttributeError:
+    if not hasattr(fact, "namespace"):
         return fact
-    if current == namespace:
-        return fact
+    updates = {"namespace": namespace, _KEY_CONVERSATION_ID: conversation_id, "source_uri": source_uri}
     if dataclasses.is_dataclass(fact) and not isinstance(fact, type):
         try:
-            return dataclasses.replace(fact, namespace=namespace)
+            return dataclasses.replace(fact, **updates)
         except (TypeError, ValueError):
             return fact
-    # FakeFactRecord uses internal state ``_namespace`` — re-construct via
-    # its public ``__init__`` rather than reaching past the boundary.
     fake_kwargs = _try_fake_record_kwargs(fact)
-    if fake_kwargs is not None:
-        fake_kwargs["namespace"] = namespace
-        return type(fact)(**fake_kwargs)
-    return fact
+    if fake_kwargs is None:
+        return fact
+    fake_kwargs.update(updates)
+    return type(fact)(**fake_kwargs)
 
 
 def _try_fake_record_kwargs(fact: Any) -> dict[str, Any] | None:
     """Read the public Protocol surface back into a constructor kwarg dict.
 
     Returns ``None`` if any required property is missing — callers fall
-    back to using the original fact. This keeps the namespace-stamping
+    back to using the original fact. This keeps the provenance-stamping
     path free of attribute-reassignment, which would be an F1 violation.
     """
     try:

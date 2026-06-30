@@ -286,12 +286,32 @@ def _resolve_session_default_evidence_at(session_metadata: dict[str, Any] | None
     return None
 
 
+def _conversation_id_from_turns(turns: list[dict[str, Any]]) -> str | None:
+    """Return the conversation id shared by a window's turns, or ``None``.
+
+    A window passed to :meth:`LLMFactExtractor.extract` is a slice of ONE
+    conversation, so every turn carries the same ``conversation_id``
+    (stamped by :func:`kairix.use_cases.ingest_chat._read_turns`). We read
+    it from the first turn that exposes a non-empty value so the extracted
+    fact carries the grouping key of the transcript it was grounded in
+    (PLA-261) — the read-time resolver turns that into a re-openable
+    ``source_uri``. ``None`` when no turn carries one (a non-conversation
+    extraction source), which the resolver tolerates.
+    """
+    for turn in turns:
+        raw = turn.get("conversation_id")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return None
+
+
 def _record_from_payload(
     payload: Any,
     namespace: str,
     extracted_at: str,
     *,
     default_evidence_at: str | None = None,
+    conversation_id: str | None = None,
 ) -> StoredFactRecord | None:
     """Build a :class:`StoredFactRecord` from one parsed LLM payload dict.
 
@@ -304,6 +324,13 @@ def _record_from_payload(
     optional ``evidence_at`` field (or returns a non-string), the
     record inherits the session's default anchor so downstream
     retrieval still gets a temporal pin.
+
+    ``conversation_id`` — PLA-261. The grouping key of the transcript the
+    window came from, threaded in from :meth:`extract`. Stamped on the
+    record so its provenance is resolvable to a re-openable ``source_uri``
+    at read time. ``source_uri`` itself is left ``None`` here — the
+    document-storage layout is ``ingest_chat``'s concern, which stamps it;
+    the extractor stays decoupled from where conversations are written.
     """
     if not isinstance(payload, dict):
         logger.warning("llm-fact-extractor: list element was not a dict: %r", type(payload).__name__)
@@ -348,6 +375,7 @@ def _record_from_payload(
         superseded_by=None,
         namespace=namespace,
         evidence_at=evidence_at,
+        conversation_id=conversation_id,
     )
 
 
@@ -438,6 +466,7 @@ class LLMFactExtractor:
         payloads = _parse_response(raw)
         extracted_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         default_evidence_at = _resolve_session_default_evidence_at(session_metadata)
+        conversation_id = _conversation_id_from_turns(turns)
         records: list[FactRecord] = []
         for payload in payloads:
             record = _record_from_payload(
@@ -445,6 +474,7 @@ class LLMFactExtractor:
                 namespace=self._namespace,
                 extracted_at=extracted_at,
                 default_evidence_at=default_evidence_at,
+                conversation_id=conversation_id,
             )
             if record is not None:
                 records.append(record)

@@ -15,3 +15,9 @@ Feature: MCP agent asks what kairix knows about an entity
     When the agent calls facts-about with entity "Nonexistent"
     Then the facts response lists 0 hits
     And the facts response error is empty
+
+  Scenario: A recalled fact carries a re-openable source breadcrumb
+    Given the fact store has a conversation-grounded fact about "Alice" in conversation "session-001" with attribute "role" and value "founder"
+    When the agent calls facts-about with entity "Alice"
+    Then the facts response hit has a resolvable source uri "04-Agent-Knowledge/conversations/session-001.md"
+    And the facts response error is empty

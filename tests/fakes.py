@@ -1351,6 +1351,8 @@ class FakeFactRecord:
         superseded_by: str | None = None,
         namespace: str = "shared",
         evidence_at: str | None = None,
+        conversation_id: str | None = None,
+        source_uri: str | None = None,
     ) -> None:
         self._id = id
         self._entity = entity
@@ -1362,6 +1364,8 @@ class FakeFactRecord:
         self._superseded_by = superseded_by
         self._namespace = namespace
         self._evidence_at = evidence_at
+        self._conversation_id = conversation_id
+        self._source_uri = source_uri
 
     @property
     def id(self) -> str:
@@ -1402,6 +1406,14 @@ class FakeFactRecord:
     @property
     def evidence_at(self) -> str | None:
         return self._evidence_at
+
+    @property
+    def conversation_id(self) -> str | None:
+        return self._conversation_id
+
+    @property
+    def source_uri(self) -> str | None:
+        return self._source_uri
 
 
 class FakeFactHit:
@@ -1503,9 +1515,11 @@ class FakeFactStore:
             raise KeyError(f"FakeFactStore: no fact with id {new_id!r}")
         old = self._facts[old_id]
         # Re-mint a record carrying the superseded_by link. Preserve
-        # the temporal anchor (``evidence_at``) too — supersession
-        # marks a *newer* fact about the same (entity, attribute);
-        # the old fact's event-time anchor stays valid for audit.
+        # the temporal anchor (``evidence_at``) and the provenance
+        # breadcrumb (``conversation_id`` / ``source_uri``) too —
+        # supersession marks a *newer* fact about the same
+        # (entity, attribute); the old fact's event-time anchor and
+        # source pointer stay valid for audit.
         self._facts[old_id] = FakeFactRecord(
             id=old.id,
             entity=old.entity,
@@ -1517,6 +1531,8 @@ class FakeFactStore:
             superseded_by=new_id,
             namespace=old.namespace,
             evidence_at=getattr(old, "evidence_at", None),
+            conversation_id=getattr(old, "conversation_id", None),
+            source_uri=getattr(old, "source_uri", None),
         )
 
 
