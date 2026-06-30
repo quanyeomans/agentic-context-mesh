@@ -103,6 +103,13 @@ _NO_MCP_AFFORDANCE_REQUIRED: frozenset[str] = frozenset(
         # observability table over MCP would be circular).
         "mcp-calls",
         "caches",
+        # slo is an operator/engineering measurement harness (PLA-256) — it
+        # runs every most-used command repeatedly to capture cold/warm
+        # latency, fact-recall quality, and breadcrumb completeness against a
+        # synthetic (or the operator's real) corpus. Load-generating and
+        # diagnostic, same shape as `eval`; not an agent-callable retrieval
+        # surface, so no MCP affordance is required.
+        "slo",
         # init + uninstall are operator-only self-installer entry points
         # (Plan 1 task 8). They mutate the FHS / XDG filesystem layout,
         # create the kairix system user (system mode), and write the

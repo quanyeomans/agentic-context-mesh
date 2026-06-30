@@ -335,6 +335,9 @@ pytest_plugins = [
     # Wizard browser-reachable remote access (#500) — tokened-URL → signed
     # cookie grant; non-loopback browser stand-in via TestClient client addr.
     "tests.bdd.steps.setup_wizard_remote_access_steps",
+    # Perf & affordance SLO harness (PLA-256) — one command for cold/warm
+    # latency + fact-recall quality + breadcrumb completeness.
+    "tests.bdd.steps.slo_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.
