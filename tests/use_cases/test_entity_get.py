@@ -62,7 +62,11 @@ def test_card_present_projects_into_output() -> None:
     assert out.name == "Acme"
     assert out.type == "Organisation"
     assert out.summary == "supplier — Tier A"
-    assert out.vault_path == "02-Areas/00-Clients/Acme/Acme.md"
+    # PLA-274 — the output field is now ``path`` (renamed from vault_path);
+    # the Neo4j card key stays ``vault_path`` and maps into it.
+    assert out.path == "02-Areas/00-Clients/Acme/Acme.md"
+    # The canonical breadcrumb resolves the entity card by node id.
+    assert out.source_ref().source_uri == "entity://acme"
 
 
 def test_card_none_returns_not_found_error() -> None:
@@ -77,7 +81,7 @@ def test_none_summary_renders_empty_string() -> None:
     card = {"id": "x", "name": "X", "type": "Project", "summary": None, "vault_path": None}
     out = run_entity_get("X", deps=_build_deps(card=card))
     assert out.summary == ""
-    assert out.vault_path == ""
+    assert out.path == ""
 
 
 def test_fetch_failure_yields_error_envelope() -> None:
@@ -87,13 +91,15 @@ def test_fetch_failure_yields_error_envelope() -> None:
 
 
 def test_envelope_includes_all_fields() -> None:
-    out = EntityGetOutput(id="a", name="A", type="Person", summary="role", vault_path="/p")
+    out = EntityGetOutput(id="a", name="A", type="Person", summary="role", path="/p")
     env = entity_get_output_to_envelope(out)
     assert env["id"] == "a"
     assert env["name"] == "A"
     assert env["type"] == "Person"
     assert env["summary"] == "role"
-    assert env["vault_path"] == "/p"
+    # PLA-274 — envelope key renamed vault_path→path; source_uri added.
+    assert env["path"] == "/p"
+    assert env["source_uri"] == "entity://a"
     assert env["error"] == ""
     # Health envelope carries the snapshot's projected dict.
     assert "vector_search" in env["health"]

@@ -154,6 +154,13 @@ class FusedResult:
     # envelope so agents can quote a specific page back to the operator.
     source_page: int | None = None
 
+    # PLA-274 — canonical resolvable breadcrumb (``documents.source_uri``),
+    # threaded from the BM25/vector rows. ``""`` for passthrough vault rows;
+    # ``SourceRef.of`` falls that back to ``path`` so the breadcrumb is
+    # always resolvable. Carried through to SearchHit + the MCP envelope so
+    # every surface cites the canonical source, not the munged ``path``.
+    source_uri: str = ""
+
 
 # ---------------------------------------------------------------------------
 # RRF fusion
@@ -234,14 +241,13 @@ def _rrf_impl(
                 title=result["title"],
                 snippet=result["snippet"],
                 source_page=_extract_source_page(result),
+                source_uri=_extract_source_uri(result),
             )
         fused[path].in_bm25 = True
         fused[path].bm25_rank = rank
         fused[path].rrf_score += w_bm25 * 1.0 / (k + rank)
-        # Backfill source_page when the BM25 leg has it but the vector
-        # leg surfaced the row first without it.
-        if fused[path].source_page is None:
-            fused[path].source_page = _extract_source_page(result)
+        # Backfill page + breadcrumb when the vec leg surfaced the row first.
+        _backfill_source_meta(fused[path], result)
 
     # Process vector results (1-indexed ranks)
     for rank, result in enumerate(vec, start=1):
@@ -253,12 +259,12 @@ def _rrf_impl(
                 title=result["title"],
                 snippet=result["snippet"],
                 source_page=_extract_source_page(result),
+                source_uri=_extract_source_uri(result),
             )
         fused[path].in_vec = True
         fused[path].vec_rank = rank
         fused[path].rrf_score += w_vec * 1.0 / (k + rank)
-        if fused[path].source_page is None:
-            fused[path].source_page = _extract_source_page(result)
+        _backfill_source_meta(fused[path], result)
 
     # Documents in only one list: they already got their score from that list's rank.
     # The spec says: "Results appearing in only one list get rank = len(other_list) + 1."
@@ -322,8 +328,7 @@ def _mark_existing_vec_hit(
         if fr.path.lower() == path_lower:
             fr.in_vec = True
             fr.vec_rank = rank
-            if fr.source_page is None:
-                fr.source_page = _extract_source_page(result)
+            _backfill_source_meta(fr, result)
             return
 
 
@@ -353,6 +358,7 @@ def _bm25_primary_impl(
             # Score: use BM25 position-based score so boosted_score ordering is preserved
             rrf_score=1.0 / rank,
             source_page=_extract_source_page(result),
+            source_uri=_extract_source_uri(result),
         )
         fr.boosted_score = fr.rrf_score
         results.append(fr)
@@ -378,6 +384,7 @@ def _bm25_primary_impl(
             # Score: below all BM25 results but in vec rank order
             rrf_score=1.0 / (base_rank + rank),
             source_page=_extract_source_page(result),
+            source_uri=_extract_source_uri(result),
         )
         fr.boosted_score = fr.rrf_score
         results.append(fr)
@@ -397,6 +404,33 @@ def _extract_source_page(result: Any) -> int | None:
         return None
     raw = result.get("source_page")
     return int(raw) if isinstance(raw, int) else None
+
+
+def _extract_source_uri(result: Any) -> str:
+    """Pull the canonical ``source_uri`` breadcrumb from a raw BM25/vector row.
+
+    PLA-274. Both ``BM25Result`` and ``VecResult`` carry the field; rows
+    that pre-date it (older fakes / tests) surface ``""`` here rather than
+    raising. The empty string defers the path-fallback to ``SourceRef.of``
+    so the breadcrumb still resolves.
+    """
+    if not isinstance(result, dict):
+        return ""
+    return str(result.get("source_uri", "") or "")
+
+
+def _backfill_source_meta(fr: FusedResult, result: Any) -> None:
+    """Backfill ``source_page`` + ``source_uri`` onto a fused row (PLA-274).
+
+    Fills only the fields the row that CREATED the entry left empty — the
+    other fusion leg may surface the same path first without the page /
+    breadcrumb. Extracted from the fusion loops so they stay under the F16
+    cognitive-complexity ceiling.
+    """
+    if fr.source_page is None:
+        fr.source_page = _extract_source_page(result)
+    if not fr.source_uri:
+        fr.source_uri = _extract_source_uri(result)
 
 
 # ---------------------------------------------------------------------------

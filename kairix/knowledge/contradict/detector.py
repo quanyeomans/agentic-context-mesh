@@ -34,7 +34,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ContradictionResult:
-    """A single detected contradiction between new content and an existing document."""
+    """A single detected contradiction between new content and an existing document.
+
+    PLA-274 — ``title`` / ``collection`` / ``source_page`` / ``source_uri``
+    carry the full breadcrumb off the contradicting document's fused
+    result so the contradict surface can cite the exact source rather than
+    a bare ``doc_path``. All default empty so legacy callers stay
+    construction-compatible.
+    """
 
     doc_path: str
     score: float  # 0.0-1.0; higher = stronger contradiction
@@ -42,6 +49,10 @@ class ContradictionResult:
     snippet: str  # excerpt from the existing document
     category: str = "direct"  # which scorer fired (direct | overstatement | status_mismatch)
     claim: str = ""  # the extracted claim that drove the search/scoring
+    title: str = ""
+    collection: str = ""
+    source_page: int | None = None
+    source_uri: str = ""
 
 
 def _default_search() -> Callable[..., Any]:
@@ -151,6 +162,11 @@ def check_contradiction(
         snippet = bundle.content[:800]
         category, score, reason = scorer.best_category(claim, snippet)
         if score >= threshold:
+            # PLA-274 — lift the full breadcrumb off the contradicting
+            # document's fused result so the surface can cite source +
+            # page, not just the bare path.
+            inner = getattr(bundle, "result", None)
+            raw_page = getattr(inner, "source_page", None)
             results.append(
                 ContradictionResult(
                     doc_path=path,
@@ -159,6 +175,10 @@ def check_contradiction(
                     snippet=snippet[:300],
                     category=category or "direct",
                     claim=claim,
+                    title=str(getattr(inner, "title", "") or ""),
+                    collection=str(getattr(inner, "collection", "") or ""),
+                    source_page=int(raw_page) if isinstance(raw_page, int) else None,
+                    source_uri=str(getattr(inner, "source_uri", "") or ""),
                 )
             )
 

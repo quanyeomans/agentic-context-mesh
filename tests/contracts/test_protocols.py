@@ -18,6 +18,7 @@ from kairix.core.protocols import (
     IntentClassifier,
     ScoringStrategy,
     SearchLogger,
+    SourceRef,
     VectorRepository,
 )
 from kairix.core.search.backends import (
@@ -855,3 +856,73 @@ class TestVectorSearchBackendAdapter:
         vector_repo = FakeVectorRepository()
         backend = VectorSearchBackend(embedding, vector_repo)
         assert backend.search("anything") == []
+
+
+# ---------------------------------------------------------------------------
+# SourceRef — the shared breadcrumb value object (PLA-274). These assertions
+# pin the OUTCOME of every coalescing operator in ``SourceRef.of`` /
+# ``from_envelope`` so a mutated ``or``/``and``/``!=`` is killed (mutation
+# parity), not merely covered. Co-located here (test_protocols.py) so they
+# stay in protocols.py's same-module impacted-test window.
+# ---------------------------------------------------------------------------
+
+
+class TestSourceRefBreadcrumb:
+    @pytest.mark.contract
+    def test_path_is_kept_when_source_uri_differs(self) -> None:
+        # Pins ``resolved_path = path or (source_uri or "")`` — the path wins;
+        # a mutated ``and`` would yield the source_uri as the path.
+        ref = SourceRef.of(path="archive/big.zip#1536", source_uri="sharepoint://site/big.zip")
+        assert ref.path == "archive/big.zip#1536"
+        assert ref.source_uri == "sharepoint://site/big.zip"
+
+    @pytest.mark.contract
+    def test_source_uri_falls_back_to_path_when_absent(self) -> None:
+        # Pins ``(source_uri or "").strip() or resolved_path`` fallback.
+        ref = SourceRef.of(path="notes/onboarding.md")
+        assert ref.source_uri == "notes/onboarding.md"
+
+    @pytest.mark.contract
+    def test_blank_source_uri_falls_back_to_path(self) -> None:
+        ref = SourceRef.of(path="notes/x.md", source_uri="   ")
+        assert ref.source_uri == "notes/x.md"
+
+    @pytest.mark.contract
+    def test_locator_derived_for_non_paged_fragment(self) -> None:
+        # Pins the ``len(frag) == 2 and frag[1]`` derivation.
+        ref = SourceRef.of(path="archive/big.zip#1536")
+        assert ref.locator == "1536"
+
+    @pytest.mark.contract
+    def test_paged_doc_keeps_locator_none(self) -> None:
+        # Pins ``resolved_locator is None and source_page is None`` — a paged
+        # doc must NOT derive a fragment locator. A mutated ``or`` would derive
+        # "3" from the path fragment here.
+        ref = SourceRef.of(path="report.pdf#3", source_page=7)
+        assert ref.source_page == 7
+        assert ref.locator is None
+
+    @pytest.mark.contract
+    def test_no_fragment_leaves_locator_none(self) -> None:
+        ref = SourceRef.of(path="notes/plain.md")
+        assert ref.locator is None
+
+    @pytest.mark.contract
+    def test_from_envelope_preserves_path(self) -> None:
+        # Pins ``path=str(data.get("path", "") or "")`` — a mutated ``and``
+        # would blank the path.
+        ref = SourceRef.from_envelope({"path": "notes/legacy.md"})
+        assert ref.path == "notes/legacy.md"
+        assert ref.source_uri == "notes/legacy.md"
+
+    @pytest.mark.contract
+    def test_to_from_envelope_round_trip_is_lossless(self) -> None:
+        ref = SourceRef(
+            source_uri="m365://msg/42",
+            path="inbox/msg-42.eml",
+            title="Re: deploy",
+            collection="mail",
+            source_page=None,
+            locator="para-3",
+        )
+        assert SourceRef.from_envelope(ref.to_envelope()) == ref

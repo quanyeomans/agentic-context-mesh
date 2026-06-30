@@ -10,9 +10,15 @@ from typing import Any
 import pytest
 
 from kairix.agents.research.cli import build_parser, format_text, main
-from kairix.use_cases.research import ResearchDeps, ResearchOutput
+from kairix.core.protocols import SourceRef
+from kairix.use_cases.research import ResearchChunk, ResearchDeps, ResearchOutput
 
 pytestmark = pytest.mark.unit
+
+
+def _chunk(path: str) -> ResearchChunk:
+    """A typed ResearchChunk embedding a resolvable SourceRef (PLA-274)."""
+    return ResearchChunk(ref=SourceRef.of(path=path))
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +58,7 @@ def test_format_text_renders_gaps_and_chunks() -> None:
         query="q",
         synthesis="answer",
         gaps=["unknown about X"],
-        retrieved_chunks=[{"path": "/c1"}, {"path": "/c2"}],
+        retrieved_chunks=[_chunk("/c1"), _chunk("/c2")],
         turns=1,
         confidence=0.4,
     )
@@ -61,11 +67,24 @@ def test_format_text_renders_gaps_and_chunks() -> None:
     assert "/c1" in text
 
 
+def test_format_text_cites_canonical_source_uri_not_path() -> None:
+    """PLA-274 — a chunk whose source_uri differs from its (munged) path is
+    cited by the canonical source_uri.
+
+    Sabotage-proof (executed): flipping ``label = ref.source_uri or ref.path``
+    to ``and`` cites the path instead and this assertion fires."""
+    chunk = ResearchChunk(ref=SourceRef.of(path="archive/h.zip#7", source_uri="sharepoint://acme/h.zip"))
+    out = ResearchOutput(query="q", synthesis="s", retrieved_chunks=[chunk])
+    text = format_text(out)
+    assert "sharepoint://acme/h.zip" in text
+    assert "archive/h.zip#7" not in text
+
+
 def test_format_text_chunks_truncated_at_5() -> None:
     out = ResearchOutput(
         query="q",
         synthesis="s",
-        retrieved_chunks=[{"path": f"/c{i}"} for i in range(8)],
+        retrieved_chunks=[_chunk(f"/c{i}") for i in range(8)],
     )
     text = format_text(out)
     assert "/c0" in text

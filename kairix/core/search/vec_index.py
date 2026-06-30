@@ -47,7 +47,8 @@ _IN_CLAUSE_BATCH_SIZE: int = 500
 # Single SELECT body for the batched metadata lookup. Lifted to a constant
 # so we don't duplicate the JOIN text per chunk (F17).
 _METADATA_SELECT_SQL: str = (
-    "SELECT d.hash, d.path, d.collection, d.title, d.source_page, COALESCE(c.doc, '') AS snippet "
+    "SELECT d.hash, d.path, d.collection, d.title, d.source_page, d.source_uri, "
+    "COALESCE(c.doc, '') AS snippet "
     "FROM documents d LEFT JOIN content c ON d.hash = c.hash "
     "WHERE d.active = 1 AND d.hash IN ({placeholders})"
 )
@@ -106,6 +107,11 @@ class VecResult(TypedDict):
     # (passthrough markdown); populated from ``documents.source_page``
     # for PDF / PPTX / XLSX chunks via the metadata JOIN.
     source_page: int | None
+    # PLA-274 — canonical resolvable breadcrumb (``documents.source_uri``).
+    # ``""`` for passthrough vault rows (NULL column); SourceRef.of falls
+    # that back to ``path`` so the pointer stays resolvable. Carried via the
+    # metadata JOIN through fusion → SearchHit → envelope.
+    source_uri: str
 
 
 class VectorIndex:
@@ -479,6 +485,28 @@ class VectorIndex:
         conn = self._get_meta_conn()
         conn.set_trace_callback(callback)
 
+    @staticmethod
+    def _row_optional_meta(row: sqlite3.Row) -> tuple[int | None, str]:
+        """Read ``(source_page, source_uri)`` defensively from a metadata row.
+
+        MM-3 + PLA-274. Legacy DBs may pre-date either column, so each read
+        is guarded; ``source_uri`` defaults to ``""`` (SourceRef.of falls
+        that back to ``path`` downstream). Extracted from ``_build_results``
+        so that loop stays under the F16 cognitive-complexity ceiling.
+        """
+        raw_page: Any = None
+        try:
+            raw_page = row["source_page"]
+        except (KeyError, IndexError):
+            raw_page = None
+        raw_uri: Any = ""
+        try:
+            raw_uri = row["source_uri"]
+        except (KeyError, IndexError):
+            raw_uri = ""
+        page = int(raw_page) if isinstance(raw_page, int) else None
+        return page, str(raw_uri or "")
+
     def _build_results(
         self,
         ordered: list[tuple[str, float, str]],
@@ -496,12 +524,9 @@ class VectorIndex:
                 continue
             snippet_raw = row["snippet"]
             snippet = strip_frontmatter(snippet_raw)[:300] if snippet_raw else ""
-            # MM-3 — surface per-page citation. Defensive on legacy rows.
-            raw_page: Any = None
-            try:
-                raw_page = row["source_page"]
-            except (KeyError, IndexError):
-                raw_page = None
+            # MM-3 per-page citation + PLA-274 canonical breadcrumb, read
+            # defensively for legacy rows (helper keeps this loop under F16).
+            page, uri = self._row_optional_meta(row)
             results.append(
                 {
                     "hash_seq": hash_seq,
@@ -510,7 +535,8 @@ class VectorIndex:
                     _KEY_COLLECTION: row[_KEY_COLLECTION],
                     "title": row["title"],
                     "snippet": snippet,
-                    "source_page": int(raw_page) if isinstance(raw_page, int) else None,
+                    "source_page": page,
+                    "source_uri": uri,
                 }
             )
             if len(results) >= k:

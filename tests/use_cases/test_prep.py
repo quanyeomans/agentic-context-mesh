@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from kairix.core.protocols import SourceRef
 from kairix.core.search.scope import Scope
 from kairix.use_cases.prep import (
     PrepDeps,
@@ -18,6 +19,12 @@ from kairix.use_cases.prep import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+def _titles(sources: list[SourceRef]) -> list[str]:
+    """Project prep SourceRefs to their display titles (PLA-274 — sources
+    are now resolvable SourceRef breadcrumbs, not bare title strings)."""
+    return [s.title or "" for s in sources]
 
 
 @dataclass
@@ -78,7 +85,11 @@ def test_l0_summary_calls_chat_with_concise_system_message() -> None:
     assert out.tier == "l0"
     assert out.summary == "brief alpha summary"
     assert out.tokens > 0
-    assert out.sources == ["doc-a"]
+    # PLA-274 — sources are resolvable SourceRefs; the title rides on
+    # ``.title`` and the resolvable pointer on ``.source_uri`` (falls back
+    # to ``path`` when no connector URI).
+    assert _titles(out.sources) == ["doc-a"]
+    assert out.sources[0].source_uri == "/a"
     # The system prompt mentions "2-3 sentences" for l0 only.
     assert "2-3 sentences" in captured["chat"]["messages"][0]["content"]
     # Search budget is 1500 for l0.
@@ -112,7 +123,10 @@ def test_sources_use_path_when_title_empty() -> None:
     )
     deps, _ = _build_deps(sr=sr, summary="ok")
     out = run_prep("topic", deps=deps)
-    assert out.sources == ["/notes/foo.md"]
+    # PLA-274 — title empty → the SourceRef still carries a resolvable
+    # pointer built from the path (source_uri falls back to path).
+    assert [s.path for s in out.sources] == ["/notes/foo.md"]
+    assert out.sources[0].source_uri == "/notes/foo.md"
 
 
 def test_only_top_5_results_become_sources() -> None:
@@ -158,7 +172,7 @@ def test_thin_snippets_dropped_but_one_useful_snippet_reaches_chat() -> None:
     out = run_prep("topic", deps=deps)
     assert out.summary == "real summary"
     # Only the substantive hit is sourced — thin hit was dropped before context-build.
-    assert out.sources == ["doc-real"]
+    assert _titles(out.sources) == ["doc-real"]
     # The chat prompt mentions doc-real but not the thin doc.
     user_msg = captured["chat"]["messages"][1]["content"]
     assert "doc-real" in user_msg
@@ -249,14 +263,21 @@ def test_l0_sources_are_prefix_of_l1_when_same_query_and_deps() -> None:
 
 
 def test_envelope_includes_all_fields() -> None:
-    out = PrepOutput(query="q", tier="l1", summary="s", tokens=42, sources=["a", "b"])
+    out = PrepOutput(
+        query="q",
+        tier="l1",
+        summary="s",
+        tokens=42,
+        sources=[SourceRef.of(path="a"), SourceRef.of(path="b")],
+    )
     env = prep_output_to_envelope(out)
+    # PLA-274 — sources serialise as SourceRef breadcrumb dicts.
     assert env == {
         "query": "q",
         "tier": "l1",
         "summary": "s",
         "tokens": 42,
-        "sources": ["a", "b"],
+        "sources": [SourceRef.of(path="a").to_envelope(), SourceRef.of(path="b").to_envelope()],
         "error": "",
     }
 
@@ -392,7 +413,7 @@ def test_run_prep_skips_results_with_none_inner_result_object() -> None:
 
     assert out.error == ""
     assert out.summary == "real summary"
-    assert out.sources == ["doc-real"]
+    assert _titles(out.sources) == ["doc-real"]
     user_msg = captured["chat"]["messages"][1]["content"]
     assert "doc-real" in user_msg
 
@@ -430,10 +451,12 @@ def test_fact_row_short_snippet_is_not_filtered_by_chunk_floor() -> None:
     out = run_prep("What is agent-alpha's role?", deps=deps)
 
     assert out.error == ""
-    assert out.sources == ["agent-alpha — role"], (
+    assert _titles(out.sources) == ["agent-alpha — role"], (
         "fact row should survive the chunk floor exemption — if this assertion fails, "
         "the D1 regression has returned and short fact snippets are being filtered again"
     )
+    # PLA-274 — the fact row's synthesised facts:// path is the breadcrumb.
+    assert out.sources[0].source_uri == "facts://fact-001"
     user_msg = captured["chat"]["messages"][1]["content"]
     assert "agent-alpha role: VP of People" in user_msg, (
         "fact snippet content must reach the LLM message body, not just the sources list"
@@ -529,7 +552,7 @@ def test_substantive_response_keeps_sources() -> None:
     )
     deps, _ = _build_deps(sr=sr, summary="Alpha and Beta are two documents about the topic.")
     out = run_prep("topic", deps=deps)
-    assert out.sources == ["doc-a", "doc-b"]
+    assert _titles(out.sources) == ["doc-a", "doc-b"]
 
 
 def test_is_no_relevant_response_handles_casing_and_extra_text() -> None:

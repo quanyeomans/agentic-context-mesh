@@ -158,11 +158,22 @@ def _render_hit_block(i: int, hit: Any, *, snippet_width: int) -> list[str]:
         snippet = hit.snippet[:snippet_width].replace("\n", " ")
         if len(hit.snippet) > snippet_width:
             snippet += "…"
-    lines: list[str] = [f"{i}. [{tier}] {hit.collection} · score {hit.score:.4f}"]
+    # PLA-274 — surface the per-page citation in text mode. Pre-fix the page
+    # number was carried in the JSON envelope but invisible in the rendered
+    # text, so an operator reading the CLI couldn't see WHICH page a PDF /
+    # PPTX / XLSX hit came from. Appended to the score header when present.
+    page_suffix = f" · p.{hit.source_page}" if getattr(hit, "source_page", None) is not None else ""
+    lines: list[str] = [f"{i}. [{tier}] {hit.collection} · score {hit.score:.4f}{page_suffix}"]
     if snippet:
         lines.append(f"   {snippet}")
     lines.append(f"   {title}")
     lines.append(f"   {hit.path}")
+    # PLA-274 — render the canonical breadcrumb when it differs from the
+    # display path (connector / archive content whose source_uri is the
+    # resolvable pointer, not the synthetic ``<uri>#<seq>`` chunk key).
+    ref = hit.source_ref()
+    if ref.source_uri and ref.source_uri != hit.path:
+        lines.append(f"   source: {ref.source_uri}")
     lines.append("")
     return lines
 

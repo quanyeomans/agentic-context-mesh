@@ -68,8 +68,12 @@ def format_text(out: ResearchOutput) -> str:
         lines.append("")
         lines.append(f"Retrieved chunks ({len(out.retrieved_chunks)}):")
         for c in out.retrieved_chunks[:5]:
-            label = c.get("path") if isinstance(c, dict) else str(c)
-            lines.append(f"  - {label}")
+            # PLA-274 — chunks are typed ResearchChunks embedding a resolvable
+            # SourceRef; cite the canonical source_uri (falls back to path).
+            ref = c.ref
+            label = ref.source_uri or ref.path
+            page_suffix = f" · p.{ref.source_page}" if ref.source_page is not None else ""
+            lines.append(f"  - {label}{page_suffix}")
         if len(out.retrieved_chunks) > 5:
             lines.append(f"  ... ({len(out.retrieved_chunks) - 5} more)")
     return "\n".join(lines)

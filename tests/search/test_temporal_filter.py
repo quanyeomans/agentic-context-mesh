@@ -31,7 +31,7 @@ def _create_test_db(tmp_path: Path) -> Path:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             collection TEXT NOT NULL, path TEXT NOT NULL, title TEXT,
             hash TEXT NOT NULL, active INTEGER DEFAULT 1,
-            source_page INTEGER,
+            source_page INTEGER, source_uri TEXT,
             UNIQUE(collection, path)
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT, created_at TEXT);

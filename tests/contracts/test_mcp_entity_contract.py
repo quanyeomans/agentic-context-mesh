@@ -58,7 +58,10 @@ class TestEntityCardPersonNode:
         assert result["summary"] != ""
         assert "Principal Engineer" in result["summary"]
         assert "Acme Corp" in result["summary"]
-        assert result["vault_path"] != ""
+        # PLA-274 — the on-disk pointer key is now ``path`` (renamed from
+        # vault_path); the Neo4j card key stays ``vault_path`` and maps in.
+        assert result["path"] != ""
+        assert result["source_uri"] == "entity://alistair-black"
         assert result["error"] == ""
 
     @pytest.mark.contract

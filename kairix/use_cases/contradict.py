@@ -21,9 +21,17 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from kairix.core.protocols import SourceRef
 from kairix.core.search.scope import Scope
 
 logger = logging.getLogger(__name__)
+
+# PLA-274 breadcrumb keys — read on the detector-result projector
+# (``_project``), the envelope writer, AND the envelope reader
+# (``from_envelope``); F17 extracts the ≥10-char keys to one edit site.
+_KEY_SOURCE_URI = "source_uri"
+_KEY_COLLECTION = "collection"
+_KEY_SOURCE_PAGE = "source_page"
 
 
 def _default_check_contradiction(**kwargs: Any) -> list[Any]:
@@ -40,7 +48,13 @@ def _default_llm_backend() -> Any:
 
 @dataclass(frozen=True)
 class ContradictionHit:
-    """A single contradicting document, projected from the detector's result."""
+    """A single contradicting document, projected from the detector's result.
+
+    PLA-274 — ``title`` / ``collection`` / ``source_page`` / ``source_uri``
+    were dropped pre-fix (the surface cited a bare ``path``); they are now
+    carried so an agent can cite the exact contradicting source + page via
+    :meth:`source_ref`.
+    """
 
     path: str
     score: float
@@ -48,6 +62,22 @@ class ContradictionHit:
     snippet: str
     category: str = ""
     claim: str = ""
+    title: str = ""
+    collection: str = ""
+    source_page: int | None = None
+    source_uri: str = ""
+    locator: str | None = None
+
+    def source_ref(self) -> SourceRef:
+        """Return the shared :class:`SourceRef` breadcrumb for this hit (F97)."""
+        return SourceRef.of(
+            path=self.path,
+            source_uri=self.source_uri,
+            title=self.title or None,
+            collection=self.collection or None,
+            source_page=self.source_page,
+            locator=self.locator,
+        )
 
 
 @dataclass(frozen=True)
@@ -95,6 +125,11 @@ class ContradictOutput:
                 snippet=str(h.get("snippet", "")),
                 category=str(h.get("category", "")),
                 claim=str(h.get("claim", "")),
+                title=str(h.get("title", "") or ""),
+                collection=str(h.get(_KEY_COLLECTION, "") or ""),
+                source_page=(int(h[_KEY_SOURCE_PAGE]) if isinstance(h.get(_KEY_SOURCE_PAGE), int) else None),
+                source_uri=str(h.get(_KEY_SOURCE_URI, "") or ""),
+                locator=(str(h["locator"]) if h.get("locator") else None),
             )
             for h in raw_hits
         ]
@@ -122,6 +157,7 @@ class ContradictDeps:
 
 
 def _project(r: Any) -> ContradictionHit:
+    raw_page = getattr(r, _KEY_SOURCE_PAGE, None)
     return ContradictionHit(
         path=str(getattr(r, "doc_path", "")),
         score=float(getattr(r, "score", 0.0)),
@@ -129,6 +165,11 @@ def _project(r: Any) -> ContradictionHit:
         snippet=str(getattr(r, "snippet", "")),
         category=str(getattr(r, "category", "")),
         claim=str(getattr(r, "claim", "")),
+        # PLA-274 — carry the breadcrumb off the detector result.
+        title=str(getattr(r, "title", "") or ""),
+        collection=str(getattr(r, _KEY_COLLECTION, "") or ""),
+        source_page=int(raw_page) if isinstance(raw_page, int) else None,
+        source_uri=str(getattr(r, _KEY_SOURCE_URI, "") or ""),
     )
 
 
@@ -200,6 +241,14 @@ def contradict_output_to_envelope(out: ContradictOutput) -> dict[str, Any]:
                 "snippet": h.snippet,
                 "category": h.category,
                 "claim": h.claim,
+                # PLA-274 — full breadcrumb (keys mirror SourceRef) so the
+                # contradicting source can be cited + re-opened, not just
+                # named by path.
+                "title": h.title,
+                _KEY_COLLECTION: h.collection,
+                _KEY_SOURCE_PAGE: h.source_ref().source_page,
+                _KEY_SOURCE_URI: h.source_ref().source_uri,
+                "locator": h.source_ref().locator,
             }
             for h in out.contradictions
         ],

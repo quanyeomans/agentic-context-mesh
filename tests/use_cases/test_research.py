@@ -6,7 +6,9 @@ from typing import Any
 
 import pytest
 
+from kairix.core.protocols import SourceRef
 from kairix.use_cases.research import (
+    ResearchChunk,
     ResearchDeps,
     ResearchOutput,
     research_output_to_envelope,
@@ -122,19 +124,22 @@ def test_payload_error_field_propagates() -> None:
 
 
 def test_envelope_includes_all_fields() -> None:
+    chunk = ResearchChunk(ref=SourceRef.of(path="/c"))
     out = ResearchOutput(
         query="q",
         synthesis="s",
-        retrieved_chunks=[{"path": "/c"}],
+        retrieved_chunks=[chunk],
         gaps=["g"],
         confidence=0.5,
         turns=2,
     )
     env = research_output_to_envelope(out)
+    # PLA-274 — each chunk serialises its embedded SourceRef breadcrumb
+    # alongside the legacy flat path + snippet keys.
     assert env == {
         "query": "q",
         "synthesis": "s",
-        "retrieved_chunks": [{"path": "/c"}],
+        "retrieved_chunks": [chunk.to_envelope()],
         "gaps": ["g"],
         "confidence": 0.5,
         "turns": 2,

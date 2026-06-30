@@ -206,6 +206,11 @@ class FakeDocumentRepository:
                 # in-memory doc-repo fake is content-keyed).
                 if "source_page" not in row:
                     row["source_page"] = None
+                # PLA-274 — canonical breadcrumb. Default to "" (SourceRef.of
+                # falls that back to the path downstream) so the fake row
+                # carries every BM25Result key the contract requires.
+                if "source_uri" not in row:
+                    row["source_uri"] = ""
                 results.append(row)
             if len(results) >= limit:
                 break

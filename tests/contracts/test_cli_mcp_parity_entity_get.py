@@ -37,7 +37,9 @@ def test_envelope_keys_match_entity_get_output() -> None:
     from kairix.use_cases import entity_get as uc
 
     src = inspect.getsource(uc.entity_get_output_to_envelope)
-    for key in ("id", "name", "type", "summary", "vault_path", "error"):
+    # PLA-274 — the on-disk pointer key is now ``path`` (renamed from
+    # vault_path) and the canonical ``source_uri`` breadcrumb is emitted.
+    for key in ("id", "name", "type", "summary", "path", "source_uri", "error"):
         assert f'"{key}"' in src
 
 

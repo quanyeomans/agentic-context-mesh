@@ -1247,7 +1247,11 @@ class KairixSetupService:
             return TourPrep(summary="", sources=(), message=_TOUR_PREP_FAILED)
         return TourPrep(
             summary=str(getattr(out, "summary", "") or ""),
-            sources=tuple(str(s) for s in getattr(out, "sources", ()) or ()),
+            # PLA-274 — prep sources are now resolvable ``SourceRef`` breadcrumbs;
+            # surface each one's canonical ``source_uri`` (falls back to path) so
+            # the tour shows a re-openable pointer, not a dataclass repr. A plain
+            # string source (legacy) passes through ``str(s)`` unchanged.
+            sources=tuple(str(getattr(s, "source_uri", None) or s) for s in getattr(out, "sources", ()) or ()),
             message="",
         )
 

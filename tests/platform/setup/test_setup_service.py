@@ -1299,7 +1299,14 @@ def test_tour_prep_passes_the_query_and_maps_summary_and_sources(tmp_path: Path)
 
     def fake_prep(query: str) -> Any:
         seen.append(query)
-        return _prep_output(summary="The rollout is the main thread.", sources=["notes/kickoff.md"])
+        # PLA-274 — prep sources are resolvable SourceRefs; the tour maps each
+        # to its canonical source_uri (here == path, no connector URI).
+        from kairix.core.protocols import SourceRef
+
+        return _prep_output(
+            summary="The rollout is the main thread.",
+            sources=[SourceRef.of(path="notes/kickoff.md")],
+        )
 
     service = _service(tmp_path, prep_fn=fake_prep)
     result = service.tour_prep("current projects")

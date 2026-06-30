@@ -178,6 +178,7 @@ def test_bootstrap_text_mode_byte_identical_in_process_and_via_warm_mcp() -> Non
 def test_prep_text_mode_byte_identical_in_process_and_via_warm_mcp() -> None:
     """prep: envelope round-trip renders byte-identical text."""
     from kairix.agents.prep.cli import format_text
+    from kairix.core.protocols import SourceRef
     from kairix.use_cases.prep import PrepOutput, prep_output_to_envelope
 
     in_process = PrepOutput(
@@ -185,7 +186,7 @@ def test_prep_text_mode_byte_identical_in_process_and_via_warm_mcp() -> None:
         tier="l0",
         summary="Lightweight context for topic-x.",
         tokens=12,
-        sources=["doc-alpha", "doc-beta"],
+        sources=[SourceRef.of(path="doc-alpha"), SourceRef.of(path="doc-beta")],
     )
     envelope = prep_output_to_envelope(in_process)
 

@@ -19,8 +19,33 @@ from kairix.agents.research.state import (
     SUFFICIENCY_THRESHOLD,
     ResearcherState,
 )
+from kairix.core.protocols import SourceRef
 
 logger = logging.getLogger(__name__)
+
+
+def _budgeted_to_research_chunk(budgeted: Any) -> dict[str, Any]:
+    """Project one budgeted search result into a research chunk dict (PLA-274).
+
+    Carries the flat ``path`` + ``snippet`` (legacy shape) AND the nested
+    ``source_ref`` breadcrumb built off the fused result, so the canonical
+    source_uri / page / collection ride through synthesis to the citation.
+    """
+    inner = getattr(budgeted, "result", None)
+    raw_page = getattr(inner, "source_page", None)
+    ref = SourceRef.of(
+        path=str(getattr(inner, "path", "") or ""),
+        source_uri=str(getattr(inner, "source_uri", "") or ""),
+        title=str(getattr(inner, "title", "") or "") or None,
+        collection=str(getattr(inner, "collection", "") or "") or None,
+        source_page=int(raw_page) if isinstance(raw_page, int) else None,
+    )
+    return {
+        "path": ref.path,
+        "snippet": getattr(budgeted, "content", "")[:500],
+        "source_ref": ref.to_envelope(),
+    }
+
 
 # F17 — ResearcherState keys appear in every node's return-dict shape; the
 # constants centralise the dict-write side. Reads via `state.get(...)` would
@@ -130,8 +155,12 @@ def retrieve(
 
     sr = search_fn(query=query, budget=budget)
 
-    # Convert SearchResult to list-of-dicts for accumulation
-    new_results = [{"path": b.result.path, "snippet": b.content[:500]} for b in sr.results]
+    # Convert SearchResult to list-of-dicts for accumulation. PLA-274 — carry
+    # the full canonical breadcrumb (source_uri / page / collection / locator)
+    # alongside path+snippet so the synthesised answer can cite the resolvable
+    # source, not just the munged ``documents.path``. The breadcrumb dict is
+    # built through SourceRef.of so the source_uri→path fallback applies.
+    new_results = [_budgeted_to_research_chunk(b) for b in sr.results]
 
     # Accumulate results across turns (don't replace previous finds)
     existing = list(_get_chunks(state))

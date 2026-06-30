@@ -25,6 +25,151 @@ if TYPE_CHECKING:
     from kairix.core.features.resolver import FlagStatus
 
 
+# PLA-274 — SourceRef breadcrumb envelope keys. Extracted as constants
+# because the ≥10-char keys are read on BOTH the to_envelope writer and the
+# from_envelope reader (F17 — a repeated literal trips the duplicate-string
+# rule and the constant makes the writer↔reader coupling a single edit site).
+_SR_KEY_SOURCE_URI = "source_uri"
+_SR_KEY_COLLECTION = "collection"
+_SR_KEY_SOURCE_PAGE = "source_page"
+
+
+@dataclass(frozen=True)
+class SourceRef:
+    """Canonical, resolvable pointer to one retrieved source (PLA-274).
+
+    The shared breadcrumb contract. EVERY agent-facing result surface
+    (``search`` / ``timeline`` / ``entity`` / ``prep`` / ``research`` /
+    ``contradict``) either embeds a ``SourceRef`` field or returns one via
+    a ``source_ref()`` accessor, so an agent can cite-or-reopen the exact
+    source behind a hit WITHOUT each surface hand-rolling its own pointer
+    (the drift PLA-274 closes). F97 enforces this mechanically.
+
+    Fields
+    ------
+    source_uri:
+        The CANONICAL breadcrumb — the connector / archive URI a chunk was
+        written under (``documents.source_uri``: e.g. ``m365://…``,
+        ``sharepoint://…``, ``entity://<QID>``). For passthrough vault /
+        markdown notes whose ``documents.source_uri`` is NULL it falls back
+        to ``path`` (see :meth:`of`), so this field is ALWAYS a resolvable
+        pointer — never empty. This is the value to cite or re-open.
+    path:
+        The DISPLAY path — the human-recognisable ``documents.path`` value.
+        Kept alongside ``source_uri`` because for connector / archive
+        content ``path`` can be a synthetic chunk key (``<uri>#<seq>``);
+        operators still recognise it, so both are surfaced.
+    title:
+        Human-readable document title, when known.
+    collection:
+        The collection the source lives in, when known.
+    source_page:
+        Per-page citation (PDF / PPTX / XLSX). ``None`` for non-paged docs.
+    locator:
+        Within-document anchor for NON-paged docs (a chunk-sequence
+        fragment, heading slug, or char offset) so an agent can point at
+        the right span of a long markdown note that has no page number.
+        ``None`` when the doc is paged (use ``source_page``) or no anchor
+        is available.
+
+    F42: a frozen dataclass — never ``dict[str, Any]`` — so the agent
+    surface boundary stays self-describing and refactor-safe.
+    """
+
+    source_uri: str
+    path: str
+    title: str | None = None
+    collection: str | None = None
+    source_page: int | None = None
+    locator: str | None = None
+
+    @classmethod
+    def of(
+        cls,
+        *,
+        path: str,
+        source_uri: str | None = None,
+        title: str | None = None,
+        collection: str | None = None,
+        source_page: int | None = None,
+        locator: str | None = None,
+    ) -> SourceRef:
+        """Build a ``SourceRef``, applying the two contract defaults.
+
+        This is the SINGLE place the breadcrumb contract lives so it can't
+        drift per-surface:
+
+        1. ``source_uri`` falls back to ``path`` when the document has no
+           connector URI (vault / markdown ``documents.source_uri`` NULL) —
+           guaranteeing a resolvable, non-empty canonical pointer.
+        2. ``locator`` is derived from a trailing ``#<fragment>`` on the
+           path for NON-paged docs when none is supplied — turning the
+           internal ``<uri>#<seq>`` chunk key into a usable within-document
+           anchor. Paged docs (``source_page`` set) keep ``locator=None``.
+
+        Every surface constructs its ``SourceRef`` through here.
+        """
+        resolved_path = path or (source_uri or "")
+        resolved_uri = (source_uri or "").strip() or resolved_path
+        resolved_locator = locator
+        if resolved_locator is None and source_page is None:
+            frag = resolved_path.rsplit("#", 1)
+            if len(frag) == 2 and frag[1]:
+                resolved_locator = frag[1]
+        return cls(
+            source_uri=resolved_uri,
+            path=resolved_path,
+            title=title or None,
+            collection=collection or None,
+            source_page=source_page,
+            locator=resolved_locator,
+        )
+
+    def to_envelope(self) -> dict[str, Any]:
+        """Project to the canonical breadcrumb dict embedded in every envelope.
+
+        Read by agents to cite or re-open the source; the inverse is
+        :meth:`from_envelope`. Keys mirror the field names exactly so the
+        round-trip is lossless.
+        """
+        return {
+            _SR_KEY_SOURCE_URI: self.source_uri,
+            "path": self.path,
+            "title": self.title,
+            _SR_KEY_COLLECTION: self.collection,
+            _SR_KEY_SOURCE_PAGE: self.source_page,
+            "locator": self.locator,
+        }
+
+    @classmethod
+    def from_envelope(cls, data: Mapping[str, Any] | None) -> SourceRef:
+        """Rebuild a ``SourceRef`` from a breadcrumb dict (inverse of
+        :meth:`to_envelope`).
+
+        Tolerant of partial dicts (an older worker that emitted only
+        ``path``) — routes through :meth:`of` so the source_uri/locator
+        defaults still apply. ``None`` / non-mapping input yields an empty
+        ref whose ``source_uri`` and ``path`` are both ``""``.
+        """
+        if not isinstance(data, Mapping):
+            return cls.of(path="")
+        raw_page = data.get(_SR_KEY_SOURCE_PAGE)
+        page = int(raw_page) if isinstance(raw_page, int) else None
+
+        def _opt(key: str) -> str | None:
+            value = data.get(key)
+            return str(value) if value else None
+
+        return cls.of(
+            path=str(data.get("path", "") or ""),
+            source_uri=_opt(_SR_KEY_SOURCE_URI),
+            title=_opt("title"),
+            collection=_opt(_SR_KEY_COLLECTION),
+            source_page=page,
+            locator=_opt("locator"),
+        )
+
+
 @runtime_checkable
 class IntentClassifier(Protocol):
     """Classifies a search query into a QueryIntent dispatch category."""

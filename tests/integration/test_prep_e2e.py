@@ -137,8 +137,11 @@ def test_prep_l0_runs_pipeline_and_emits_documented_envelope() -> None:
     assert envelope["tier"] == "l0"
     assert envelope["error"] == ""
     assert envelope["summary"] == "Kairix uses hybrid retrieval with RRF fusion."
-    # Sources projected from the FusedResult.title of each hit.
-    assert envelope["sources"] == ["Architecture Overview", "Performance Notes"]
+    # PLA-274 / #437 — sources are resolvable SourceRef breadcrumb dicts.
+    # The human title rides on ``title``; the resolvable pointer on
+    # ``source_uri`` / ``path`` (source_uri falls back to path here).
+    assert [s["title"] for s in envelope["sources"]] == ["Architecture Overview", "Performance Notes"]
+    assert [s["source_uri"] for s in envelope["sources"]] == ["notes/architecture.md", "notes/performance.md"]
     # Tokens estimated from the summary string itself.
     assert envelope["tokens"] > 0
 

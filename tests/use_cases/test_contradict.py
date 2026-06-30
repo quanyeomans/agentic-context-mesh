@@ -171,8 +171,23 @@ def test_envelope_includes_category_and_claim() -> None:
     assert env["content"] == "c"
     assert env["has_contradictions"] is True
     assert env["error"] == ""
+    # PLA-274 — the contradicting source's breadcrumb rides on the envelope
+    # (title / collection / source_page / source_uri / locator); source_uri
+    # falls back to the path when no connector URI is present.
     assert env["contradictions"] == [
-        {"path": "p", "score": 0.5, "reason": "r", "snippet": "s", "category": "overstatement", "claim": "C"}
+        {
+            "path": "p",
+            "score": 0.5,
+            "reason": "r",
+            "snippet": "s",
+            "category": "overstatement",
+            "claim": "C",
+            "title": "",
+            "collection": "",
+            "source_page": None,
+            "source_uri": "p",
+            "locator": None,
+        }
     ]
 
 

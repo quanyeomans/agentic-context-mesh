@@ -178,7 +178,16 @@ def test_cli_and_mcp_render_same_summary_text() -> None:
     envelope = tool_prep(query="what is agent-alpha's role?", deps=deps_mcp)
 
     assert envelope["summary"] == summary, f"MCP envelope summary mismatch: {envelope!r}"
-    assert envelope["sources"] == ["onboarding-notes", "role-card"], f"MCP envelope sources mismatch: {envelope!r}"
+    # PLA-274 / #437 — sources are now resolvable SourceRef breadcrumb dicts,
+    # not bare title strings. The human title rides on ``title``; the
+    # resolvable pointer is ``path`` / ``source_uri`` (source_uri falls back
+    # to path when the stub carries no connector URI).
+    src_titles = [s["title"] for s in envelope["sources"]]
+    src_uris = [s["source_uri"] for s in envelope["sources"]]
+    assert src_titles == ["onboarding-notes", "role-card"], f"MCP envelope source titles mismatch: {envelope!r}"
+    assert src_uris == ["notes/onboarding.md", "people/agent-alpha.md"], (
+        f"MCP envelope source uris mismatch: {envelope!r}"
+    )
     assert envelope["error"] == "", f"MCP envelope unexpectedly carries error: {envelope!r}"
 
 
