@@ -34,7 +34,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "agent",
-        help="Agent name (builder, shape, growth, consultant).",
+        help=(
+            "Agent name. Any agent configured in kairix.config.yaml "
+            "(run `kairix onboard agent --name <name>` to add one)."
+        ),
     )
     parser.add_argument(
         "--print",

@@ -44,12 +44,15 @@ def _hit_to_dict(hit: Any) -> dict[str, Any]:
     """
     record = hit.record
     return {
+        "id": record.id,
         "entity": record.entity,
         "attribute": record.attribute,
         "value": record.value,
         "confidence": record.confidence,
         "source_turn_ids": list(record.source_turn_ids),
         "extracted_at": record.extracted_at,
+        "evidence_at": record.evidence_at,
+        "namespace": record.namespace,
         "score": hit.score,
     }
 

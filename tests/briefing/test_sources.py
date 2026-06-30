@@ -14,12 +14,14 @@ import pytest
 
 from kairix.agents.briefing.sources import (
     fetch_entity_stub,
+    fetch_hybrid_search,
     fetch_knowledge_rules,
     fetch_memory_logs,
     fetch_recent_decisions,
     fetch_recent_memory,
 )
 from kairix.text import estimate_tokens, truncate_to_tokens
+from tests.fakes import FakeSearchPipeline
 
 # ---------------------------------------------------------------------------
 # Utility function tests
@@ -365,12 +367,13 @@ class TestFetchRecentDecisionsErrorPaths:
 
 @pytest.mark.unit
 class TestFetchHybridSearchErrorPaths:
-    """fetch_hybrid_search has no DI seam; we exercise the outer except path
-    by invoking it in an environment where build_search_pipeline cannot
-    construct a working pipeline (no Azure creds, no Neo4j).
+    """Exercise the production no-injection path of fetch_hybrid_search.
 
-    This is purely a defensive test: the function must return '' and not raise
-    when its dependencies are unavailable.
+    With both DI seams left ``None`` the function builds the real pipeline
+    via ``build_search_pipeline`` and collects focus signals through the
+    cached source fetchers. In an environment with no Azure creds / Neo4j
+    and no on-disk signal, the search fails (or returns empty) and the
+    outer except returns '' — the function must never raise.
     """
 
     @pytest.mark.unit
@@ -378,9 +381,86 @@ class TestFetchHybridSearchErrorPaths:
         """Calling without creds / Neo4j leaves build_search_pipeline returning
         a degraded pipeline whose .search() raises. The outer except returns ''.
         """
-        from kairix.agents.briefing.sources import fetch_hybrid_search
-
         # The pipeline construction may succeed but .search() will fail without
-        # a populated index. Either way the function returns '' (lines 266-268).
+        # a populated index. Either way the function returns ''.
         result = fetch_hybrid_search("nonexistent-agent-xyz")
         assert isinstance(result, str)
+
+
+@pytest.mark.unit
+class TestFetchHybridSearchQueryFromSignal:
+    """PLA-264: the retrieval query is built from real agent work-signal
+    (the [pending]/[blocked]/TODO lines the fan-out already fetched), not the
+    bare agent name — while agent= / scope= are preserved for collection
+    scoping. Driven through the FakeSearchPipeline DI seam, which records the
+    query + kwargs it received.
+    """
+
+    @pytest.mark.unit
+    def test_query_is_built_from_focus_signals_not_agent_name(self):
+        pipeline = FakeSearchPipeline(
+            scripted_results=[
+                FakeSearchPipeline.make_chunk_row(
+                    path="notes/connectors.md",
+                    title="Connectors",
+                    content="connector refactor design notes",
+                ),
+            ]
+        )
+        signals = [
+            "[2026-06-30] [pending] ship the connector refactor",
+            "[2026-06-29] [blocked] waiting on review of PR 42",
+        ]
+
+        result = fetch_hybrid_search("builder", pipeline=pipeline, focus_signals=signals)
+
+        assert pipeline.calls, "fetch_hybrid_search did not call pipeline.search"
+        call = pipeline.calls[0]
+        query = call["query"]
+        # The query carries the real work-items, not the degenerate "builder".
+        assert "ship the connector refactor" in query
+        assert "waiting on review of PR 42" in query
+        assert query != "builder"
+        # The status markers and date labels are stripped from the query text.
+        assert "[pending]" not in query
+        assert "[blocked]" not in query
+        # agent= / scope= are preserved for collection scoping.
+        assert call["kwargs"]["agent"] == "builder"
+        assert call["kwargs"]["scope"] == "shared+agent"
+        # The scripted hit is rendered into the returned context.
+        assert "connector refactor design notes" in result
+
+    @pytest.mark.unit
+    def test_duplicate_focus_signals_are_deduped_in_query(self):
+        """A work-item repeated across days collapses to a single occurrence in
+        the query — the dedup guard keeps the focus string tight rather than
+        echoing the same task once per memory line.
+        """
+        pipeline = FakeSearchPipeline(scripted_results=[])
+        signals = [
+            "[2026-06-30] [pending] ship the connector refactor",
+            "[2026-06-29] [pending] ship the connector refactor",
+        ]
+
+        fetch_hybrid_search("builder", pipeline=pipeline, focus_signals=signals)
+
+        query = pipeline.calls[0]["query"]
+        assert query.count("ship the connector refactor") == 1
+
+    @pytest.mark.unit
+    def test_query_falls_back_to_agent_name_when_no_signal(self):
+        """With no actionable signal (fresh agent), the query falls back to the
+        agent name rather than searching for the empty string — agent= / scope=
+        still preserved.
+        """
+        pipeline = FakeSearchPipeline(scripted_results=[])
+
+        result = fetch_hybrid_search("growth", pipeline=pipeline, focus_signals=[])
+
+        assert pipeline.calls
+        call = pipeline.calls[0]
+        assert call["query"] == "growth"
+        assert call["kwargs"]["agent"] == "growth"
+        assert call["kwargs"]["scope"] == "shared+agent"
+        # No results scripted → empty context, no raise.
+        assert result == ""

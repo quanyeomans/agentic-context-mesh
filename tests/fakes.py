@@ -390,20 +390,35 @@ class FakeEmbeddingService:
     When constructed with ``vector=[]`` (or any empty iterable), every call to
     ``embed`` returns ``[]`` — useful for exercising backend short-circuit
     paths that treat empty embeddings as a soft failure.
+
+    Pass ``raises=`` to make ``embed`` / ``embed_batch`` raise — covers
+    never-raises contracts in callers that wrap the embedder (e.g. the
+    fact-store fused recall path degrading to BM25-only).
     """
 
-    def __init__(self, vector: list[float] | None = None, dim: int = 1536) -> None:
+    def __init__(
+        self,
+        vector: list[float] | None = None,
+        dim: int = 1536,
+        *,
+        raises: BaseException | None = None,
+    ) -> None:
         # Treat an explicitly-passed empty list as "embed always returns []".
         # Default (None) -> a normal fixed dim-vector.
         if vector is None:
             self._vector: list[float] = [0.01] * dim
         else:
             self._vector = list(vector)
+        self._raises = raises
 
     def embed(self, text: str) -> list[float]:
+        if self._raises is not None:
+            raise self._raises
         return list(self._vector)
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        if self._raises is not None:
+            raise self._raises
         return [list(self._vector) for _ in texts]
 
 
@@ -1547,9 +1562,14 @@ class FakeSearchPipeline:
     the runner's *use* of the pipeline, not the pipeline itself.
     """
 
-    def __init__(self, scripted_results: list[Any] | None = None) -> None:
+    def __init__(self, scripted_results: list[Any] | None = None, *, config: Any = None) -> None:
         self._scripted_results = list(scripted_results or [])
         self.calls: list[dict[str, Any]] = []
+        # Mirrors the production SearchPipeline's ``.config`` (a
+        # RetrievalConfig). The warm runner's cross-encoder warm step reads
+        # ``pipeline.config.rerank`` + ``.rerank_intents`` to decide whether
+        # rerank is wired; tests pass a real RetrievalConfig to drive it.
+        self.config = config
 
     def search(self, query: str, **kwargs: Any) -> Any:
         self.calls.append({"query": query, "kwargs": kwargs})
@@ -1582,6 +1602,30 @@ class _FakeSearchResult:
 
     def __init__(self, *, results: list[Any]) -> None:
         self.results = results
+
+
+class FakeCrossEncoderLoader:
+    """Recording stand-in for ``kairix.core.search.rerank.get_cross_encoder``.
+
+    Injected into :func:`kairix.platform.warm.run_warm` through the
+    ``cross_encoder_loader`` seam so a test can prove the cross-encoder model
+    load is requested *exactly* when rerank is wired — without importing
+    torch / sentence-transformers or loading a real model. Every requested
+    model name lands in ``models``; ``calls`` is the request count.
+    """
+
+    def __init__(self, encoder: Any = None) -> None:
+        self._encoder = encoder
+        self.models: list[str] = []
+
+    @property
+    def calls(self) -> int:
+        """Number of times the loader was invoked."""
+        return len(self.models)
+
+    def __call__(self, model: str) -> Any:
+        self.models.append(model)
+        return self._encoder
 
 
 # ---------------------------------------------------------------------------

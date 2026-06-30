@@ -25,8 +25,9 @@ Boundary chain exercised:
     → JSON envelope to stdout
 
 Outcome assertion: the warm envelope is well-formed JSON with the
-three canonical step names (build_search_pipeline, probe_search,
-open_graph_client) and every required field per ``WarmResult.to_envelope``.
+canonical warm-up step names (build_search_pipeline, probe_search,
+warm_cross_encoder, ensure_sqlite_stats, open_graph_client) and every
+required field per ``WarmResult.to_envelope``.
 The build step lands ``ok=false`` in this CI-clean tmp environment
 because no ``kairix.config.yaml`` provider is configured; that's
 deliberate — the outcome test confirms the envelope SHAPE the operator
@@ -57,7 +58,13 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
-_EXPECTED_STEP_NAMES = {"build_search_pipeline", "probe_search", "open_graph_client", "ensure_sqlite_stats"}
+_EXPECTED_STEP_NAMES = {
+    "build_search_pipeline",
+    "probe_search",
+    "warm_cross_encoder",
+    "open_graph_client",
+    "ensure_sqlite_stats",
+}
 
 
 def test_warm_cli_subprocess_envelope_outcome(tmp_path: Path) -> None:

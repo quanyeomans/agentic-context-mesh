@@ -32,11 +32,14 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from kairix.agents.mcp.cold_start import require_ready, warm_retrieval_stack
 from kairix.agents.mcp.errors import async_tool_handler
 from kairix.core.search.scope import Scope
+
+if TYPE_CHECKING:
+    from kairix.use_cases.remember import RememberDeps
 
 logger = logging.getLogger(__name__)
 
@@ -1083,17 +1086,30 @@ def tool_caches_status() -> dict[str, Any]:
     return envelope
 
 
-def tool_remember(agent: str, content: str, kind: str = "note") -> dict[str, Any]:
+def tool_remember(
+    agent: str,
+    content: str,
+    kind: str = "note",
+    *,
+    deps: RememberDeps | None = None,
+) -> dict[str, Any]:
     """Real MCP binding for ``kairix remember`` (#472) — F25 affordance.
 
     Delegates to :func:`kairix.agents.mcp.tools.memory_write.tool_memory_write`,
     which calls the SAME :func:`kairix.use_cases.remember.remember` use case
     the CLI uses. Agents see this capability registered under the tool name
     ``memory_write`` in :func:`build_server`.
+
+    ``deps`` is the injection seam: production callers (and the registered
+    ``memory_write`` closure) leave it ``None`` so the use case wires the
+    real config / paths / clock / index step; ``build_server(remember_deps=...)``
+    threads a tmp-path ``RememberDeps`` here so an integration test can drive
+    the registered MCP tool against a temp knowledge store without touching
+    the live tree (F1/F2-clean — a constructor seam, not a monkeypatch).
     """
     from kairix.agents.mcp.tools.memory_write import tool_memory_write
 
-    return tool_memory_write(agent=agent, content=content, kind=kind)
+    return tool_memory_write(agent=agent, content=content, kind=kind, deps=deps)
 
 
 # ---------------------------------------------------------------------------
@@ -2178,13 +2194,28 @@ def _register_synthesis_and_diagnostic_tools(
         return tool_recommend(task=task, agent=agent)
 
 
-def _register_operator_and_ingest_tools(server: Any) -> None:
+def _register_operator_and_ingest_tools(
+    server: Any,
+    *,
+    remember_deps: RememberDeps | None = None,
+) -> None:
     """Register operator-only escalation stubs + Plan B-parity ingest surface.
 
     Operator stubs return ``OperatorOnlyCapability`` envelopes that point the
-    calling agent at the exact CLI command to surface to its admin. The ingest
-    tools (``ingest_chat`` / ``facts_about``) sit alongside because they share
+    calling agent at the exact CLI command to surface to its admin. The
+    ``ingest_chat`` / ``facts_about`` tools sit alongside because they share
     the same out-of-band-write hygiene (warm-gated, namespace-scoped).
+
+    ``memory_write`` is deliberately NOT warm-gated (PLA-257): an agent is
+    most likely to record a decision at session start, exactly when the
+    embedding model is still warming, and the write does not depend on
+    warmth. The file is always persisted and BM25-indexed immediately;
+    vector embedding follows at the next embed tick, and if immediate
+    indexing can't complete the use case returns a "saved, queued for
+    indexing" status rather than rejecting the write.
+
+    ``remember_deps`` is the injection seam threaded to the ``memory_write``
+    closure (see :func:`tool_remember`); production leaves it ``None``.
     """
 
     # ---- Operator-only escalation stubs ----
@@ -2366,24 +2397,35 @@ def _register_operator_and_ingest_tools(server: Any) -> None:
     # #472 — the agent-facing memory-write verb. Same use case as the
     # ``kairix remember`` CLI (kairix/use_cases/remember.py).
     # F45-feature: tests/bdd/features/mcp_memory_write.feature
+    #
+    # PLA-257 — NOT ``@warm_gate``-decorated, on purpose. An agent records a
+    # decision/fact most often at session start, when the embedding model is
+    # still warming (tens of seconds). The write doesn't depend on warmth, so
+    # gating it would refuse the agent's memory exactly when it most needs to
+    # persist. The body always writes the file and BM25-indexes it (a SQLite
+    # FTS rebuild — cold-safe); vector embedding follows at the next embed
+    # tick. If immediate indexing can't complete, the use case returns a
+    # "saved, queued for indexing" status (indexed=False + a re-index
+    # affordance) rather than rejecting the write.
     @server.tool(
         description=(
             "Save a memory for an agent. Writes the text as a dated markdown file in the "
-            "agent's memory folder inside the knowledge store, and indexes it right away so "
-            "search finds it in this same session. Use it whenever the agent learns something "
-            "worth keeping: a note (default), a decision, or a fact — pass kind to say which. "
-            "The agent name must be in the team's agent configuration."
+            "agent's memory folder inside the knowledge store, and indexes it for search. "
+            "Works even while kairix is still warming up: the file is always saved, and if "
+            "search indexing can't run yet the memory is queued for the next indexing pass. "
+            "Use it whenever the agent learns something worth keeping: a note (default), a "
+            "decision, or a fact — pass kind to say which. The agent name must be in the "
+            "team's agent configuration."
         )
     )
     @async_tool_handler
-    @warm_gate
     def memory_write(
         agent: str,
         content: str,
         kind: str = "note",
     ) -> dict[str, Any]:
         """Write a memory for an agent into the knowledge store."""
-        return tool_remember(agent=agent, content=content, kind=kind)
+        return tool_remember(agent=agent, content=content, kind=kind, deps=remember_deps)
 
 
 def build_server(
@@ -2392,6 +2434,7 @@ def build_server(
     *,
     readiness_check: Callable[[], bool] | None = None,
     mark_ready: Callable[[], None] | None = None,
+    remember_deps: RememberDeps | None = None,
 ) -> Any:
     """Construct the FastMCP server with every kairix tool registered.
 
@@ -2405,6 +2448,13 @@ def build_server(
         mark_ready: Optional callback to open the readiness gate after a
                     successful manual warm-up. Paired with ``readiness_check``
                     in long-running HTTP deployments.
+        remember_deps: Optional ``RememberDeps`` injection seam for the
+                       ``memory_write`` tool. Production leaves it ``None``
+                       (the use case wires real config / paths / index step);
+                       an integration test passes a tmp-path ``RememberDeps``
+                       so the registered tool writes to a temp knowledge store
+                       — the F1/F2-clean way to prove the cold-write path
+                       through the live dispatch surface.
 
     Raises ImportError when the ``mcp`` package is not installed.
     Install via: pip install kairix[agents]
@@ -2421,5 +2471,5 @@ def build_server(
     server = FastMCP("kairix", host=host, port=port)
     _register_retrieval_tools(server, readiness_check)
     _register_synthesis_and_diagnostic_tools(server, readiness_check, mark_ready)
-    _register_operator_and_ingest_tools(server)
+    _register_operator_and_ingest_tools(server, remember_deps=remember_deps)
     return server

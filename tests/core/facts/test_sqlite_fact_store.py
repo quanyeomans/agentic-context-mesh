@@ -31,6 +31,7 @@ import pytest
 
 from kairix.core.facts import SQLiteFactStore, StoredFactHit, StoredFactRecord
 from kairix.core.protocols import FactHit, FactRecord, FactStore
+from tests.fakes import FakeEmbeddingService, FakeVectorRepository
 
 pytestmark = pytest.mark.unit
 
@@ -627,3 +628,221 @@ def test_legacy_schema_without_evidence_at_column_migrates_on_add(tmp_path: Path
     hits = store.search("z-distinct")
     assert hits
     assert hits[0].record.evidence_at == "2024-12-01"
+
+
+# ---------------------------------------------------------------------------
+# Vector / RRF-fused recall (PLA-262, #340) — the fallback branches that
+# degrade to BM25-only. The happy fused path + BM25 control live in
+# tests/integration/test_factstore_rrf_fusion.py; these pin the
+# never-break-recall contract for every way the vector leg can no-op.
+# ---------------------------------------------------------------------------
+
+
+def _fused_store(
+    tmp_path: Path,
+    *,
+    embedder: FakeEmbeddingService | None,
+    vector_index: FakeVectorRepository | None,
+) -> SQLiteFactStore:
+    """A store wired with the supplied (possibly absent) fused-path seams."""
+    return SQLiteFactStore(
+        db_path=tmp_path / "fused.sqlite",
+        embedder=embedder,
+        vector_index=vector_index,
+    )
+
+
+def test_search_runs_bm25_only_when_no_vector_index(tmp_path: Path) -> None:
+    """An embedder with no vector index degrades to BM25-only recall.
+
+    Sabotage-proof: drop the ``self._vector_index is None`` guard in
+    ``_vector_recall`` and the code dereferences ``None.search`` →
+    ``AttributeError`` → this search raises instead of returning the BM25
+    hit.
+    """
+    store = _fused_store(tmp_path, embedder=FakeEmbeddingService(), vector_index=None)
+    store.add(_make_record(fact_id="f1", value="onboarding"))
+
+    hits = store.search("onboarding")
+    assert {h.record.id for h in hits} == {"f1"}
+
+
+def test_search_recovers_when_embedder_raises(tmp_path: Path) -> None:
+    """A raising embedder is swallowed; recall degrades to BM25-only.
+
+    Sabotage-proof: remove the ``try/except`` around ``embed`` in
+    ``_vector_recall`` and the RuntimeError propagates → search raises
+    instead of returning the lexical hit.
+    """
+    store = _fused_store(
+        tmp_path,
+        embedder=FakeEmbeddingService(raises=RuntimeError("embed boom")),
+        vector_index=FakeVectorRepository(results=[{"id": "f1", "collection": "facts"}]),
+    )
+    store.add(_make_record(fact_id="f1", value="onboarding"))
+
+    hits = store.search("onboarding")
+    assert {h.record.id for h in hits} == {"f1"}
+
+
+def test_search_recovers_when_embedding_is_empty(tmp_path: Path) -> None:
+    """An empty embedding vector short-circuits the vector leg.
+
+    Sabotage-proof: drop the ``if not query_vec`` guard and the empty
+    vector reaches ``vector_index.search`` — the fake returns its
+    configured row regardless, so a sabotaged build would *also* recall
+    ``f-extra`` (proving the guard's absence changes behaviour).
+    """
+    store = _fused_store(
+        tmp_path,
+        embedder=FakeEmbeddingService(vector=[]),
+        vector_index=FakeVectorRepository(results=[{"id": "f-extra", "collection": "facts"}]),
+    )
+    store.add(_make_record(fact_id="f1", value="onboarding"))
+    store.add(_make_record(fact_id="f-extra", entity="zeta", attribute="q", value="disjoint tokens here"))
+
+    hits = store.search("onboarding")
+    assert {h.record.id for h in hits} == {"f1"}
+
+
+def test_search_recovers_when_vector_index_raises(tmp_path: Path) -> None:
+    """A raising vector index is swallowed; recall degrades to BM25-only.
+
+    Sabotage-proof: remove the ``try/except`` around ``vector_index.search``
+    and the RuntimeError propagates → search raises.
+    """
+    store = _fused_store(
+        tmp_path,
+        embedder=FakeEmbeddingService(),
+        vector_index=FakeVectorRepository(raises=RuntimeError("index boom")),
+    )
+    store.add(_make_record(fact_id="f1", value="onboarding"))
+
+    hits = store.search("onboarding")
+    assert {h.record.id for h in hits} == {"f1"}
+
+
+def test_search_skips_vector_rows_missing_an_id(tmp_path: Path) -> None:
+    """Vector rows carrying neither ``id`` nor ``path`` are ignored.
+
+    Sabotage-proof: change ``_vec_row_id`` to return a truthy constant for
+    a key-less row and ``_facts_by_ids`` would query a bogus id — this
+    test (BM25-only result) would gain a phantom entry / raise.
+    """
+    store = _fused_store(
+        tmp_path,
+        embedder=FakeEmbeddingService(),
+        vector_index=FakeVectorRepository(results=[{"collection": "facts", "distance": 0.1}]),
+    )
+    store.add(_make_record(fact_id="f1", value="onboarding"))
+
+    hits = store.search("onboarding")
+    assert {h.record.id for h in hits} == {"f1"}
+
+
+def test_fused_recall_accepts_vector_rows_keyed_by_path(tmp_path: Path) -> None:
+    """A usearch-style row keyed by ``path`` (not ``id``) still resolves.
+
+    Sabotage-proof: drop the ``row.get("path")`` fallback in
+    ``_vec_row_id`` and the path-keyed semantic hit is never recalled →
+    this assertion fails.
+    """
+    store = _fused_store(
+        tmp_path,
+        embedder=FakeEmbeddingService(),
+        vector_index=FakeVectorRepository(results=[{"path": "f-sem", "collection": "facts"}]),
+    )
+    store.add(_make_record(fact_id="f-sem", entity="agent-alpha", attribute="pet", value="owns a tabby kitten"))
+
+    hits = store.search("feline companions")
+    assert any(h.record.id == "f-sem" for h in hits)
+
+
+def test_fused_recall_drops_superseded_vector_hits(tmp_path: Path) -> None:
+    """A superseded fact returned by the vector index is filtered out.
+
+    The vector leg obeys the same ``superseded_by IS NULL`` visibility
+    contract as BM25.
+
+    Sabotage-proof: drop ``AND superseded_by IS NULL`` from
+    ``_facts_by_ids`` and the superseded ``f-old`` leaks back into recall.
+    """
+    store = _fused_store(
+        tmp_path,
+        embedder=FakeEmbeddingService(),
+        vector_index=FakeVectorRepository(results=[{"id": "f-old", "collection": "facts"}]),
+    )
+    store.add(_make_record(fact_id="f-old", entity="agent-alpha", attribute="pet", value="had a goldfish"))
+    store.add(_make_record(fact_id="f-new", entity="agent-alpha", attribute="pet", value="owns a tabby kitten"))
+    store.supersede(old_id="f-old", new_id="f-new")
+
+    hits = store.search("aquatic friend")
+    assert all(h.record.id != "f-old" for h in hits)
+
+
+def test_fused_recall_honours_namespace_on_vector_leg(tmp_path: Path) -> None:
+    """A vector hit outside the requested namespace is filtered out.
+
+    Sabotage-proof: drop the ``namespace`` clause from ``_facts_by_ids``
+    and the out-of-namespace ``f-other-ns`` leaks into the scoped result.
+    """
+    store = _fused_store(
+        tmp_path,
+        embedder=FakeEmbeddingService(),
+        vector_index=FakeVectorRepository(results=[{"id": "f-other-ns", "collection": "facts"}]),
+    )
+    store.add(
+        _make_record(
+            fact_id="f-other-ns",
+            entity="agent-alpha",
+            attribute="pet",
+            value="owns a tabby kitten",
+            namespace="eng-b",
+        )
+    )
+
+    hits = store.search("feline companions", namespace="eng-a")
+    assert all(h.record.id != "f-other-ns" for h in hits)
+
+
+def test_fused_recall_combines_bm25_and_vector_legs(tmp_path: Path) -> None:
+    """RRF fuses a lexical BM25 hit AND a no-overlap vector hit in one list.
+
+    Drives the BM25 leg of ``_rrf_fuse`` (the ``BM25Result`` row build)
+    together with the vector leg, then maps both back to hits — the full
+    fused happy path at unit tier.
+
+    Sabotage-proof: skip the vector leg (``return list(bm25_hits)``) and
+    ``f-vec`` is lost; pass ``[]`` for the BM25 rows into ``rrf`` and
+    ``f-lex`` is lost. Either mutation fails this test.
+    """
+    store = _fused_store(
+        tmp_path,
+        embedder=FakeEmbeddingService(),
+        vector_index=FakeVectorRepository(results=[{"id": "f-vec", "collection": "facts"}]),
+    )
+    store.add(_make_record(fact_id="f-lex", entity="agent-alpha", attribute="onboarding", value="onboarding owner"))
+    store.add(_make_record(fact_id="f-vec", entity="agent-alpha", attribute="pet", value="owns a tabby kitten"))
+
+    recalled = {h.record.id for h in store.search("onboarding")}
+    assert {"f-lex", "f-vec"} <= recalled, f"both legs must survive fusion; got {recalled!r}"
+
+
+def test_search_ignores_non_dict_vector_rows(tmp_path: Path) -> None:
+    """A vector index yielding a non-dict row is tolerated (skipped).
+
+    Sabotage-proof: drop the ``isinstance(row, dict)`` guard in
+    ``_vec_row_id`` and ``None.get(...)`` raises ``AttributeError`` →
+    search raises instead of degrading to BM25-only.
+    """
+    store = _fused_store(
+        tmp_path,
+        embedder=FakeEmbeddingService(),
+        # A deliberately malformed (non-dict) row to exercise the defensive
+        # guard in ``_vec_row_id`` (tests/ are not in mypy's checked set).
+        vector_index=FakeVectorRepository(results=[None]),
+    )
+    store.add(_make_record(fact_id="f1", value="onboarding"))
+
+    hits = store.search("onboarding")
+    assert {h.record.id for h in hits} == {"f1"}

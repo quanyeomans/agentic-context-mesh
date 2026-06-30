@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import logging
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -41,7 +42,7 @@ from kairix.core.search.scope import Scope
 
 logger = logging.getLogger(__name__)
 
-# Module-level thread pool for parallel BM25 + vector dispatch (#perf-dispatch).
+# Process-shared thread pool for parallel BM25 + vector dispatch (#perf-dispatch).
 # Profile data (post-#409): dispatch=2384ms = bm25 (~605ms) + vector (~1780ms)
 # strictly sequential. Both legs are I/O-bound (SQLite FTS5 + Azure embed HTTP)
 # and have no inter-dependency — running them on the same thread serialises
@@ -49,19 +50,82 @@ logger = logging.getLogger(__name__)
 # floor to ~max(bm25, vector); on warm-cache miss that's ~600ms saved off the
 # critical path (≈25% of dispatch budget) with no result-set change.
 #
-# Sized at 2 workers: exactly one BM25 + one vector futures per search call.
-# A bigger pool would spend memory on idle workers; a smaller (single-worker)
-# pool collapses back to sequential.
+# Pool SIZE (PLA-272). Each in-flight search submits exactly two futures (one
+# BM25 + one vector). The pool was previously fixed at 2 workers, which capped
+# the WHOLE process at a single search's worth of dispatch parallelism: under
+# teaming load (#436 benchmarked post-warm p95 ~640ms at --concurrency 5 — ten
+# dispatch tasks contending for two slots) the surplus tasks queued and the
+# pool became the bottleneck the parallel-dispatch optimisation was meant to
+# remove. Size from the expected concurrent-search load instead
+# (``_FUTURES_PER_SEARCH * KAIRIX_MAX_CONCURRENCY``) so every concurrent
+# search's two legs overlap rather than serialising behind the ceiling.
 #
-# Hoisted to module scope (not per-call) so the pool's thread initialisation
-# (~0.5-1ms per worker) is paid once at import time and amortised across
-# every subsequent search call. Per-call ``ThreadPoolExecutor(max_workers=2)``
-# would re-pay that cost on every query.
-#
-# Thread-name prefix makes the pool's workers visible in py-spy / stack dumps
-# so future profiling can tell parallel-dispatch workers apart from coalescer,
-# embed-batch, or factory-build threads.
-_DISPATCH_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search-dispatch")
+# Built LAZILY (not at import) so the size resolves from config/env at first
+# use — and so tests can size + inject a pool via the ``dispatch_pool`` seam on
+# SearchPipeline without touching process env (F2-clean). Threads keep the
+# ``search-dispatch`` prefix so the pool stays identifiable in py-spy / stack
+# dumps, distinct from coalescer, embed-batch, or factory-build threads. The
+# per-worker thread-init cost (~0.5-1ms) is still paid once and amortised
+# across every subsequent search because the singleton is reused.
+_FUTURES_PER_SEARCH = 2
+DEFAULT_DISPATCH_CONCURRENCY = 8
+
+_DISPATCH_POOL: ThreadPoolExecutor | None = None
+_DISPATCH_POOL_LOCK = threading.Lock()
+
+
+def dispatch_workers_for(concurrency: int) -> int:
+    """Pool workers needed to dispatch ``concurrency`` concurrent searches.
+
+    Each search submits one BM25 + one vector future
+    (``_FUTURES_PER_SEARCH``), so ``2 * concurrency`` slots keep every
+    concurrent search's two legs overlapping instead of queueing behind a
+    fixed ceiling. Floored at ``_FUTURES_PER_SEARCH`` so a misconfigured
+    ``concurrency <= 1`` still parallelises a single search's two legs rather
+    than collapsing to sequential.
+    """
+    return _FUTURES_PER_SEARCH * max(1, concurrency)
+
+
+def build_dispatch_pool(concurrency: int) -> ThreadPoolExecutor:
+    """Build a dispatch pool sized for ``concurrency`` concurrent searches.
+
+    ``max_workers`` comes from :func:`dispatch_workers_for` so the size always
+    tracks the configured concurrency — never a hardcoded literal. The caller
+    owns the returned pool's lifecycle; :func:`_default_dispatch_pool` reuses a
+    single process-wide instance.
+    """
+    return ThreadPoolExecutor(
+        max_workers=dispatch_workers_for(concurrency),
+        thread_name_prefix="search-dispatch",
+    )
+
+
+def _resolve_dispatch_concurrency() -> int:
+    """Resolve the expected concurrent-search load, with env override (F4-clean).
+
+    Routes the env read through :mod:`kairix.paths` so no ``os.environ`` read
+    leaks into the search tier. Operators tune ``KAIRIX_MAX_CONCURRENCY`` to
+    match their teaming load (the number of agents firing searches at once).
+    """
+    from kairix.paths import read_int_env
+
+    return read_int_env("KAIRIX_MAX_CONCURRENCY", default=DEFAULT_DISPATCH_CONCURRENCY)
+
+
+def _default_dispatch_pool() -> ThreadPoolExecutor:
+    """Return the process-lifetime dispatch pool, building it lazily.
+
+    Built on the first search and reused for every subsequent dispatch so the
+    per-worker thread-init cost is paid once and amortised. Sized from
+    :func:`_resolve_dispatch_concurrency` so the pool matches the expected
+    concurrent load instead of the legacy fixed two workers (PLA-272).
+    """
+    global _DISPATCH_POOL
+    with _DISPATCH_POOL_LOCK:
+        if _DISPATCH_POOL is None:
+            _DISPATCH_POOL = build_dispatch_pool(_resolve_dispatch_concurrency())
+        return _DISPATCH_POOL
 
 
 @dataclass
@@ -139,6 +203,13 @@ class SearchPipeline:
     # — preserves every existing test that constructs SearchPipeline
     # directly with fakes.
     reranker: Callable[[str, list[FusedResult]], list[FusedResult]] | None = None
+    # Backend dispatch pool for the parallel BM25 + vector legs. When ``None``
+    # (the default — what the factory and every existing test construct), the
+    # process-shared pool from :func:`_default_dispatch_pool` is used, sized
+    # for the expected concurrent load so teaming traffic doesn't queue behind
+    # the legacy fixed 2-worker ceiling (PLA-272). Tests inject a known-size
+    # pool here to exercise sizing without touching process env (F2-clean).
+    dispatch_pool: ThreadPoolExecutor | None = None
 
     def search(
         self,
@@ -350,9 +421,13 @@ class SearchPipeline:
         Both legs are I/O-bound (SQLite FTS5 + Azure embed HTTP + usearch ANN)
         with no inter-dependency. The previous implementation ran them
         sequentially on the request thread; this version submits both to the
-        module-level ``_DISPATCH_POOL`` so wall-clock collapses to ~max(bm25,
-        vector) instead of bm25 + vector. On the production warm-cache miss
-        path (bm25 ~605ms, vector ~1780ms) that saves ~600ms per search.
+        injected ``dispatch_pool`` (or the process-shared
+        :func:`_default_dispatch_pool` when none is injected) so wall-clock
+        collapses to ~max(bm25, vector) instead of bm25 + vector. On the
+        production warm-cache miss path (bm25 ~605ms, vector ~1780ms) that
+        saves ~600ms per search. The pool is sized for the expected concurrent
+        load (PLA-272) so teaming traffic overlaps rather than queueing behind
+        a fixed worker ceiling.
 
         When ``stages`` is supplied, records ``bm25`` and ``vector`` wall-clock
         deltas into it so the caller can decompose the ``dispatch`` stage in
@@ -391,8 +466,9 @@ class SearchPipeline:
                     stages["vector"] = round((time.monotonic() - t0) * 1000.0, 2)
             return rows, failed
 
-        bm25_future = _DISPATCH_POOL.submit(_run_bm25)
-        vector_future = _DISPATCH_POOL.submit(_run_vector)
+        pool = self.dispatch_pool if self.dispatch_pool is not None else _default_dispatch_pool()
+        bm25_future = pool.submit(_run_bm25)
+        vector_future = pool.submit(_run_vector)
         bm25_results = bm25_future.result()
         vec_results, vec_failed = vector_future.result()
         return bm25_results, vec_results, vec_failed

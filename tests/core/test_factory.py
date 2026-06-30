@@ -25,6 +25,7 @@ vector index, graph client, or secrets bootstrap construct a
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -35,6 +36,7 @@ from kairix.core.factory import (
     build_search_pipeline,
     select_boosts,
 )
+from kairix.core.facts import SQLiteFactStore, StoredFactRecord
 from kairix.core.search.boosts import (
     ChunkDateBoost,
     EntityBoost,
@@ -49,7 +51,7 @@ from kairix.core.search.config import (
     TemporalBoostConfig,
 )
 from kairix.core.search.fusion import BM25PrimaryFusion, RRFFusion
-from tests.fakes import FakeGraphRepository, FakeProvider, FakeProviderRegistry
+from tests.fakes import FakeEmbeddingService, FakeGraphRepository, FakePaths, FakeProvider, FakeProviderRegistry
 
 # ── select_boosts — on/off matrix and ordering ────────────────────────
 
@@ -967,3 +969,58 @@ def test_build_embedding_service_resolves_and_delegates() -> None:
     vectors = svc.embed_batch(["a task description"])
 
     assert vectors == [[0.1, 0.2, 0.3]]
+
+
+# ── auto-wired fact retriever — embedder threading (PLA-262, #340) ──────
+
+
+def _seed_facts_table(db: Path) -> None:
+    """Create a ``facts`` table at ``db`` so ``_auto_wire_fact_retriever``
+    activates (it auto-wires only when the DB carries a facts table)."""
+    SQLiteFactStore(db_path=db).add(
+        StoredFactRecord(
+            id="seed",
+            entity="agent-alpha",
+            attribute="role",
+            value="VP",
+            confidence=0.9,
+            source_turn_ids=("t1",),
+            extracted_at="2026-01-01T00:00:00Z",
+            superseded_by=None,
+            namespace="shared",
+        )
+    )
+
+
+@pytest.mark.unit
+def test_build_search_pipeline_threads_embedder_into_auto_wired_fact_store(tmp_path: Path) -> None:
+    """``_auto_wire_fact_retriever`` passes the production embedder into the
+    SQLiteFactStore so the fused recall path is reachable (PLA-262, #340).
+
+    Composed through the public factory surface: a facts-table-bearing tmp
+    DB makes the retriever auto-wire, and an explicit embed-service override
+    pins the embedder instance the factory threads through. The wiring
+    assertion mirrors the ``pipeline.vector._embedding`` factory-wiring
+    checks elsewhere in this module — a composition pin, read off the built
+    pipeline.
+
+    Sabotage proof: revert ``_auto_wire_fact_retriever`` to
+    ``SQLiteFactStore(db_path=db_path)`` (drop the embedder argument) and
+    the identity assertion fails because ``_embedder`` is ``None``.
+    """
+    db = tmp_path / "index.sqlite"
+    _seed_facts_table(db)
+    embedder = FakeEmbeddingService(vector=[0.1, 0.2, 0.3])
+
+    pipeline = build_search_pipeline(
+        config=_wire_cfg(RetrievalConfig(fusion_strategy="rrf")),
+        registry=_provider_registry(),
+        paths=FakePaths(db_path=db),
+        deps=FactoryDeps(embed_service_override=embedder, vec_index_factory=lambda: None),
+    )
+
+    retriever = pipeline.fact_retriever
+    assert isinstance(retriever, SQLiteFactStore)
+    # Composition pin (same style as ``pipeline.vector._embedding`` above):
+    # the auto-wired store carries the exact embedder the factory built.
+    assert retriever._embedder is embedder

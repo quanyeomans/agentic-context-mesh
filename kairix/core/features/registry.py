@@ -120,6 +120,10 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_CONNECTOR_INGESTION_SPEC,
     ),
+    # retire-extension: 12-month window intentional — per-customer AAD
+    # Sites.Read.All consent cadence is slower than the M365 siblings; flag
+    # stays past the 6-month F51 ceiling until adoption soaks. Retirement
+    # tracked under the flag-retirement wave (PLA-278).
     "connector_sharepoint": FeatureFlag(
         name="connector_sharepoint",
         default=False,
@@ -140,6 +144,10 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_CONNECTOR_INGESTION_SPEC,
     ),
+    # retire-extension: 12-month window intentional — the §6.6 build sequence
+    # (Steps 4-7: slim-perms, Resolver, sensitivity routing, webhooks) lands
+    # incrementally behind this one flag, past the 6-month F51 ceiling.
+    # Retirement tracked under the flag-retirement wave (PLA-278).
     "connector_notion": FeatureFlag(
         name="connector_notion",
         default=False,
@@ -162,6 +170,10 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec="docs/architecture/connector-scope-topology/connector-design-specs/notion.md",
     ),
+    # retire-extension: 12-month Wave-E window intentional — greenfield
+    # connector still in introduce-stage soak (secondary-rate-limit backoff,
+    # installation-token rotation, force-push reconcile) past the 6-month F51
+    # ceiling. Retirement tracked under the flag-retirement wave (PLA-278).
     "connector_github": FeatureFlag(
         name="connector_github",
         default=False,
@@ -183,6 +195,10 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec="docs/architecture/connector-scope-topology/connector-design-specs/github.md",
     ),
+    # retire-extension: 12-month Wave-E window intentional — per-workspace
+    # admin consent + bot-scope review cadence is slower than the M365 flows;
+    # flag stays past the 6-month F51 ceiling until per-channel routing soaks.
+    # Retirement tracked under the flag-retirement wave (PLA-278).
     "connector_slack": FeatureFlag(
         name="connector_slack",
         default=False,
@@ -209,6 +225,10 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec="docs/architecture/connector-scope-topology/connector-design-specs/slack.md",
     ),
+    # retire-extension: 12-month Wave-E window intentional — greenfield
+    # connector with per-workspace API-key provisioning cadence; flag stays
+    # past the 6-month F51 ceiling until adoption soaks. Retirement tracked
+    # under the flag-retirement wave (PLA-278).
     "connector_linear": FeatureFlag(
         name="connector_linear",
         default=False,
@@ -251,6 +271,10 @@ REGISTRY: dict[str, FeatureFlag] = {
     # bronze_ttl_gc removed in Phase 7 of streaming-bronze (#27) — streaming
     # bronze writes no on-disk blobs so there's nothing for a TTL-based GC
     # to bound. The maintenance stage that backed this flag is a no-op now.
+    # retire-extension: 12-month Wave-E window intentional — KFEAT-021 prune +
+    # rebuild cadence awaits dogfood-VM cutover validation before the flag can
+    # flip ON, so it stays past the 6-month F51 ceiling. Retirement tracked
+    # under the flag-retirement wave (PLA-278).
     "maintenance_loop": FeatureFlag(
         name="maintenance_loop",
         default=False,

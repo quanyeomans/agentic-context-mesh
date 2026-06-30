@@ -38,7 +38,17 @@ from kairix.core.search.brief_output_cache import (
 
 logger = logging.getLogger(__name__)
 
-_VALID_AGENTS = {"builder", "shape", "growth", "consultant"}
+# F21 affordance appended to every InvalidAgent rejection so the operator
+# (or the calling agent) gets the exact fix without reading source. There
+# is no fixed four-name allow-list any more (PLA-265): any agent the
+# operator has onboarded — an explicit ``agents.<name>`` block, an
+# ``agent_defaults`` synthesis, or the built-in document-root default —
+# resolves to a surface and is briefable. ``InvalidAgent`` now fires only
+# when scope resolution genuinely yields no surfaces.
+_INVALID_AGENT_ACTION = (
+    "fix: run `kairix onboard agent --name <name>` to configure the agent's "
+    "memory surface in kairix.config.yaml. next: re-run kairix brief <name>."
+)
 
 # Process-shared BriefOutputCache. Lazy-initialised on first run_brief
 # call. Mirrors the prep_summary_cache + query_cache accessor patterns
@@ -174,9 +184,38 @@ def _default_generate(agent: str, **kwargs: Any) -> str:
 
 
 def _default_briefing_dir() -> Path:
-    from kairix.agents.briefing.writer import BRIEFING_DIR
+    from kairix.paths import briefing_dir
 
-    return BRIEFING_DIR
+    return briefing_dir()
+
+
+def _default_brief_config() -> dict[str, object] | None:
+    from kairix.paths import load_top_level_config
+
+    return load_top_level_config()
+
+
+def _resolve_agent_surfaces(agent: str, config: dict[str, object] | None) -> tuple[Path, ...]:
+    """Return the agent's configured surface paths, or ``()`` when none resolve.
+
+    Routes through :func:`kairix.core.agents.scope.get_agent_scope` — the
+    same resolver the briefing pipeline's source fetchers use — so any
+    agent the operator has onboarded resolves: an explicit ``agents.<name>``
+    block, an ``agent_defaults`` synthesis, or the built-in document-root
+    default. Returns ``()`` only when the scope genuinely has no surfaces
+    (an explicit empty ``surfaces: []`` entry) or the config is malformed
+    (``get_agent_scope`` raises ``ValueError``); :func:`run_brief` maps
+    ``()`` to an ``InvalidAgent`` envelope. Replaces the hardcoded
+    four-name allow-list so config-onboarded agents (``kairix onboard
+    agent --name <name>``) can be briefed (PLA-265).
+    """
+    from kairix.core.agents.scope import get_agent_scope
+
+    try:
+        scope = get_agent_scope(agent, config=config)
+    except ValueError:
+        return ()
+    return tuple(scope.memory_paths())
 
 
 @dataclass(frozen=True)
@@ -193,8 +232,9 @@ class BriefOutput:
         preview: First 30 lines of ``content``, useful for stdout
             previews without re-splitting.
         error: Empty string on success; structured ``"<Class>: <msg>"``
-            on top-level failure, or ``invalid agent: <name>`` when
-            the agent name is unknown.
+            on top-level failure, or ``"InvalidAgent: <name> resolves to
+            no configured surface. ..."`` when scope resolution yields no
+            surfaces for the requested agent.
     """
 
     agent: str
@@ -240,10 +280,17 @@ class BriefDeps:
     helper. Tests construct ``BriefDeps(generate_fn=fake, ...)``;
     production callers leave ``deps=None`` and the run_brief default
     factory wires the real helpers.
+
+    ``config_fn`` is the agent-validation seam: it returns the parsed
+    ``kairix.config.yaml`` top-level dict (or None) that drives
+    AgentScope resolution. Tests inject a config that declares the
+    agent under test (``config_fn=lambda: {"agents": {...}}``) to prove
+    a config-onboarded agent is briefable without writing a real file.
     """
 
     generate_fn: Callable[..., str] = field(default_factory=lambda: _default_generate)
     briefing_dir_fn: Callable[[], Path] = field(default_factory=lambda: _default_briefing_dir)
+    config_fn: Callable[[], dict[str, object] | None] = field(default_factory=lambda: _default_brief_config)
     health_deps: HealthDeps = field(default_factory=HealthDeps)
 
 
@@ -257,18 +304,22 @@ def run_brief(
     Never raises — failures populate ``BriefOutput.error``.
 
     Args:
-        agent: Agent name (builder / shape / growth / consultant).
+        agent: Agent name. Any agent the operator has onboarded resolves
+            (explicit ``agents.<name>`` block, an ``agent_defaults``
+            synthesis, or the built-in document-root default); the brief
+            only rejects names that resolve to no surface at all.
         deps: Injectable dependencies; production callers leave None.
     """
     d = deps or BriefDeps()
     health = _brief_health(_cached_probe_health(d.health_deps))
 
     normalised = (agent or "").lower().strip()
-    if normalised not in _VALID_AGENTS:
+    surfaces = _resolve_agent_surfaces(normalised, d.config_fn()) if normalised else ()
+    if not surfaces:
         return BriefOutput(
             agent=agent,
             health=health,
-            error=f"InvalidAgent: {agent!r}. Must be one of: {sorted(_VALID_AGENTS)}",
+            error=f"InvalidAgent: {agent!r} resolves to no configured surface. {_INVALID_AGENT_ACTION}",
         )
 
     # When chat synthesis is offline the envelope returns an empty

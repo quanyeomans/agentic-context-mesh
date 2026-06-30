@@ -201,6 +201,39 @@ class TestGenerateBriefing:
         assert len(result) > 0
 
     @pytest.mark.unit
+    def test_write_failure_returns_fresh_synthesised_content(self, tmp_path):
+        """PLA-267: the brief is built inline and returned directly — there is
+        NO write-then-read-back. When the writer raises, the FRESH synthesised
+        content (header + body) is returned, never a stale prior brief read
+        back from disk.
+
+        Sabotage-proof (executed): reintroducing the disk read-back in
+        ``generate_briefing`` and pointing ``briefing_dir()`` at a file holding
+        a prior brief makes this return that stale content; the exact
+        ``endswith`` assertion below then fails. Restored.
+        """
+
+        def _failing_writer(agent, content, sources_count=0, token_estimate=0):
+            raise OSError("read-only filesystem")
+
+        result = generate_briefing(
+            "builder",
+            deps=BriefingDeps(
+                synthesise_fn=lambda agent, ctx, max_tokens=800: "FRESH_BODY_PLA267",
+                write_fn=_failing_writer,
+            ),
+            sources=_all_empty_sources(),
+        )
+
+        # The header is built inline and the body is the freshly-synthesised
+        # content — intact even though the write failed.
+        assert "# Agent Briefing — builder" in result
+        assert "FRESH_BODY_PLA267" in result
+        # The return ends with the fresh body — proving it is the synthesised
+        # content, not a (possibly stale) read-back from disk.
+        assert result.rstrip().endswith("FRESH_BODY_PLA267")
+
+    @pytest.mark.unit
     def test_output_file_is_written(self, tmp_path):
         generate_briefing(
             "builder",

@@ -1,23 +1,41 @@
 """
 Briefing file writer.
 
-Writes the generated briefing to ``<cache_dir>/briefing/<agent>-latest.md``,
-where ``cache_dir`` resolves through :mod:`kairix.paths` (defaults to
-``/var/cache/kairix`` on v2026.6.8+ FHS containers, ``~/.cache/kairix`` for
-user installs). Creates the directory if needed. Overwrites on each run
-(ephemeral working memory).
+Writes the generated briefing to ``<briefing_dir>/<agent>-latest.md``,
+where ``briefing_dir`` resolves lazily through
+:func:`kairix.paths.briefing_dir` (``<cache_dir>/briefing`` —
+``/var/cache/kairix/briefing`` on FHS containers + service installs,
+``~/.cache/kairix/briefing`` for user installs, or the
+``KAIRIX_BRIEFING_DIR`` override). The path is resolved at call time, not
+at import, so the module imports cleanly on a hardened no-HOME deploy.
+Creates the directory if needed. Overwrites on each run (ephemeral
+working memory).
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-BRIEFING_DIR = Path(os.environ.get("KAIRIXBRIEFING_DIR", str(Path.home() / ".cache" / "kairix" / "briefing")))
+
+def build_briefing_header(agent: str, *, sources_count: int = 0, token_estimate: int = 0) -> str:
+    """Render the two-line briefing header (title + generation metadata).
+
+    The header is prepended to the synthesised body both here (the file
+    on disk) and in :func:`kairix.agents.briefing.pipeline.generate_briefing`
+    (the value returned to the caller). Single-sourced so the two stay in
+    lockstep — the pipeline no longer reads the file back to recover it.
+    """
+    now = datetime.now(timezone.utc)
+    ts = now.strftime("%Y-%m-%d %H:%M UTC")
+    date_str = now.strftime("%Y-%m-%d")
+    return (
+        f"# Agent Briefing — {agent} — {date_str}\n"
+        f"_Generated: {ts} | Sources: {sources_count} | Tokens: ~{token_estimate}_\n\n"
+    )
 
 
 def write_briefing(
@@ -28,7 +46,7 @@ def write_briefing(
     output_dir: Path | None = None,
 ) -> Path:
     """
-    Write a briefing to /data/kairix/briefing/<agent>-latest.md.
+    Write a briefing to ``<briefing_dir>/<agent>-latest.md``.
 
     Creates the directory if it doesn't exist.
     Overwrites any existing file.
@@ -39,7 +57,7 @@ def write_briefing(
         sources_count:  Number of sources that contributed.
         token_estimate: Estimated token count of the output.
         output_dir:     Optional override for the briefing output directory.
-                        Defaults to BRIEFING_DIR.
+                        Defaults to :func:`kairix.paths.briefing_dir`.
 
     Returns:
         Path to the written file.
@@ -47,21 +65,17 @@ def write_briefing(
     Raises:
         OSError: If the file cannot be written.
     """
-    target_dir = output_dir if output_dir is not None else BRIEFING_DIR
+    if output_dir is not None:
+        target_dir = output_dir
+    else:
+        from kairix.paths import briefing_dir
+
+        target_dir = briefing_dir()
     target_dir.mkdir(parents=True, exist_ok=True)
 
     out_path = target_dir / f"{agent}-latest.md"
 
-    now = datetime.now(timezone.utc)
-    ts = now.strftime("%Y-%m-%d %H:%M UTC")
-    date_str = now.strftime("%Y-%m-%d")
-
-    header = (
-        f"# Agent Briefing — {agent} — {date_str}\n"
-        f"_Generated: {ts} | Sources: {sources_count} | Tokens: ~{token_estimate}_\n\n"
-    )
-
-    full_content = header + content
+    full_content = build_briefing_header(agent, sources_count=sources_count, token_estimate=token_estimate) + content
 
     try:
         out_path.write_text(

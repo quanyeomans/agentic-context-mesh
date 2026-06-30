@@ -35,8 +35,11 @@ def _create_test_db(tmp_path: Path) -> Path:
             UNIQUE(collection, path)
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT, created_at TEXT);
+        -- Production-faithful FTS schema: content-storing (NOT content='')
+        -- with the filepath/title/doc columns the production index uses, so
+        -- the FTS5 snippet() in _build_bm25_query resolves column 2 = doc.
         CREATE VIRTUAL TABLE documents_fts USING fts5(
-            title, doc, content='', tokenize='porter unicode61'
+            filepath, title, doc, tokenize='porter unicode61'
         );
 
         INSERT INTO documents (collection, path, title, hash, active)
@@ -57,7 +60,7 @@ def _create_test_db(tmp_path: Path) -> Path:
         INSERT INTO content (hash, doc) VALUES ('h4', 'This document is inactive and should not appear in results.');
 
         -- Populate FTS index
-        INSERT INTO documents_fts(rowid, title, doc) SELECT d.id, d.title, c.doc
+        INSERT INTO documents_fts(rowid, filepath, title, doc) SELECT d.id, d.path, d.title, c.doc
         FROM documents d JOIN content c ON c.hash = d.hash WHERE d.active = 1;
     """)
     db.close()
@@ -208,14 +211,14 @@ def test_bm25_search_handles_hyphenated_query_tokens(tmp_path: Path) -> None:
             UNIQUE(collection, path)
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
-        CREATE VIRTUAL TABLE documents_fts USING fts5(title, doc, content='', tokenize='porter unicode61');
+        CREATE VIRTUAL TABLE documents_fts USING fts5(filepath, title, doc, tokenize='porter unicode61');
 
         INSERT INTO documents (collection, path, title, hash)
         VALUES ('docs', 'docs/project-overview.md', 'Project Overview', 'h1');
         INSERT INTO content (hash, doc)
         VALUES ('h1', 'A description of the Project Overview document.');
-        INSERT INTO documents_fts(rowid, title, doc)
-        SELECT d.id, d.title, c.doc FROM documents d JOIN content c ON c.hash = d.hash;
+        INSERT INTO documents_fts(rowid, filepath, title, doc)
+        SELECT d.id, d.path, d.title, c.doc FROM documents d JOIN content c ON c.hash = d.hash;
     """)
     db.close()
     # Hyphenated query must still match the doc with "project" in it.

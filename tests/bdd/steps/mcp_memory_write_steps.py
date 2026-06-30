@@ -33,6 +33,10 @@ class _MemoryWriteState:
     db_path: Path
     config: dict[str, Any] = field(default_factory=dict)
     response: dict[str, Any] = field(default_factory=dict)
+    # Models whether immediate search indexing can complete. False mirrors a
+    # still-warming kairix: the file is written and the memory is queued for
+    # the next indexing pass rather than the write being refused (PLA-257).
+    index_ready: bool = True
 
 
 @pytest.fixture
@@ -49,7 +53,7 @@ def _deps_from(state: _MemoryWriteState) -> RememberDeps:
         document_root_fn=lambda: state.document_root,
         db_path_fn=lambda: state.db_path,
         now_fn=lambda: _BDD_NOW,
-        index_fn=lambda _db, _root, _hash: True,
+        index_fn=lambda _db, _root, _hash: state.index_ready,
     )
 
 
@@ -63,6 +67,11 @@ def _alpha_registered(_memory_write_state: _MemoryWriteState) -> None:
             }
         }
     }
+
+
+@given("kairix has not finished warming up so search indexing is not ready yet")
+def _kairix_still_warming(_memory_write_state: _MemoryWriteState) -> None:
+    _memory_write_state.index_ready = False
 
 
 @when(parsers.parse('the agent writes the memory "{content}" for {agent}'))
@@ -89,6 +98,12 @@ def _then_saved_path(_memory_write_state: _MemoryWriteState) -> None:
 @then("the memory-write response says the memory is searchable now")
 def _then_indexed(_memory_write_state: _MemoryWriteState) -> None:
     assert _memory_write_state.response["indexed"] is True
+
+
+@then("the memory-write response says the memory is saved and queued for indexing")
+def _then_queued_for_indexing(_memory_write_state: _MemoryWriteState) -> None:
+    assert _memory_write_state.response["indexed"] is False
+    assert "next: run kairix embed" in _memory_write_state.response["detail"]
 
 
 @then("the memory-write response is an error naming agent-omega")

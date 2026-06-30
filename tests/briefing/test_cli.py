@@ -98,10 +98,25 @@ def test_format_output_empty_content_returns_empty_string() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _build_deps(content: str = "x", out_dir: Path = Path("/tmp/brief")) -> BriefDeps:
+# Config declaring the role labels these tests brief, each with a surface,
+# so AgentScope resolution is deterministic without writing a real file.
+_SURFACE_CONFIG: dict[str, object] = {
+    "agents": {
+        name: {"surfaces": [{"path": f"memory/{name}", "label": "memory"}]}
+        for name in ("builder", "shape", "growth", "consultant")
+    }
+}
+
+
+def _build_deps(
+    content: str = "x",
+    out_dir: Path = Path("/tmp/brief"),
+    config: dict[str, object] | None = None,
+) -> BriefDeps:
     return BriefDeps(
         generate_fn=lambda agent, **_: content,
         briefing_dir_fn=lambda: out_dir,
+        config_fn=lambda: config if config is not None else _SURFACE_CONFIG,
         health_deps=_healthy_health_deps(),
     )
 
@@ -118,8 +133,15 @@ def _run(argv: list[str], deps: BriefDeps | None = None) -> tuple[int, str, str]
     return exit_code, out_buf.getvalue(), err_buf.getvalue()
 
 
-def test_main_invalid_agent_exits_nonzero() -> None:
-    exit_code, _stdout, stderr = _run(["rogue"], _build_deps())
+def test_main_no_surface_agent_exits_nonzero() -> None:
+    """An agent that resolves to no surface exits 1 with the InvalidAgent error.
+
+    Post-PLA-265, the brief accepts any config-resolvable agent; the only
+    rejection left is a name whose scope has zero surfaces (an explicit
+    empty ``surfaces: []`` block).
+    """
+    deps = _build_deps(config={"agents": {"ghost": {"surfaces": []}}})
+    exit_code, _stdout, stderr = _run(["ghost"], deps)
     assert exit_code == 1
     assert "Error generating briefing" in stderr
     assert "InvalidAgent" in stderr

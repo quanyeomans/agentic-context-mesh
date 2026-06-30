@@ -41,6 +41,40 @@ _SYSTEM_PROMPT = (
     "Do not add a title or preamble - the header is added by the caller."
 )
 
+# Section heading → context source key(s) → empty-section text. When the
+# LLM is unavailable (provider unconfigured or the chat call failed), the
+# brief surfaces the raw gathered content under these headings — five of
+# the six brief sources need no LLM, so an offline brief still carries the
+# actionable items instead of empty placeholders (PLA-267).
+_OFFLINE_SECTIONS: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    ("## Pending & Blocked", ("memory_logs",), "No pending items."),
+    ("## Recent Decisions", ("recent_decisions",), "No recent decisions found."),
+    ("## Active Projects", ("recent_memory",), "No active project data found."),
+    ("## Relevant Context", ("hybrid_search", "entity_stub"), "No relevant context found."),
+    ("## Key Constraints", ("knowledge_rules",), "No constraints found."),
+)
+
+
+def _degrade_to_non_llm_brief(agent: str, context: dict[str, str], reason: str) -> str:
+    """Assemble a brief from already-gathered context without the LLM.
+
+    Five of the six brief sources need no LLM call — when synthesis is
+    unavailable we still surface that raw content under the standard
+    headings, so the agent gets the actual pending/blocked items,
+    decisions, and rules rather than empty ``(synthesis unavailable)``
+    placeholders. Falls back to :func:`fallback_briefing` only when there
+    is genuinely no content to show.
+    """
+    if not any(value and value.strip() for value in context.values()):
+        return fallback_briefing(agent, reason)
+    sections: list[str] = []
+    for heading, keys, empty_text in _OFFLINE_SECTIONS:
+        parts = [context[k].strip() for k in keys if context.get(k) and context[k].strip()]
+        rendered = "\n\n".join(parts) if parts else empty_text
+        sections.append(f"{heading}\n{rendered}")
+    note = f"_Synthesis unavailable ({reason}); showing gathered context directly._"
+    return note + "\n\n" + "\n\n".join(sections)
+
 
 def synthesise(
     agent: str,
@@ -71,7 +105,11 @@ def synthesise(
 
         name = provider_name()
         if name is None:
-            return fallback_briefing(agent, "kairix.config.yaml is missing the required 'provider:' field")
+            # No provider configured, but 5/6 sources need no LLM — surface
+            # the gathered context rather than an empty brief (PLA-267).
+            return _degrade_to_non_llm_brief(
+                agent, context, "kairix.config.yaml is missing the required 'provider:' field"
+            )
         llm_backend = ProviderChatBackend(get_provider(name))
     chat = llm_backend.chat
     # Build context block
@@ -108,10 +146,12 @@ def synthesise(
         return result.strip()
     except Exception as e:
         logger.warning("synthesiser: synthesis API call failed - %s", e)
-        # str(e) is acceptable here: fallback_briefing embeds it in a markdown
-        # block that is written to a local file, not returned to an external caller.
-        # The briefing is consumed by the agent operator, not an untrusted API client.
-        return fallback_briefing(agent, str(e))
+        # The chat call failed, but the 5 non-LLM sources already gathered
+        # their content — degrade to that gathered context instead of an
+        # empty placeholder brief (PLA-267). str(e) is acceptable here: it
+        # is embedded in a markdown block written to a local file / returned
+        # to the agent operator, not an untrusted API client.
+        return _degrade_to_non_llm_brief(agent, context, str(e))
 
 
 def fallback_briefing(agent: str, reason: str) -> str:

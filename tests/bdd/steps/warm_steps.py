@@ -158,8 +158,8 @@ def _then_envelope_has_steps(_warm_state: dict[str, Any]) -> None:
     # Sabotage: drop the ``steps=`` projection in to_envelope and this
     # length check sees zero steps (or KeyError).
     assert "steps" in envelope
-    assert len(envelope["steps"]) == 4, (
-        f"expected 4 step records (build, probe, ensure_sqlite_stats, graph); "
+    assert len(envelope["steps"]) == 5, (
+        f"expected 5 step records (build, probe, warm_cross_encoder, ensure_sqlite_stats, graph); "
         f"got {len(envelope['steps'])}: {[s['name'] for s in envelope['steps']]}"
     )
 

@@ -28,10 +28,16 @@ def _healthy_health_deps() -> HealthDeps:
     )
 
 
+def _surface_config(agent: str) -> dict[str, object]:
+    """Config declaring ``agent`` with one surface so it resolves (PLA-265)."""
+    return {"agents": {agent: {"surfaces": [{"path": f"memory/{agent}", "label": "memory"}]}}}
+
+
 def test_tool_brief_happy_path_returns_envelope_dict() -> None:
     deps = BriefDeps(
         generate_fn=lambda agent, **_: "line 1\nline 2\nline 3",
         briefing_dir_fn=lambda: Path("/var/kairix"),
+        config_fn=lambda: _surface_config("builder"),
         health_deps=_healthy_health_deps(),
     )
     result = tool_brief(agent="builder", deps=deps)
@@ -46,9 +52,14 @@ def test_tool_brief_happy_path_returns_envelope_dict() -> None:
     assert result["health"]["next_action"] == ""
 
 
-def test_tool_brief_invalid_agent_returns_error_envelope() -> None:
-    deps = BriefDeps(health_deps=_healthy_health_deps())
-    result = tool_brief(agent="rogue", deps=deps)
+def test_tool_brief_no_surface_agent_returns_error_envelope() -> None:
+    """An agent that resolves to no surface returns the InvalidAgent envelope.
+
+    Post-PLA-265 the brief accepts any config-resolvable agent; only a
+    name with zero surfaces (explicit empty ``surfaces: []``) is rejected.
+    """
+    deps = BriefDeps(config_fn=lambda: {"agents": {"ghost": {"surfaces": []}}}, health_deps=_healthy_health_deps())
+    result = tool_brief(agent="ghost", deps=deps)
     assert result["error"].startswith("InvalidAgent")
     assert result["content"] == ""
 
@@ -57,7 +68,12 @@ def test_tool_brief_generate_failure_returns_error_envelope() -> None:
     def _boom(agent: str, **_: object) -> str:
         raise RuntimeError("generate failed")
 
-    deps = BriefDeps(generate_fn=_boom, briefing_dir_fn=lambda: Path("/x"), health_deps=_healthy_health_deps())
+    deps = BriefDeps(
+        generate_fn=_boom,
+        briefing_dir_fn=lambda: Path("/x"),
+        config_fn=lambda: _surface_config("builder"),
+        health_deps=_healthy_health_deps(),
+    )
     result = tool_brief(agent="builder", deps=deps)
     assert result["error"].startswith("RuntimeError")
     assert result["content"] == ""

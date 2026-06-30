@@ -80,6 +80,48 @@ def test_happy_path_returns_record_read_surface() -> None:
     assert "score" in hit
 
 
+def test_read_surface_exposes_evidence_at_id_and_namespace() -> None:
+    """The read surface carries ``evidence_at``, ``id`` and ``namespace``.
+
+    Temporal recall ("when did X move?") depends on ``evidence_at`` — the
+    real event-time the fact occurred — NOT ``extracted_at`` (wall-clock
+    at extraction). This test uses a record whose ``evidence_at`` differs
+    from ``extracted_at`` so it pins that the tool surfaces the event-time,
+    the deterministic ``id`` (for dedup/citation), and the ``namespace``
+    (engagement scope) — all of which the old ``_hit_to_dict`` dropped.
+
+    Sabotage: drop any one of the ``"id"``, ``"evidence_at"`` or
+    ``"namespace"`` keys from ``_hit_to_dict`` in facts_about.py → the
+    matching assertion below fails because the field is missing. Confirmed
+    by mutating each key out in turn.
+    """
+    store = _store_with_facts(
+        FakeFactRecord(
+            id="f-evt-1",
+            entity="Acme HQ",
+            attribute="location",
+            value="Berlin",
+            confidence=0.88,
+            source_turn_ids=("t-9",),
+            extracted_at="2026-06-30T12:00:00Z",
+            evidence_at="2025-11-02T00:00:00Z",
+            namespace="engagement-gamma",
+        )
+    )
+
+    out = tool_facts_about(entity="Acme HQ", fact_store=store)
+
+    assert out["error"] == ""
+    assert len(out["hits"]) == 1
+    hit = out["hits"][0]
+    assert hit["id"] == "f-evt-1"
+    assert hit["namespace"] == "engagement-gamma"
+    # evidence_at is the event-time, distinct from the extraction wall-clock.
+    assert hit["evidence_at"] == "2025-11-02T00:00:00Z"
+    assert hit["extracted_at"] == "2026-06-30T12:00:00Z"
+    assert hit["evidence_at"] != hit["extracted_at"]
+
+
 def test_empty_entity_is_rejected() -> None:
     """An empty entity string is rejected before any store call.
 

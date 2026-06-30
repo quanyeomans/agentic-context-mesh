@@ -6,7 +6,10 @@ from typing import Any
 
 import pytest
 
+from kairix.core.search.config import RerankConfig, RetrievalConfig
 from kairix.platform.warm import WARMUP_QUERY, run_warm
+from kairix.platform.warm.runner import DETAIL_RERANK_NOT_WIRED
+from tests.fakes import FakeCrossEncoderLoader, FakeSearchPipeline
 
 pytestmark = pytest.mark.unit
 
@@ -52,13 +55,14 @@ def _ok_deps() -> dict[str, Any]:
 
 
 def test_happy_path_runs_every_step() -> None:
-    """All four steps execute and report ok=True."""
+    """All five steps execute and report ok=True."""
     result = run_warm(**_ok_deps())
     assert result.ok is True
     assert result.failures == []
     assert {s.name for s in result.steps} == {
         "build_search_pipeline",
         "probe_search",
+        "warm_cross_encoder",
         "ensure_sqlite_stats",
         "open_graph_client",
     }
@@ -174,6 +178,7 @@ def test_progress_callback_fires_once_per_stage_in_order() -> None:
     assert observed == [
         "build_search_pipeline",
         "probe_search",
+        "warm_cross_encoder",
         "ensure_sqlite_stats",
         "open_graph_client",
     ], f"progress callback must fire once per stage in execution order; got {observed!r}"
@@ -197,6 +202,94 @@ def test_progress_callback_exception_does_not_abort_warm() -> None:
     assert {s.name for s in result.steps} == {
         "build_search_pipeline",
         "probe_search",
+        "warm_cross_encoder",
         "ensure_sqlite_stats",
         "open_graph_client",
     }
+
+
+# ---------------------------------------------------------------------------
+# Cross-encoder warm step — PLA-271. "ready" must mean "rerank model loaded".
+# ---------------------------------------------------------------------------
+
+
+_TEST_RERANK_MODEL = "cross-encoder/test-warm-model"
+
+
+def _rerank_deps(cfg: RetrievalConfig, loader: FakeCrossEncoderLoader) -> dict[str, Any]:
+    """Happy-path deps whose built pipeline carries ``cfg`` and whose
+    cross-encoder load is routed through the recording ``loader``."""
+    pipeline = FakeSearchPipeline(config=cfg)
+    return {
+        "pipeline_builder": lambda: pipeline,
+        "search_probe": lambda p: p.search(query="__test__"),
+        "graph_client_opener": _FakeGraphClient,
+        "sqlite_stats_ensurer": lambda: _FakeStatsResult(),
+        "cross_encoder_loader": loader,
+    }
+
+
+def _rerank_step(result: Any) -> Any:
+    """Return the single ``warm_cross_encoder`` step record from a WarmResult."""
+    matches = [s for s in result.steps if s.name == "warm_cross_encoder"]
+    assert len(matches) == 1, f"expected exactly one warm_cross_encoder step; got {[s.name for s in result.steps]}"
+    return matches[0]
+
+
+def test_warms_cross_encoder_when_rerank_wired_via_intents() -> None:
+    """When ``rerank_intents`` is non-empty (the default), warm force-loads
+    the cross-encoder so the first semantic / multi-hop query doesn't pay the
+    torch import + model load on the request path (PLA-271).
+
+    Sabotage-proof (executed): deleting the ``loader(model)`` call in
+    ``_step_warm_cross_encoder`` drops ``loader.models`` to ``[]`` and this
+    assertion fails.
+    """
+    # Default RetrievalConfig: rerank.enabled=False but rerank_intents are
+    # ("multi_hop", "semantic") — so the factory wires a real reranker and the
+    # model WILL load on the first matching query.
+    cfg = RetrievalConfig(rerank=RerankConfig(model=_TEST_RERANK_MODEL))
+    assert cfg.rerank.enabled is False and cfg.rerank_intents, "fixture must be wired via intents, not enabled"
+    loader = FakeCrossEncoderLoader()
+
+    result = run_warm(**_rerank_deps(cfg, loader))
+
+    assert loader.models == [_TEST_RERANK_MODEL], (
+        f"warm must force-load the config's rerank model exactly once; got {loader.models!r}"
+    )
+    assert _rerank_step(result).ok is True
+
+
+def test_warms_cross_encoder_when_rerank_force_enabled() -> None:
+    """``rerank.enabled=True`` with no rerank_intents is still wired (operator
+    force-enable), so warm loads the model.
+
+    Sabotage-proof (executed): narrowing the guard to ``rerank_intents`` only
+    (dropping the ``rerank.enabled`` limb) leaves ``loader.models`` empty here.
+    """
+    cfg = RetrievalConfig(rerank=RerankConfig(enabled=True, model=_TEST_RERANK_MODEL), rerank_intents=())
+    loader = FakeCrossEncoderLoader()
+
+    result = run_warm(**_rerank_deps(cfg, loader))
+
+    assert loader.models == [_TEST_RERANK_MODEL], f"force-enabled rerank must warm the model; got {loader.models!r}"
+    assert _rerank_step(result).ok is True
+
+
+def test_does_not_warm_cross_encoder_when_rerank_fully_disabled() -> None:
+    """When rerank is fully disabled (``enabled=False`` AND no rerank_intents)
+    the factory wires no reranker, so warm must NOT import torch / load a model.
+
+    Sabotage-proof (executed): removing the ``wired`` guard in
+    ``_step_warm_cross_encoder`` makes the loader fire unconditionally —
+    ``loader.calls`` becomes 1 and this assertion fails.
+    """
+    cfg = RetrievalConfig(rerank=RerankConfig(enabled=False, model=_TEST_RERANK_MODEL), rerank_intents=())
+    loader = FakeCrossEncoderLoader()
+
+    result = run_warm(**_rerank_deps(cfg, loader))
+
+    assert loader.calls == 0, f"disabled rerank must not load the cross-encoder; got models={loader.models!r}"
+    step = _rerank_step(result)
+    assert step.ok is True, f"the skip is a structural no-op, not a failure; got detail={step.detail!r}"
+    assert step.detail == DETAIL_RERANK_NOT_WIRED, f"skip detail should explain the no-op; got {step.detail!r}"

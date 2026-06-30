@@ -52,7 +52,13 @@ services:
       - "${KAIRIX_MCP_BIND_HOST:-127.0.0.1}:8080:8080"
     volumes:
       - ./documents:/data/documents
-      - kairix-data:/data/kairix
+      # FHS image layout: the SQLite index + worker-state live on the data
+      # volume (/var/lib/kairix), regenerable caches on the cache volume
+      # (/var/cache/kairix). The image bakes KAIRIX_DATA_DIR=/var/lib/kairix
+      # + KAIRIX_CACHE_DIR=/var/cache/kairix, so a stale /data/kairix mount
+      # left the index on the container's ephemeral layer (#486 / PLA-276).
+      - kairix-data:/var/lib/kairix
+      - kairix-cache:/var/cache/kairix
       # Layered config: the image ships a complete canonical config at
       # /opt/kairix/kairix.config.yaml (containing _schema_version, provider:,
       # collections, retrieval defaults). Operators overlay sparse host-side
@@ -91,6 +97,10 @@ services:
     env_file:
       - .env
     environment:
+      # The image bakes KAIRIX_DOCUMENT_ROOT=/var/lib/kairix/documents; point
+      # it at the ./documents bind target so `kairix embed` scans your files
+      # instead of an empty baked dir (#486 / PLA-276).
+      - KAIRIX_DOCUMENT_ROOT=/data/documents
       - KAIRIX_NEO4J_URI=bolt://neo4j:7687
       - KAIRIX_NEO4J_USER=neo4j
       - KAIRIX_NEO4J_PASSWORD=${KAIRIX_NEO4J_PASSWORD}
@@ -151,7 +161,13 @@ services:
     command: ["worker"]
     volumes:
       - ./documents:/data/documents
-      - kairix-data:/data/kairix
+      # FHS image layout: the SQLite index + worker-state live on the data
+      # volume (/var/lib/kairix), regenerable caches on the cache volume
+      # (/var/cache/kairix). The image bakes KAIRIX_DATA_DIR=/var/lib/kairix
+      # + KAIRIX_CACHE_DIR=/var/cache/kairix, so a stale /data/kairix mount
+      # left the index on the container's ephemeral layer (#486 / PLA-276).
+      - kairix-data:/var/lib/kairix
+      - kairix-cache:/var/cache/kairix
       # Layered config: the image ships a complete canonical config at
       # /opt/kairix/kairix.config.yaml (containing _schema_version, provider:,
       # collections, retrieval defaults). Operators overlay sparse host-side
@@ -163,6 +179,10 @@ services:
     env_file:
       - .env
     environment:
+      # The image bakes KAIRIX_DOCUMENT_ROOT=/var/lib/kairix/documents; point
+      # it at the ./documents bind target so `kairix embed` scans your files
+      # instead of an empty baked dir (#486 / PLA-276).
+      - KAIRIX_DOCUMENT_ROOT=/data/documents
       - KAIRIX_NEO4J_URI=bolt://neo4j:7687
       - KAIRIX_NEO4J_USER=neo4j
       - KAIRIX_NEO4J_PASSWORD=${KAIRIX_NEO4J_PASSWORD}
@@ -233,4 +253,5 @@ services:
 
 volumes:
   kairix-data:
+  kairix-cache:
   neo4j-data:
