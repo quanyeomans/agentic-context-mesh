@@ -525,3 +525,98 @@ def test_per_query_stages_aggregation_pins_known_stage_maps() -> None:
     for record in result.per_query_stages:
         assert record["stage_latency_ms"]["classify"] == 7.0
         assert record["stage_latency_ms"]["case_marker"] == float(len(record["case_id"]))
+
+
+def test_warmup_separates_cold_build_from_steady_state() -> None:
+    """The probe runs a dedicated warm-up query (the one-time cold build)
+    BEFORE the measured sample and reports it separately, so the
+    steady-state distribution excludes it and the gated p95 isn't inflated
+    by the factory build + first-query model load (#436 / PLA-273).
+
+    Deterministic + wall-clock-free: asserts the warm-up adds exactly one
+    extra searcher call and that the steady-state sample size is unchanged.
+
+    Sabotage-proof: (1) drop the ``_run_warmup`` call in run_probe_search →
+    only 5 searcher calls (the ``== 6`` assertion fires); (2) fold the
+    warm-up into the measured sample (append it to ``durations_ms``) →
+    ``overall.n`` becomes 6 (the ``== 5`` assertion fires).
+    """
+    calls: list[str] = []
+
+    def recording_searcher(q: SampledQuery) -> dict[str, str]:
+        calls.append(q.case_id)
+        return {"results": "fake"}
+
+    result = run_probe_search(
+        suite="x",
+        queries=5,
+        concurrency=1,
+        suite_loader=_suite_loader,
+        searcher=recording_searcher,
+        warmup=True,
+    )
+
+    # One extra warm-up call ahead of the 5 measured queries.
+    assert len(calls) == 6
+    # The steady-state distribution excludes the warm-up.
+    assert result.overall.n == 5
+    # Cold build is reported separately on the result + in the envelope.
+    assert isinstance(result.cold_build_ms, float)
+    assert "cold_build_ms" in result.to_envelope()
+
+
+def test_warmup_disabled_runs_single_pass_with_zero_cold_build() -> None:
+    """``warmup=False`` reproduces the legacy single-pass shape: no extra
+    warm-up call and ``cold_build_ms == 0.0``.
+
+    Sabotage-proof: make ``cold_build_ms`` populate regardless of the
+    ``warmup`` flag (or always run the warm-up) → the call count climbs to
+    5 and ``cold_build_ms`` is no longer 0.0.
+    """
+    calls: list[str] = []
+
+    def recording_searcher(q: SampledQuery) -> dict[str, str]:
+        calls.append(q.case_id)
+        return {"results": "fake"}
+
+    result = run_probe_search(
+        suite="x",
+        queries=4,
+        concurrency=1,
+        suite_loader=_suite_loader,
+        searcher=recording_searcher,
+        warmup=False,
+    )
+
+    assert len(calls) == 4  # no warm-up query
+    assert result.overall.n == 4
+    assert result.cold_build_ms == 0.0
+
+
+def test_warmup_defaults_on_when_omitted() -> None:
+    """``run_probe_search`` defaults ``warmup=True`` — omitting the kwarg
+    still runs the one-time warm-up. The agent-facing ``tool_probe_search``
+    calls run_probe_search WITHOUT a warmup argument and relies on this
+    default to keep the cold build out of the steady-state p95 (#436).
+
+    Sabotage-proof: flip the ``warmup: bool = True`` default to ``False``
+    and, with the kwarg omitted, the searcher is called only ``queries``
+    times (no warm-up), so the ``== 4`` assertion fires.
+    """
+    calls: list[str] = []
+
+    def recording_searcher(q: SampledQuery) -> dict[str, str]:
+        calls.append(q.case_id)
+        return {"results": "fake"}
+
+    result = run_probe_search(
+        suite="x",
+        queries=3,
+        concurrency=1,
+        suite_loader=_suite_loader,
+        searcher=recording_searcher,
+        # warmup intentionally omitted — exercises the default.
+    )
+
+    assert len(calls) == 4  # 3 measured + 1 warm-up via the default
+    assert result.overall.n == 3

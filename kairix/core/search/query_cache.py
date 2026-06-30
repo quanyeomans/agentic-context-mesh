@@ -62,6 +62,8 @@ from dataclasses import asdict, dataclass, fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
+from kairix.core.search.scope import Scope
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_ENTRIES = 500
@@ -186,6 +188,12 @@ class QueryResultCache:
             # query-result persistence DB (#411 Phase 2). Same trust boundary as embed_cache
             # F77-allow: kairix-user-owned data dir; not a writer-coordinator concern.
             conn = sqlite3.connect(str(self._path), check_same_thread=False)
+            # WAL keeps a cache-miss search write off the full-fsync path
+            # (#408 / PLA-273): write-through put() appends to the WAL and the
+            # main-db fsync is batched at checkpoint time, so the warm search
+            # path doesn't pay a synchronous fsync per cache write. WAL is a
+            # persistent property of the DB file, so it survives reopen.
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(_CREATE_META_SQL)
             conn.execute(_CREATE_SQL)
             conn.commit()
@@ -471,6 +479,28 @@ def normalise_query(query: str) -> str:
     return " ".join(query.lower().split())
 
 
+# Scopes whose resolved collection set does NOT depend on the requesting
+# agent — two agents asking the same question see the same result, so the
+# cache key drops the agent identity to let them share the entry (#281 /
+# PLA-273). SHARED = shared collections only; ALL_AGENTS = every agent
+# collection, no shared; EVERYTHING = shared + every agent. SHARED_AGENT
+# (the default) and AGENT both fold in the *requesting* agent's own private
+# collection, so their result is agent-specific and the agent stays in the key.
+_AGENT_AGNOSTIC_SCOPE_VALUES = frozenset({Scope.SHARED.value, Scope.ALL_AGENTS.value, Scope.EVERYTHING.value})
+
+
+def _scope_is_agent_agnostic(scope: Any) -> bool:
+    """True when ``scope`` resolves to an agent-independent collection set.
+
+    Accepts a :class:`Scope` enum or its raw string value — ``Scope`` is a
+    str-Enum but its hash keys on the member name, not the value, so a raw
+    ``"shared"`` would miss a ``frozenset`` of enum members. Comparing by
+    value keeps both call shapes correct.
+    """
+    value = scope.value if isinstance(scope, Scope) else str(scope)
+    return value in _AGENT_AGNOSTIC_SCOPE_VALUES
+
+
 def make_cache_key(
     query: str,
     scope: Any,
@@ -484,11 +514,19 @@ def make_cache_key(
     pass equivalent lists in different orders hit the same slot.
     ``agent=None`` and ``agent=""`` collapse to the same key — both
     mean "no agent supplied".
+
+    For agent-agnostic scopes (SHARED / ALL_AGENTS / EVERYTHING — see
+    :data:`_AGENT_AGNOSTIC_SCOPE_VALUES`) the agent dimension is dropped
+    entirely so teaming agents asking the same question under a shared
+    scope share one cached result (#281). Agent-specific scopes
+    (SHARED_AGENT / AGENT) keep the agent in the key because the result
+    set differs per agent.
     """
+    agent_component = "" if _scope_is_agent_agnostic(scope) else (agent or "")
     return (
         normalise_query(query),
         scope,
-        agent or "",
+        agent_component,
         tuple(sorted(collections)) if collections else (),
     )
 

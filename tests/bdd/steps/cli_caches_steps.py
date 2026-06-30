@@ -32,11 +32,9 @@ import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
 
 from kairix.agents.briefing.sources import reset_brief_source_cache
+from kairix.core.health import reset_health_probe_cache
 from kairix.quality.probe.caches_cli import main as caches_main
-from kairix.use_cases.brief import (
-    reset_brief_output_cache,
-    reset_health_probe_cache,
-)
+from kairix.use_cases.brief import reset_brief_output_cache
 from kairix.use_cases.prep import reset_prep_summary_cache
 
 scenarios("../features/cli_caches.feature")

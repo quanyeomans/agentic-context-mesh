@@ -8,6 +8,7 @@ same use case drives both the CLI's ``kairix search`` and the MCP's
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -236,6 +237,93 @@ def test_classify_failure_falls_through_to_heuristic() -> None:
     deps, captured = _build_deps(classify_raises=True)
     run_search("ordinary query", deps=deps)
     assert captured["search"][0]["budget"] == 3000
+
+
+@pytest.mark.unit
+def test_query_classified_once_and_intent_threaded_into_search() -> None:
+    """run_search classifies the query EXACTLY ONCE and threads that single
+    intent into the search call, so the pipeline reuses it instead of
+    re-classifying the same query (PLA-273 warm-path dedup).
+
+    Sabotage (executed): (1) revert ``_infer_budget`` to take + call the
+    ``classify_fn`` again and the recording classifier fires twice, so
+    ``len(captured["classify"]) == 1`` fails; (2) drop the ``intent=``
+    kwarg on the ``deps.search_fn`` call and ``captured["search"][0]``
+    has no ``intent`` key, so the second assertion KeyErrors.
+    """
+    deps, captured = _build_deps(classify=QueryIntent.ENTITY)
+
+    run_search("who is Acme", deps=deps)
+
+    # The recording classifier seam fired exactly once for the request.
+    assert len(captured["classify"]) == 1
+    # That single classification threaded into the search call.
+    assert captured["search"][0]["intent"] == QueryIntent.ENTITY
+
+
+@pytest.mark.unit
+def test_failed_classification_threads_none_intent_into_search(caplog: pytest.LogCaptureFixture) -> None:
+    """When classification fails, run_search threads ``intent=None`` so the
+    pipeline falls back to classifying internally (safe default), and the
+    failure is logged WITH the traceback attached (``exc_info=True``) so an
+    operator can see why classification fell back.
+
+    Sabotage: (1) thread a non-None default intent on the failure path and
+    the pipeline would skip its own (correct) classification; (2) flip the
+    classify-failure log's ``exc_info=True`` to ``False`` and the captured
+    record carries no traceback, failing the ``exc_info is not None`` assert.
+    """
+    deps, captured = _build_deps(classify_raises=True)
+
+    with caplog.at_level(logging.DEBUG, logger="kairix.use_cases.search"):
+        run_search("ordinary query", deps=deps)
+
+    assert captured["search"][0]["intent"] is None
+    # The classify-failure debug log attaches the exception traceback.
+    # exc_info=True populates record.exc_info with the (type, value, tb)
+    # tuple; exc_info=False leaves it the literal ``False`` — so assert the
+    # tuple shape, not ``is not None`` (which ``False`` also satisfies).
+    failure_records = [r for r in caplog.records if "intent classification failed" in r.getMessage()]
+    assert failure_records, "expected a classify-failure debug log"
+    assert isinstance(failure_records[0].exc_info, tuple)
+
+
+@pytest.mark.unit
+def test_health_probe_deduped_across_repeated_searches() -> None:
+    """run_search routes health through the shared TTL cache, so a repeat
+    search within the TTL window doesn't re-run the 4-probe fan-out per
+    request (PLA-273). The ``_reset_workstream_b_caches`` conftest fixture
+    leaves the cache cold at the start of each test, and two adjacent
+    run_search calls land far inside the 10s TTL.
+
+    Sabotage (executed): change ``cached_probe_health`` back to a direct
+    ``probe_health`` call in run_search — the second search re-probes and
+    the secrets-probe count climbs to 2.
+    """
+    counts = {"secrets": 0}
+
+    def _counting_secrets() -> bool:
+        counts["secrets"] += 1
+        return True
+
+    health_deps = HealthDeps(
+        secrets_loaded_fn=_counting_secrets,
+        embed_backend_available_fn=lambda: True,
+        bm25_index_available_fn=lambda: True,
+        neo4j_available_fn=lambda: True,
+    )
+    base, _ = _build_deps()
+    deps = SearchDeps(
+        search_fn=base.search_fn,
+        entity_card_fn=base.entity_card_fn,
+        classify_fn=base.classify_fn,
+        health_deps=health_deps,
+    )
+
+    run_search("q", deps=deps)  # cold cache → probes run once
+    run_search("q", deps=deps)  # within TTL → cache hit, no re-probe
+
+    assert counts["secrets"] == 1
 
 
 # ---------------------------------------------------------------------------

@@ -31,12 +31,14 @@ from __future__ import annotations
 
 import pytest
 
-from kairix.core.health import HealthDeps
+from kairix.core.health import (
+    HealthDeps,
+    reset_health_probe_cache,
+    set_health_probe_cache_clock,
+)
 from kairix.use_cases.brief import (
     BriefDeps,
-    reset_health_probe_cache,
     run_brief,
-    set_health_probe_cache_clock,
 )
 
 pytestmark = pytest.mark.unit
@@ -164,3 +166,31 @@ def test_probe_health_clear() -> None:
     run_brief("builder", deps=deps)
 
     assert counts["secrets"] == 2, f"reset must force re-probe; saw secrets count = {counts['secrets']}"
+
+
+def test_probe_health_cache_hit_at_exact_ttl_boundary() -> None:
+    """At EXACTLY the TTL boundary the cached snapshot is still served — the
+    comparison is ``<=`` (inclusive), not ``<``.
+
+    The default TTL is 10.0s; advancing the clock by exactly that amount must
+    still be a cache hit so the probes don't re-run on the boundary tick.
+
+    Sabotage-proof: change ``<=`` to ``<`` in cached_probe_health's TTL check
+    and the boundary tick becomes a miss → the probes re-run → secrets count
+    climbs to 2, failing the ``== 1`` assertion below.
+    """
+    clock = _ControllableClock()
+    set_health_probe_cache_clock(clock)
+
+    health_deps, counts = _counting_health_deps()
+    deps = BriefDeps(
+        generate_fn=lambda agent, **_: "# brief",
+        briefing_dir_fn=lambda: None,
+        health_deps=health_deps,
+    )
+
+    run_brief("builder", deps=deps)  # stored at t=1000.0
+    clock.advance(10.0)  # exactly the documented 10.0s TTL boundary
+    run_brief("builder", deps=deps)
+
+    assert counts["secrets"] == 1, f"boundary tick must still hit (<=); saw secrets count = {counts['secrets']}"

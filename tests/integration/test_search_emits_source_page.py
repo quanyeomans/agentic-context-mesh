@@ -186,13 +186,13 @@ def test_search_envelope_exposes_source_page(tmp_path: Path) -> None:
 
     paths = FakePaths(db_path=db_path, document_root=tmp_path / "vault")
 
-    def _injected_search(*, query: str, agent: str, scope, budget: int):
+    def _injected_search(*, query: str, agent: str, scope, budget: int, intent=None):
         pipeline = build_search_pipeline(
             config=_search_skip_vector_config(),
             paths=paths,
             registry=_fake_registry(),
         )
-        return pipeline.search(query=query, budget=budget, scope=scope, agent=agent)
+        return pipeline.search(query=query, budget=budget, scope=scope, agent=agent, intent=intent)
 
     deps = SearchDeps(search_fn=_injected_search)
     out = run_search("quarterly outlook", budget=3000, include_entity_card=False, deps=deps)

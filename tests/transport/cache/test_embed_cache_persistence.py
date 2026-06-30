@@ -32,6 +32,7 @@ F-rule discipline:
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,31 @@ pytestmark = pytest.mark.unit
 # Lifted to a module constant so the literal doesn't repeat across
 # multiple test cases (F17 hygiene).
 _VEC: list[float] = [0.1, 0.2, 0.3]
+
+
+def test_persistence_db_opens_in_wal_mode(tmp_path: Path) -> None:
+    """The on-disk embed cache is opened in WAL so a write-through ``put``
+    skips the full-db fsync on the warm path (#408 / PLA-273).
+
+    WAL is a persistent property of the DB file, so a fresh connection to
+    the same file reports ``wal``.
+
+    Sabotage proof (executed locally): remove the
+    ``PRAGMA journal_mode=WAL`` line in ``_open_and_replay`` and the file
+    stays in the default ``delete`` rollback-journal mode — this assertion
+    then reads ``delete``.
+    """
+    cache_file = tmp_path / "cache.sqlite"
+    cache = EmbedCache(path=cache_file)
+    try:
+        probe = sqlite3.connect(str(cache_file))
+        try:
+            mode = probe.execute("PRAGMA journal_mode").fetchone()[0]
+        finally:
+            probe.close()
+    finally:
+        cache.close()
+    assert mode.lower() == "wal"
 
 
 def test_cache_writes_persist_across_construction(tmp_path: Path) -> None:

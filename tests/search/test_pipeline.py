@@ -67,6 +67,34 @@ def test_pipeline_classifies_intent():
 
 
 @pytest.mark.unit
+def test_pipeline_reuses_supplied_intent_and_skips_classifier():
+    """A caller-supplied ``intent=`` is reused and the classifier is NOT
+    called (PLA-273 warm-path dedup — run_search classifies once and threads
+    the result in).
+
+    Proof without a recording classifier: wire a classifier that RAISES. If
+    the pipeline classified, the raise would fall back to SEMANTIC; instead
+    the supplied KEYWORD intent flows straight through, which is only
+    possible if classification was skipped. The control call (no supplied
+    intent) confirms the same classifier would otherwise yield SEMANTIC.
+
+    Sabotage: drop the ``if intent is None`` guard in SearchPipeline.search
+    (always classify) → the supplied-intent call hits the raising classifier
+    and ``supplied.intent`` becomes SEMANTIC, not KEYWORD.
+    """
+    raising = FakeClassifier(raises=RuntimeError("classifier must not be called when intent is supplied"))
+    pipeline = _test_pipeline(classifier=raising)
+
+    supplied = pipeline.search("alpha bravo", intent=QueryIntent.KEYWORD)
+    assert supplied.intent == QueryIntent.KEYWORD
+
+    # Control: with no supplied intent, the raising classifier runs and the
+    # pipeline degrades to the SEMANTIC fallback.
+    classified = pipeline.search("alpha bravo")
+    assert classified.intent == QueryIntent.SEMANTIC
+
+
+@pytest.mark.unit
 def test_pipeline_returns_bm25_results():
     """Pipeline returns BM25 results when documents match."""
     docs = [
