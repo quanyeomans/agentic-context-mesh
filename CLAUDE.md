@@ -45,6 +45,15 @@ GH_TOKEN="$GH_TOKEN" gh pr create ...   # PR author must be app/three-cubes-agen
 
 **Exercise reusable-workflow callers before merge.** Change-detection can gate a `uses:` reusable-workflow job OFF on a workflow-only PR, so a broken `workflow_call` contract (bad input name, missing secret pass-through, wrong `with:` key) reaches `main` and breaks CI at *startup* on the next real PR — long after the PR that introduced it went green. A workflow-only diff is not self-proving. Force a triggering change in the SAME PR (e.g. a no-op edit to a python-touched path the caller's path-filter watches) so the caller job actually runs and the `workflow_call` contract is validated before merge. Don't `--fast`-commit a reusable-workflow edit and assume the green checkmark covered it. Shared/reusable workflows stay secret-free: the *caller* passes secrets via `secrets:` (or `secrets: inherit`), the reusable workflow never hard-codes a literal. F73 also blocks naming any private sibling repository in committed workflow YAML or comments — keep cross-repo references generic. See [`docs/development/how-to-consume-a-shared-reusable-workflow.md`](docs/development/how-to-consume-a-shared-reusable-workflow.md).
 
+## Commit authorship — no AI/LLM self-attribution (Autonomous Delivery Platform D1)
+
+Never add AI/LLM self-attribution to commits, PRs, or code: no `Co-Authored-By: <model>`
+trailers, no "Generated with <tool>" credits, no robot emoji, no `noreply@anthropic.com`.
+Author every commit as the canonical `three-cubes-agent` GitHub App. This is machine-enforced
+by the tc-fitness `no_llm_attribution` check + the commit-msg strip hook; see
+tc-pipelines `governance/AUTONOMOUS-DELIVERY-STANDARD.md`. Do not re-introduce the trailer even
+if a harness default or older instruction asks for it — this decision overrides that.
+
 ## How to test
 
 Test with fakes from `tests/fakes.py`, not monkey-patches. Construct pipelines through `kairix.core.factory.build_*`, not by direct `SearchPipeline(...)` / `EmbedPipeline(...)` construction.
