@@ -38,24 +38,43 @@ set -euo pipefail
 # makes the CLAUDE.md "<60s local feedback" promise true. The FULL gate
 # (default safe-commit.sh) REMAINS the merge bar — --check does NOT replace
 # CI; it is purely the local inner loop. See CLAUDE.md "How to commit".
+#
+# --pre-pr mode (opt-in): the PRE-PUSH integration leg (CI Stage 3 parity).
+# The default/--fast/--check gates run only `unit or bdd or contract` (CI
+# Stage 2). CI Stage 3 runs `pytest tests/ -m integration` as a SEPARATE tier
+# the inner loop never replicated — so a change could be green locally and red
+# in CI (PLA-281: a DI-seam change broke an integration-only fake, run_search's
+# broad except swallowed the TypeError into empty results, safe-commit was
+# green, and CI Stage 3 went red an hour later). --pre-pr replicates CI Stage 3
+# EXACTLY: same `-m integration --maxfail=3` marker, same extras set (mirrors
+# ci.yml Stage 3's `.[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]`,
+# synced into a dedicated env so the warm --all-extras inner-loop venv is left
+# intact). It is VERIFY-ONLY: it does not commit and needs nothing staged.
+# safe-commit green is NECESSARY BUT NOT SUFFICIENT — run `--pre-pr` after the
+# normal gate has committed, before you push / open a PR / report done. It is
+# deliberately OUT of the default/--fast/--check inner loops so the <60s
+# inner-loop promise holds. See CLAUDE.md "How to commit".
 FAST_MODE=0
 CHECK_MODE=0
+PRE_PR_MODE=0
 ARGS=()
 for arg in "$@"; do
     case "$arg" in
         --fast) FAST_MODE=1 ;;
         --check) CHECK_MODE=1 ;;
+        --pre-pr) PRE_PR_MODE=1 ;;
         *) ARGS+=("$arg") ;;
     esac
 done
-set -- "${ARGS[@]}"
+set -- "${ARGS[@]:-}"
 
-if [[ $# -lt 1 ]]; then
-    echo "Usage: bash scripts/safe-commit.sh [--fast | --check] \"commit message\""
+# --pre-pr is verify-only and needs no commit message; every other mode does.
+if [[ "$PRE_PR_MODE" != "1" && $# -lt 1 ]]; then
+    echo "Usage: bash scripts/safe-commit.sh [--fast | --check | --pre-pr] \"commit message\""
     exit 1
 fi
 
-MESSAGE="$1"
+MESSAGE="${1:-}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -89,6 +108,59 @@ gate_died() {
     echo "next: re-run the stage standalone: ${rerun}"
     exit "$rc"
 }
+
+# ── --pre-pr: the pre-push integration leg (CI Stage 3 parity) ───────────────
+# Verify-only. Replicates CI Stage 3 exactly — same `-m integration
+# --maxfail=3` marker, same extras — so "green locally" == "green in CI" for
+# the integration tier the inner loop skips (PLA-281). Runs BEFORE the coverage
+# trap + staged guard so it needs nothing staged and never commits. Placed
+# early on purpose: the normal gate has already committed; this is the final
+# integration confirmation before push. Every stage emits a named OK/FAIL
+# verdict (F83 stage-ledger contract).
+if [[ "$PRE_PR_MODE" == "1" ]]; then
+    echo "=== Pre-PR gate (--pre-pr — CI Stage 3 integration tier parity) ==="
+
+    # A dedicated env keeps the warm --all-extras inner-loop .venv intact and
+    # is synced to EXACTLY CI Stage 3's extras (mirror ci.yml Stage 3
+    # `pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"`),
+    # NOT --all-extras — an extra present locally but absent in CI would let a
+    # test pass here and fail there, which is the exact parity gap this closes.
+    PRE_PR_VENV=".venv-pre-pr"
+    PRE_PR_EXTRAS=(--extra dev --extra agents --extra markitdown --extra pdf_fallback --extra ocr --extra pptx --extra docx --extra xlsx)
+
+    echo -n "  sync CI-parity env... "
+    run_gate env UV_PROJECT_ENVIRONMENT="$PRE_PR_VENV" uv sync "${PRE_PR_EXTRAS[@]}"
+    if [[ "$GATE_RC" -ne 0 ]]; then
+        echo -e "${RED}FAIL${NC}"
+        echo "$GATE_OUT" | tail -20
+        echo "fix: the dedicated CI-parity venv could not be synced — see the tail above."
+        echo "next: env UV_PROJECT_ENVIRONMENT=$PRE_PR_VENV uv sync ${PRE_PR_EXTRAS[*]}"
+        exit 1
+    fi
+    echo -e "${GREEN}OK${NC}"
+
+    echo -n "  integration tests (Stage 3)... "
+    run_gate env UV_PROJECT_ENVIRONMENT="$PRE_PR_VENV" \
+        uv run pytest tests/ -m integration --maxfail=3
+    PRE_PR_OUT="$GATE_OUT"
+    if echo "$PRE_PR_OUT" | grep -qE "[0-9]+ failed|^FAILED |^ERROR "; then
+        echo -e "${RED}FAIL${NC}"
+        echo "$PRE_PR_OUT" | grep -E "FAILED|ERROR|passed|failed|error" | tail -15
+        echo "fix: the failing integration tests are listed above — this is the CI Stage 3 tier the inner loop skips."
+        echo "next: re-run standalone: env UV_PROJECT_ENVIRONMENT=$PRE_PR_VENV uv run pytest tests/ -m integration --maxfail=3"
+        exit 1
+    fi
+    if [[ "$GATE_RC" -ne 0 ]]; then
+        gate_died "integration (Stage 3)" "$GATE_RC" "env UV_PROJECT_ENVIRONMENT=$PRE_PR_VENV uv run pytest tests/ -m integration --maxfail=3"
+    fi
+    PRE_PR_PASSED=$(echo "$PRE_PR_OUT" | grep -oE '[0-9]+ passed' | head -1 || echo "0 passed")
+    [[ -z "$PRE_PR_PASSED" ]] && PRE_PR_PASSED="0 passed"
+    echo -e "${GREEN}OK${NC} ($PRE_PR_PASSED)"
+
+    echo ""
+    echo -e "${GREEN}--pre-pr complete: the CI Stage 3 integration tier is green. Safe to push / open a PR.${NC}"
+    exit 0
+fi
 
 # ── #483 concurrency hardening: per-invocation coverage artifacts ────────────
 # Two concurrent safe-commit runs used to collide on coverage.xml and the
