@@ -23,33 +23,38 @@ name: verify-and-close
 #      comments the failing run link, then surfaces red on main so the backlog
 #      dispatcher re-picks it (never silently dropped).
 #
-# ── ONE-TIME SETUP REQUIRED (human / infra) ─────────────────────────────────
-# The reusable authenticates to the Linear GraphQL API with a REQUIRED secret,
-# `LINEAR_API_KEY` (a Linear personal/workspace API key with write access to the
-# target team's issues). It is NOT yet present on this repo. Until an operator
-# adds it, this workflow is CORRECT-BUT-INERT: the verify smoke still runs, but
-# the Linear close/needs-fix step is a no-op (the issue-resolution step SKIPs
-# rather than false-closing). To activate, source the key from Key Vault and:
-#     gh secret set LINEAR_API_KEY --repo three-cubes/kairix --body "<key>"
-# (or add it org-level scoped to this repo). See the reusable's contract at
-# tc-pipelines governance/loop/verify-and-close.md and the local consumer guide
-# docs/development/how-to-consume-a-shared-reusable-workflow.md.
+# ── NO GITHUB SECRET REQUIRED — the Linear key is read from Key Vault ─────────
+# The reusable authenticates to the Linear GraphQL API with a key it fetches
+# at RUNTIME from Azure Key Vault over Workload Identity Federation (OIDC).
+# There is NO long-lived `LINEAR_API_KEY` Actions secret to add, store, or
+# rotate on this repo — nothing to provision. This caller federates with the
+# repo's existing WIF variables (`AZURE_CLIENT_ID` / `AZURE_TENANT_ID` /
+# `AZURE_SUBSCRIPTION_ID`), whose App Registration already holds `Key Vault
+# Secrets User` on the vault named by `KAIRIX_KV_NAME`; the reusable then
+# reads the `ci-verify-and-close` secret (the Linear API key) from that vault.
+# Same zero-standing-secret path the reflib benchmark gate already uses for
+# provider creds. If WIF or the KV read fails, or the issue can't be resolved,
+# the reusable emits a documented SKIP and does NOT touch Linear — a
+# false-close is worse than a skip.
 #
 # Injection-safety: the reusable env-binds every caller input and every
 # github.event.* field before it reaches a shell body, and runs `verify-command`
-# via a deliberate `bash -c` WITHOUT `LINEAR_API_KEY` in its environment. The
-# `uses:` ref is pinned to the immutable-per-release `@v1` shared tag.
+# via a deliberate `bash -c` WITHOUT the KV-sourced Linear key in its
+# environment. The `uses:` ref is pinned to the immutable-per-release `@v1` tag.
 
 on:
   push:
     branches: [main]
 
-# The reusable declares `contents: read` + `pull-requests: read`; the effective
-# grant is the intersection with this caller, so we grant at least those. No
-# write scope is needed — the Linear transition goes over the API key, not the
-# GITHUB_TOKEN.
+# `id-token: write` lets the reusable mint the OIDC token it exchanges for an
+# Azure access token (WIF) to read the Linear key from Key Vault; `contents:
+# read` + `pull-requests: read` let it check out the merged tree and read the
+# merged PR. The effective grant is the intersection with this caller, so we
+# grant exactly those. No write scope — the Linear transition goes over the
+# KV-sourced API key, not the GITHUB_TOKEN.
 permissions:
   contents: read
+  id-token: write
   pull-requests: read
 
 jobs:
@@ -78,8 +83,11 @@ jobs:
         kairix --version
         kairix --help >/dev/null
         echo "post-merge smoke PASS: merged tree installs, imports, and the kairix CLI entrypoint resolves"
-    secrets:
-      # Passed explicitly (never `inherit`) per the shared-reusable consumer
-      # rule. Resolves to empty until the one-time setup above lands, which is
-      # why the close step is inert-not-broken in the meantime.
-      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      # Key Vault fetch of the Linear API key over WIF — no GitHub secret. The
+      # reusable federates with the client/tenant/subscription below, then reads
+      # `linear-key-secret-name` from the vault named by `linear-key-vault`.
+      linear-key-vault: ${{ vars.KAIRIX_KV_NAME }}
+      linear-key-secret-name: ci-verify-and-close
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
