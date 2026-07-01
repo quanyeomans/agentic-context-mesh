@@ -47,9 +47,7 @@ def _recipe_of(target: str, makefile_text: str) -> str:
     blank, a comment, nor tab-indented (i.e. the next target/declaration).
     """
     lines = makefile_text.splitlines()
-    start = next(
-        i for i, line in enumerate(lines) if re.match(rf"^{re.escape(target)}:", line)
-    )
+    start = next(i for i, line in enumerate(lines) if re.match(rf"^{re.escape(target)}:", line))
     body: list[str] = []
     for line in lines[start + 1 :]:
         if line.startswith("\t") or line.startswith("#") or line.strip() == "":
@@ -70,8 +68,7 @@ def test_check_target_runs_ci_coverage_gate() -> None:
 
     check_prereqs = _prerequisites_of("check", text)
     assert "test-ci" in check_prereqs, (
-        "`make check` must depend on `test-ci` (the literal CI Stage 2 gate), "
-        f"got prerequisites: {check_prereqs}"
+        f"`make check` must depend on `test-ci` (the literal CI Stage 2 gate), got prerequisites: {check_prereqs}"
     )
     assert "test-all" not in check_prereqs, (
         "`make check` must NOT depend on the weaker `test-all` (bare pytest, "
@@ -80,23 +77,13 @@ def test_check_target_runs_ci_coverage_gate() -> None:
 
     recipe = _recipe_of("test-ci", text)
     assert "--cov=kairix" in recipe, "`test-ci` must measure coverage (--cov=kairix)"
-    assert "--cov-fail-under=80" in recipe, (
-        "`test-ci` must enforce the 80% repo coverage floor CI Stage 2 enforces"
-    )
-    assert 'unit or bdd or contract' in recipe, (
-        "`test-ci` must run the same CI Stage 2 selector"
-    )
-    assert "check_per_file_coverage.py" in recipe, (
-        "`test-ci` must run the F7 per-file coverage floor CI Stage 2 runs"
-    )
+    assert "--cov-fail-under=80" in recipe, "`test-ci` must enforce the 80% repo coverage floor CI Stage 2 enforces"
+    assert "unit or bdd or contract" in recipe, "`test-ci` must run the same CI Stage 2 selector"
+    assert "check_per_file_coverage.py" in recipe, "`test-ci` must run the F7 per-file coverage floor CI Stage 2 runs"
 
 
 def test_python_version_pinned_to_ci_runtime() -> None:
     """A pinned ``.python-version`` selects the CI runtime (3.12) locally."""
-    assert _PYTHON_VERSION_FILE.exists(), (
-        ".python-version must exist so uv/pyenv pin the CI interpreter locally"
-    )
+    assert _PYTHON_VERSION_FILE.exists(), ".python-version must exist so uv/pyenv pin the CI interpreter locally"
     pinned = _PYTHON_VERSION_FILE.read_text(encoding="utf-8").strip()
-    assert pinned.startswith(_CI_PYTHON), (
-        f".python-version must pin the CI runtime {_CI_PYTHON}, got '{pinned}'"
-    )
+    assert pinned.startswith(_CI_PYTHON), f".python-version must pin the CI runtime {_CI_PYTHON}, got '{pinned}'"
