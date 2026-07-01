@@ -1,4 +1,4 @@
-.PHONY: setup setup-dev setup-check fitness-config lint format check test test-unit test-bdd test-contract test-integration type-check security commit clean \
+.PHONY: setup setup-dev setup-check fitness-config lint format check test test-unit test-bdd test-contract test-integration test-all test-ci type-check security commit clean \
         go-modules go-fmt go-vet go-lint go-test go-build go-check
 
 # Developer-environment setup — wires the pre-commit hooks so first-commit
@@ -79,14 +79,41 @@ test-integration:
 test-all:
 	pytest tests/ -m "unit or bdd or contract" -x --timeout=30
 
+# The LITERAL CI Stage 2 test tier (SGO-105). `make check` runs THIS, not the
+# weaker `test-all`, so a green local `make check` means green CI Stage 2 by
+# construction. Mirrors the two ci.yml (Stage 2 `unit-and-type`) steps exactly:
+#   1. "Unit + BDD + Contract tests with coverage" — same selector, same
+#      --cov/--cov-report/--cov-fail-under=80 repo floor.
+#   2. "F7 — per-file coverage floor" — check_per_file_coverage.py against the
+#      same coverage.xml.
+# Run under `uv run` (the canonical launcher, matching scripts/safe-commit.sh —
+# the proven local↔CI parity carrier) so the synced project env is used and the
+# tc_fitness engine that F7 imports is importable. Do NOT weaken this back to a
+# bare `pytest` subset — that reopens the coverage/F7 gap this target closes.
+test-ci:
+	uv run pytest tests/ \
+	  -m "unit or bdd or contract" \
+	  --cov=kairix \
+	  --cov-report=xml:coverage.xml \
+	  --cov-report=term-missing \
+	  --cov-fail-under=80 \
+	  --junitxml=results-unit.xml \
+	  -v --tb=short
+	uv run python3 scripts/checks/check_per_file_coverage.py coverage.xml
+
 # Security
 security:
 	detect-secrets scan --baseline .secrets.baseline
 	python3 -m bandit -r kairix/ -ll --quiet
 	bash scripts/pre-commit-confidential-check.sh
 
-# Full pre-commit gate
-check: lint test-all security
+# Full pre-commit gate — the LITERAL CI gate (SGO-105). `lint test-ci security`
+# reproduces CI Stage 2 (ruff + format + mypy strict, then unit+bdd+contract
+# with the 80% repo coverage floor AND the F7 per-file floor) so green-local
+# ⇒ green-CI by construction. Previously `check` ran `test-all` (bare pytest,
+# no --cov/--cov-fail-under/F7), so a green `make check` could still fail CI on
+# coverage/F7; `test-ci` closes that gap.
+check: lint test-ci security
 
 # Gated commit — use: make commit MSG="your message"
 commit:
