@@ -135,23 +135,26 @@ def secrets_loaded_fails():
 
 
 # ---------------------------------------------------------------------------
-# PLA-298 — agent memory writability probe (both branches)
+# PLA-298 / #689 — agent memory writability probe (deploy-gate semantics)
 # ---------------------------------------------------------------------------
-# The probe verdict is driven through the ``probe_fn`` DI seam so the scenario
-# is deterministic without racing real mount permissions; the real-filesystem
-# proof lives in the F71 count-equals-ground-truth unit test + the read-only
-# outcome tests.
+# The probe resolves each agent's ACTUAL write destination the way the runtime
+# write path does (prefer the overlay, fall back to the writable data dir) and
+# passes when that destination is writable. The verdict is driven through the
+# ``probe_fn`` DI seam so the scenario is deterministic without racing real
+# mount permissions; the real-filesystem proof lives in the F71
+# count-equals-ground-truth unit test + the read-only outcome tests.
 
 
-@given("an agent is configured with a read-only memory overlay")
-def agent_readonly_overlay(tmp_path):
-    _state["memory_deps"] = AgentMemoryWritableCheckDeps(
-        config_loader=lambda: _AGENT_CONFIG,
-        document_root_fn=lambda: tmp_path / "vault",
-        probe_fn=lambda p: WriteAccessProbe(
-            path=Path(p), writable=False, reason="Permission denied", errno_name="EACCES"
-        ),
-    )
+def _fallback_aware_probe(fallback_root: Path):
+    """Fake probe: the data-dir fallback is writable, the read-only overlay is not."""
+
+    def probe(p):
+        target = Path(p)
+        if str(fallback_root) in str(target):
+            return WriteAccessProbe(path=target, writable=True)
+        return WriteAccessProbe(path=target, writable=False, reason="Read-only file system", errno_name="EROFS")
+
+    return probe
 
 
 @given("an agent is configured with a writable memory overlay")
@@ -159,7 +162,31 @@ def agent_writable_overlay(tmp_path):
     _state["memory_deps"] = AgentMemoryWritableCheckDeps(
         config_loader=lambda: _AGENT_CONFIG,
         document_root_fn=lambda: tmp_path / "vault",
+        memory_fallback_root_fn=lambda: tmp_path / "data" / "agent-memory",
         probe_fn=lambda p: WriteAccessProbe(path=Path(p), writable=True),
+    )
+
+
+@given("an agent is configured with a read-only overlay but a writable data-dir fallback")
+def agent_ro_overlay_writable_fallback(tmp_path):
+    fallback_root = tmp_path / "data" / "agent-memory"
+    _state["memory_deps"] = AgentMemoryWritableCheckDeps(
+        config_loader=lambda: _AGENT_CONFIG,
+        document_root_fn=lambda: tmp_path / "vault",
+        memory_fallback_root_fn=lambda: fallback_root,
+        probe_fn=_fallback_aware_probe(fallback_root),
+    )
+
+
+@given("an agent has no writable memory destination anywhere")
+def agent_no_writable_destination(tmp_path):
+    _state["memory_deps"] = AgentMemoryWritableCheckDeps(
+        config_loader=lambda: _AGENT_CONFIG,
+        document_root_fn=lambda: tmp_path / "vault",
+        memory_fallback_root_fn=lambda: tmp_path / "data" / "agent-memory",
+        probe_fn=lambda p: WriteAccessProbe(
+            path=Path(p), writable=False, reason="Read-only file system", errno_name="EROFS"
+        ),
     )
 
 
@@ -171,7 +198,7 @@ def run_agent_memory_check():
 @then("agent_memory_writable fails with a fix hint")
 def agent_memory_writable_fails():
     result = _state["memory_result"]
-    assert result.ok is False, f"read-only overlay must FAIL, got ok=True ({result.detail})"
+    assert result.ok is False, f"no writable destination must FAIL, got ok=True ({result.detail})"
     assert result.fix is not None and "fix:" in result.fix and "next:" in result.fix
 
 
@@ -179,3 +206,10 @@ def agent_memory_writable_fails():
 def agent_memory_writable_passes():
     result = _state["memory_result"]
     assert result.ok is True, f"writable overlay must PASS, got: {result.detail}"
+
+
+@then("agent_memory_writable passes via the data-dir fallback")
+def agent_memory_writable_passes_via_fallback():
+    result = _state["memory_result"]
+    assert result.ok is True, f"read-only overlay with a working fallback must PASS, got: {result.detail}"
+    assert "ok(fallback)" in result.detail, f"expected a fallback verdict, got: {result.detail}"
