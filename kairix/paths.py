@@ -18,7 +18,7 @@ import os
 import sys
 import tempfile
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
@@ -2095,3 +2095,151 @@ def write_access_fix_hint(errno_name: str) -> str:
             "path it owns"
         )
     return "fix: ensure the directory exists and the kairix process can write to it"
+
+
+# ---------------------------------------------------------------------------
+# Writable-memory resolver — preferred overlay with a data-dir fallback
+# ---------------------------------------------------------------------------
+#
+# On the stock compose (ADR-017) the document root mounts read-only and only
+# ``04-Agent-Knowledge`` is a *separate writable* overlay. When that overlay
+# isn't writable for the agent's uid (``:ro`` mount → EROFS, wrong owner →
+# EACCES/EPERM), a memory-write / conversation-ingest would die with an
+# ``OSError`` and the agent could persist nothing. :func:`resolve_writable_memory_dir`
+# PREFERS the ADR-017 overlay path but, when a real write-access probe reports
+# the read-only / permission family, FALLS BACK to a writable location under
+# the kairix data dir (the F94 posture — persist through ``kairix.paths``,
+# never a read-only path with no fallback) so the write is never lost. The
+# fallback base is registered as an extra scan collection by the caller so a
+# fallback write stays BM25/vector-searchable immediately.
+
+# The read-only / permission errno family that a data-dir fallback can rescue.
+# Any OTHER OSError (ENOSPC disk full, etc.) is NOT masked by a fallback — the
+# caller's write hits it and surfaces the real cause, rather than a silent
+# fallback papering over a genuinely-broken box.
+_MEMORY_WRITE_FALLBACK_ERRNOS = frozenset(
+    {
+        errno.errorcode[errno.EROFS],
+        errno.errorcode[errno.EACCES],
+        errno.errorcode[errno.EPERM],
+    }
+)
+
+# Collection name under which fallback memories/conversations are indexed. It
+# is deliberately DISTINCT from the operator's scanned collections: the worker
+# full-scan never walks this collection, and per-collection deactivation
+# (kairix/core/db/scanner.py) therefore never marks a fallback document
+# inactive — a fallback write stays searchable until it is genuinely re-indexed.
+AGENT_MEMORY_FALLBACK_COLLECTION = "agent-memory-fallback"
+
+
+def agent_memory_fallback_root(mode: Mode | None = None) -> Path:
+    """Writable data-dir base for agent memory when the preferred overlay is read-only (PLA-296).
+
+    Resolves under :func:`data_dir` (the persistent writable data dir, e.g.
+    ``/var/lib/kairix`` on the container mode), so a fallback write lands on a
+    surface kairix always owns even when the ``04-Agent-Knowledge`` overlay is
+    a ``:ro`` mount or owned by another uid. ``mode`` mirrors :func:`data_dir`'s
+    per-mode dispatch; production callers leave it ``None``.
+    """
+    return data_dir(mode) / "agent-memory"
+
+
+@dataclass(frozen=True)
+class ResolvedMemoryDir:
+    """Where an agent memory / conversation write should actually land (PLA-296).
+
+    Attributes:
+        write_dir:      The directory to write into — ``preferred_dir`` when it
+                        is writable, else ``fallback_dir``.
+        preferred_dir:  The ADR-017 intent (``04-Agent-Knowledge/...`` under the
+                        document root).
+        used_fallback:  True when the preferred overlay was not writable and the
+                        data-dir fallback was chosen.
+        probe:          The :class:`WriteAccessProbe` for ``preferred_dir`` — the
+                        evidence behind the choice.
+        scan_root:      The absolute base to register as an
+                        :data:`AGENT_MEMORY_FALLBACK_COLLECTION` scan collection
+                        when a fallback happened, else ``None`` (no extra
+                        collection needed — the preferred path is already scanned).
+    """
+
+    write_dir: Path
+    preferred_dir: Path
+    used_fallback: bool
+    probe: WriteAccessProbe
+    scan_root: Path | None
+
+
+def resolve_writable_memory_dir(
+    preferred_dir: Path,
+    fallback_dir: Path,
+    *,
+    label: str,
+    fallback_scan_root: Path,
+    probe_fn: Callable[[str | Path], WriteAccessProbe] = probe_write_access,
+) -> ResolvedMemoryDir:
+    """Choose a writable directory: prefer ``preferred_dir``, fall back on read-only (PLA-296).
+
+    Probes ``preferred_dir`` with ``probe_fn`` (default
+    :func:`probe_write_access`, which creates the directory on demand and
+    round-trips a probe file). When it is writable the preferred path is
+    returned unchanged — behaviour on a correctly-mounted deploy is identical
+    to before this resolver existed. When the probe reports the read-only /
+    permission family (:data:`_MEMORY_WRITE_FALLBACK_ERRNOS`) the write would
+    otherwise be lost, so ``fallback_dir`` is returned, a LOUD ``WARN`` is
+    emitted (naming the surface, the errno, and the F21 fix hint so a
+    genuinely-misconfigured box is still surfaced rather than silently masked),
+    and ``fallback_scan_root`` is handed back so the caller can register it as
+    an extra scan collection. Any other probe failure (e.g. ENOSPC) is NOT
+    masked — the preferred path is returned so the caller's write surfaces the
+    real error.
+
+    Args:
+        preferred_dir:       The ADR-017 intent directory.
+        fallback_dir:        The scope-preserving directory under the writable
+                             data dir (caller composes it so namespace /
+                             engagement isolation is preserved on the fallback).
+        label:               Human tag for the WARN (e.g. ``"agent 'shape'"``).
+        fallback_scan_root:  The absolute base registered as the fallback scan
+                             collection when a fallback happens.
+        probe_fn:            Write-access probe seam — production default
+                             :func:`probe_write_access`; tests inject a fake to
+                             drive the writable / read-only branches.
+    """
+    probe = probe_fn(preferred_dir)
+    if probe.writable:
+        return ResolvedMemoryDir(
+            write_dir=preferred_dir,
+            preferred_dir=preferred_dir,
+            used_fallback=False,
+            probe=probe,
+            scan_root=None,
+        )
+    if probe.errno_name not in _MEMORY_WRITE_FALLBACK_ERRNOS:
+        # Not a read-only / permission failure — do not paper over it with a
+        # fallback; let the caller's write hit the same OSError and report it.
+        return ResolvedMemoryDir(
+            write_dir=preferred_dir,
+            preferred_dir=preferred_dir,
+            used_fallback=False,
+            probe=probe,
+            scan_root=None,
+        )
+    logger.warning(
+        "agent memory surface for %s is not writable: %s [%s] at %s — falling back to the "
+        "writable data dir at %s so the write is not lost. This box is misconfigured: %s",
+        label,
+        probe.reason,
+        probe.errno_name,
+        preferred_dir,
+        fallback_dir,
+        write_access_fix_hint(probe.errno_name),
+    )
+    return ResolvedMemoryDir(
+        write_dir=fallback_dir,
+        preferred_dir=preferred_dir,
+        used_fallback=True,
+        probe=probe,
+        scan_root=fallback_scan_root,
+    )

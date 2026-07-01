@@ -15,3 +15,13 @@ Feature: Deployment onboard check
     Given kairix is installed without API credentials
     When I run onboard check
     Then secrets_loaded fails with guidance
+
+  Scenario: The agent memory writability probe fails on a read-only overlay
+    Given an agent is configured with a read-only memory overlay
+    When I check whether agent memory is writable
+    Then agent_memory_writable fails with a fix hint
+
+  Scenario: The agent memory writability probe passes on a writable overlay
+    Given an agent is configured with a writable memory overlay
+    When I check whether agent memory is writable
+    Then agent_memory_writable passes

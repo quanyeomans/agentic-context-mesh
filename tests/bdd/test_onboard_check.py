@@ -18,3 +18,15 @@ def test_all_checks_pass():
 @scenario(FEATURE, "Missing credentials are detected")
 def test_missing_credentials():
     """Body populated by @scenario from the .feature file."""
+
+
+@pytest.mark.bdd
+@scenario(FEATURE, "The agent memory writability probe fails on a read-only overlay")
+def test_agent_memory_writable_readonly_fails():
+    """Body populated by @scenario from the .feature file."""
+
+
+@pytest.mark.bdd
+@scenario(FEATURE, "The agent memory writability probe passes on a writable overlay")
+def test_agent_memory_writable_writable_passes():
+    """Body populated by @scenario from the .feature file."""

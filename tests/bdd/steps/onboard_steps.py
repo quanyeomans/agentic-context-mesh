@@ -6,13 +6,17 @@ on ``os.environ`` or ``shutil.which``.
 """
 
 import sqlite3
+from pathlib import Path
 
 import pytest
 from pytest_bdd import given, then, when
 
+from kairix.paths import WriteAccessProbe
 from kairix.platform.onboard.check import (
+    AgentMemoryWritableCheckDeps,
     CheckResult,
     OnboardChecksDeps,
+    check_agent_memory_writable,
     check_kairix_on_path,
     check_secrets_loaded,
 )
@@ -20,6 +24,15 @@ from kairix.platform.onboard.check import (
 pytestmark = pytest.mark.bdd
 
 _state: dict = {}
+
+_AGENT_CONFIG = {
+    "agents": {
+        "agent-alpha": {
+            "harness": "claude-code",
+            "surfaces": [{"path": "04-Agent-Knowledge/agent-alpha", "label": "memory"}],
+        }
+    }
+}
 
 
 @given("kairix is installed with valid credentials")
@@ -119,3 +132,50 @@ def secrets_loaded_fails():
     assert not result.ok, f"secrets_loaded should fail but passed: {result.detail}"
     assert result.fix is not None, "secrets_loaded should provide fix guidance"
     assert len(result.fix) > 0, "Fix guidance should not be empty"
+
+
+# ---------------------------------------------------------------------------
+# PLA-298 — agent memory writability probe (both branches)
+# ---------------------------------------------------------------------------
+# The probe verdict is driven through the ``probe_fn`` DI seam so the scenario
+# is deterministic without racing real mount permissions; the real-filesystem
+# proof lives in the F71 count-equals-ground-truth unit test + the read-only
+# outcome tests.
+
+
+@given("an agent is configured with a read-only memory overlay")
+def agent_readonly_overlay(tmp_path):
+    _state["memory_deps"] = AgentMemoryWritableCheckDeps(
+        config_loader=lambda: _AGENT_CONFIG,
+        document_root_fn=lambda: tmp_path / "vault",
+        probe_fn=lambda p: WriteAccessProbe(
+            path=Path(p), writable=False, reason="Permission denied", errno_name="EACCES"
+        ),
+    )
+
+
+@given("an agent is configured with a writable memory overlay")
+def agent_writable_overlay(tmp_path):
+    _state["memory_deps"] = AgentMemoryWritableCheckDeps(
+        config_loader=lambda: _AGENT_CONFIG,
+        document_root_fn=lambda: tmp_path / "vault",
+        probe_fn=lambda p: WriteAccessProbe(path=Path(p), writable=True),
+    )
+
+
+@when("I check whether agent memory is writable")
+def run_agent_memory_check():
+    _state["memory_result"] = check_agent_memory_writable(deps=_state["memory_deps"])
+
+
+@then("agent_memory_writable fails with a fix hint")
+def agent_memory_writable_fails():
+    result = _state["memory_result"]
+    assert result.ok is False, f"read-only overlay must FAIL, got ok=True ({result.detail})"
+    assert result.fix is not None and "fix:" in result.fix and "next:" in result.fix
+
+
+@then("agent_memory_writable passes")
+def agent_memory_writable_passes():
+    result = _state["memory_result"]
+    assert result.ok is True, f"writable overlay must PASS, got: {result.detail}"

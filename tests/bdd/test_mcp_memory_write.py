@@ -23,3 +23,8 @@ def test_unregistered_agent_is_rejected_with_guidance():
 @scenario(FEATURE, "A memory is saved even while kairix is still warming up")
 def test_memory_saved_while_warming_up_is_queued_for_indexing():
     """Body populated by @scenario from the .feature file."""
+
+
+@scenario(FEATURE, "A memory falls back to a writable area when the overlay is read-only")
+def test_memory_falls_back_when_overlay_readonly():
+    """Body populated by @scenario from the .feature file."""

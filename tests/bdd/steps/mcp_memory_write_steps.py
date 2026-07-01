@@ -18,6 +18,7 @@ import pytest
 from pytest_bdd import given, parsers, then, when
 
 from kairix.agents.mcp.tools.memory_write import tool_memory_write
+from kairix.paths import WriteAccessProbe
 from kairix.use_cases.remember import RememberDeps
 
 pytestmark = pytest.mark.bdd
@@ -31,12 +32,16 @@ class _MemoryWriteState:
 
     document_root: Path
     db_path: Path
+    fallback_root: Path
     config: dict[str, Any] = field(default_factory=dict)
     response: dict[str, Any] = field(default_factory=dict)
     # Models whether immediate search indexing can complete. False mirrors a
     # still-warming kairix: the file is written and the memory is queued for
     # the next indexing pass rather than the write being refused (PLA-257).
     index_ready: bool = True
+    # PLA-296 — when True the preferred overlay is read-only, so the write must
+    # fall back to the writable data dir instead of crashing.
+    overlay_readonly: bool = False
 
 
 @pytest.fixture
@@ -44,16 +49,26 @@ def _memory_write_state(tmp_path: Path) -> _MemoryWriteState:
     return _MemoryWriteState(
         document_root=tmp_path / "vault",
         db_path=tmp_path / "index.sqlite",
+        fallback_root=tmp_path / "data" / "agent-memory",
     )
 
 
 def _deps_from(state: _MemoryWriteState) -> RememberDeps:
+    def _probe(path: str | Path) -> WriteAccessProbe:
+        if state.overlay_readonly:
+            return WriteAccessProbe(path=Path(path), writable=False, reason="Permission denied", errno_name="EACCES")
+        return WriteAccessProbe(path=Path(path), writable=True)
+
     return RememberDeps(
         config_fn=lambda: state.config,
         document_root_fn=lambda: state.document_root,
         db_path_fn=lambda: state.db_path,
         now_fn=lambda: _BDD_NOW,
-        index_fn=lambda _db, _root, _target, _hash: state.index_ready,
+        # The fallback path calls the indexer with a trailing ``extra_scan_root``
+        # keyword, so the stub accepts **_kw.
+        index_fn=lambda _db, _root, _target, _hash, **_kw: state.index_ready,
+        memory_fallback_root_fn=lambda: state.fallback_root,
+        probe_fn=_probe,
     )
 
 
@@ -72,6 +87,11 @@ def _alpha_registered(_memory_write_state: _MemoryWriteState) -> None:
 @given("kairix has not finished warming up so search indexing is not ready yet")
 def _kairix_still_warming(_memory_write_state: _MemoryWriteState) -> None:
     _memory_write_state.index_ready = False
+
+
+@given("the agent-knowledge overlay is read-only")
+def _overlay_readonly(_memory_write_state: _MemoryWriteState) -> None:
+    _memory_write_state.overlay_readonly = True
 
 
 @when(parsers.parse('the agent writes the memory "{content}" for {agent}'))
@@ -121,3 +141,10 @@ def _then_error_affordance(_memory_write_state: _MemoryWriteState) -> None:
 def _then_no_file(_memory_write_state: _MemoryWriteState) -> None:
     assert _memory_write_state.response["path"] == ""
     assert not _memory_write_state.document_root.exists()
+
+
+@then("the memory is saved in the writable fallback area")
+def _then_saved_in_fallback(_memory_write_state: _MemoryWriteState) -> None:
+    saved = Path(_memory_write_state.response["path"])
+    assert saved.exists(), f"expected the memory to land in the fallback, missing: {saved}"
+    assert saved.parent == _memory_write_state.fallback_root / "agent-alpha"
