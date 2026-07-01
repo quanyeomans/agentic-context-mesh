@@ -177,3 +177,51 @@ def test_usage_guide_cli_subprocess_missing_guide_emits_error(tmp_path: Path) ->
     assert proc.returncode == 1, f"expected exit 1 for missing guide, got {proc.returncode}. stderr={proc.stderr!r}"
     assert "error:" in proc.stdout, f"stdout missing 'error:' prefix: {proc.stdout!r}"
     assert "UsageGuideNotFound" in proc.stdout, f"stdout missing UsageGuideNotFound class name: {proc.stdout!r}"
+
+
+def _bundled_guide_topic(topic: str) -> dict[str, object]:
+    """Drive the real ``kairix usage-guide <topic>`` binary against the bundled
+    guide (NO ``--guide-path``) and return the parsed JSON envelope.
+
+    Proves the shipped guide — the one a self-training agent reads — surfaces
+    the requested section, not merely a tmp fixture.
+    """
+    proc = subprocess.run(
+        [sys.executable, "-m", "kairix.cli", "usage-guide", topic, "--json"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert proc.returncode == 0, f"usage-guide {topic!r} exited {proc.returncode}\n--- stderr ---\n{proc.stderr}"
+    envelope: dict[str, object] = json.loads(proc.stdout)
+    assert envelope["error"] == "", f"unexpected error for topic {topic!r}: {envelope.get('error')!r}"
+    return envelope
+
+
+def test_bundled_guide_surfaces_expand_affordance() -> None:
+    """PLA-299 F30 outcome: the bundled guide surfaces the ``expand`` capability
+    through the real CLI, so a self-training agent discovers the
+    ``search → expand`` retrieval loop.
+
+    Sabotage-proof (executed): delete the `tool_expand` / `kairix expand`
+    mentions from kairix/agents/usage_guide/data/agent-usage-guide.md — the
+    topic slice no longer contains either token and this assertion fails.
+    Restored.
+    """
+    content = str(_bundled_guide_topic("expand")["content"])
+    assert "kairix expand" in content or "tool_expand" in content, (
+        f"bundled guide's 'expand' slice must name the expand affordance; got: {content[:300]!r}"
+    )
+
+
+def test_bundled_guide_surfaces_write_loop() -> None:
+    """PLA-299 F30 outcome: the bundled guide surfaces the write loop
+    (``remember`` + ``ingest_chat``) through the real CLI.
+
+    Sabotage-proof (executed): remove the "### Write loop" section from
+    agent-usage-guide.md — the topic slice loses the remember/ingest-chat
+    invocations and this assertion fails. Restored.
+    """
+    content = str(_bundled_guide_topic("write")["content"])
+    assert "kairix remember" in content, f"write loop must name `kairix remember`; got: {content[:300]!r}"
+    assert "kairix ingest-chat" in content, f"write loop must name `kairix ingest-chat`; got: {content[:300]!r}"

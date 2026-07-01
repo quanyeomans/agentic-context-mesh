@@ -231,3 +231,29 @@ def _then_no_not_found_error(_usage_guide_state: dict[str, Any]) -> None:
     # False, so the use case returns the ``UsageGuideNotFound`` envelope —
     # this assertion catches the #466 regression at the BDD layer.
     assert out.error == "", f"expected no error on the default path; got {out.error!r}"
+
+
+@then("the guide surfaces the search-to-expand read loop")
+def _then_surfaces_expand(_usage_guide_state: dict[str, Any]) -> None:
+    out = _result(_usage_guide_state)
+    # PLA-299: the bundled guide must foreground the search -> expand loop so
+    # a self-training agent discovers ``expand`` (the drift class that let it
+    # fall out). Sabotage: delete the expand mentions from the bundled guide
+    # and this assertion fails.
+    assert "kairix expand" in out.content or "tool_expand" in out.content, (
+        f"expected the expand affordance in the bundled guide; got first 200 chars={out.content[:200]!r}"
+    )
+
+
+@then("the guide surfaces the remember and ingest-chat write loop")
+def _then_surfaces_write_loop(_usage_guide_state: dict[str, Any]) -> None:
+    out = _result(_usage_guide_state)
+    # PLA-299: the write loop (remember + ingest_chat) must be foregrounded so
+    # agents know how to write knowledge back. Sabotage: remove the write-loop
+    # section from the bundled guide and this assertion fails.
+    assert "kairix remember" in out.content, (
+        f"expected `kairix remember` in the bundled guide; got {out.content[:200]!r}"
+    )
+    assert "kairix ingest-chat" in out.content, (
+        f"expected `kairix ingest-chat` in the bundled guide; got {out.content[:200]!r}"
+    )
