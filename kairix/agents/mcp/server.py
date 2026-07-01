@@ -540,7 +540,7 @@ def tool_research(
 
 def tool_expand(
     source_uri: str,
-    seq: int,
+    seq: int | None = None,
     token_budget: int = 2000,
     *,
     deps: Any = None,
@@ -554,7 +554,11 @@ def tool_expand(
     context: pass the hit's ``source_uri`` + ``seq`` (the typed PLA-270
     fields on every ``SearchHit``) and expand returns the matched chunk plus
     the preceding and following chunks — so you read context WITHOUT
-    re-ingesting the whole document.
+    re-ingesting the whole document. For a doc / section-level (L2) hit whose
+    ``seq`` is null, omit ``seq`` (PLA-297): expand resolves the document's
+    chunks by ``source_uri`` and anchors on the first, so the handoff never
+    dead-ends. When the source has no finer chunks, the envelope returns the
+    whole-document content with ``no_finer_chunks=True``.
 
     The optional ``deps`` parameter forwards an ``ExpandDeps`` directly to the
     use case — production callers leave it None; tests pass an ``ExpandDeps``
@@ -562,7 +566,7 @@ def tool_expand(
     """
     from kairix.use_cases.expand import expand_output_to_envelope, run_expand
 
-    logger.info("mcp.expand: source_uri=%r seq=%d budget=%d", source_uri, seq, token_budget)
+    logger.info("mcp.expand: source_uri=%r seq=%s budget=%d", source_uri, seq, token_budget)
     out = run_expand(source_uri, seq, token_budget=token_budget, deps=deps)
     return expand_output_to_envelope(out)
 
@@ -2014,12 +2018,14 @@ def _register_synthesis_and_diagnostic_tools(
             "expand pulls the matched chunk's neighbouring chunks (the preceding and "
             "following ones) within a token budget, so you read context WITHOUT "
             "re-ingesting the whole document. Pass the hit's source_uri + seq (the "
-            "typed fields on every search result). Works even while kairix is still "
+            "typed fields on every search result). For a document/section-level hit "
+            "whose seq is null, pass source_uri alone and expand resolves the "
+            "document's chunks for you. Works even while kairix is still "
             "warming up — it only reads the local index."
         )
     )
     @async_tool_handler
-    def expand(source_uri: str, seq: int, token_budget: int = 2000) -> dict[str, Any]:
+    def expand(source_uri: str, seq: int | None = None, token_budget: int = 2000) -> dict[str, Any]:
         """Expand a search hit to its neighbouring chunks within a token budget."""
         return tool_expand(source_uri=source_uri, seq=seq, token_budget=token_budget)
 

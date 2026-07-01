@@ -46,7 +46,8 @@ def _deps(state: _McpExpandState) -> ExpandDeps:
         }
         for seq in range(state.chunk_count)
     ]
-    return ExpandDeps(get_chunk=FakeDocumentRepository(documents=documents).get_by_path)
+    repo = FakeDocumentRepository(documents=documents)
+    return ExpandDeps(get_chunk=repo.get_by_path, list_chunk_seqs=repo.list_chunk_seqs)
 
 
 @given(parsers.parse("a document indexed as {count:d} chunks over MCP"))
@@ -57,6 +58,12 @@ def _doc_indexed(_mcp_expand_state: _McpExpandState, count: int) -> None:
 @when(parsers.parse("the agent calls the expand tool at chunk {seq:d}"))
 def _call_expand(_mcp_expand_state: _McpExpandState, seq: int) -> None:
     _mcp_expand_state.envelope = tool_expand(_URI, seq, token_budget=10_000, deps=_deps(_mcp_expand_state))
+
+
+@when("the agent calls the expand tool with source_uri and no chunk seq")
+def _call_expand_by_source_uri(_mcp_expand_state: _McpExpandState) -> None:
+    # The doc / section-level (L2) handoff: source_uri only, seq omitted.
+    _mcp_expand_state.envelope = tool_expand(_URI, token_budget=10_000, deps=_deps(_mcp_expand_state))
 
 
 @then("the expand tool envelope includes the matched chunk and its neighbours")
@@ -76,3 +83,12 @@ def _envelope_no_error(_mcp_expand_state: _McpExpandState) -> None:
 def _envelope_missing(_mcp_expand_state: _McpExpandState) -> None:
     assert _mcp_expand_state.envelope["chunks"] == []
     assert "no chunk stored" in _mcp_expand_state.envelope["error"]
+
+
+@then("the expand tool envelope returns an ordered window anchored on the first chunk")
+def _envelope_source_uri_window(_mcp_expand_state: _McpExpandState) -> None:
+    seqs = [c["seq"] for c in _mcp_expand_state.envelope["chunks"]]
+    assert seqs == [0, 1, 2, 3, 4], f"expected the ordered window from chunk 0; got {seqs!r}"
+    matches = [c["seq"] for c in _mcp_expand_state.envelope["chunks"] if c["is_match"]]
+    assert matches == [0], f"expected chunk 0 anchored; got {matches!r}"
+    assert _mcp_expand_state.envelope["error"] == ""

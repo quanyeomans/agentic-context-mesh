@@ -44,6 +44,7 @@ def test_envelope_keys_match_expand_output() -> None:
         "matched_seq",
         "chunks",
         "total_tokens",
+        "no_finer_chunks",
         "error",
     }
 

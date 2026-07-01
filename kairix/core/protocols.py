@@ -196,6 +196,14 @@ class DocumentRepository(Protocol):
         """Return the document row for ``path``, or None if absent."""
         ...
 
+    def list_chunk_seqs(self, source_uri: str) -> list[int]:
+        """Return the sorted 0-based chunk seqs stored under ``<source_uri>#<seq>``.
+
+        The by-prefix lookup source_uri-only expansion keys on (PLA-297):
+        ``[]`` when the source_uri has no finer chunk rows (doc-level-only).
+        """
+        ...
+
     def get_chunk_dates(self, paths: list[str]) -> dict[str, str]:
         """Return a ``path -> ISO-8601 date`` map for the given document paths."""
         ...

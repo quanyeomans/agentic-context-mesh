@@ -24,3 +24,20 @@ Feature: Expand — an agent reads the context around a search hit
     Given a document indexed as 5 chunks
     When the agent expands the hit at chunk 99 with a generous budget
     Then the expand response says no chunk is stored there
+
+  Scenario: An agent expands a document-level hit by source_uri alone
+    A document / section-level hit carries a source_uri but no chunk seq.
+    Expanding by source_uri resolves the document's chunks and returns the
+    neighbour window, so the handoff never dead-ends.
+
+    Given a document indexed as 5 chunks
+    When the agent expands the hit by source_uri with no chunk seq
+    Then the response includes an ordered neighbour window
+    And the expand response reports no error
+
+  Scenario: A document-level-only hit returns the whole document, not a dead-end
+    Given a document indexed only at the document level
+    When the agent expands the hit by source_uri with no chunk seq
+    Then the response carries the whole-document content
+    And the response signals there are no finer chunks
+    And the expand response reports no error

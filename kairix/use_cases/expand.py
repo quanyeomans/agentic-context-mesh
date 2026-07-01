@@ -51,6 +51,10 @@ _KEY_TOTAL_TOKENS = "total_tokens"
 _KEY_MATCHED_SEQ = "matched_seq"
 _KEY_IS_MATCH = "is_match"
 _KEY_COLLECTION = "collection"
+# PLA-297 — the doc-level-only signal. Set when the source_uri has no finer
+# chunk rows and expand returns the whole-document content instead (never a
+# second dead-end). Read at the writer AND the reader, hence a constant.
+_KEY_NO_FINER_CHUNKS = "no_finer_chunks"
 
 
 def _chunk_path(source_uri: str, seq: int) -> str:
@@ -78,23 +82,44 @@ def _default_get_chunk(path: str) -> dict[str, Any] | None:
     return SQLiteDocumentRepository(db_path()).get_by_path(path)
 
 
+def _default_list_chunk_seqs(source_uri: str) -> list[int]:
+    """Production by-prefix seam — wires ``SQLiteDocumentRepository.list_chunk_seqs``.
+
+    The by-prefix retrieval backbone (PLA-297): returns the sorted 0-based
+    chunk seqs stored under ``<source_uri>#<seq>`` in the default worker
+    index, or ``[]`` when the source_uri has no finer chunk rows.
+    """
+    from kairix.core.db.repository import SQLiteDocumentRepository
+    from kairix.paths import db_path
+
+    return SQLiteDocumentRepository(db_path()).list_chunk_seqs(source_uri)
+
+
 @dataclass(frozen=True)
 class ExpandDeps:
     """Injectable dependencies for :func:`run_expand`.
 
     ``get_chunk`` is the by-key chunk-retrieval seam — a callable taking a
     chunk path (``<source_uri>#<seq>``) and returning the document row dict
-    or ``None``. Production callers leave ``deps`` None and the default
-    factory wires :meth:`SQLiteDocumentRepository.get_by_path`; tests inject
-    ``ExpandDeps(get_chunk=FakeDocumentRepository(...).get_by_path)`` so the
-    neighbour-walking + budget logic is the property under test, not SQLite.
+    or ``None``. ``list_chunk_seqs`` is the by-prefix seam (PLA-297) — a
+    callable taking a ``source_uri`` and returning the sorted 0-based chunk
+    seqs stored under it, so a source_uri-only (no-``seq``) expand resolves
+    the document's real chunks instead of guessing ``#0``. Production callers
+    leave ``deps`` None and the default factory wires
+    :meth:`SQLiteDocumentRepository.get_by_path` /
+    :meth:`~SQLiteDocumentRepository.list_chunk_seqs`; tests inject
+    ``ExpandDeps(get_chunk=FakeDocumentRepository(...).get_by_path,
+    list_chunk_seqs=FakeDocumentRepository(...).list_chunk_seqs)`` so the
+    neighbour-walking + budget + anchor-selection logic is the property under
+    test, not SQLite.
 
-    F6-clean: a non-Optional field with a ``default_factory`` (the canonical
+    F6-clean: non-Optional fields with a ``default_factory`` (the canonical
     Deps shape, mirroring :class:`kairix.use_cases.research.ResearchDeps`) —
     never a ``*_fn=None`` test-only kwarg.
     """
 
     get_chunk: Callable[[str], dict[str, Any] | None] = field(default_factory=lambda: _default_get_chunk)
+    list_chunk_seqs: Callable[[str], list[int]] = field(default_factory=lambda: _default_list_chunk_seqs)
 
 
 @dataclass(frozen=True)
@@ -182,6 +207,10 @@ class ExpandOutput:
             ordered by ascending ``seq``, fitting within the token budget.
             Empty on error.
         total_tokens: Sum of token estimates across ``chunks``.
+        no_finer_chunks: True when the source_uri had no finer chunk rows and
+            ``chunks`` carries the whole-document (doc-level) content instead
+            (PLA-297) — the explicit "no finer chunks" signal so a doc-level
+            hit never dead-ends. False for an ordinary chunk window.
         error: Empty on success; an actionable message on a miss or
             structured ``"<Class>: <msg>"`` on a top-level failure.
     """
@@ -190,6 +219,7 @@ class ExpandOutput:
     matched_seq: int | None = None
     chunks: list[ExpandedChunk] = field(default_factory=list)
     total_tokens: int = 0
+    no_finer_chunks: bool = False
     error: str = ""
 
     @classmethod
@@ -202,6 +232,7 @@ class ExpandOutput:
             matched_seq=int(raw_seq) if isinstance(raw_seq, int) else None,
             chunks=[ExpandedChunk.from_envelope(c) for c in raw_chunks],
             total_tokens=int(envelope.get(_KEY_TOTAL_TOKENS, 0) or 0),
+            no_finer_chunks=bool(envelope.get(_KEY_NO_FINER_CHUNKS, False)),
             error=str(envelope.get("error", "")),
         )
 
@@ -275,9 +306,79 @@ def _collect_window(
     return ordered, total
 
 
+def _window_from_anchor(
+    deps: ExpandDeps,
+    *,
+    source_uri: str,
+    anchor: int,
+    budget: int,
+) -> ExpandOutput:
+    """Build the neighbour window centred on ``anchor`` (a resolved seq)."""
+    matched_row = deps.get_chunk(_chunk_path(source_uri, anchor))
+    if matched_row is None:
+        return ExpandOutput(
+            source_uri=source_uri,
+            matched_seq=anchor,
+            error=(
+                f"expand: no chunk stored at {_chunk_path(source_uri, anchor)}. "
+                "fix: re-run search for a current source_uri + seq."
+            ),
+        )
+    matched = _row_to_chunk(matched_row, source_uri=source_uri, seq=anchor, is_match=True)
+    chunks, total = _collect_window(deps.get_chunk, source_uri=source_uri, matched=matched, budget=budget)
+    return ExpandOutput(source_uri=source_uri, matched_seq=anchor, chunks=chunks, total_tokens=total)
+
+
+def _expand_doc_level(deps: ExpandDeps, *, source_uri: str) -> ExpandOutput:
+    """Return the whole-document (doc-level) content with the no-finer-chunks signal.
+
+    The source_uri has no finer ``#<seq>`` chunk rows (the doc-level-only /
+    chunk-0-placeholder class, PLA-297 / cf. #627). Rather than a second
+    dead-end, resolve the bare doc-level row and hand it back with
+    ``no_finer_chunks=True`` so the agent gets content plus an explicit
+    signal. A genuinely absent source_uri still surfaces an actionable miss.
+    """
+    doc_row = deps.get_chunk(source_uri)
+    if doc_row is None:
+        return ExpandOutput(
+            source_uri=source_uri,
+            matched_seq=None,
+            no_finer_chunks=True,
+            error=(f"expand: nothing stored for {source_uri}. fix: re-run search for a current source_uri."),
+        )
+    chunk = _row_to_chunk(doc_row, source_uri=source_uri, seq=0, is_match=True)
+    return ExpandOutput(
+        source_uri=source_uri,
+        matched_seq=None,
+        chunks=[chunk],
+        total_tokens=chunk.tokens,
+        no_finer_chunks=True,
+    )
+
+
+def _expand_by_source_uri(deps: ExpandDeps, *, source_uri: str, budget: int) -> ExpandOutput:
+    """Resolve the best chunk for ``source_uri`` when the hit carries no seq.
+
+    Doc / section-level (L2) hits arrive with ``seq=None`` — the by-prefix
+    lookup resolves the document's real chunk seqs and anchors the window on
+    the FIRST existing chunk (``min(seqs)`` — the natural matched-region
+    anchor for a whole-document hit), instead of hard-failing at a guessed
+    ``#0``. When no finer chunk rows exist, fall back to the doc-level content
+    with the no-finer-chunks signal.
+    """
+    seqs = deps.list_chunk_seqs(source_uri)
+    if seqs:
+        anchor = seqs[0]
+        out = _window_from_anchor(deps, source_uri=source_uri, anchor=anchor, budget=budget)
+        if out.chunks:
+            return out
+    # No chunk rows (or the listed anchor vanished mid-flight) — doc-level.
+    return _expand_doc_level(deps, source_uri=source_uri)
+
+
 def run_expand(
     source_uri: str,
-    seq: int,
+    seq: int | None = None,
     *,
     token_budget: int = _DEFAULT_TOKEN_BUDGET,
     deps: ExpandDeps | None = None,
@@ -289,6 +390,10 @@ def run_expand(
     Args:
         source_uri: The hit's canonical breadcrumb (``SearchHit.source_uri``).
         seq: The hit's 0-based chunk sequence index (``SearchHit.seq``).
+            ``None`` (or omitted) selects source_uri-only mode (PLA-297): for
+            a doc / section-level (L2) hit whose ``seq`` is null, expand
+            resolves the document's real chunks by prefix and anchors on the
+            first — so the handoff never dead-ends at a guessed ``#0``.
         token_budget: Soft cap on the total tokens of the returned window
             (clamped to ``[1, 32000]``). The matched chunk is always
             included even if it alone exceeds the budget.
@@ -303,27 +408,20 @@ def run_expand(
             matched_seq=seq,
             error="expand: source_uri is required. fix: pass the hit's source_uri.",
         )
-    if seq < 0:
+    if seq is not None and seq < 0:
         return ExpandOutput(
             source_uri=source_uri,
             matched_seq=seq,
-            error=f"expand: seq must be >= 0; got {seq}. fix: pass the hit's 0-based seq.",
+            error=(
+                f"expand: seq must be >= 0; got {seq}. "
+                "fix: pass the hit's 0-based seq (or omit it to expand by source_uri)."
+            ),
         )
 
     try:
-        matched_row = d.get_chunk(_chunk_path(source_uri, seq))
-        if matched_row is None:
-            return ExpandOutput(
-                source_uri=source_uri,
-                matched_seq=seq,
-                error=(
-                    f"expand: no chunk stored at {_chunk_path(source_uri, seq)}. "
-                    "fix: re-run search for a current source_uri + seq."
-                ),
-            )
-        matched = _row_to_chunk(matched_row, source_uri=source_uri, seq=seq, is_match=True)
-        chunks, total = _collect_window(d.get_chunk, source_uri=source_uri, matched=matched, budget=budget)
-        return ExpandOutput(source_uri=source_uri, matched_seq=seq, chunks=chunks, total_tokens=total)
+        if seq is None:
+            return _expand_by_source_uri(d, source_uri=source_uri, budget=budget)
+        return _window_from_anchor(d, source_uri=source_uri, anchor=seq, budget=budget)
     except Exception as exc:
         logger.warning("run_expand failed: %s", exc, exc_info=True)
         return ExpandOutput(source_uri=source_uri, matched_seq=seq, error=f"{type(exc).__name__}: {exc}")
@@ -336,6 +434,7 @@ def expand_output_to_envelope(out: ExpandOutput) -> dict[str, Any]:
         _KEY_MATCHED_SEQ: out.matched_seq,
         _KEY_CHUNKS: [c.to_envelope() for c in out.chunks],
         _KEY_TOTAL_TOKENS: out.total_tokens,
+        _KEY_NO_FINER_CHUNKS: out.no_finer_chunks,
         "error": out.error,
     }
 
@@ -356,7 +455,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("source_uri", help="The hit's canonical source_uri (SearchHit.source_uri)")
-    parser.add_argument("seq", type=int, help="The hit's 0-based chunk sequence index (SearchHit.seq)")
+    parser.add_argument(
+        "seq",
+        type=int,
+        nargs="?",
+        default=None,
+        help=(
+            "The hit's 0-based chunk sequence index (SearchHit.seq). Omit for a "
+            "doc / section-level (L2) hit whose seq is null — expand then "
+            "resolves the document's chunks by source_uri instead of failing."
+        ),
+    )
     parser.add_argument(
         "--token-budget",
         dest="token_budget",
@@ -385,7 +494,7 @@ def _deps_from_args(args: argparse.Namespace) -> ExpandDeps | None:
         from kairix.core.db.repository import SQLiteDocumentRepository
 
         repo = SQLiteDocumentRepository(Path(args.db_path))
-        return ExpandDeps(get_chunk=repo.get_by_path)
+        return ExpandDeps(get_chunk=repo.get_by_path, list_chunk_seqs=repo.list_chunk_seqs)
     return None
 
 
@@ -395,6 +504,9 @@ def _format_text(out: ExpandOutput) -> str:
     if out.error:
         lines.append(f"Error: {out.error}")
         return "\n".join(lines) + "\n"
+    if out.no_finer_chunks:
+        # PLA-297 — doc-level-only hit: whole-document content, no chunk window.
+        lines.append("note: no finer chunks for this source — showing the whole document.")
     lines.append(f"chunks: {len(out.chunks)} returned | {out.total_tokens} tokens")
     lines.append("")
     for chunk in out.chunks:
