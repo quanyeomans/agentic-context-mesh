@@ -201,7 +201,7 @@ dev = [
     # The python_version marker is required: the package pins >=3.12 but kairix
     # declares >=3.10 with a 3.10/3.11/3.12 matrix; without the marker uv's
     # universal resolver fails. The checks only run under the 3.12 venv.
-    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.7.0 ; python_version >= '3.12'",
+    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.7.1 ; python_version >= '3.12'",
 ]
 
 [project.scripts]
@@ -626,3 +626,31 @@ roots = ["kairix/core/embed"]
 extensions = [".py"]
 state_tables.content_vectors = ["model", "embedded_at"]
 name = "embed-discovery-state-predicate"
+
+# SGO-156 — no AI/LLM self-attribution residue (Autonomous Delivery Platform SP-A,
+# decision D1). The banned-signature set is intrinsic to the engine; kairix binds
+# only the first-party source/docs scan scope. NET-NEW residue fails; the per-file
+# baseline (.architecture/baseline/no-llm-attribution-files.txt) grandfathers any
+# pre-cutover residue (guard-forward, decision D2). This block is CODEOWNERS-gated
+# (/pyproject.toml → @three-cubes/maintainers) so an agent cannot self-exempt.
+[tool.tc_fitness.core_checks.no_llm_attribution]
+roots = ["kairix", "scripts", "services", "docs"]
+extensions = [".py", ".md", ".rst", ".txt", ".sh", ".yaml", ".yml", ".go", ".toml"]
+name = "no-llm-attribution"
+
+# SGO-158 — canonical commit identity (Autonomous Delivery Platform SP-A). Every
+# commit author AND committer over cutover_ref..HEAD must be on allowed_emails: the
+# canonical three-cubes-agent App, the named human maintainer, and the platform
+# merge/bot committers observed on origin/main. cutover_ref (origin/main HEAD at
+# adoption) bounds enforcement to commits made forward, so pre-cutover history is
+# grandfathered (guard-forward, decision D2). CODEOWNERS-gated (see above): the
+# allow-list can only be extended via a maintainer-approved control-plane edit.
+[tool.tc_fitness.core_checks.canonical_commit_identity]
+allowed_emails = [
+    "295831460+three-cubes-agent[bot]@users.noreply.github.com",
+    "10286112+quanyeomans@users.noreply.github.com",
+    "noreply@github.com",
+    "49699333+dependabot[bot]@users.noreply.github.com",
+]
+cutover_ref = "f40aad21a773222ef1d407d3ed32d62ad5d52ba4"  # pragma: allowlist secret — cutover SHA
+name = "canonical-commit-identity"

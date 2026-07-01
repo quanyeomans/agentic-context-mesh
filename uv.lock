@@ -1340,7 +1340,7 @@ requires-dist = [
     { name = "sentence-transformers", marker = "extra == 'rerank'", specifier = ">=3.0,<6" },
     { name = "spacy", marker = "extra == 'nlp'", specifier = ">=3.7,<4" },
     { name = "tenacity", specifier = ">=8,<10" },
-    { name = "three-cubes-fitness", marker = "python_full_version >= '3.12' and extra == 'dev'", git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.7.0" },
+    { name = "three-cubes-fitness", marker = "python_full_version >= '3.12' and extra == 'dev'", git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.7.1" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "types-requests", marker = "extra == 'dev'", specifier = ">=2.33.0.20260408" },
     { name = "usearch", specifier = ">=2.8,<3" },
@@ -4036,8 +4036,8 @@ wheels = [
 
 [[package]]
 name = "three-cubes-fitness"
-version = "0.7.0"
-source = { git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.7.0#4cb572999a3f523f4384f8c28790321fd351d8bb" }
+version = "0.7.1"
+source = { git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.7.1#3be1cde48448e0699c48b90189b765d0fc727f4b" }
 
 [[package]]
 name = "tokenizers"
