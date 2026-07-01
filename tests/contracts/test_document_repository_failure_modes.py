@@ -19,8 +19,12 @@ that proves the assertion has teeth.
 
 from __future__ import annotations
 
+import sqlite3
+from pathlib import Path
+
 import pytest
 
+from kairix.core.db.repository import SQLiteDocumentRepository
 from tests.fakes import FakeDocumentRepository
 
 pytestmark = pytest.mark.contract
@@ -91,3 +95,24 @@ def test_insert_or_update_raises_when_backend_rejects() -> None:
 
     with pytest.raises(RuntimeError, match="F68-insert-rejected"):
         _RaisingRepo().insert_or_update("a.md", "default", "t", "c", "h")
+
+
+def test_list_chunk_seqs_returns_empty_when_backend_open_fails() -> None:
+    """``list_chunk_seqs`` MUST return ``[]`` (never raise) when the SQLite
+    backend can't be opened — a source_uri-only expand degrades to the
+    doc-level fallback instead of crashing the L2 handoff (PLA-297).
+
+    Failure is injected through the public ``opener`` DI seam (no
+    monkeypatch, F1-clean); the observable outcome is the empty list.
+
+    Sabotage proof: EXECUTED — dropping the ``except (sqlite3.Error,
+    OSError)`` guard in ``SQLiteDocumentRepository.list_chunk_seqs`` lets the
+    injected ``OperationalError`` propagate and this test fails with that
+    error instead of returning ``[]``. Restored.
+    """
+
+    def _boom(_path: object) -> object:
+        raise sqlite3.OperationalError("F68-open-failed")
+
+    repo = SQLiteDocumentRepository(Path("unused.sqlite"), opener=_boom)
+    assert repo.list_chunk_seqs("m365://doc-alpha") == []

@@ -97,3 +97,18 @@ def test_expand_cli_default_index_degrades_gracefully() -> None:
     assert "chunks" in envelope
     # Empty store → a miss, surfaced as an error string (never a crash).
     assert envelope["error"] != ""
+
+
+def test_expand_cli_source_uri_only_default_index_degrades_gracefully() -> None:
+    """No seq AND no ``--db-path`` → the source_uri-only path runs the
+    production by-prefix default seam (``_default_list_chunk_seqs``) against
+    the resolved (empty/fresh) worker index and returns an actionable miss
+    with the no-finer-chunks signal, never a traceback."""
+    result = _run_cli("kairix://does-not-exist", "--json")
+
+    assert "Traceback" not in result.stderr, f"default by-prefix seam crashed:\n{result.stderr}"
+    envelope = json.loads(result.stdout)
+    assert envelope["chunks"] == []
+    # Empty store, source_uri-only → no finer chunks + an actionable error.
+    assert envelope["no_finer_chunks"] is True
+    assert envelope["error"] != ""

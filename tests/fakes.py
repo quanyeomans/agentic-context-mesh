@@ -219,6 +219,24 @@ class FakeDocumentRepository:
     def get_by_path(self, path: str) -> dict[str, Any] | None:
         return self._docs.get(path)
 
+    def list_chunk_seqs(self, source_uri: str) -> list[int]:
+        """Sorted 0-based seqs of the ``<source_uri>#<seq>`` chunk rows held.
+
+        Mirrors the real repo's by-prefix lookup (PLA-297) over the in-memory
+        docs: only paths whose trailing ``#<tail>`` is all-digits count, so
+        heading-anchor fragments are ignored. ``[]`` when the source_uri has
+        no finer chunk rows (the doc-level-only class).
+        """
+        prefix = f"{source_uri}#"
+        seqs: list[int] = []
+        for path in self._docs:
+            if not path.startswith(prefix):
+                continue
+            tail = path[len(prefix) :]
+            if tail.isdigit():
+                seqs.append(int(tail))
+        return sorted(seqs)
+
     def get_chunk_dates(self, paths: list[str]) -> dict[str, str]:
         result: dict[str, str] = {}
         for path in paths:

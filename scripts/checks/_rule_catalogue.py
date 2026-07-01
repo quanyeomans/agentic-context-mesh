@@ -1436,6 +1436,28 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         # kairix/use_cases/**; any could drop the contract. Always run.
         staged_class="always-run",
     ),
+    RuleEntry(
+        id="F98",
+        gate="f98",
+        check="f98_expand_locator_contract",
+        category="agent-affordance",
+        scope="per-class",
+        summary=(
+            "every agent result-row surface exposes an expand-acceptable locator AND "
+            "expand accepts a source_uri-only call — each registered surface (search / "
+            "timeline / entity / prep / research / contradict / expand) exposes the "
+            "resolvable source_uri (source_ref() / SourceRef field / source_uri field) "
+            "an agent feeds to expand, and run_expand keeps its seq parameter optional, "
+            "so a document/section-level (L2) hit whose seq is null never dead-ends at a "
+            "guessed #0 (the anti-dead-end lock, PLA-297)"
+        ),
+        adr_origin="PLA-297 — expand-acceptable locator contract",
+        tags=("agent-affordance",),
+        # AST scan of a FIXED registry of agent-surface modules + the expand
+        # entry point under kairix/use_cases/**; any could drop the contract.
+        # Always run.
+        staged_class="always-run",
+    ),
     # ----- go-discipline (active when services/*/go.mod exists) -----------
     RuleEntry(
         id="G1",

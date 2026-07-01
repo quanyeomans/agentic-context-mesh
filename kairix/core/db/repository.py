@@ -22,6 +22,24 @@ logger = logging.getLogger(__name__)
 # load drives SQLite-WAL-lock contention on the enrich path.
 _CHUNK_DATES_CACHE_MAX = 256
 
+# Upper bound on the by-prefix chunk-seq scan (PLA-297). One document's chunk
+# count is naturally bounded by silver chunking (tens-to-low-thousands); the
+# cap keeps the LIKE scan bounded for a pathological source while always
+# covering the low seqs (the chunk writer inserts seq 0 first, at the lowest
+# rowid, so the anchor min-seq is never truncated away).
+_CHUNK_SEQ_SCAN_LIMIT = 10000
+
+
+def _escape_like_prefix(text: str) -> str:
+    """Escape SQLite LIKE metacharacters so ``text`` matches literally.
+
+    ``list_chunk_seqs`` builds a ``LIKE '<source_uri>#%'`` prefix pattern; a
+    ``%`` / ``_`` / ``\\`` inside a real ``source_uri`` (URIs can carry them)
+    would otherwise act as a wildcard and over-match. Paired with
+    ``ESCAPE '\\'`` on the query so the escaped characters match as literals.
+    """
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
 
 class SQLiteDocumentRepository:
     """DocumentRepository implementation backed by SQLite + FTS5.
@@ -79,6 +97,16 @@ class SQLiteDocumentRepository:
             raw_page = row["source_page"]
         except (KeyError, IndexError):
             raw_page = None
+        # PLA-274 / PLA-297 — carry the canonical resolvable breadcrumb through
+        # the composed search path so every hit exposes an expandable locator
+        # (fusion backfills it onto the FusedResult; a doc / section-level hit
+        # then hands source_uri to expand without dead-ending). Defensive on
+        # legacy rows that pre-date the source_uri column.
+        raw_uri: Any = ""
+        try:
+            raw_uri = row["source_uri"]
+        except (KeyError, IndexError):
+            raw_uri = ""
         return {
             "file": str(row["path"]),
             "title": str(row["title"] or ""),
@@ -86,6 +114,7 @@ class SQLiteDocumentRepository:
             "score": score,
             "collection": str(row["collection"]),
             "source_page": int(raw_page) if isinstance(raw_page, int) else None,
+            "source_uri": str(raw_uri or ""),
         }
 
     def search_fts(
@@ -146,6 +175,44 @@ class SQLiteDocumentRepository:
         except (sqlite3.Error, OSError) as e:
             logger.warning("SQLiteDocumentRepository.get_by_path: %s", e)
             return None
+
+    def list_chunk_seqs(self, source_uri: str) -> list[int]:
+        """Return the sorted 0-based chunk seqs stored under ``<source_uri>#<seq>``.
+
+        The by-prefix lookup that powers source_uri-only chunk expansion
+        (PLA-297). When a document / section-level (L2) hit carries no
+        ``seq``, expand resolves the document's ACTUAL chunk seqs here — a
+        ``documents.path LIKE '<source_uri>#%'`` scan — picks the anchor and
+        walks outward, instead of hard-failing at a guessed ``#0``.
+
+        Only paths whose trailing ``#<tail>`` is all-digits count as chunk
+        rows; heading-anchor fragments (``note#section``) are ignored. Returns
+        ``[]`` when the source_uri has no finer chunk rows (the doc-level-only
+        class) or on any failure — never raises.
+        """
+        if not source_uri:
+            return []
+        pattern = _escape_like_prefix(source_uri) + "#%"
+        try:
+            db = self._opener(Path(self._db_path))
+            try:
+                # F63-bounded: LIMIT caps the scan at one document's chunk count.
+                rows = db.execute(
+                    "SELECT path FROM documents WHERE path LIKE ? ESCAPE '\\' AND active = 1 LIMIT ?",
+                    (pattern, _CHUNK_SEQ_SCAN_LIMIT),
+                ).fetchall()
+            finally:
+                db.close()
+        except (sqlite3.Error, OSError) as e:
+            logger.warning("SQLiteDocumentRepository.list_chunk_seqs: %s", e)
+            return []
+
+        seqs: list[int] = []
+        for (path,) in rows:
+            _head, sep, tail = str(path).rpartition("#")
+            if sep and tail.isdigit():
+                seqs.append(int(tail))
+        return sorted(seqs)
 
     def get_chunk_dates(self, paths: list[str]) -> dict[str, str]:
         """Return {path: chunk_date} for paths that have a chunk_date.

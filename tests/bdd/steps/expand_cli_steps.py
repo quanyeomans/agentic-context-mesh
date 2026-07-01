@@ -34,6 +34,7 @@ class _ExpandState:
     """Per-scenario state — fresh on every scenario."""
 
     chunk_count: int = 0
+    doc_level_only: bool = False
     stdout: str = ""
     stderr: str = ""
     exit_code: int = 0
@@ -55,21 +56,31 @@ def _deps_for(state: _ExpandState) -> ExpandDeps:
         }
         for seq in range(state.chunk_count)
     ]
+    if state.doc_level_only:
+        # A bare document-level row (no ``#seq`` chunks) — the doc-level-only
+        # class an agent hits when the store holds only the whole document.
+        documents.append(
+            {
+                "path": _URI,
+                "title": "Alpha Doc",
+                "collection": "team-notes",
+                "content": f"{_NINE_WORDS} whole-document",
+            }
+        )
     repo = FakeDocumentRepository(documents=documents)
-    return ExpandDeps(get_chunk=repo.get_by_path)
+    return ExpandDeps(get_chunk=repo.get_by_path, list_chunk_seqs=repo.list_chunk_seqs)
 
 
-def _run(state: _ExpandState, seq: int, budget: int) -> None:
+def _invoke(state: _ExpandState, argv: list[str]) -> None:
     out, err = io.StringIO(), io.StringIO()
-    state.exit_code = expand_main(
-        [_URI, str(seq), "--token-budget", str(budget), "--json"],
-        deps=_deps_for(state),
-        out=out,
-        err=err,
-    )
+    state.exit_code = expand_main(argv, deps=_deps_for(state), out=out, err=err)
     state.stdout = out.getvalue()
     state.stderr = err.getvalue()
     state.envelope = json.loads(state.stdout) if state.stdout.strip() else {}
+
+
+def _run(state: _ExpandState, seq: int, budget: int) -> None:
+    _invoke(state, [_URI, str(seq), "--token-budget", str(budget), "--json"])
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +91,11 @@ def _run(state: _ExpandState, seq: int, budget: int) -> None:
 @given(parsers.parse("a document indexed as {count:d} chunks"))
 def _document_indexed(_expand_state: _ExpandState, count: int) -> None:
     _expand_state.chunk_count = count
+
+
+@given("a document indexed only at the document level")
+def _document_indexed_doc_level_only(_expand_state: _ExpandState) -> None:
+    _expand_state.doc_level_only = True
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +111,13 @@ def _expand_generous(_expand_state: _ExpandState, seq: int) -> None:
 @when(parsers.parse("the agent expands the hit at chunk {seq:d} with a budget for one chunk"))
 def _expand_tight(_expand_state: _ExpandState, seq: int) -> None:
     _run(_expand_state, seq, 13)
+
+
+@when("the agent expands the hit by source_uri with no chunk seq")
+def _expand_by_source_uri(_expand_state: _ExpandState) -> None:
+    # No positional seq — the doc / section-level (L2) handoff. Expand resolves
+    # the document's chunks by source_uri instead of failing at a guessed #0.
+    _invoke(_expand_state, [_URI, "--token-budget", "10000", "--json"])
 
 
 # ---------------------------------------------------------------------------
@@ -133,3 +156,24 @@ def _only_match(_expand_state: _ExpandState) -> None:
 def _says_missing(_expand_state: _ExpandState) -> None:
     assert _expand_state.exit_code == 1
     assert "no chunk stored" in _expand_state.envelope["error"]
+
+
+@then("the response includes an ordered neighbour window")
+def _ordered_window(_expand_state: _ExpandState) -> None:
+    seqs = [c["seq"] for c in _expand_state.envelope["chunks"]]
+    # A doc-level hit anchors on the document's first chunk and walks forward.
+    assert seqs == [0, 1, 2, 3, 4], f"expected the ordered window from chunk 0; got {seqs!r}"
+    matches = [c["seq"] for c in _expand_state.envelope["chunks"] if c["is_match"]]
+    assert matches == [0], f"expected chunk 0 anchored; got {matches!r}"
+
+
+@then("the response carries the whole-document content")
+def _whole_document(_expand_state: _ExpandState) -> None:
+    chunks = _expand_state.envelope["chunks"]
+    assert len(chunks) == 1, f"expected a single whole-document row; got {len(chunks)}"
+    assert "whole-document" in chunks[0]["text"]
+
+
+@then("the response signals there are no finer chunks")
+def _signals_no_finer(_expand_state: _ExpandState) -> None:
+    assert _expand_state.envelope["no_finer_chunks"] is True

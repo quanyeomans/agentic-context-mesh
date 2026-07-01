@@ -196,6 +196,90 @@ def test_search_fts_returns_hit_with_plain_body_snippet(db_path: Path, repo: SQL
 
 
 @pytest.mark.unit
+def test_search_fts_result_carries_source_uri(db_path: Path, repo: SQLiteDocumentRepository) -> None:
+    """A hit's result row threads the canonical ``source_uri`` breadcrumb
+    through the composed search path (PLA-274 / PLA-297), so a document /
+    section-level hit exposes the expandable locator an agent hands to
+    ``expand``.
+
+    Pins the ``str(raw_uri or "")`` projection: a non-empty source_uri must
+    reach the result dict verbatim, not collapse to ``""``. Sabotage proof:
+    EXECUTED — the ``or`` -> ``and`` mutant on that line makes source_uri
+    always ``""`` and this assertion fails.
+    """
+    body = "alpha bravo charlie content"
+    db = open_db(db_path)
+    try:
+        db.execute("INSERT OR REPLACE INTO content (hash, doc) VALUES (?, ?)", ("uh", body))
+        db.execute(
+            "INSERT INTO documents (collection, path, title, hash, source_uri, active) VALUES (?, ?, ?, ?, ?, 1)",
+            ("notes", "m365://doc-x#3", "Doc X", "uh", "m365://doc-x"),
+        )
+        doc_id = int(db.execute("SELECT id FROM documents WHERE path = ?", ("m365://doc-x#3",)).fetchone()[0])
+        db.execute(
+            "INSERT OR REPLACE INTO documents_fts (rowid, filepath, title, doc) VALUES (?, ?, ?, ?)",
+            (doc_id, "m365://doc-x#3", "Doc X", body),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    results = repo.search_fts("alpha")
+
+    assert results, "expected a hit"
+    assert results[0]["source_uri"] == "m365://doc-x", results[0]
+
+
+@pytest.mark.unit
+def test_list_chunk_seqs_returns_sorted_digit_seqs_only(db_path: Path, repo: SQLiteDocumentRepository) -> None:
+    """``list_chunk_seqs`` returns the sorted 0-based chunk seqs stored under
+    ``<source_uri>#<seq>``, counting ONLY paths whose trailing ``#<tail>`` is
+    all-digits — heading-anchor fragments and the bare doc-level row are
+    excluded (PLA-297).
+
+    Sabotage proof: EXECUTED — the ``sep and tail.isdigit()`` -> ``sep or
+    tail.isdigit()`` mutant admits the ``#intro`` heading anchor, whose
+    ``int()`` conversion then raises, failing this assertion.
+    """
+    uri = "m365://doc-y"
+    db = open_db(db_path)
+    try:
+        db.execute("INSERT OR REPLACE INTO content (hash, doc) VALUES (?, ?)", ("uh", "body"))
+        for path in (f"{uri}#2", f"{uri}#0", f"{uri}#intro", uri):
+            db.execute(
+                "INSERT INTO documents (collection, path, hash, source_uri, active) VALUES (?, ?, ?, ?, 1)",
+                ("notes", path, "uh", uri),
+            )
+        db.commit()
+    finally:
+        db.close()
+
+    assert repo.list_chunk_seqs(uri) == [0, 2]
+
+
+@pytest.mark.unit
+def test_list_chunk_seqs_returns_empty_for_source_with_no_chunk_rows(
+    db_path: Path, repo: SQLiteDocumentRepository
+) -> None:
+    """A source_uri with no ``#<digit>`` chunk rows (only a doc-level row)
+    yields ``[]`` — the doc-level-only class that drives expand's whole-doc
+    fallback."""
+    uri = "m365://doc-z"
+    db = open_db(db_path)
+    try:
+        db.execute("INSERT OR REPLACE INTO content (hash, doc) VALUES (?, ?)", ("uh2", "body"))
+        db.execute(
+            "INSERT INTO documents (collection, path, hash, source_uri, active) VALUES (?, ?, ?, ?, 1)",
+            ("notes", uri, "uh2", uri),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    assert repo.list_chunk_seqs(uri) == []
+
+
+@pytest.mark.unit
 def test_search_fts_snippet_centres_on_body_match_not_frontmatter(
     db_path: Path, repo: SQLiteDocumentRepository
 ) -> None:
