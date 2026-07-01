@@ -28,6 +28,20 @@ _PY = [".py"]
 _KAIRIX = ["kairix"]
 _TESTS = ["tests"]
 
+# ── identity & attribution (Autonomous Delivery Platform SP-A) ──────────────
+# The canonical three-cubes-agent GitHub App identity — author AND committer of
+# every agent-authored commit — plus the named human maintainer and the platform
+# committer identities that legitimately land on origin/main (GitHub web-flow
+# merge committer, dependabot). All four are sourced from `git log` on main; none
+# is an AI-vendor / off-allowlist identity the check exists to reject.
+_AGENT_BOT_EMAIL = "295831460+three-cubes-agent[bot]@users.noreply.github.com"
+_HUMAN_MAINTAINER_EMAIL = "10286112+quanyeomans@users.noreply.github.com"
+_GITHUB_WEBFLOW_EMAIL = "noreply@github.com"
+_DEPENDABOT_EMAIL = "49699333+dependabot[bot]@users.noreply.github.com"
+# The origin/main HEAD at adoption; enforcement is bounded to cutover_ref..HEAD so
+# pre-cutover history never fails (guard-forward, decision D2).
+_IDENTITY_CUTOVER_REF = "f40aad21a773222ef1d407d3ed32d62ad5d52ba4"  # pragma: allowlist secret — cutover SHA
+
 #: Each key is the CORE module name (the part after ``core:``); the value is the
 #: config block the engine injects via ``build(config, repo_root=...)``.
 CORE_BINDINGS: dict[str, dict[str, Any]] = {
@@ -89,5 +103,27 @@ CORE_BINDINGS: dict[str, dict[str, Any]] = {
         "extensions": _PY,
         "state_tables": {"content_vectors": ["model", "embedded_at"]},
         "name": "embed-discovery-state-predicate",
+    },
+    # SGO-156 — no AI/LLM self-attribution residue. Scans kairix's first-party
+    # source + docs for attribution signatures (the banned set is intrinsic to the
+    # engine; kairix supplies only the scan scope). NET-NEW residue fails; the
+    # per-file baseline grandfathers any pre-cutover residue (decision D2).
+    "no_llm_attribution": {
+        "roots": ["kairix", "scripts", "services", "docs"],
+        "extensions": [".py", ".md", ".rst", ".txt", ".sh", ".yaml", ".yml", ".go", ".toml"],
+        "name": "no-llm-attribution",
+    },
+    # SGO-158 — canonical commit identity. Every author AND committer over
+    # cutover_ref..HEAD must be on the allow-list. cutover_ref bounds enforcement
+    # to commits made from adoption forward (guard-forward, decision D2).
+    "canonical_commit_identity": {
+        "allowed_emails": [
+            _AGENT_BOT_EMAIL,
+            _HUMAN_MAINTAINER_EMAIL,
+            _GITHUB_WEBFLOW_EMAIL,
+            _DEPENDABOT_EMAIL,
+        ],
+        "cutover_ref": _IDENTITY_CUTOVER_REF,
+        "name": "canonical-commit-identity",
     },
 }

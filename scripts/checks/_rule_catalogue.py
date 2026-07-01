@@ -1458,6 +1458,50 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         # Always run.
         staged_class="always-run",
     ),
+    # ----- identity & attribution (CORE — Autonomous Delivery Platform SP-A) --
+    # Two shared CORE checks adopted from three-cubes-fitness (v0.7.1) that make
+    # machine-enforced clean authorship (decision D1) LIVE in kairix. Both are
+    # guard-forward (decision D2): pre-cutover residue/history is grandfathered,
+    # only NET-NEW work is gated. Their config (scan roots / allow-list / cutover)
+    # lives in the CODEOWNERS-gated control plane (pyproject.toml +
+    # scripts/checks/_core_bindings.py) so an agent cannot self-exempt.
+    RuleEntry(
+        id="SGO-156",
+        gate="no-llm-attribution",
+        check="core:no_llm_attribution",
+        category="repo-hygiene",
+        scope="per-file",
+        summary=(
+            "no AI/LLM self-attribution residue in first-party source/docs — no model "
+            "co-author trailer, no AI-vendor no-reply author identity, no robot emoji "
+            "(the metadata agent tools stamp onto commits); agent work is authored by the "
+            "canonical bot/human, never advertised as model-generated (decision D1)"
+        ),
+        adr_origin="SGO-156 — Autonomous Delivery Platform SP-A (identity & attribution)",
+        tags=("process",),
+        # Literal signature scan across the configured first-party source/docs roots;
+        # any authored file could carry residue. Always run (guard-forward via the
+        # per-file baseline, decision D2).
+        staged_class="always-run",
+    ),
+    RuleEntry(
+        id="SGO-158",
+        gate="canonical-commit-identity",
+        check="core:canonical_commit_identity",
+        category="process",
+        scope="per-commit",
+        summary=(
+            "every commit author AND committer over the PR range (cutover..HEAD) carries an "
+            "allow-listed identity — the canonical three-cubes-agent App, the named human "
+            "maintainer, and the platform merge/bot committers — so an off-allowlist or "
+            "marker-in-name identity can't slip in; guard-forward via cutover_ref (decision D2)"
+        ),
+        adr_origin="SGO-158 — Autonomous Delivery Platform SP-A (identity & attribution)",
+        tags=("process",),
+        # Range check over git log (no file surface); a staged file can't scope it.
+        # Always run.
+        staged_class="always-run",
+    ),
     # ----- go-discipline (active when services/*/go.mod exists) -----------
     RuleEntry(
         id="G1",
