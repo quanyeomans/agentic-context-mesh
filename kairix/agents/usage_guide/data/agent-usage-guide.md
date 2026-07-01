@@ -22,6 +22,47 @@ You do not need to use basic keyword search. Kairix routes your query to the rig
 
 ---
 
+## The core loops — read this first
+
+Almost everything you do with kairix is one of two loops: the **read loop** and the **write loop**. Learn these before the per-command detail further down.
+
+### Read loop: search → expand
+
+Always start with `search`. It finds the most relevant snippets across the knowledge store. A snippet is only a small window into a larger document, so when a hit looks right but the snippet is too thin to answer with confidence, call `expand` on that hit to pull the text around it — the paragraphs before and after, up to the section it belongs to.
+
+```bash
+kairix search "how we decided to handle retries" --agent builder --json
+# take the top hit's source_uri + seq from the results, then:
+kairix expand "<source_uri>" <seq> --token-budget 2000
+```
+
+`search → expand` is the intended pattern for any question you are going to answer or cite. Search gives you the lead; expand gives you the surrounding evidence. Do not answer from a single thin snippet when expand can hand you the full passage cheaply — it reads straight from the index, so there is no re-search cost.
+
+**Wire `source_uri` into every final answer.** Each result — from search, briefings, fact lookups, timelines, research, and contradiction checks — carries a `source_uri` you can show a human or hand back to `expand`. Cite it so the reader can open the original evidence.
+
+### Write loop: remember + ingest_chat
+
+When you learn a durable fact or make a decision worth keeping, write it back so the next session can recall it.
+
+```bash
+kairix remember "We chose PostgreSQL for the jobs table because ..." --agent builder
+kairix ingest-chat --agent builder --transcript <path-to-transcript.jsonl>
+```
+
+- `remember` (MCP: `tool_memory_write`) stores a single fact or decision now, so it can be recalled later.
+- `ingest-chat` (MCP: `tool_ingest_chat`) saves a whole chat transcript into the knowledge store for later recall.
+
+You do **not** need to run diagnostics before every write — just write. Only *if* a write fails, run `kairix doctor agent --name <you>` (MCP: `tool_doctor_check_agent`) to see what is misconfigured, fix it, and retry.
+
+### How to work well — a few rules that pay off
+
+- **Cite your source.** Put the `source_uri` behind every claim in a final answer (see the read loop above).
+- **`contradict` checks coverage, not truth.** `contradict` (MCP: `tool_contradict`) tells you whether the store already holds something that conflicts with what you are about to write — a provenance-and-coverage check. It is not a truth oracle: a "no conflict" result means the store is quiet on the point, not that your claim is correct. Treat it as a prompt to look closer, not a green light.
+- **Deep-read from a briefing.** `kairix brief` ends with a `## Sources` list. When a briefing line matters, `expand` its source to read the full passage before you rely on the summary.
+- **Reach for `search` first, not `entity` or `facts_about`.** Entity lookup (`kairix entity`) and stored-fact recall (`kairix facts about`) help once the knowledge store has good coverage of a person or topic, but today they can come back thin. Start with `search → expand`; fall back to `entity` / `facts_about` when you specifically want a curated summary or a previously-saved fact.
+
+---
+
 ## How to call kairix
 
 ```bash
@@ -314,22 +355,47 @@ Set with `--budget N`. The budget caps total tokens returned, not the number of 
 
 Every kairix capability has one Python implementation with one or more bindings (CLI, MCP). This table is the index for agents — search it for "diagnostics", "soak", "health", or any capability you're looking for and it tells you which surface to use.
 
+This table lists **every** kairix capability, so nothing you can call is left undocumented. If a capability is not in this table, it is not a live agent capability.
+
 | capability | when to use | how to invoke | surface |
 |---|---|---|---|
 | `tool_search` / `kairix search` | retrieve content from the knowledge store | MCP — direct | both |
 | `tool_expand` / `kairix expand` | pull the chunks around a search hit (before/after/section) within a token budget | MCP — direct | both |
 | `tool_entity` / `kairix entity` | named-entity lookup (person, org, project) | MCP — direct | both |
-| `tool_prep` / `kairix prep` | tiered L0/L1 context summary | MCP — direct | both |
-| `tool_contradict` / `kairix contradict` | check new content for contradictions | MCP — direct | both |
-| `tool_brief` / `kairix brief` | session briefing synthesis | MCP — direct | both |
+| `tool_timeline` / `kairix timeline` | trace how a topic or project changed over time, in date order | MCP — direct | both |
+| `tool_facts_about` / `kairix facts about` | recall the stored facts about a person, project, or topic | MCP — direct | both |
+| `tool_prep` / `kairix prep` | tiered L0/L1 context summary before a meeting or hand-off | MCP — direct | both |
+| `tool_research` / `kairix research` | gather and synthesise everything the store knows about a broad question | MCP — direct | both |
+| `tool_contradict` / `kairix contradict` | check new content for contradictions (a coverage check, not a truth oracle) | MCP — direct | both |
+| `tool_brief` / `kairix brief` | session briefing synthesis (ends with a `## Sources` list) | MCP — direct | both |
+| `tool_memory_write` / `kairix remember` | remember a fact or decision now so it can be recalled later | MCP — direct | both |
+| `tool_ingest_chat` / `kairix ingest-chat` | save a chat transcript into the knowledge store for later recall | MCP — direct | both |
 | `tool_bootstrap` / `kairix bootstrap` | session-start orientation envelope | MCP — direct | both |
-| `tool_onboard_check` / `kairix onboard check` | "is kairix healthy?" — read-only 9-probe envelope | MCP — direct | both |
+| `tool_usage_guide` / `kairix usage-guide` | read this guide (full text or filtered by topic) | MCP — direct | both |
+| `tool_capabilities` / `kairix capabilities` | list every kairix capability and which surface to use | MCP — direct | both |
+| `tool_entity_suggest` / `kairix entity suggest` | propose entities to add to the graph | MCP — direct | both |
+| `tool_entity_validate` / `kairix entity validate` | check an entity record for problems before it lands | MCP — direct | both |
+| `tool_onboard_check` / `kairix onboard check` | "is kairix healthy?" — read-only probe envelope | MCP — direct | both |
+| `tool_onboard_scan` / `kairix onboard scan` | discover which sources and scopes are available to configure | MCP — direct | both |
+| `tool_onboard_agent` / `kairix onboard agent` | propose the scope config for a new agent | MCP — direct | both |
+| `tool_doctor_check_all` / `kairix doctor agent --all` | check every agent's scope config for drift | MCP — direct | both |
+| `tool_doctor_check_agent` / `kairix doctor agent --name` | check one agent's scope config for drift (run this if a write fails) | MCP — direct | both |
 | `tool_worker_status` / `kairix worker status` | "is the worker running?" — state file envelope | MCP — direct | both |
+| `tool_features_status` / `kairix features status` | which feature flags are on or off | MCP — direct | both |
+| `tool_secrets_verify` / `kairix secrets verify` | "is auth wired up?" — read-only secrets status table | MCP — direct | both |
+| `tool_dead_letter_status` / `kairix dead-letter status` | how many items failed to ingest, and why | MCP — direct | both |
+| `tool_caches_status` / `kairix caches` | cache hit-rate and size | MCP — direct | both |
+| `tool_warm` / `kairix warm` | warm the model + index caches before heavy use | MCP — direct | both |
+| `tool_maintenance_analyze` / `kairix maintenance analyze` | read-only store health analysis | MCP — direct | both |
+| `tool_probe_search` | capped concurrent search probe (latency check) | MCP — direct, capped | MCP |
 | `tool_soak_run` / `kairix benchmark run --mode soak` | repeat-and-assert (memory, log volume, fd, determinism) | MCP returns escalation envelope; operator runs CLI | CLI |
 | `tool_benchmark_run` / `kairix benchmark run` | retrieval quality measurement | MCP returns escalation envelope; operator runs CLI | CLI |
+| `tool_probe_burst` | burst-load latency probe | MCP returns escalation envelope; operator runs CLI | CLI |
+| `tool_probe_config` / `kairix probe-config` | inspect the effective retrieval config | MCP returns escalation envelope; operator runs CLI | CLI |
 | `tool_embed` / `kairix embed` | embed documents into the vector index | MCP returns escalation envelope; operator runs CLI | CLI |
 | `tool_store_crawl` / `kairix store crawl` | rebuild the Neo4j entity graph | MCP returns escalation envelope; operator runs CLI | CLI |
 | `tool_embed_rebuild_fts` / `kairix embed rebuild-fts` | drop + re-create the FTS5 table | MCP returns escalation envelope; operator runs CLI | CLI |
+| `tool_cc_pair` / `kairix cc-pair` | reconcile contradiction/consistency pairs | MCP returns escalation envelope; operator runs CLI | CLI |
 
 The operator-only rows return an `OperatorOnlyCapability` envelope via MCP — surface the `operator_command` field to your admin if you need the work done.
 

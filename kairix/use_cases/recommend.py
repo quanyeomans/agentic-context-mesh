@@ -55,7 +55,15 @@ logger = logging.getLogger(__name__)
 # same way in tests and behind either surface. When the flag is OFF, the
 # adapter returns this disabled message WITHOUT calling ``run_recommend``.
 _RECOMMENDER_FLAG = "recommender"
-RECOMMENDER_DISABLED_ERROR = "recommender is disabled — enable the 'recommender' feature flag"
+# Reads as a deployment state directed at the operator, NOT an instruction to
+# the agent (agents can't flip flags; an operator turns it on). Keeps the
+# "recommender is disabled" lead so an agent that gets this envelope treats the
+# capability as absent-here rather than live. PLA-299: stop advertising the
+# recommender as a live capability while its flag defaults OFF.
+RECOMMENDER_DISABLED_ERROR = (
+    "recommender is disabled — not enabled on this deployment "
+    "(an operator turns it on via the 'recommender' feature flag)"
+)
 
 # The capability-bearing collections the recommender retrieves over. The
 # two feeders write to their *natural* collections: kairix's own caps

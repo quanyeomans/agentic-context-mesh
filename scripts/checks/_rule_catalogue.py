@@ -1502,6 +1502,30 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         # Always run.
         staged_class="always-run",
     ),
+    RuleEntry(
+        id="F99",
+        gate="f99",
+        check="f99_usage_guide_currency",
+        category="agent-affordance",
+        scope="cross-cutting",
+        summary=(
+            "bundled usage guide stays in sync with the tool registry — every capability in "
+            "tool_capabilities() (each registered MCP tool + CLI subcommand) is discoverable in "
+            "kairix/agents/usage_guide/data/agent-usage-guide.md via its CLI / tool_<name> token, so "
+            "an agent self-training from the guide can find every shipped tool (the drift class that "
+            "let `expand` fall out); flag-gated-off surfaces are excluded (PLA-299)"
+        ),
+        adr_origin="PLA-299 — usage-guide ↔ tool-registry currency",
+        tags=("agent-affordance",),
+        # Relational: a new _cap(...) row in the MCP server registry OR a
+        # rewrite of the bundled guide can break currency. Run when either
+        # side is touched.
+        staged_class="relational",
+        staged_scope=(
+            "kairix/agents/mcp/server.py",
+            "kairix/agents/usage_guide/data/agent-usage-guide.md",
+        ),
+    ),
     # ----- go-discipline (active when services/*/go.mod exists) -----------
     RuleEntry(
         id="G1",

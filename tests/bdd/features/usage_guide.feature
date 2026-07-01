@@ -28,3 +28,9 @@ Feature: Usage guide — agent-facing capability documentation
     When the agent requests the usage guide on the production default path
     Then the response contains guide content
     And the response has no UsageGuideNotFound error
+
+  Scenario: The bundled guide foregrounds the read and write loops
+    Given a default kairix install with no operator setup
+    When the agent requests the usage guide on the production default path
+    Then the guide surfaces the search-to-expand read loop
+    And the guide surfaces the remember and ingest-chat write loop

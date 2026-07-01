@@ -28,3 +28,8 @@ def test_unknown_topic_returns_fallback_orientation_slice():
 @scenario(FEATURE, "A default install returns the guide with no operator action")
 def test_default_install_returns_guide_no_operator_action():
     """Body populated by @scenario from the .feature file (#466)."""
+
+
+@scenario(FEATURE, "The bundled guide foregrounds the read and write loops")
+def test_bundled_guide_foregrounds_read_and_write_loops():
+    """Body populated by @scenario from the .feature file (PLA-299)."""
