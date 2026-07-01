@@ -348,16 +348,62 @@ def test_writes_under_writable_agent_knowledge_submount_not_ro_root(tmp_path: Pa
     assert not bare_root_chunk.exists(), "chunk must NOT be written to the bare read-only document root"
 
 
-def test_readonly_submount_returns_actionable_envelope_not_oserror(
+def test_readonly_submount_falls_back_to_writable_data_dir(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """A read-only agent-knowledge submount NO LONGER fails — it falls back (PLA-296).
+
+    Strips write perms from ``04-Agent-Knowledge`` so the preferred conversations
+    submount is unwritable, but injects a writable ``memory_fallback_root`` under
+    ``tmp_path``. The tool must succeed via the data-dir fallback (error == "")
+    rather than hand back the old IngestFailed envelope, and log a LOUD warning
+    so a genuinely-misconfigured box is still surfaced.
+
+    Sabotage (executed): reverted ``ingest_chat`` to write straight to
+    ``agent_conversations_dir`` (dropping ``resolve_writable_memory_dir``) → the
+    mkdir raised PermissionError and the success assertion failed; restored.
+    """
+    paths = _paths(tmp_path)
+    ak_dir = paths.document_root / "04-Agent-Knowledge"
+    ak_dir.mkdir(parents=True)
+    fallback_root = tmp_path / "data" / "agent-memory"
+    _require_enforced_readonly_or_skip(ak_dir)
+
+    try:
+        with caplog.at_level(logging.WARNING, logger="kairix.paths"):
+            out = tool_ingest_chat(
+                jsonl_content=_jsonl("conv-ro", n_turns=2),
+                conversation_id="conv-ro",
+                namespace="engagement-alpha",
+                allowed_namespace="engagement-alpha",
+                paths=paths,
+                fact_store=FakeFactStore(),
+                fact_extractor=FakeFactExtractor(),
+                no_extract=True,
+                memory_fallback_root=fallback_root,
+            )
+    finally:
+        # Restore perms so pytest can clean up tmp_path even if an assertion fails.
+        os.chmod(ak_dir, 0o700)
+
+    assert out["error"] == "", f"expected fallback success, got: {out}"
+    assert out["turns_ingested"] == 2
+    # The conversation landed in the writable, namespace-isolated fallback.
+    fallback_file = fallback_root / "engagement-alpha" / "conversations" / "conv-ro.md"
+    assert fallback_file.exists(), f"expected fallback conversation at {fallback_file}"
+    # A loud WARN records the misconfigured overlay so it is not silently masked.
+    warned = [r for r in caplog.records if "not writable" in r.getMessage()]
+    assert warned, "expected a WARN naming the non-writable overlay"
+
+
+def test_readonly_submount_and_fallback_returns_actionable_envelope_not_oserror(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A read-only agent-knowledge submount yields an actionable envelope, not a crash.
+    """When BOTH the overlay and the fallback are read-only, the tool still yields
+    an actionable envelope, not a crash (PLA-296 residual + PLA-275).
 
-    Simulates a misconfigured (read-only) writable submount by stripping write
-    perms from ``04-Agent-Knowledge`` so the use case's
-    ``conversations_dir.mkdir(...)`` raises ``PermissionError`` (an OSError
-    subclass). The tool must catch it and hand the agent an F21-actionable
-    envelope pointing at the fix — never let the OSError propagate (PLA-275).
+    Both the preferred ``04-Agent-Knowledge`` submount and the injected
+    ``memory_fallback_root`` are stripped of write perms, so even the fallback
+    ``mkdir(...)`` raises ``PermissionError``. The tool must catch it and hand
+    the agent an F21-actionable envelope — never let the OSError propagate.
 
     Sabotage: remove the ``except OSError`` branch around the ``ingest_chat``
     call in ``tool_ingest_chat`` → the PermissionError propagates out of the
@@ -366,7 +412,10 @@ def test_readonly_submount_returns_actionable_envelope_not_oserror(
     paths = _paths(tmp_path)
     ak_dir = paths.document_root / "04-Agent-Knowledge"
     ak_dir.mkdir(parents=True)
+    fallback_root = tmp_path / "data" / "agent-memory"
+    fallback_root.mkdir(parents=True)
     _require_enforced_readonly_or_skip(ak_dir)
+    _require_enforced_readonly_or_skip(fallback_root)
 
     try:
         with caplog.at_level(logging.WARNING, logger="kairix.agents.mcp.tools.ingest_chat"):
@@ -379,10 +428,12 @@ def test_readonly_submount_returns_actionable_envelope_not_oserror(
                 fact_store=FakeFactStore(),
                 fact_extractor=FakeFactExtractor(),
                 no_extract=True,
+                memory_fallback_root=fallback_root,
             )
     finally:
         # Restore perms so pytest can clean up tmp_path even if an assertion fails.
         os.chmod(ak_dir, 0o700)
+        os.chmod(fallback_root, 0o700)
 
     assert out["error"] == ERROR_INGEST_FAILED
     # Actionable: F21 fix:/next: markers + names the writable submount.
@@ -392,9 +443,7 @@ def test_readonly_submount_returns_actionable_envelope_not_oserror(
     assert out["turns_ingested"] == 0
     assert out["facts_added"] == 0
     # The filesystem error is logged WITH traceback context (exc_info=True) so
-    # operators can diagnose the misconfigured mount from the worker logs. A
-    # truthy ``exc_info`` carries the captured exception tuple; ``exc_info=False``
-    # would leave it falsy — so the truthiness + type check pins exc_info=True.
+    # operators can diagnose the misconfigured mount from the worker logs.
     fs_records = [r for r in caplog.records if "filesystem error" in r.getMessage()]
     assert fs_records, "expected a WARNING log for the filesystem error"
     captured = fs_records[0].exc_info

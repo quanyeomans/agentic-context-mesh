@@ -379,6 +379,8 @@ def _build_scanner(  # pragma: no cover  # lazy-import DI-default delegation
     db: Any,
     diagnostics: list[str],
     d: UseCaseDeps,
+    *,
+    extra_collections: list[Any] | None = None,
 ) -> tuple[Any, list[Any]]:
     """Construct the DocumentScanner + resolved scan-collection list.
 
@@ -387,6 +389,11 @@ def _build_scanner(  # pragma: no cover  # lazy-import DI-default delegation
     wiring and the collection-resolution (config collections → default
     fallback → reference-library mode) live in ONE place. Returns
     ``(scanner, scan_collections)``.
+
+    ``extra_collections`` are appended verbatim to the resolved list — the
+    memory-write fallback path (PLA-296) passes the writable data-dir scan
+    root as an absolute ``CollectionConfig`` so a fallback write is indexed
+    even though it sits outside the document root.
     """
     from kairix.core.db.scanner import CollectionConfig
 
@@ -416,6 +423,8 @@ def _build_scanner(  # pragma: no cover  # lazy-import DI-default delegation
         scan_collections = [CollectionConfig(name="default", path=".")]
 
     scan_collections = _resolve_reflib_collections(scan_collections, d, droot)
+    if extra_collections:
+        scan_collections = [*scan_collections, *extra_collections]
     return scanner, scan_collections
 
 
@@ -457,6 +466,7 @@ def default_index_file(  # pragma: no cover  # lazy-import DI-default delegation
     file_path: Path,
     *,
     deps: UseCaseDeps | None = None,
+    extra_collections: list[Any] | None = None,
 ) -> tuple[int, int, int]:
     """Incrementally index ONE file — the latency-sensitive write path (PLA-258).
 
@@ -467,11 +477,15 @@ def default_index_file(  # pragma: no cover  # lazy-import DI-default delegation
     rescan or full FTS rebuild. The whole document tree is left untouched,
     so the memory-write cost stays O(1) in corpus size. Returns
     ``(new, updated, errors)`` for parity with the full scan.
+
+    ``extra_collections`` registers additional (typically absolute) scan
+    collections so a fallback write outside the document root (PLA-296) still
+    matches a collection and is indexed.
     """
     from kairix.core.db.fts import sync_fts
 
     d = deps if deps is not None else UseCaseDeps()
-    scanner, scan_collections = _build_scanner(db, diagnostics, d)
+    scanner, scan_collections = _build_scanner(db, diagnostics, d, extra_collections=extra_collections)
 
     scan_report, touched = scanner.scan_file(file_path, scan_collections)
     if touched:

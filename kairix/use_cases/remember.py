@@ -42,6 +42,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TextIO
 
+from kairix.paths import WriteAccessProbe
+from kairix.use_cases.agent_memory_sink import (
+    agent_memory_fallback_root,
+    index_agent_file,
+    resolve_writable_memory_dir,
+)
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -119,41 +126,14 @@ def _real_classify(
     return classify_content(content, agent=agent, config=config)
 
 
-def _index_single_file(db_path: Path, document_root: Path, target: Path, content_hash: str) -> bool:
-    """Production immediate-index step — incremental single-file index (PLA-258).
+def _real_memory_fallback_root() -> Path:  # pragma: no cover  # lazy-import DI-default delegation
+    return agent_memory_fallback_root()
 
-    Indexes ONLY ``target`` (the file ``remember`` just wrote) via
-    :func:`kairix.core.embed.use_cases.default_index_file`, then reports
-    whether a document with ``content_hash`` is active in the store. This
-    is the latency-sensitive memory-write path: it reuses the scanner's
-    per-file processing for the one known path and an incremental FTS
-    update, so it does NOT re-read or re-hash the rest of the document tree
-    (the old full-rescan cost was O(corpus) — multiple seconds on a vault
-    of thousands of files). True means BM25 search finds the new memory
-    now; the vector leg follows at the next embed run, which sees the
-    document as pending.
-    """
-    from kairix.core.db import open_db
-    from kairix.core.db.schema import create_schema
-    from kairix.core.embed.use_cases import UseCaseDeps, default_index_file
 
-    db = open_db(db_path)
-    try:
-        create_schema(db)
-        diagnostics: list[str] = []
-        default_index_file(
-            db,
-            diagnostics,
-            target,
-            deps=UseCaseDeps(document_root_fn=lambda: document_root),
-        )
-        row = db.execute(
-            "SELECT 1 FROM documents WHERE hash = ? AND active = 1 LIMIT 1",
-            (content_hash,),
-        ).fetchone()
-        return row is not None
-    finally:
-        db.close()
+def _real_probe_write_access(path: str | Path) -> WriteAccessProbe:  # pragma: no cover  # lazy-import DI seam
+    from kairix.paths import probe_write_access
+
+    return probe_write_access(path)
 
 
 @dataclass(frozen=True)
@@ -171,7 +151,14 @@ class RememberDeps:
     db_path_fn: Callable[[], Path] = field(default_factory=lambda: _real_db_path)
     now_fn: Callable[[], datetime] = field(default_factory=lambda: _real_now)
     classify_fn: Callable[..., Any] = field(default_factory=lambda: _real_classify)
-    index_fn: Callable[[Path, Path, Path, str], bool] = field(default_factory=lambda: _index_single_file)
+    # ``index_fn`` is called with a trailing ``extra_scan_root=`` keyword ONLY
+    # on the read-only-overlay fallback path (PLA-296); the common path calls it
+    # positionally with four args, so existing four-arg test doubles still fit.
+    index_fn: Callable[..., bool] = field(default_factory=lambda: index_agent_file)
+    # PLA-296 — the writable data-dir base + probe seam that let a memory write
+    # fall back off a read-only 04-Agent-Knowledge overlay instead of crashing.
+    memory_fallback_root_fn: Callable[[], Path] = field(default_factory=lambda: _real_memory_fallback_root)
+    probe_fn: Callable[[str | Path], WriteAccessProbe] = field(default_factory=lambda: _real_probe_write_access)
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +277,32 @@ def _write_failed_error(agent: str, write_dir: Path, exc: OSError) -> str:
     )
 
 
+def _index_written(
+    d: RememberDeps,
+    document_root: Path,
+    target: Path,
+    content_hash: str,
+    scan_root: Path | None,
+) -> bool:
+    """Run the immediate index; register the fallback scan root when set (PLA-296).
+
+    ``scan_root`` is non-None ONLY on the read-only-overlay fallback path, so
+    the common path calls ``index_fn`` with the four positional args a stock
+    four-arg test double expects; the fallback path adds the ``extra_scan_root``
+    keyword so the data-dir write is indexed even though it sits outside the
+    document root. Indexing failures are swallowed to ``False`` — a
+    saved-but-unindexed memory is queued for the next embed rather than lost.
+    """
+    db_path = d.db_path_fn()
+    try:
+        if scan_root is not None:
+            return bool(d.index_fn(db_path, document_root, target, content_hash, extra_scan_root=scan_root))
+        return bool(d.index_fn(db_path, document_root, target, content_hash))
+    except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+        logger.warning("remember: immediate indexing failed — %s", exc)
+        return False
+
+
 def remember(
     agent: str,
     content: str,
@@ -331,11 +344,25 @@ def remember(
     classified_as = _classify_advisory(content, agent, config, d)
 
     document_root = d.document_root_fn()
-    write_dir = _resolve_write_dir(agent, config, document_root)
+    preferred_dir = _resolve_write_dir(agent, config, document_root)
 
-    in_root_error = _in_root_error(agent, write_dir, document_root)
+    in_root_error = _in_root_error(agent, preferred_dir, document_root)
     if in_root_error:
         return _failure(agent, kind, in_root_error)
+
+    # PLA-296 — prefer the ADR-017 04-Agent-Knowledge overlay, but when it is
+    # read-only for our uid fall back to the writable data dir so the memory is
+    # never lost on a stock deploy. ``fallback_root / agent`` keeps per-agent
+    # isolation on the fallback surface (F44/F80).
+    fallback_root = d.memory_fallback_root_fn()
+    resolved = resolve_writable_memory_dir(
+        preferred_dir,
+        fallback_root / agent,
+        label=f"agent {agent!r}",
+        fallback_scan_root=fallback_root,
+        probe_fn=d.probe_fn,
+    )
+    write_dir = resolved.write_dir
 
     now = d.now_fn()
     target = _build_target_path(write_dir, now.date().isoformat(), content, kind)
@@ -350,12 +377,8 @@ def remember(
 
     from kairix.knowledge.reflib.dedup import hash_content
 
-    indexed = False
+    indexed = _index_written(d, document_root, target, hash_content(body), resolved.scan_root)
     detail = ""
-    try:
-        indexed = d.index_fn(d.db_path_fn(), document_root, target, hash_content(body))
-    except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-        logger.warning("remember: immediate indexing failed — %s", exc)
     if not indexed:
         detail = "memory saved but not yet searchable. next: run kairix embed (or wait for the worker tick)."
 

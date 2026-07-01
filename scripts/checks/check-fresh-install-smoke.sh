@@ -372,4 +372,42 @@ if ! echo "$SEARCH_OUT" | grep -q "$SAMPLE_DOC"; then
 fi
 echo "stage 4 bm25-search: OK (${SAMPLE_DOC} found)"
 
+# ── stage 5: agent memory-write path (PLA-296/298) ───────────────────────────
+# The standard compose mounts the document root read-only and 04-Agent-Knowledge
+# as the one writable submount. A memory write must PERSIST (preferred overlay
+# when writable, data-dir fallback when read-only) and be BM25-searchable
+# immediately — the write path a stock deploy relies on, proven end to end.
+MEMORY_PROBE="wombat-beacon-cadence-memory"
+MEMORY_OUT=$(run_bounded 120 docker compose --project-name "$COMPOSE_PROJECT" \
+    exec -T kairix kairix remember builder "decision: adopt the ${MEMORY_PROBE} rollout" --kind decision --json 2>&1 || true)
+if ! echo "$MEMORY_OUT" | grep -q "$MEMORY_PROBE"; then
+    echo "remember output:"
+    echo "$MEMORY_OUT" | tail -20
+    fail_stage "memory-write" \
+        "kairix remember did not persist a memory on the stock compose (read-only document root + writable 04-Agent-Knowledge submount) — an agent cannot save what it learned. PLA-296 should fall back to the writable data dir when the overlay is read-only." \
+        "reproduce: docker compose exec kairix kairix remember builder 'decision: test' --kind decision --json"
+fi
+MEMORY_SEARCH=$(run_bounded 120 docker compose --project-name "$COMPOSE_PROJECT" \
+    exec -T kairix kairix search "$MEMORY_PROBE" --no-entity-card --json 2>&1 || true)
+if ! echo "$MEMORY_SEARCH" | grep -q "$MEMORY_PROBE"; then
+    echo "memory search output:"
+    echo "$MEMORY_SEARCH" | tail -20
+    fail_stage "memory-write" \
+        "kairix search could not find the memory just written by kairix remember — the memory-write path is not indexed/searchable on a stock deploy." \
+        "reproduce: docker compose exec kairix kairix remember builder 'decision: test ${MEMORY_PROBE}' --kind decision; docker compose exec kairix kairix search '${MEMORY_PROBE}' --json"
+fi
+# The honest per-agent writability probe (PLA-298) must be wired into onboard
+# check. The human render lists every check by name (pass or fail); `--json`
+# lists only failures, so we grep the human output for the probe's presence.
+ONBOARD_OUT=$(run_bounded 120 docker compose --project-name "$COMPOSE_PROJECT" \
+    exec -T kairix kairix onboard check 2>&1 || true)
+if ! echo "$ONBOARD_OUT" | grep -q "agent_memory_writable"; then
+    echo "onboard check output:"
+    echo "$ONBOARD_OUT" | tail -30
+    fail_stage "memory-write" \
+        "kairix onboard check does not surface the agent_memory_writable probe — the honest writability leg (PLA-298) is not wired into the check set." \
+        "reproduce: docker compose exec kairix kairix onboard check"
+fi
+echo "stage 5 memory-write: OK (memory persisted + searchable + writability probe wired)"
+
 echo "=== F81 fresh-install smoke: ALL STAGES PASSED ==="

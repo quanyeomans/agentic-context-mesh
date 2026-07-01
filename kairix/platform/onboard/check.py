@@ -62,6 +62,7 @@ _CHECK_SHAREPOINT_CREDENTIALS_LOADED = (
 )
 _CHECK_MAINTENANCE_LOOP_TICKING = "maintenance_loop_ticking"
 _CHECK_EXTRACTOR_LIBRARIES_IMPORTABLE = "extractor_libraries_importable"
+_CHECK_AGENT_MEMORY_WRITABLE = "agent_memory_writable"
 
 
 @dataclass
@@ -285,6 +286,13 @@ CANONICAL_REMEDIATIONS: dict[str, str] = {
         "next: rebuild the Docker image with the extras in the Dockerfile install "
         "line, then redeploy. run: docker exec app-kairix-1 python3 -c "
         "'import markitdown.converters; print(\"ok\")' to verify."
+    ),
+    _CHECK_AGENT_MEMORY_WRITABLE: (
+        "fix: make the 04-Agent-Knowledge overlay writable by the kairix container user — "
+        "on the standard compose the document root mounts read-only and 04-Agent-Knowledge is "
+        "the one writable submount kairix writes agent memory to. next: re-run "
+        "`kairix onboard check agent_memory_writable` after fixing the mount/ownership. "
+        "run: mkdir -p documents/04-Agent-Knowledge && sudo chown -R 995:985 documents/04-Agent-Knowledge."
     ),
 }
 
@@ -1997,6 +2005,191 @@ def check_extractor_libraries_importable() -> CheckResult:
     )
 
 
+# ---------------------------------------------------------------------------
+# PLA-298 — honest per-agent memory-writability probe
+# ---------------------------------------------------------------------------
+# The old onboard check passed 18/18 on a box where the 04-Agent-Knowledge
+# overlay was read-only for the agent's uid, because it never probed
+# writability — memory_write / ingest_chat then died with EACCES at runtime.
+# This leg does a real write → read → cleanup at each configured agent's
+# resolved memory root (the ADR-017 overlay, the same destination the PLA-296
+# resolver PREFERS), as the same uid the MCP server writes as, and returns a
+# hard FAIL on EACCES/EROFS. PLA-296's runtime fallback keeps the agent
+# unblocked; this check still tells the operator the box is misconfigured.
+
+
+def _default_agent_memory_config() -> dict[str, Any] | None:
+    """Production seam — the parsed top-level kairix.config.yaml (agents block)."""
+    from kairix.paths import load_top_level_config
+
+    return load_top_level_config()
+
+
+def _default_agent_memory_document_root() -> Path:
+    """Production seam — the resolved document root the overlay lives under."""
+    from kairix.paths import document_root
+
+    return document_root()
+
+
+def _nearest_existing_dir(path: Path) -> Path:
+    """Walk up from ``path`` to the first existing directory (its own or an ancestor)."""
+    p = path
+    while not p.exists() and p != p.parent:
+        p = p.parent
+    return p
+
+
+def _default_agent_memory_probe(path: Path) -> Any:
+    """Production seam — probe the nearest existing ancestor's writability.
+
+    The live write (``remember`` / ``ingest_chat``) does ``mkdir(parents=True) +
+    write_text`` under the agent's memory root, so "can I create + write here?"
+    is faithfully answered by probing the deepest EXISTING ancestor. Because
+    that ancestor already exists, ``probe_write_access``'s create-on-demand is a
+    no-op there — the check leaves NO lasting directory behind, a read-only
+    overlay still surfaces EACCES/EROFS from the existing mount, and a fresh
+    per-agent dir isn't false-failed as ENOENT.
+    """
+    from kairix.paths import probe_write_access
+
+    return probe_write_access(_nearest_existing_dir(path))
+
+
+@dataclass
+class AgentMemoryWritableCheckDeps:
+    """Injectable dependencies for :func:`check_agent_memory_writable` (PLA-298).
+
+    F6-clean: each field has a ``default_factory`` wiring the production
+    boundary. Tests construct
+    ``AgentMemoryWritableCheckDeps(document_root_fn=lambda: tmp, config_loader=...)``
+    to point the probe at a ``tmp_path`` memory root — so the check runs a REAL
+    filesystem write attempt (F71 count-equals-ground-truth) without a fake
+    probe and without touching the live document tree.
+    """
+
+    config_loader: Callable[[], dict[str, Any] | None] = field(default_factory=lambda: _default_agent_memory_config)
+    document_root_fn: Callable[[], Path] = field(default_factory=lambda: _default_agent_memory_document_root)
+    probe_fn: Callable[[Path], Any] = field(default_factory=lambda: _default_agent_memory_probe)
+
+
+def _resolve_agent_memory_roots(config: dict[str, Any] | None, document_root: Path) -> list[tuple[str, Path]]:
+    """Return ``(agent_label, memory_root)`` for every configured agent.
+
+    Reuses :func:`kairix.core.agents.scope.load_agent_scopes` so the probe hits
+    the SAME resolved memory root the runtime write path uses. When no agents
+    are explicitly configured, probes the shared ``04-Agent-Knowledge`` writable
+    submount (the surface every built-in agent writes under) so a fresh install
+    still gets a truthful writability signal.
+    """
+    from kairix.core.agents.scope import load_agent_scopes
+
+    try:
+        scopes = load_agent_scopes(config)
+    except (ValueError, TypeError):
+        scopes = {}
+    roots: list[tuple[str, Path]] = []
+    for name, scope in scopes.items():
+        try:
+            candidate = Path(scope.writable_path())
+        except ValueError:
+            continue
+        if not candidate.is_absolute():
+            candidate = document_root / candidate
+        roots.append((name, candidate))
+    if not roots:
+        roots.append(("(default agent surface)", document_root / "04-Agent-Knowledge"))
+    return roots
+
+
+def _probe_agent_memory_roots(
+    roots: list[tuple[str, Path]],
+    probe_fn: Callable[[Path], Any],
+) -> tuple[list[str], list[tuple[str, Path, Any]]]:
+    """Probe each memory root; return per-agent verdict strings + the failures.
+
+    Extracted from :func:`check_agent_memory_writable` to keep it under the F16
+    cognitive-complexity ceiling. Each verdict reads ``<label>@<root>=ok`` or
+    ``=FAIL[<errno>]`` so the per-agent result surfaces in ``onboard check --json``.
+    """
+    verdicts: list[str] = []
+    failures: list[tuple[str, Path, Any]] = []
+    for label, root in roots:
+        # ``probe_fn`` (the WriteAccessProbe helper) reports failures structurally
+        # and never raises — so no OSError guard is needed here.
+        probe = probe_fn(root)
+        writable = bool(probe.writable)
+        errno_name = str(probe.errno_name)
+        verdict = "ok" if writable else f"FAIL[{errno_name or 'error'}]"
+        verdicts.append(f"{label}@{root}={verdict}")
+        if not writable:
+            failures.append((label, root, probe))
+    return verdicts, failures
+
+
+def _agent_memory_fail_result(
+    failures: list[tuple[str, Path, Any]],
+    total_roots: int,
+    per_agent: str,
+) -> CheckResult:
+    """Build the hard-FAIL CheckResult reusing ``write_access_fix_hint`` (PLA-298)."""
+    from kairix.paths import write_access_fix_hint
+
+    first_errno = str(getattr(failures[0][2], "errno_name", "") or "")
+    return CheckResult(
+        name=_CHECK_AGENT_MEMORY_WRITABLE,
+        ok=False,
+        detail=f"{len(failures)}/{total_roots} agent memory root(s) not writable — {per_agent}",
+        fix=(
+            f"{write_access_fix_hint(first_errno)}. "
+            "next: re-run `kairix onboard check agent_memory_writable` after fixing the mount/ownership. "
+            "run: mkdir -p documents/04-Agent-Knowledge && sudo chown -R 995:985 documents/04-Agent-Knowledge."
+        ),
+    )
+
+
+def check_agent_memory_writable(deps: AgentMemoryWritableCheckDeps | None = None) -> CheckResult:
+    """Each configured agent's memory root is actually writable (PLA-298).
+
+    Probes a real write → read → cleanup at every configured agent's resolved
+    memory root (the ADR-017 ``04-Agent-Knowledge`` overlay), as the same uid
+    the MCP server writes as. Returns a hard FAIL — not a WARN — on any
+    non-writable root (EACCES/EROFS): a read-only overlay means agent memory
+    lands in the hidden data-dir fallback (PLA-296) instead of the
+    operator-visible knowledge tree, which is a misconfiguration to fix. This
+    is the leg that stops the false-green where onboard check never probed
+    writability.
+
+    ``deps`` is the public DI seam (config loader / document root / probe).
+    """
+    d = deps if deps is not None else AgentMemoryWritableCheckDeps()
+    try:
+        config = d.config_loader()
+        document_root = Path(d.document_root_fn())
+    except Exception as exc:
+        return CheckResult(
+            name=_CHECK_AGENT_MEMORY_WRITABLE,
+            ok=False,
+            detail=f"could not resolve agent memory roots: {exc}",
+            fix=(
+                "fix: ensure KAIRIX_DOCUMENT_ROOT resolves and kairix.config.yaml is readable. "
+                "next: run `kairix onboard check document_root_configured`. "
+                "run: kairix onboard check."
+            ),
+        )
+
+    roots = _resolve_agent_memory_roots(config, document_root)
+    verdicts, failures = _probe_agent_memory_roots(roots, d.probe_fn)
+    per_agent = "; ".join(verdicts)
+    if failures:
+        return _agent_memory_fail_result(failures, len(roots), per_agent)
+    return CheckResult(
+        name=_CHECK_AGENT_MEMORY_WRITABLE,
+        ok=True,
+        detail=f"{len(roots)} agent memory root(s) writable — {per_agent}",
+    )
+
+
 ALL_CHECKS: list[Callable[..., CheckResult]] = [
     check_kairix_on_path,
     check_wrapper_installed,
@@ -2016,6 +2209,7 @@ ALL_CHECKS: list[Callable[..., CheckResult]] = [
     check_sharepoint_credentials_loaded,
     check_maintenance_loop_ticking,
     check_extractor_libraries_importable,
+    check_agent_memory_writable,
 ]
 
 

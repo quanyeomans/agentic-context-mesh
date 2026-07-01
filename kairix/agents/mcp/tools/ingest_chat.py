@@ -104,6 +104,7 @@ def tool_ingest_chat(
     fact_extractor: FactExtractor | None = None,
     window_turns: int = 5,
     no_extract: bool = False,
+    memory_fallback_root: Path | None = None,
 ) -> dict[str, Any]:
     """Ingest a JSONL chat transcript supplied inline by an agent.
 
@@ -131,6 +132,10 @@ def tool_ingest_chat(
         use case default.
     no_extract:
         Skip fact extraction entirely (chunks-only mode).
+    memory_fallback_root:
+        PLA-296 test seam — the writable data-dir base used when the
+        ``04-Agent-Knowledge`` overlay is read-only. Production leaves it
+        ``None`` (resolves the real data dir); tests pin it under ``tmp_path``.
 
     Returns
     -------
@@ -204,6 +209,7 @@ def tool_ingest_chat(
             namespace=namespace,
             window_turns=window_turns,
             no_extract=no_extract,
+            memory_fallback_root=memory_fallback_root,
         )
     except OSError as exc:
         # Conversations write to {document_root}/04-Agent-Knowledge/conversations

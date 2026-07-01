@@ -24,3 +24,10 @@ Feature: MCP agent writes a memory to the knowledge store
     Then the memory-write response reports no error
     And the memory-write response names a saved file under agent-alpha's memory area
     And the memory-write response says the memory is saved and queued for indexing
+
+  Scenario: A memory falls back to a writable area when the overlay is read-only
+    Given agent-alpha is registered in the team's agent configuration
+    And the agent-knowledge overlay is read-only
+    When the agent writes the memory "note: keep working through the read-only mount" for agent-alpha
+    Then the memory-write response reports no error
+    And the memory is saved in the writable fallback area

@@ -54,6 +54,11 @@ from kairix.paths import (
     agent_conversations_dir,
     confine_to_roots,
 )
+from kairix.use_cases.agent_memory_sink import (
+    agent_memory_fallback_root,
+    index_agent_file,
+    resolve_writable_memory_dir,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +319,7 @@ def ingest_chat(
     window_turns: int = 5,
     no_extract: bool = False,
     session_metadata: dict[str, Any] | None = None,
+    memory_fallback_root: Path | None = None,
 ) -> IngestChatResult:
     """Ingest a JSONL conversation transcript into the document store + fact store.
 
@@ -362,6 +368,11 @@ def ingest_chat(
         Honours an alternate ingest-side lookup: when ``None``, the
         function looks for a sidecar ``<jsonl_path>.metadata.json`` and
         loads it if present.
+    memory_fallback_root:
+        PLA-296 test seam — the writable data-dir base used when the
+        ``04-Agent-Knowledge`` overlay is read-only. Production callers leave
+        it ``None`` (resolves :func:`kairix.paths.agent_memory_fallback_root`);
+        tests pin it under ``tmp_path`` so the fallback stays hermetic.
     """
     # S8707 confinement: the transcript path is an agent/operator-supplied CLI
     # argument with no upstream validation. Canonicalise + confine it to the
@@ -373,7 +384,18 @@ def ingest_chat(
     grouped = _group_by_conversation(turns)
     resolved_metadata = session_metadata if session_metadata is not None else _read_sidecar_metadata(jsonl_path)
 
-    conversations_dir = agent_conversations_dir(paths.document_root)
+    # PLA-296 — prefer the ADR-017 writable 04-Agent-Knowledge/conversations
+    # submount, but fall back to the writable data dir when the overlay is
+    # read-only so the ingest is not lost on a stock deploy. The fallback dir is
+    # namespaced so a fallback write keeps engagement isolation (F44/F80).
+    fallback_root = memory_fallback_root if memory_fallback_root is not None else agent_memory_fallback_root()
+    resolved_dir = resolve_writable_memory_dir(
+        agent_conversations_dir(paths.document_root),
+        fallback_root / namespace / "conversations",
+        label=f"namespace {namespace!r}",
+        fallback_scan_root=fallback_root,
+    )
+    conversations_dir = resolved_dir.write_dir
     conversations_dir.mkdir(parents=True, exist_ok=True)
     ingested_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -384,14 +406,17 @@ def ingest_chat(
     )
 
     totals = _ExtractionTotals()
+    written_targets: list[Path] = []
 
     for cid, conv_turns in grouped.items():
-        _write_conversation_markdown(
-            conversations_dir=conversations_dir,
-            conversation_id=cid,
-            turns=conv_turns,
-            ingested_at=ingested_at,
-            session_metadata=resolved_metadata,
+        written_targets.append(
+            _write_conversation_markdown(
+                conversations_dir=conversations_dir,
+                conversation_id=cid,
+                turns=conv_turns,
+                ingested_at=ingested_at,
+                session_metadata=resolved_metadata,
+            )
         )
         if no_extract:
             continue
@@ -411,6 +436,14 @@ def ingest_chat(
             consolidation=resolved_consolidation,
             totals=totals,
         )
+
+    # PLA-296 — only the fallback path indexes here. On the preferred overlay
+    # the worker full-scan already covers {document_root}/04-Agent-Knowledge/
+    # conversations, so that path's behaviour is unchanged; a fallback
+    # conversation lives OUTSIDE the document root (which the worker never
+    # walks), so we index it now under the fallback scan collection.
+    if resolved_dir.scan_root is not None:
+        _index_fallback_conversations(written_targets, paths, resolved_dir.scan_root)
 
     return IngestChatResult(
         turns_ingested=len(turns),
@@ -437,13 +470,43 @@ def _write_conversation_markdown(
     turns: Sequence[dict[str, Any]],
     ingested_at: str,
     session_metadata: dict[str, Any] | None,
-) -> None:
-    """Render + write one conversation's markdown file, idempotent on body hash."""
+) -> Path:
+    """Render + write one conversation's markdown file, idempotent on body hash.
+
+    Returns the target path (written or already-present) so the caller can
+    incrementally index it when a read-only-overlay fallback happened (PLA-296).
+    """
     markdown = _render_markdown(conversation_id, turns, ingested_at, session_metadata)
     body = _strip_frontmatter(markdown)
     target = conversations_dir / f"{conversation_id}.md"
     if not _existing_body_matches(target, body):
         target.write_text(markdown, encoding="utf-8")
+    return target
+
+
+def _index_fallback_conversations(targets: list[Path], paths: KairixPaths, scan_root: Path) -> None:
+    """Incrementally index fallback conversations so they stay searchable (PLA-296).
+
+    Runs ONLY on the fallback path — a fallback conversation lives outside the
+    document root the worker full-scan walks, so without this it would be saved
+    but never found. Each file is indexed under the fallback scan collection
+    rooted at ``scan_root``; an index failure is logged, not raised, so one bad
+    file never fails the whole ingest.
+    """
+    from kairix.knowledge.reflib.dedup import hash_content
+
+    for target in targets:
+        try:
+            content = target.read_text(encoding="utf-8")
+            index_agent_file(
+                paths.db_path,
+                paths.document_root,
+                target,
+                hash_content(content),
+                extra_scan_root=scan_root,
+            )
+        except (OSError, ValueError, RuntimeError) as exc:
+            logger.warning("ingest-chat: fallback index of %s failed — %s", target, exc)
 
 
 def _extract_facts_for_conversation(

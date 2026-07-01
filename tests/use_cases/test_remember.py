@@ -23,6 +23,7 @@ import io
 import json
 import os
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -57,15 +58,30 @@ class _RecordingClassifier:
 
 
 class _RecordingIndexer:
-    """Index seam stub recording its args and returning a scripted outcome."""
+    """Index seam stub recording its args and returning a scripted outcome.
+
+    Accepts the optional ``extra_scan_root`` keyword the PLA-296 fallback path
+    passes so a read-only-overlay write is indexed under the data-dir scan
+    collection; ``scan_roots`` records what each call was handed.
+    """
 
     def __init__(self, result: bool = True, raises: BaseException | None = None) -> None:
         self.result = result
         self.raises = raises
         self.calls: list[tuple[Path, Path, Path, str]] = []
+        self.scan_roots: list[Path | None] = []
 
-    def __call__(self, db_path: Path, document_root: Path, target: Path, content_hash: str) -> bool:
+    def __call__(
+        self,
+        db_path: Path,
+        document_root: Path,
+        target: Path,
+        content_hash: str,
+        *,
+        extra_scan_root: Path | None = None,
+    ) -> bool:
         self.calls.append((db_path, document_root, target, content_hash))
+        self.scan_roots.append(extra_scan_root)
         if self.raises is not None:
             raise self.raises
         return self.result
@@ -82,14 +98,31 @@ def _scope_config(name: str, surface_path: str) -> dict[str, object]:
     }
 
 
+@dataclass(frozen=True)
+class _StubProbe:
+    """Minimal WriteAccessProbe duck-type for driving the PLA-296 resolver branches."""
+
+    writable: bool
+    errno_name: str = ""
+    reason: str = ""
+    path: Path = Path("/stub")
+
+
 def _deps(
     tmp_path: Path,
     *,
     config: dict[str, object] | None = None,
     classify: Any | None = None,
     index: Any | None = None,
+    probe: Any | None = None,
+    memory_fallback_root: Path | None = None,
 ) -> RememberDeps:
     cfg = config if config is not None else {}
+    overrides: dict[str, Any] = {}
+    if probe is not None:
+        overrides["probe_fn"] = probe
+    if memory_fallback_root is not None:
+        overrides["memory_fallback_root_fn"] = lambda: memory_fallback_root
     return RememberDeps(
         config_fn=lambda: cfg,
         document_root_fn=lambda: tmp_path / "vault",
@@ -97,6 +130,7 @@ def _deps(
         now_fn=lambda: _FIXED_NOW,
         classify_fn=classify if classify is not None else _RecordingClassifier(),
         index_fn=index if index is not None else _RecordingIndexer(),
+        **overrides,
     )
 
 
@@ -327,7 +361,15 @@ def test_write_failed_names_path_permission_and_fix(tmp_path: Path) -> None:
     write_dir.mkdir(parents=True)
     write_dir.chmod(0o500)  # r-x: the agent's memory dir exists but is not writable
     try:
-        result = remember("builder", "rule: never skip the gate", deps=_deps(tmp_path))
+        # Inject a probe that reports the surface writable so the PLA-296 data-dir
+        # fallback does NOT engage; the real write then hits the 0o500 wall and
+        # exercises the residual WriteFailed envelope (the probe-was-optimistic /
+        # TOCTOU case).
+        result = remember(
+            "builder",
+            "rule: never skip the gate",
+            deps=_deps(tmp_path, probe=lambda p: _StubProbe(writable=True, path=Path(p))),
+        )
         if result.error == "":
             pytest.skip("filesystem ignores mode bits (write succeeded despite 0o500)")
         assert result.error.startswith("WriteFailed:")
@@ -548,3 +590,58 @@ def test_cli_without_flags_or_deps_rejects_empty_content_before_any_write(tmp_pa
 
     assert code == 1
     assert "EmptyContent" in stderr
+
+
+# ---------------------------------------------------------------------------
+# PLA-296 — read-only-overlay fallback (unit)
+# ---------------------------------------------------------------------------
+
+
+def test_readonly_overlay_falls_back_and_indexes_with_scan_root(tmp_path: Path) -> None:
+    """A read-only preferred overlay makes ``remember`` fall back to the writable
+    data dir; the write lands there and the index step is handed the fallback
+    scan root so the memory stays searchable (PLA-296).
+
+    Sabotage (executed): dropped ``resolve_writable_memory_dir`` from ``remember``
+    (write straight to the preferred dir) → the file lands under the read-only
+    surface and the ``fallback`` path assertion fails; restored.
+    """
+    fallback_root = tmp_path / "data" / "agent-memory"
+    indexer = _RecordingIndexer(result=True)
+    deps = _deps(
+        tmp_path,
+        config=_scope_config("agent-alpha", "04-Agent-Knowledge/agent-alpha"),
+        index=indexer,
+        probe=lambda p: _StubProbe(writable=False, errno_name="EROFS", path=Path(p)),
+        memory_fallback_root=fallback_root,
+    )
+    result = remember("agent-alpha", "decision: fall back cleanly", kind="decision", deps=deps)
+
+    assert result.error == ""
+    written = Path(result.path)
+    assert written.parent == fallback_root / "agent-alpha", f"expected fallback dir, got {written.parent}"
+    assert written.exists()
+    # The index step was handed the fallback scan root so BM25 can reach it.
+    assert indexer.scan_roots == [fallback_root]
+    assert result.indexed is True
+
+
+def test_writable_overlay_indexes_without_scan_root(tmp_path: Path) -> None:
+    """When the overlay is writable the memory lands in the preferred surface and
+    the index step is called with NO fallback scan root — the common path is
+    byte-for-byte unchanged (PLA-296).
+
+    Sabotage: always pass the fallback scan root → ``scan_roots == [None]`` fails.
+    """
+    indexer = _RecordingIndexer(result=True)
+    deps = _deps(
+        tmp_path,
+        config=_scope_config("agent-alpha", "04-Agent-Knowledge/agent-alpha"),
+        index=indexer,
+        probe=lambda p: _StubProbe(writable=True, path=Path(p)),
+    )
+    result = remember("agent-alpha", "note: ordinary write", deps=deps)
+
+    assert result.error == ""
+    assert Path(result.path).parent == tmp_path / "vault" / "04-Agent-Knowledge" / "agent-alpha"
+    assert indexer.scan_roots == [None]
