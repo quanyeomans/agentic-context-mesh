@@ -1,0 +1,85 @@
+name: verify-and-close
+
+# On-merge-to-main adoption of the org-shared, DETERMINISTIC close side of the
+# Autonomous Delivery loop — kairix is the FIRST consumer of the reusable
+# `three-cubes/tc-pipelines/.github/workflows/verify-and-close.yml@v1`
+# (Autonomous Delivery Platform initiative · SP-C-3, decision D5). It replaces a
+# human/agent manually verifying a merge and hand-marking the linked Linear
+# issue Done.
+#
+# On every push to `main` (a merged PR) the reusable, in order:
+#   1. Resolves the linked Linear issue id from the merged PR's branch name
+#      (org convention `<user>/<team>-<number>-<slug>`, e.g. `dan/pla-311-...`
+#      => PLA-311) or, failing that, the merged PR body. If NEITHER resolves it
+#      emits a documented SKIP and does NOT touch Linear (a false-close is worse
+#      than a skip).
+#   2. Runs the kairix post-merge verification below (`verify-command`) with the
+#      merged commit checked out — a lean install+import+CLI smoke that proves
+#      the merged tree is installable and the `kairix` entrypoint resolves. Its
+#      exit code is the interim gate.
+#   3. On PASS: transitions the issue to Done and comments
+#      `verification-confirmed on <sha>`.
+#   4. On FAIL: moves the issue to the needs-fix state, adds `needs-redispatch`,
+#      comments the failing run link, then surfaces red on main so the backlog
+#      dispatcher re-picks it (never silently dropped).
+#
+# ── ONE-TIME SETUP REQUIRED (human / infra) ─────────────────────────────────
+# The reusable authenticates to the Linear GraphQL API with a REQUIRED secret,
+# `LINEAR_API_KEY` (a Linear personal/workspace API key with write access to the
+# target team's issues). It is NOT yet present on this repo. Until an operator
+# adds it, this workflow is CORRECT-BUT-INERT: the verify smoke still runs, but
+# the Linear close/needs-fix step is a no-op (the issue-resolution step SKIPs
+# rather than false-closing). To activate, source the key from Key Vault and:
+#     gh secret set LINEAR_API_KEY --repo three-cubes/kairix --body "<key>"
+# (or add it org-level scoped to this repo). See the reusable's contract at
+# tc-pipelines governance/loop/verify-and-close.md and the local consumer guide
+# docs/development/how-to-consume-a-shared-reusable-workflow.md.
+#
+# Injection-safety: the reusable env-binds every caller input and every
+# github.event.* field before it reaches a shell body, and runs `verify-command`
+# via a deliberate `bash -c` WITHOUT `LINEAR_API_KEY` in its environment. The
+# `uses:` ref is pinned to the immutable-per-release `@v1` shared tag.
+
+on:
+  push:
+    branches: [main]
+
+# The reusable declares `contents: read` + `pull-requests: read`; the effective
+# grant is the intersection with this caller, so we grant at least those. No
+# write scope is needed — the Linear transition goes over the API key, not the
+# GITHUB_TOKEN.
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  verify-and-close:
+    name: verify-and-close
+    uses: three-cubes/tc-pipelines/.github/workflows/verify-and-close.yml@v1
+    with:
+      # fetch-depth: 0 so setuptools-scm can derive a real version from tags on
+      # the source install below (the reusable defaults to a shallow depth-1
+      # checkout; kairix's build falls back to 0.0.0 without tags).
+      fetch-depth: 0
+      # Lean post-merge smoke: build a throwaway venv (ubuntu images mark the
+      # system interpreter externally-managed / PEP 668), install the MERGED
+      # tree, then assert the package imports and the `kairix` CLI entrypoint
+      # resolves. This exercises the merged change end-to-end at the
+      # packaging + import + CLI layer with no provider secrets — the same shape
+      # release-smoke's wheel-smoke uses, run against source instead of PyPI.
+      # `set -euo pipefail` because the reusable runs this via a bare `bash -c`.
+      verify-command: |
+        set -euo pipefail
+        python3 -m venv .verify-venv
+        . .verify-venv/bin/activate
+        python -m pip install --upgrade pip
+        pip install .
+        python -c "import kairix; print(f'post-merge smoke: import OK, kairix {kairix.__version__}')"
+        kairix --version
+        kairix --help >/dev/null
+        echo "post-merge smoke PASS: merged tree installs, imports, and the kairix CLI entrypoint resolves"
+    secrets:
+      # Passed explicitly (never `inherit`) per the shared-reusable consumer
+      # rule. Resolves to empty until the one-time setup above lands, which is
+      # why the close step is inert-not-broken in the meantime.
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
