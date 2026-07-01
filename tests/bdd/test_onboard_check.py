@@ -21,12 +21,18 @@ def test_missing_credentials():
 
 
 @pytest.mark.bdd
-@scenario(FEATURE, "The agent memory writability probe fails on a read-only overlay")
-def test_agent_memory_writable_readonly_fails():
+@scenario(FEATURE, "The agent memory writability probe passes on a writable overlay")
+def test_agent_memory_writable_writable_passes():
     """Body populated by @scenario from the .feature file."""
 
 
 @pytest.mark.bdd
-@scenario(FEATURE, "The agent memory writability probe passes on a writable overlay")
-def test_agent_memory_writable_writable_passes():
+@scenario(FEATURE, "A read-only overlay with a writable fallback passes the deploy gate")
+def test_agent_memory_writable_readonly_fallback_passes():
+    """Body populated by @scenario from the .feature file."""
+
+
+@pytest.mark.bdd
+@scenario(FEATURE, "An agent with no writable destination anywhere fails the deploy gate")
+def test_agent_memory_writable_nowhere_writable_fails():
     """Body populated by @scenario from the .feature file."""

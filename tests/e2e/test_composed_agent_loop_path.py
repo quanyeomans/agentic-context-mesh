@@ -231,27 +231,31 @@ def test_readonly_deploy_overlay_is_genuinely_nonwritable(readonly_deploy: _Depl
 
 @pytest.mark.e2e
 def test_onboard_probe_reports_true_writability_state(tmp_path: Path, _ro_dirs: list[Path]) -> None:
-    """Leg 2 — ``check_agent_memory_writable`` tells the truth on a RO-root deploy.
+    """Leg 2 — ``check_agent_memory_writable`` reflects the REAL write capability.
 
-    Green when the configured agent's memory surface is a genuinely writable
-    submount (the correctly-configured standard deploy where the document root
-    is read-only but the agent-knowledge mount is writable); NOT-green when the
-    surface is genuinely dead — the probe never false-greens a read-only
-    surface just because a runtime fallback exists.
+    The probe resolves each agent's destination through the SAME resolver the
+    runtime write path uses (``resolve_writable_memory_dir``): green when the
+    agent can persist *somewhere* writable, hard-fail only when it can persist
+    NOWHERE. Three cases on a read-only document root:
+      - a writable agent-knowledge submount → PASS;
+      - a read-only overlay WHOSE data-dir fallback IS writable → PASS
+        (``ok(fallback)``) — the hardened / read-only-root deploy case that must
+        NOT block the deploy gate;
+      - overlay AND fallback both read-only (nowhere writable) → hard FAIL, no
+        false-green.
 
-    Both verdicts run the REAL ``probe_write_access`` (the check's default
-    ``probe_fn``); only the config + document root are injected.
+    Runs the REAL ``probe_write_access``; only config / document root / fallback
+    root are injected.
 
     Sabotage-proof (executed): force ``_probe_agent_memory_roots`` to treat
-    every probe as writable → the dead-surface assertion (``ok is False``)
+    every probe as writable → the nowhere-writable assertion (``ok is False``)
     fails; restored.
     """
     document_root = tmp_path / "documents"
     document_root.mkdir()
     _make_readonly_or_skip(document_root, _ro_dirs, reason="read-only document root")
 
-    # Correctly-configured deploy: the agent's memory surface is a separate
-    # writable mount, even though the document root above is read-only.
+    # (a) Correctly-configured deploy: a separate writable agent-knowledge mount.
     writable_mount = tmp_path / "agent-knowledge-mount" / "agent-alpha"
     writable_mount.mkdir(parents=True)
     green_config = {"agents": {"agent-alpha": {"surfaces": [{"path": str(writable_mount), "label": "memory"}]}}}
@@ -263,18 +267,42 @@ def test_onboard_probe_reports_true_writability_state(tmp_path: Path, _ro_dirs: 
     )
     assert green.ok is True, f"writable submount must probe green, got: {green.detail}"
 
-    # Misconfigured deploy: the agent's memory surface is itself read-only.
+    # (b) Hardened read-only-root deploy: overlay is read-only, but the writable
+    # data-dir fallback carries agent memory — the deploy-gate case that MUST
+    # stay green (the probe reflects the resolved destination, not the overlay).
+    ro_overlay = tmp_path / "ro-overlay" / "agent-alpha"
+    ro_overlay.mkdir(parents=True)
+    _make_readonly_or_skip(ro_overlay, _ro_dirs, reason="read-only agent overlay")
+    writable_fallback = tmp_path / "data" / "agent-memory"
+    writable_fallback.mkdir(parents=True)
+    fb_config = {"agents": {"agent-alpha": {"surfaces": [{"path": str(ro_overlay), "label": "memory"}]}}}
+    fell_back = check_agent_memory_writable(
+        AgentMemoryWritableCheckDeps(
+            config_loader=lambda: fb_config,
+            document_root_fn=lambda: document_root,
+            memory_fallback_root_fn=lambda: writable_fallback,
+        )
+    )
+    assert fell_back.ok is True, f"read-only overlay with a writable fallback must PASS: {fell_back.detail}"
+    assert "ok(fallback)" in fell_back.detail, f"fallback verdict must be surfaced, got: {fell_back.detail}"
+
+    # (c) Genuinely dead: overlay AND data-dir fallback both read-only → the
+    # agent can persist nowhere → hard FAIL, no false-green.
     dead_mount = tmp_path / "dead-mount" / "agent-alpha"
     dead_mount.mkdir(parents=True)
     _make_readonly_or_skip(dead_mount, _ro_dirs, reason="read-only agent surface")
+    dead_fallback = tmp_path / "dead-data" / "agent-memory"
+    dead_fallback.mkdir(parents=True)
+    _make_readonly_or_skip(dead_fallback, _ro_dirs, reason="read-only fallback root")
     dead_config = {"agents": {"agent-alpha": {"surfaces": [{"path": str(dead_mount), "label": "memory"}]}}}
     dead = check_agent_memory_writable(
         AgentMemoryWritableCheckDeps(
             config_loader=lambda: dead_config,
             document_root_fn=lambda: document_root,
+            memory_fallback_root_fn=lambda: dead_fallback,
         )
     )
-    assert dead.ok is False, "a genuinely read-only agent surface must NOT false-green"
+    assert dead.ok is False, "overlay AND fallback both read-only → must NOT false-green"
 
 
 # ---------------------------------------------------------------------------

@@ -288,11 +288,14 @@ CANONICAL_REMEDIATIONS: dict[str, str] = {
         "'import markitdown.converters; print(\"ok\")' to verify."
     ),
     _CHECK_AGENT_MEMORY_WRITABLE: (
-        "fix: make the 04-Agent-Knowledge overlay writable by the kairix container user — "
-        "on the standard compose the document root mounts read-only and 04-Agent-Knowledge is "
-        "the one writable submount kairix writes agent memory to. next: re-run "
-        "`kairix onboard check agent_memory_writable` after fixing the mount/ownership. "
-        "run: mkdir -p documents/04-Agent-Knowledge && sudo chown -R 995:985 documents/04-Agent-Knowledge."
+        "fix: give the kairix process at least one writable memory destination. This check "
+        "only fails when NEITHER the 04-Agent-Knowledge overlay NOR the writable data-dir "
+        "fallback can be written — on a hardened read-only-root box the read-only overlay is "
+        "expected and the data-dir fallback carries agent memory, so a failure means that "
+        "fallback is also unwritable (e.g. the disk is full or the data dir is not owned by "
+        "the kairix user). next: re-run `kairix onboard check agent_memory_writable` after "
+        "freeing space / fixing data-dir ownership. run: df -h and confirm the kairix data "
+        "dir is owned by the kairix user."
     ),
 }
 
@@ -2011,11 +2014,23 @@ def check_extractor_libraries_importable() -> CheckResult:
 # The old onboard check passed 18/18 on a box where the 04-Agent-Knowledge
 # overlay was read-only for the agent's uid, because it never probed
 # writability — memory_write / ingest_chat then died with EACCES at runtime.
-# This leg does a real write → read → cleanup at each configured agent's
-# resolved memory root (the ADR-017 overlay, the same destination the PLA-296
-# resolver PREFERS), as the same uid the MCP server writes as, and returns a
-# hard FAIL on EACCES/EROFS. PLA-296's runtime fallback keeps the agent
-# unblocked; this check still tells the operator the box is misconfigured.
+#
+# This leg resolves each configured agent's ACTUAL write destination through the
+# SAME resolver the runtime write path (remember / ingest_chat) uses —
+# resolve_writable_memory_dir — which PREFERS the ADR-017 04-Agent-Knowledge
+# overlay but FALLS BACK to a writable path under the kairix data dir when the
+# overlay is read-only for our uid (PLA-296). The verdict is whether that
+# resolved destination is writable, so the probe reflects the real write
+# capability rather than the overlay alone.
+#
+# On a hardened, read-only-root enterprise box the overlay is legitimately :ro
+# and the data-dir fallback IS the correct write location (F94 — persist through
+# kairix.paths, never a system path); agents reach memory through
+# commands/connectors, so where it is stored does not matter as long as it is
+# always writable and searchable. So a read-only overlay whose data-dir fallback
+# IS writable PASSES (surfaced as ok(fallback)) — it must NOT block the deploy
+# gate (#689). A hard FAIL is reserved for an agent that can persist NOWHERE: a
+# non-fallback error (e.g. ENOSPC disk-full) or an unwritable data dir.
 
 
 def _default_agent_memory_config() -> dict[str, Any] | None:
@@ -2030,6 +2045,18 @@ def _default_agent_memory_document_root() -> Path:
     from kairix.paths import document_root
 
     return document_root()
+
+
+def _default_agent_memory_fallback_root() -> Path:
+    """Production seam — the writable data-dir base agent memory falls back to (PLA-296).
+
+    The same :func:`kairix.paths.agent_memory_fallback_root` the runtime write
+    path (``remember`` / ``ingest_chat``) uses when the preferred overlay is
+    read-only, so the probe resolves the destination identically.
+    """
+    from kairix.paths import agent_memory_fallback_root
+
+    return agent_memory_fallback_root()
 
 
 def _nearest_existing_dir(path: Path) -> Path:
@@ -2070,17 +2097,31 @@ class AgentMemoryWritableCheckDeps:
 
     config_loader: Callable[[], dict[str, Any] | None] = field(default_factory=lambda: _default_agent_memory_config)
     document_root_fn: Callable[[], Path] = field(default_factory=lambda: _default_agent_memory_document_root)
+    memory_fallback_root_fn: Callable[[], Path] = field(default_factory=lambda: _default_agent_memory_fallback_root)
     probe_fn: Callable[[Path], Any] = field(default_factory=lambda: _default_agent_memory_probe)
 
 
-def _resolve_agent_memory_roots(config: dict[str, Any] | None, document_root: Path) -> list[tuple[str, Path]]:
-    """Return ``(agent_label, memory_root)`` for every configured agent.
+def _fallback_key(label: str) -> str:
+    """Filesystem-safe per-agent subdir under the data-dir fallback root.
 
-    Reuses :func:`kairix.core.agents.scope.load_agent_scopes` so the probe hits
-    the SAME resolved memory root the runtime write path uses. When no agents
-    are explicitly configured, probes the shared ``04-Agent-Knowledge`` writable
-    submount (the surface every built-in agent writes under) so a fresh install
-    still gets a truthful writability signal.
+    Mirrors the runtime write path's ``fallback_root / <agent>`` namespacing
+    (``remember`` / ``ingest_chat``) so the probe lands where a real fallback
+    write would. The synthetic ``(default agent surface)`` label collapses to
+    ``default``.
+    """
+    safe = "".join(c if (c.isalnum() or c in "._-") else "-" for c in label).strip("-")
+    return safe or "default"
+
+
+def _resolve_agent_memory_roots(config: dict[str, Any] | None, document_root: Path) -> list[tuple[str, Path]]:
+    """Return ``(agent_label, preferred_overlay_root)`` for every configured agent.
+
+    Reuses :func:`kairix.core.agents.scope.load_agent_scopes` so the PREFERRED
+    overlay matches the runtime write path's intent. The resolution to a writable
+    destination (overlay-or-data-dir-fallback) happens in
+    :func:`_probe_agent_memory_roots`. When no agents are explicitly configured,
+    returns the shared ``04-Agent-Knowledge`` writable submount (the surface every
+    built-in agent writes under) so a fresh install still gets a truthful signal.
     """
     from kairix.core.agents.scope import load_agent_scopes
 
@@ -2104,26 +2145,53 @@ def _resolve_agent_memory_roots(config: dict[str, Any] | None, document_root: Pa
 
 def _probe_agent_memory_roots(
     roots: list[tuple[str, Path]],
+    fallback_root: Path,
     probe_fn: Callable[[Path], Any],
 ) -> tuple[list[str], list[tuple[str, Path, Any]]]:
-    """Probe each memory root; return per-agent verdict strings + the failures.
+    """Resolve + probe each agent's ACTUAL memory write destination.
+
+    For every configured agent, resolve the write destination through the SAME
+    :func:`kairix.paths.resolve_writable_memory_dir` the runtime write path
+    (``remember`` / ``ingest_chat``) uses: prefer the 04-Agent-Knowledge overlay,
+    fall back to ``fallback_root / <agent>`` under the writable data dir on a
+    read-only / permission overlay. The verdict is whether that RESOLVED
+    destination is writable, so a read-only overlay whose data-dir fallback IS
+    writable reads ``<label>@<dir>=ok(fallback)`` (the correct, expected state on
+    a hardened / read-only-root deploy) rather than failing the deploy gate. A
+    hard FAIL is reserved for an agent that can persist NOWHERE — a non-fallback
+    error (e.g. ENOSPC) or an unwritable data dir.
 
     Extracted from :func:`check_agent_memory_writable` to keep it under the F16
-    cognitive-complexity ceiling. Each verdict reads ``<label>@<root>=ok`` or
-    ``=FAIL[<errno>]`` so the per-agent result surfaces in ``onboard check --json``.
+    cognitive-complexity ceiling. Returns per-agent verdict strings + the
+    genuinely-unwritable failures (for ``onboard check --json``).
     """
+    from kairix.paths import resolve_writable_memory_dir
+
+    def _probe(target: str | Path) -> Any:
+        return probe_fn(Path(target))
+
     verdicts: list[str] = []
     failures: list[tuple[str, Path, Any]] = []
-    for label, root in roots:
-        # ``probe_fn`` (the WriteAccessProbe helper) reports failures structurally
-        # and never raises — so no OSError guard is needed here.
-        probe = probe_fn(root)
+    for label, preferred_root in roots:
+        resolved = resolve_writable_memory_dir(
+            preferred_root,
+            fallback_root / _fallback_key(label),
+            label=f"agent {label!r}",
+            fallback_scan_root=fallback_root,
+            probe_fn=_probe,
+        )
+        # resolve_writable_memory_dir only probed the PREFERRED dir; when it fell
+        # back, re-probe the resolved fallback dir so the verdict reflects whether
+        # the box can persist THERE — not merely that the overlay was read-only.
+        probe = probe_fn(resolved.write_dir) if resolved.used_fallback else resolved.probe
         writable = bool(probe.writable)
-        errno_name = str(probe.errno_name)
-        verdict = "ok" if writable else f"FAIL[{errno_name or 'error'}]"
-        verdicts.append(f"{label}@{root}={verdict}")
+        if writable:
+            state = "ok(fallback)" if resolved.used_fallback else "ok"
+        else:
+            state = f"FAIL[{str(probe.errno_name) or 'error'}]"
+        verdicts.append(f"{label}@{resolved.write_dir}={state}")
         if not writable:
-            failures.append((label, root, probe))
+            failures.append((label, resolved.write_dir, probe))
     return verdicts, failures
 
 
@@ -2132,40 +2200,64 @@ def _agent_memory_fail_result(
     total_roots: int,
     per_agent: str,
 ) -> CheckResult:
-    """Build the hard-FAIL CheckResult reusing ``write_access_fix_hint`` (PLA-298)."""
+    """Build the hard-FAIL CheckResult reusing ``write_access_fix_hint`` (PLA-298 / #689).
+
+    A failure here means the agent can persist to NEITHER the 04-Agent-Knowledge
+    overlay NOR the writable data-dir fallback — so memory writes are lost. This
+    is the only condition that blocks the deploy gate; a read-only overlay with a
+    working fallback is a PASS (the resolved write path lands in the data dir).
+    """
     from kairix.paths import write_access_fix_hint
 
     first_errno = str(getattr(failures[0][2], "errno_name", "") or "")
     return CheckResult(
         name=_CHECK_AGENT_MEMORY_WRITABLE,
         ok=False,
-        detail=f"{len(failures)}/{total_roots} agent memory root(s) not writable — {per_agent}",
+        detail=(
+            f"{len(failures)}/{total_roots} agent(s) have NO writable memory destination "
+            f"(neither the overlay nor the data-dir fallback is writable) — {per_agent}"
+        ),
         fix=(
             f"{write_access_fix_hint(first_errno)}. "
-            "next: re-run `kairix onboard check agent_memory_writable` after fixing the mount/ownership. "
-            "run: mkdir -p documents/04-Agent-Knowledge && sudo chown -R 995:985 documents/04-Agent-Knowledge."
+            "next: re-run `kairix onboard check agent_memory_writable` once a writable "
+            "destination exists — free disk space (ENOSPC), fix data-dir ownership, or "
+            "mount 04-Agent-Knowledge read-write. "
+            "run: df -h and check the kairix data dir is owned by the kairix user."
         ),
     )
 
 
 def check_agent_memory_writable(deps: AgentMemoryWritableCheckDeps | None = None) -> CheckResult:
-    """Each configured agent's memory root is actually writable (PLA-298).
+    """Each configured agent has a writable memory destination (PLA-298 / #689).
 
-    Probes a real write → read → cleanup at every configured agent's resolved
-    memory root (the ADR-017 ``04-Agent-Knowledge`` overlay), as the same uid
-    the MCP server writes as. Returns a hard FAIL — not a WARN — on any
-    non-writable root (EACCES/EROFS): a read-only overlay means agent memory
-    lands in the hidden data-dir fallback (PLA-296) instead of the
-    operator-visible knowledge tree, which is a misconfiguration to fix. This
-    is the leg that stops the false-green where onboard check never probed
-    writability.
+    Resolves every configured agent's memory write destination through the SAME
+    :func:`kairix.paths.resolve_writable_memory_dir` the runtime write path
+    (``remember`` / ``ingest_chat``) uses: it PREFERS the ADR-017
+    ``04-Agent-Knowledge`` overlay but, on a read-only / permission overlay,
+    FALLS BACK to a writable path under the kairix data dir. The verdict is
+    whether that RESOLVED destination is writable — not whether the preferred
+    overlay is.
 
-    ``deps`` is the public DI seam (config loader / document root / probe).
+    On a hardened, read-only-root enterprise box the overlay is legitimately
+    ``:ro`` and the data-dir fallback IS the correct write location (F94 —
+    persist through ``kairix.paths``, never a system path); agents reach memory
+    through commands/connectors, so where it is stored does not matter as long as
+    it is always writable and searchable. So a read-only overlay whose data-dir
+    fallback IS writable PASSES (surfaced as ``<agent>@<dir>=ok(fallback)``) — it
+    does NOT block the deploy gate. A hard FAIL is reserved for an agent that can
+    persist NOWHERE: a non-fallback error (e.g. ENOSPC disk-full) or an
+    unwritable data dir. This is the leg that both closes the old false-green
+    (never probed writability) and stops the false-red that rolled back the
+    v2026.7.2 alpha on the read-only-root production box.
+
+    ``deps`` is the public DI seam (config loader / document root / fallback root
+    / probe).
     """
     d = deps if deps is not None else AgentMemoryWritableCheckDeps()
     try:
         config = d.config_loader()
         document_root = Path(d.document_root_fn())
+        fallback_root = Path(d.memory_fallback_root_fn())
     except Exception as exc:
         return CheckResult(
             name=_CHECK_AGENT_MEMORY_WRITABLE,
@@ -2179,14 +2271,14 @@ def check_agent_memory_writable(deps: AgentMemoryWritableCheckDeps | None = None
         )
 
     roots = _resolve_agent_memory_roots(config, document_root)
-    verdicts, failures = _probe_agent_memory_roots(roots, d.probe_fn)
+    verdicts, failures = _probe_agent_memory_roots(roots, fallback_root, d.probe_fn)
     per_agent = "; ".join(verdicts)
     if failures:
         return _agent_memory_fail_result(failures, len(roots), per_agent)
     return CheckResult(
         name=_CHECK_AGENT_MEMORY_WRITABLE,
         ok=True,
-        detail=f"{len(roots)} agent memory root(s) writable — {per_agent}",
+        detail=f"{len(roots)} agent memory destination(s) writable — {per_agent}",
     )
 
 

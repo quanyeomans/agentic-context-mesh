@@ -16,12 +16,17 @@ Feature: Deployment onboard check
     When I run onboard check
     Then secrets_loaded fails with guidance
 
-  Scenario: The agent memory writability probe fails on a read-only overlay
-    Given an agent is configured with a read-only memory overlay
-    When I check whether agent memory is writable
-    Then agent_memory_writable fails with a fix hint
-
   Scenario: The agent memory writability probe passes on a writable overlay
     Given an agent is configured with a writable memory overlay
     When I check whether agent memory is writable
     Then agent_memory_writable passes
+
+  Scenario: A read-only overlay with a writable fallback passes the deploy gate
+    Given an agent is configured with a read-only overlay but a writable data-dir fallback
+    When I check whether agent memory is writable
+    Then agent_memory_writable passes via the data-dir fallback
+
+  Scenario: An agent with no writable destination anywhere fails the deploy gate
+    Given an agent has no writable memory destination anywhere
+    When I check whether agent memory is writable
+    Then agent_memory_writable fails with a fix hint
