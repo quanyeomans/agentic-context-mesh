@@ -21,6 +21,7 @@ from kairix.use_cases.search import (
     SearchDeps,
     SearchHit,
     SearchOutput,
+    SearchSeamSignatureError,
     run_search,
     search_output_to_envelope,
 )
@@ -468,6 +469,50 @@ def test_search_pipeline_failure_yields_error_envelope() -> None:
     deps, _ = _build_deps(search_raises=True)
     out = run_search("q", deps=deps)
     assert out.error.startswith("RuntimeError:")
+    assert out.results == []
+    assert out.intent == ""
+
+
+# ---------------------------------------------------------------------------
+# PLA-281: a DI-seam signature mismatch must fail LOUDLY, not swallow into an
+# empty result envelope. This is the exact swallow that let a fake/real
+# search_fn signature drift go green locally and red in CI Stage 3.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_search_fn_signature_mismatch_raises_instead_of_swallowing() -> None:
+    """A search_fn whose signature can't bind the seam kwargs raises loudly.
+
+    The seam passes max_tier=; a search_fn that never declared it (and has no
+    **kwargs) raises a binding TypeError before its body runs. run_search must
+    surface that as SearchSeamSignatureError rather than returning empty
+    results with error set.
+    """
+
+    def narrow_search(*, query: str) -> Any:  # missing agent/scope/... — binding fails
+        raise AssertionError("body must never run — binding fails first")
+
+    deps = SearchDeps(search_fn=narrow_search)
+    with pytest.raises(SearchSeamSignatureError):
+        run_search("q", deps=deps)
+
+
+@pytest.mark.unit
+def test_runtime_typeerror_inside_search_fn_is_still_swallowed() -> None:
+    """A TypeError raised INSIDE search_fn's body is a genuine runtime failure.
+
+    It descends past the seam call frame, so it is NOT a signature mismatch and
+    stays swallowed into the error envelope — the broad except still handles a
+    real runtime fault gracefully.
+    """
+
+    def exploding_search(**kwargs: Any) -> Any:
+        raise TypeError("runtime boom inside body")
+
+    deps = SearchDeps(search_fn=exploding_search)
+    out = run_search("q", deps=deps)
+    assert out.error.startswith("TypeError:")
     assert out.results == []
     assert out.intent == ""
 

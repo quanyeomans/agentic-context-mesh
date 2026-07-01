@@ -512,6 +512,40 @@ def _search_output_from_pipeline(
     )
 
 
+class SearchSeamSignatureError(TypeError):
+    """A ``search_fn`` whose signature drifts from the seam contract.
+
+    PLA-281: ``run_search`` wraps the pipeline call in a broad ``except`` that
+    turns any failure into an empty ``SearchOutput.error``. That is right for a
+    genuine runtime failure, but wrong for a fake/real ``search_fn`` whose
+    signature no longer matches the seam — a programmer error that should fail
+    loudly, not silently return empty results (the exact swallow that let a
+    DI-seam change go green locally and red in CI Stage 3). This distinct type
+    is re-raised past that broad ``except`` so the mismatch surfaces.
+    """
+
+
+def _invoke_search_fn(search_fn: Callable[..., Any], /, **kwargs: Any) -> Any:
+    """Call the ``search_fn`` DI seam, surfacing a signature mismatch loudly.
+
+    A binding ``TypeError`` (wrong/missing/extra kwarg) is raised by the call
+    machinery *before* ``search_fn``'s body runs, so its traceback stops at
+    this frame (``tb_next is None``). We convert that into
+    ``SearchSeamSignatureError`` so ``run_search``'s broad ``except`` can't
+    swallow a programmer error into empty results. A ``TypeError`` raised
+    *inside* ``search_fn`` descends past this frame (``tb_next`` is set) and is
+    re-raised unchanged — a genuine runtime failure the broad ``except`` still
+    handles gracefully.
+    """
+    try:
+        return search_fn(**kwargs)
+    except TypeError as exc:
+        tb = exc.__traceback__
+        if tb is not None and tb.tb_next is None:
+            raise SearchSeamSignatureError(str(exc)) from exc
+        raise
+
+
 def run_search(
     query: str,
     *,
@@ -559,14 +593,24 @@ def run_search(
         # pipeline so the query isn't classified twice (PLA-273).
         intent = _classify_for_request(query, deps.classify_fn)
         effective_budget = _infer_budget(query, budget, intent)
-        sr = deps.search_fn(
-            query=query, agent=agent, scope=scope, budget=effective_budget, intent=intent, max_tier=max_tier
+        sr = _invoke_search_fn(
+            deps.search_fn,
+            query=query,
+            agent=agent,
+            scope=scope,
+            budget=effective_budget,
+            intent=intent,
+            max_tier=max_tier,
         )
         intent_value = _intent_value(sr)
         hits: list[SearchHit] = [_budgeted_to_hit(b) for b in getattr(sr, "results", [])[:limit]]
         _maybe_prepend_entity_card(hits, query, intent_value, deps.entity_card_fn, include_entity_card)
         elapsed_ms = (time.monotonic() - started) * 1000
         return _search_output_from_pipeline(sr, query, hits, health, elapsed_ms)
+    except SearchSeamSignatureError:
+        # PLA-281: a DI-seam signature mismatch is a programmer error — fail
+        # loudly instead of letting the broad except below return empty results.
+        raise
     except Exception as exc:
         logger.warning("run_search failed: %s", exc, exc_info=True)
         return SearchOutput(
