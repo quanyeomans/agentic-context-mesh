@@ -19,7 +19,7 @@ without monkey-patching.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -53,6 +53,46 @@ class ContradictionResult:
     collection: str = ""
     source_page: int | None = None
     source_uri: str = ""
+
+
+@dataclass(frozen=True)
+class ContradictionReport:
+    """Full outcome of one ``check_contradiction`` run.
+
+    Carries BOTH the above-threshold contradictions (``hits``) AND the
+    number of unique candidate documents the search retrieved and scored
+    (``candidates_considered``).
+
+    The candidate count is what lets a caller tell 'the store has related
+    content but nothing that contradicts' (unsupported) apart from 'the
+    store has nothing relevant at all' (not_found) — a distinction an empty
+    ``hits`` list alone cannot make (#468). ``candidates_considered`` is 0
+    only when the search retrieved nothing (empty store / no overlap) or
+    every search call failed.
+    """
+
+    hits: list[ContradictionResult] = field(default_factory=list)
+    candidates_considered: int = 0
+
+    @classmethod
+    def of(
+        cls,
+        hits: Iterable[ContradictionResult],
+        *,
+        candidates_considered: int | None = None,
+    ) -> ContradictionReport:
+        """Build a report from ``hits``, defaulting the candidate count to ``len(hits)``.
+
+        Convenience for callers (and test fakes) that only have the hit
+        list: when ``candidates_considered`` is omitted it defaults to the
+        number of hits, so ``of([hit])`` classifies as a contradiction and
+        ``of([])`` classifies as not_found. Pass ``candidates_considered``
+        explicitly to model the unsupported case (retrieved candidates that
+        did not rise to a contradiction).
+        """
+        materialised = list(hits)
+        count = candidates_considered if candidates_considered is not None else len(materialised)
+        return cls(hits=materialised, candidates_considered=count)
 
 
 def _default_search() -> Callable[..., Any]:
@@ -122,7 +162,7 @@ def check_contradiction(
     *,
     top_claims: int = 3,
     deps: ContradictDetectorDeps | None = None,
-) -> list[ContradictionResult]:
+) -> ContradictionReport:
     """Check whether ``content`` contradicts existing knowledge in the document store.
 
     Args:
@@ -141,8 +181,13 @@ def check_contradiction(
                     composite scorer, and entity-density extractor.
 
     Returns:
-        List of ContradictionResult, sorted by score descending. Empty list
-        when no contradictions found or on any failure.
+        A :class:`ContradictionReport` whose ``hits`` are the
+        ContradictionResults scoring at or above ``threshold``, sorted by
+        score descending, and whose ``candidates_considered`` is the number
+        of unique candidate documents the search retrieved and scored.
+        ``hits`` is empty when nothing contradicts or on any failure;
+        ``candidates_considered`` is 0 only when the search surfaced no
+        candidates at all.
     """
     d = deps if deps is not None else ContradictDetectorDeps()
     scorer = d.scorer if d.scorer is not None else default_contradiction_scorer(llm)
@@ -183,5 +228,10 @@ def check_contradiction(
             )
 
     results.sort(key=lambda r: r.score, reverse=True)
-    logger.info("contradict: %d contradictions found (threshold=%.2f)", len(results), threshold)
-    return results
+    logger.info(
+        "contradict: %d contradictions found across %d candidates (threshold=%.2f)",
+        len(results),
+        len(seen_paths),
+        threshold,
+    )
+    return ContradictionReport(hits=results, candidates_considered=len(seen_paths))

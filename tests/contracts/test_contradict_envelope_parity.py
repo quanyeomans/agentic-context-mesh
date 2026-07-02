@@ -27,6 +27,7 @@ import pytest
 from kairix.knowledge.contradict.cli import format_text
 from kairix.use_cases.contradict import (
     ContradictionHit,
+    ContradictionOutcome,
     ContradictOutput,
     contradict_output_to_envelope,
 )
@@ -137,6 +138,7 @@ def test_roundtrip_preserves_structural_fields() -> None:
     rebuilt = _roundtrip(original)
     assert rebuilt.content == original.content
     assert rebuilt.has_contradictions == original.has_contradictions
+    assert rebuilt.outcome == original.outcome
     assert rebuilt.error == original.error
     assert len(rebuilt.contradictions) == len(original.contradictions)
     for orig_hit, rebuilt_hit in zip(original.contradictions, rebuilt.contradictions, strict=True):
@@ -164,3 +166,46 @@ def test_roundtrip_preserves_missing_contradictions_as_empty_list() -> None:
     assert rebuilt.content == "claim"
     assert rebuilt.has_contradictions is False
     assert rebuilt.error == ""
+
+
+# Sabotage-proof (executed): drop the ``outcome`` key from
+# ``contradict_output_to_envelope`` → ``from_envelope`` falls back to the
+# has_contradictions-derived legacy verdict, so the ``unsupported`` case
+# rebuilds as ``not_found`` and the parametrized equality fires. Restored.
+@pytest.mark.parametrize(
+    "outcome",
+    [ContradictionOutcome.CONTRADICTION, ContradictionOutcome.UNSUPPORTED, ContradictionOutcome.NOT_FOUND],
+)
+def test_roundtrip_preserves_tri_state_outcome(outcome: ContradictionOutcome) -> None:
+    """#468 — each tri-state verdict survives the envelope round-trip, so the
+    warm-MCP path and the in-process path agree on contradiction /
+    unsupported / not_found (not just the has_contradictions boolean)."""
+    original = ContradictOutput(
+        content="a claim",
+        contradictions=[],
+        has_contradictions=outcome is ContradictionOutcome.CONTRADICTION,
+        outcome=outcome,
+    )
+    rebuilt = _roundtrip(original)
+    assert rebuilt.outcome == outcome
+    assert rebuilt.has_contradictions == original.has_contradictions
+
+
+@pytest.mark.parametrize(
+    ("has_contradictions", "expected"),
+    [(True, ContradictionOutcome.CONTRADICTION), (False, ContradictionOutcome.NOT_FOUND)],
+)
+def test_legacy_envelope_without_outcome_key_derives_from_has_contradictions(
+    has_contradictions: bool, expected: ContradictionOutcome
+) -> None:
+    """A pre-#468 warm-worker envelope has no ``outcome`` key; ``from_envelope``
+    derives a sane verdict from ``has_contradictions`` so an old response
+    still routes to CONTRADICTION / NOT_FOUND rather than raising."""
+    legacy_envelope = {
+        "content": "claim",
+        "contradictions": [],
+        "has_contradictions": has_contradictions,
+        "error": "",
+    }
+    rebuilt = ContradictOutput.from_envelope(legacy_envelope)
+    assert rebuilt.outcome is expected

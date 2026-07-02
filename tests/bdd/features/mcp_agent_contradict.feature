@@ -13,7 +13,22 @@ Feature: Agents can verify facts before writing them
     Given the search finds a contradicting document
     When the agent calls tool_contradict with content "architecture uses monolith"
     Then the contradict response has_contradictions is true
+    And the contradict response outcome is "contradiction"
     And the contradict response contains at least one contradiction with a reason
+
+  Scenario: Agent learns the claim is unsupported, not contradicted
+    Given the search finds related content that neither supports nor refutes the claim
+    When the agent calls tool_contradict with content "the release notes praise the new feature"
+    Then the contradict response has_contradictions is false
+    And the contradict response outcome is "unsupported"
+    And the contradict response error is empty
+
+  Scenario: Agent learns the store has nothing on the claim
+    Given the search finds nothing relevant to the claim
+    When the agent calls tool_contradict with content "an obscure topic no one has written about"
+    Then the contradict response has_contradictions is false
+    And the contradict response outcome is "not_found"
+    And the contradict response error is empty
 
   Scenario: Agent gets a safe response even when the system has issues
     Given the search raises an error

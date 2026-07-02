@@ -22,6 +22,7 @@ from pytest_bdd import given, parsers, scenarios, then, when
 
 from kairix.knowledge.contradict.cli import format_text
 from kairix.knowledge.contradict.cli import main as contradict_main
+from kairix.knowledge.contradict.detector import ContradictionReport
 from kairix.use_cases.contradict import (
     ContradictDeps,
     ContradictionHit,
@@ -100,8 +101,8 @@ def _assert_text_byte_identical(contradict_warm_ctx: _ContradictWarmCtx) -> None
 
 @given("a contradict use case that returns no hits for the input content")
 def _seed_contradict_deps(contradict_warm_ctx: _ContradictWarmCtx) -> None:
-    def _check_fn(**_kwargs: Any) -> list[Any]:
-        return []
+    def _check_fn(**_kwargs: Any) -> ContradictionReport:
+        return ContradictionReport.of([])
 
     contradict_warm_ctx.deps = ContradictDeps(check_fn=_check_fn, llm_backend=FakeLLMBackend())
 

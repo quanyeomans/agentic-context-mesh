@@ -57,6 +57,7 @@ from kairix.agents.research.cli import main as research_cli_main
 from kairix.core.health import HealthDeps, reset_health_probe_cache
 from kairix.core.protocols import SourceRef
 from kairix.knowledge.contradict.cli import main as contradict_cli_main
+from kairix.knowledge.contradict.detector import ContradictionReport
 from kairix.use_cases.brief import BriefDeps, reset_brief_output_cache
 from kairix.use_cases.contradict import ContradictDeps
 from kairix.use_cases.prep import PrepDeps, reset_prep_summary_cache
@@ -180,8 +181,8 @@ class _FakeLLM:
 
 
 def _contradict_deps() -> ContradictDeps:
-    def fake_check(**_kwargs: Any) -> list[_FakeContradictionResult]:
-        return [_FakeContradictionResult()]
+    def fake_check(**_kwargs: Any) -> ContradictionReport:
+        return ContradictionReport.of([_FakeContradictionResult()])
 
     return ContradictDeps(check_fn=fake_check, llm_backend=_FakeLLM())
 

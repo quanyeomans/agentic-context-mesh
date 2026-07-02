@@ -37,7 +37,7 @@ from kairix.knowledge.contradict.detector import (
 )
 from kairix.knowledge.contradict.extract import EntityDensityClaimExtractor
 from kairix.knowledge.contradict.scorers import default_contradiction_scorer
-from kairix.use_cases.contradict import ContradictDeps, run_contradict
+from kairix.use_cases.contradict import ContradictDeps, ContradictionOutcome, run_contradict
 
 pytestmark = pytest.mark.integration
 
@@ -136,7 +136,7 @@ def test_contradiction_detected_when_seeded_fact_disagrees_with_new_claim() -> N
         threshold=0.45,
         top_claims=3,
         deps=deps,
-    )
+    ).hits
 
     assert len(results) >= 1
     top = results[0]
@@ -191,6 +191,9 @@ def test_no_contradiction_when_new_content_is_unrelated() -> None:
     assert out.error == ""
     assert out.has_contradictions is False
     assert out.contradictions == []
+    # #468 — the kettle claim shares no terms with the seeded OpenClaw doc, so
+    # the search surfaced no candidates: the store holds nothing relevant.
+    assert out.outcome is ContradictionOutcome.NOT_FOUND
 
 
 @pytest.mark.integration
@@ -228,6 +231,8 @@ def test_empty_store_yields_no_contradictions_clean_envelope() -> None:
     assert out.error == ""
     assert out.has_contradictions is False
     assert out.contradictions == []
+    # #468 — an empty store surfaces zero candidates → not_found.
+    assert out.outcome is ContradictionOutcome.NOT_FOUND
     # Sabotage-prove: the scorer never had to chat because there were
     # no candidates. If the pipeline had fabricated a phantom candidate
     # the fake LLM would have logged a call.
@@ -280,7 +285,7 @@ def test_contradict_results_are_sorted_by_score_descending() -> None:
             scorer=scorer,
             extractor=EntityDensityClaimExtractor(),
         ),
-    )
+    ).hits
 
     assert len(results) == 2
     assert results[0].doc_path == "docs/strong.md"

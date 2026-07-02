@@ -25,6 +25,7 @@ from typing import Any
 import pytest
 
 from kairix.agents.mcp.server import tool_contradict
+from kairix.knowledge.contradict.detector import ContradictionReport
 from kairix.use_cases.contradict import ContradictDeps
 
 pytestmark = pytest.mark.integration
@@ -86,9 +87,9 @@ def test_tool_contradict_envelope_carries_hits_and_has_contradictions_flag() -> 
 
     captured: dict[str, Any] = {}
 
-    def fake_check(**kwargs: Any) -> list[_FakeContradictionResult]:
+    def fake_check(**kwargs: Any) -> ContradictionReport:
         captured.update(kwargs)
-        return [fake_result]
+        return ContradictionReport.of([fake_result])
 
     deps = ContradictDeps(check_fn=fake_check, llm_backend=_FakeLLM())
     envelope = tool_contradict(content="System now uses option B", top_k=3, deps=deps)
@@ -96,6 +97,7 @@ def test_tool_contradict_envelope_carries_hits_and_has_contradictions_flag() -> 
     assert isinstance(envelope, dict)
     assert envelope["content"] == "System now uses option B", f"content mismatch: {envelope['content']!r}"
     assert envelope["has_contradictions"] is True, f"has_contradictions must be True when hits exist: {envelope!r}"
+    assert envelope["outcome"] == "contradiction", f"outcome must be 'contradiction' when hits exist: {envelope!r}"
     assert envelope["error"] == "", f"error must be empty on happy path: {envelope['error']!r}"
     assert len(envelope["contradictions"]) == 1, f"expected 1 hit: {envelope['contradictions']!r}"
 
@@ -118,7 +120,7 @@ def test_tool_contradict_envelope_surfaces_detector_failure_in_error_field() -> 
     run. Verified.
     """
 
-    def fake_check(**kwargs: Any) -> list[_FakeContradictionResult]:
+    def fake_check(**kwargs: Any) -> ContradictionReport:
         raise RuntimeError("detector down")
 
     deps = ContradictDeps(check_fn=fake_check, llm_backend=_FakeLLM())

@@ -16,10 +16,26 @@ import pytest
 
 from kairix.knowledge.contradict.detector import (
     ContradictDetectorDeps,
+    ContradictionReport,
     ContradictionResult,
-    check_contradiction,
+)
+from kairix.knowledge.contradict.detector import (
+    check_contradiction as _run_check,
 )
 from tests.fakes import FakeLLMBackend
+
+
+def check_contradiction(*args: Any, **kwargs: Any) -> list[ContradictionResult]:
+    """Project ``check_contradiction`` to its ``hits`` list.
+
+    These tests pin hit-level scoring / parse-branch behaviour, so they
+    assert on the contradiction list. ``check_contradiction`` now returns a
+    :class:`ContradictionReport` (hits + candidates_considered, #468); this
+    shim keeps the hit-level assertions reading naturally while the
+    report-shape contract is pinned by the dedicated tests below.
+    """
+    return _run_check(*args, **kwargs).hits
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -332,3 +348,50 @@ def test_check_contradiction_snippet_truncated_to_300_chars() -> None:
     bundles = [_make_search_result("doc.md", long_content)]
     results = check_contradiction("claim", llm=llm, threshold=0.0, deps=_deps_with_search(_fake_search(bundles)))
     assert len(results[0].snippet) <= 300
+
+
+# ---------------------------------------------------------------------------
+# ContradictionReport — the #468 tri-state carrier: hits + candidates_considered
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_report_counts_candidates_even_when_none_contradict() -> None:
+    """A retrieved-but-sub-threshold candidate is counted, hits stay empty.
+
+    This is the load-bearing distinction #468 adds at the detector layer:
+    ``candidates_considered`` records that the store HELD related content,
+    even when nothing rose to a contradiction — the caller reads that as
+    'unsupported', not 'not_found'.
+
+    Sabotage-proof (executed): hard-code ``candidates_considered=0`` in
+    ``ContradictionReport(...)`` at the end of ``check_contradiction`` →
+    this assertion fires (2 became 0). Restored.
+    """
+    llm = FakeLLMBackend(chat_response=_llm_response(0.1))  # below threshold
+    bundles = [
+        _make_search_result("a/doc.md", "some content"),
+        _make_search_result("b/doc.md", "other content"),
+    ]
+    report = _run_check("new claim", llm=llm, threshold=0.6, deps=_deps_with_search(_fake_search(bundles)))
+    assert isinstance(report, ContradictionReport)
+    assert report.hits == []
+    assert report.candidates_considered == 2
+
+
+@pytest.mark.unit
+def test_report_candidates_zero_when_search_empty() -> None:
+    """No search candidates → candidates_considered is 0 (the 'not_found' signal)."""
+    llm = FakeLLMBackend()
+    report = _run_check("claim", llm=llm, deps=_deps_with_search(_fake_search([])))
+    assert report.hits == []
+    assert report.candidates_considered == 0
+
+
+@pytest.mark.unit
+def test_report_of_defaults_candidates_to_hit_count() -> None:
+    """``ContradictionReport.of`` defaults the candidate count to ``len(hits)``."""
+    hit = ContradictionResult(doc_path="d.md", score=0.9, reason="r", snippet="s")
+    assert ContradictionReport.of([hit]).candidates_considered == 1
+    assert ContradictionReport.of([]).candidates_considered == 0
+    assert ContradictionReport.of([], candidates_considered=4).candidates_considered == 4

@@ -19,10 +19,14 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from enum import Enum
+from typing import TYPE_CHECKING, Any
 
 from kairix.core.protocols import SourceRef
 from kairix.core.search.scope import Scope
+
+if TYPE_CHECKING:
+    from kairix.knowledge.contradict.detector import ContradictionReport
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +36,36 @@ logger = logging.getLogger(__name__)
 _KEY_SOURCE_URI = "source_uri"
 _KEY_COLLECTION = "collection"
 _KEY_SOURCE_PAGE = "source_page"
+_KEY_OUTCOME = "outcome"
 
 
-def _default_check_contradiction(**kwargs: Any) -> list[Any]:
+class ContradictionOutcome(str, Enum):
+    """The tri-state verdict a contradiction check returns (#468).
+
+    The single ``has_contradictions`` boolean conflated three distinct
+    situations: the store actively disagreeing, the store being silent on a
+    claim it holds related material for, and the store holding nothing
+    relevant at all. Those are now separated so an agent (or an automated
+    gate) never reads 'contradiction' off the mere *absence* of supporting
+    evidence.
+
+    - ``CONTRADICTION`` — the store holds evidence that directly conflicts
+      with the claim (at least one hit scored at or above the threshold).
+    - ``UNSUPPORTED`` — the store holds related content, but none of it
+      supports or refutes the claim (candidates were retrieved and scored,
+      none rose to a contradiction).
+    - ``NOT_FOUND`` — the store holds nothing relevant to the claim (the
+      search surfaced no candidates at all).
+
+    A ``str`` Enum so the value serialises directly into the JSON envelope.
+    """
+
+    CONTRADICTION = "contradiction"
+    UNSUPPORTED = "unsupported"
+    NOT_FOUND = "not_found"
+
+
+def _default_check_contradiction(**kwargs: Any) -> ContradictionReport:
     from kairix.knowledge.contradict.detector import check_contradiction
 
     return check_contradiction(**kwargs)
@@ -88,8 +119,16 @@ class ContradictOutput:
         content: The caller's content, unchanged.
         contradictions: Up to ``top_k * top_claims`` ``ContradictionHit``s
             that scored above ``threshold``, best-first.
-        has_contradictions: Equivalent to ``len(contradictions) > 0``;
-            kept as a top-level field for ergonomic JSON-envelope reads.
+        outcome: The tri-state verdict (#468). ``CONTRADICTION`` when the
+            store actively disagrees, ``UNSUPPORTED`` when it holds related
+            but non-probative content, ``NOT_FOUND`` when it holds nothing
+            relevant. Defaults to ``NOT_FOUND`` (the safe 'no contradiction
+            asserted' verdict used on the empty and error paths).
+        has_contradictions: True iff ``outcome is CONTRADICTION`` — i.e.
+            only when the ``contradictions`` list is non-empty. It never
+            fires on the mere absence of support (that is the whole point
+            of #468). Kept as a top-level field for ergonomic
+            JSON-envelope reads.
         error: Empty string on success; structured ``"<Class>: <msg>"`` on
             top-level failure.
     """
@@ -97,6 +136,7 @@ class ContradictOutput:
     content: str
     contradictions: list[ContradictionHit] = field(default_factory=list)
     has_contradictions: bool = False
+    outcome: ContradictionOutcome = ContradictionOutcome.NOT_FOUND
     error: str = ""
 
     @classmethod
@@ -133,10 +173,12 @@ class ContradictOutput:
             )
             for h in raw_hits
         ]
+        has_contradictions = bool(envelope.get("has_contradictions", False))
         return cls(
             content=str(envelope.get("content", "")),
             contradictions=hits,
-            has_contradictions=bool(envelope.get("has_contradictions", False)),
+            has_contradictions=has_contradictions,
+            outcome=_outcome_from_envelope(str(envelope.get(_KEY_OUTCOME, "") or ""), has_contradictions),
             error=str(envelope.get("error", "")),
         )
 
@@ -152,8 +194,39 @@ class ContradictDeps:
     the LLM stack stays unloaded at import time.
     """
 
-    check_fn: Callable[..., list[Any]] = field(default_factory=lambda: _default_check_contradiction)
+    check_fn: Callable[..., ContradictionReport] = field(default_factory=lambda: _default_check_contradiction)
     llm_backend: Any | None = None
+
+
+def _classify_outcome(report: ContradictionReport) -> ContradictionOutcome:
+    """Map a detector report to the tri-state verdict (#468).
+
+    A non-empty ``hits`` list means the store actively disagrees
+    (``CONTRADICTION``). Otherwise, retrieved-but-non-probative candidates
+    mean the store is silent on a claim it holds related material for
+    (``UNSUPPORTED``), and zero candidates mean the store holds nothing
+    relevant (``NOT_FOUND``). This is the one place the absence of support
+    is prevented from masquerading as a contradiction.
+    """
+    if report.hits:
+        return ContradictionOutcome.CONTRADICTION
+    if report.candidates_considered > 0:
+        return ContradictionOutcome.UNSUPPORTED
+    return ContradictionOutcome.NOT_FOUND
+
+
+def _outcome_from_envelope(raw_outcome: str, has_contradictions_fallback: bool) -> ContradictionOutcome:
+    """Resolve the tri-state ``outcome`` from a JSON envelope, tolerant of legacy shapes.
+
+    A pre-#468 envelope has no ``outcome`` key (``raw_outcome`` is empty);
+    fall back to the parsed ``has_contradictions`` so an old warm-worker
+    response still round-trips to a sane verdict (``CONTRADICTION`` when it
+    flagged one, ``NOT_FOUND`` otherwise).
+    """
+    try:
+        return ContradictionOutcome(raw_outcome)
+    except ValueError:
+        return ContradictionOutcome.CONTRADICTION if has_contradictions_fallback else ContradictionOutcome.NOT_FOUND
 
 
 def _project(r: Any) -> ContradictionHit:
@@ -212,12 +285,14 @@ def run_contradict(
         if agent is not None:
             kwargs["agent"] = agent
 
-        results = d.check_fn(**kwargs)
-        hits = [_project(r) for r in results]
+        report = d.check_fn(**kwargs)
+        hits = [_project(r) for r in report.hits]
+        outcome = _classify_outcome(report)
         return ContradictOutput(
             content=content,
             contradictions=hits,
-            has_contradictions=bool(hits),
+            has_contradictions=outcome is ContradictionOutcome.CONTRADICTION,
+            outcome=outcome,
         )
     except Exception as exc:
         logger.warning("run_contradict failed: %s", exc, exc_info=True)
@@ -225,6 +300,7 @@ def run_contradict(
             content=content,
             contradictions=[],
             has_contradictions=False,
+            outcome=ContradictionOutcome.NOT_FOUND,
             error=f"{type(exc).__name__}: {exc}",
         )
 
@@ -253,5 +329,9 @@ def contradict_output_to_envelope(out: ContradictOutput) -> dict[str, Any]:
             for h in out.contradictions
         ],
         "has_contradictions": out.has_contradictions,
+        # #468 — the tri-state verdict rides on the envelope so BOTH the CLI
+        # ``--json`` surface and the MCP tool expose the same distinction
+        # (contradiction / unsupported / not_found), never just the boolean.
+        _KEY_OUTCOME: out.outcome.value,
         "error": out.error,
     }
