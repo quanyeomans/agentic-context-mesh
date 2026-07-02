@@ -24,8 +24,9 @@ Detection (AST walk over server.py + a substring scan of the guide):
   1. Resolve the module-level tool-name string constants in server.py
      (``CONTRADICT_TOOL_NAME`` etc.) so ``_cap(name=CONTRADICT_TOOL_NAME)``
      rows resolve to their literal value.
-  2. Walk ``tool_capabilities()`` for every ``_cap(...)`` call and read its
-     ``name`` / ``mcp_tool`` / ``cli`` / ``escalate_via``.
+  2. Walk the module for every ``_cap(...)`` catalogue row (they live in the
+     module-level ``CAPABILITIES_CATALOG`` tuple that ``tool_capabilities()``
+     projects) and read its ``name`` / ``mcp_tool`` / ``cli`` / ``escalate_via``.
   3. For each capability not on the deliberate exclusion allowlist, assert at
      least one invocation token appears in the bundled guide.
 
@@ -56,8 +57,11 @@ from tc_fitness import REPO_ROOT, gate
 MCP_SERVER_FILE = REPO_ROOT / "kairix" / "agents" / "mcp" / "server.py"
 GUIDE_FILE = REPO_ROOT / "kairix" / "agents" / "usage_guide" / "data" / "agent-usage-guide.md"
 
-# The function whose ``_cap(...)`` rows are the canonical tool registry.
-_CATALOGUE_FUNC = "tool_capabilities"
+# The builder call whose rows are the canonical tool registry. Post-PLA-317
+# the ``_cap(...)`` rows live in the module-level ``CAPABILITIES_CATALOG`` tuple
+# (``tool_capabilities()`` now just projects them), so the walk scans the whole
+# module for ``_cap(...)`` calls rather than a single function body — server.py
+# uses ``_cap`` only to build catalogue rows, so this stays precise.
 _CAP_BUILDER = "_cap"
 
 # Capabilities deliberately kept OUT of the agent usage guide. A name here is
@@ -130,15 +134,15 @@ def _resolve(node: ast.expr | None, constants: dict[str, str]) -> str | None:
 
 
 def _catalogue_capabilities(tree: ast.Module, constants: dict[str, str]) -> list[dict[str, str | None]]:
-    """Return one dict per ``_cap(...)`` row in ``tool_capabilities()``."""
-    func = next(
-        (n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == _CATALOGUE_FUNC),
-        None,
-    )
-    if func is None:
-        return []
+    """Return one dict per ``_cap(...)`` catalogue row in the module.
+
+    The rows live in the module-level ``CAPABILITIES_CATALOG`` tuple
+    (``tool_capabilities()`` projects them), so the whole module is walked for
+    ``_cap(...)`` calls. ``_cap`` is the catalogue-row builder only, so no
+    non-catalogue call is matched.
+    """
     caps: list[dict[str, str | None]] = []
-    for call in ast.walk(func):
+    for call in ast.walk(tree):
         if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == _CAP_BUILDER):
             continue
         row: dict[str, str | None] = {}
