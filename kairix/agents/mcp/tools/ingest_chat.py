@@ -41,7 +41,11 @@ from typing import Any
 from kairix.agents.mcp.tools._common import RegistrationContext, ToolBinding
 from kairix.core.protocols import FactExtractor, FactStore
 from kairix.paths import KairixPaths
-from kairix.use_cases.ingest_chat import ingest_chat
+from kairix.use_cases.ingest_chat import (
+    ingest_chat,
+    resolve_production_fact_extractor,
+    resolve_production_fact_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -178,18 +182,17 @@ def tool_ingest_chat(
 
     resolved_paths = paths if paths is not None else KairixPaths.resolve()
 
-    # Resolve fact_store / fact_extractor lazily — keep the production
-    # heavy imports off the module-level path so test runs that pass
-    # fakes don't pay for SQLite/LLM stack imports.
+    # Resolve fact_store / fact_extractor through the SAME use-case-level
+    # factories the ``kairix ingest-chat`` CLI uses (W5c DRY consolidation,
+    # PLA-324). The adapter never re-inlines the production store/extractor
+    # construction — both surfaces resolve the production wiring from one
+    # site so they can never drift apart. The heavy imports still stay lazy
+    # (inside the resolvers) so a fake-injected test run never pays for the
+    # SQLite/LLM stack.
     if fact_store is None:
-        from kairix.core.facts import SQLiteFactStore
-
-        fact_store = SQLiteFactStore(db_path=resolved_paths.db_path)
+        fact_store = resolve_production_fact_store(resolved_paths.db_path)
     if fact_extractor is None:
-        from kairix.core.facts import LLMFactExtractor
-        from kairix.platform.llm import get_default_backend
-
-        fact_extractor = LLMFactExtractor(llm=get_default_backend())
+        fact_extractor = resolve_production_fact_extractor()
 
     try:
         jsonl_path = _write_tmp_jsonl(resolved_paths.workspace_root, conversation_id, jsonl_content)
