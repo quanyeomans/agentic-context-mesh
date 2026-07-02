@@ -7,6 +7,24 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.7.2] - 2026-07-03
+
+### The agent guide now shows the real tool names
+
+Agents learning kairix from the built-in usage guide were copying names like `tool_search`, but the real name on the wire is just `search` — so those calls failed. The guide now shows the exact bare names (`search`, `expand`, `memory_write`, …) and is ordered the way you actually work: get oriented, find, dig in, remember, check health, escalate.
+
+### Ask about the things you work on — and get an answer
+
+`facts_about("Kairix")` used to come back empty. Kairix and Three Cubes are now built in, so questions about them resolve out of the box, and a short description on any entity now helps it show up in search, not just its name.
+
+### Contradiction checks say what they actually found
+
+The contradiction checker used to report a problem even when there was simply no evidence either way. It now tells you which of three things happened: the store holds evidence that conflicts, it holds related notes but nothing that settles the point, or it holds nothing on the topic.
+
+### One consistent way in, from the command line or an agent
+
+Each capability now runs through one shared path, so the command line and the agent (MCP) tools behave the same and stay in step as kairix changes — backed by a new test that checks every capability through both doors on every change.
+
 ### Removed
 
 - **The `vault` command is gone — use `store` instead.** `kairix vault` was an old name for `kairix store`. It has been removed. If a script calls `kairix vault`, change it to `kairix store` — it works exactly the same way.
