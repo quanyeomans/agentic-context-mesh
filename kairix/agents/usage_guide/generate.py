@@ -176,27 +176,37 @@ def _check(guide_path: Path, rendered: str) -> int:
     return 1
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Regenerate (or ``--check``) the bundled guide from the catalogue."""
+def main(
+    argv: list[str] | None = None,
+    *,
+    template_path: Path | None = None,
+    guide_path: Path | None = None,
+) -> int:
+    """Regenerate (or ``--check``) the bundled guide from the catalogue.
+
+    ``template_path`` / ``guide_path`` are keyword-only test seams that default
+    to the bundled data files. They are deliberately NOT command-line flags: the
+    generator only ever reads/writes the one bundled guide, so the CLI exposes
+    no user-controllable filesystem path (an agent running this with faulty
+    arguments cannot escape to an arbitrary path).
+    """
     parser = argparse.ArgumentParser(
         prog="python -m kairix.agents.usage_guide.generate",
         description="Generate the bundled agent usage guide from CAPABILITIES_CATALOG.",
     )
-    parser.add_argument("--template-path", type=Path, default=None, help="Override the template location.")
-    parser.add_argument("--guide-path", type=Path, default=None, help="Override the generated-guide location.")
     parser.add_argument("--check", action="store_true", help="Verify the committed guide is current; do not write.")
     args = parser.parse_args(argv)
 
-    template_path = args.template_path or _data_path(_TEMPLATE_RESOURCE)
-    guide_path = args.guide_path or _data_path(_GUIDE_RESOURCE)
+    tpath = template_path or _data_path(_TEMPLATE_RESOURCE)
+    gpath = guide_path or _data_path(_GUIDE_RESOURCE)
 
-    rendered = render_guide(template_path.read_text(encoding="utf-8"))
+    rendered = render_guide(tpath.read_text(encoding="utf-8"))
 
     if args.check:
-        return _check(guide_path, rendered)
+        return _check(gpath, rendered)
 
-    guide_path.write_text(rendered, encoding="utf-8")
-    print(f"wrote {guide_path}")
+    gpath.write_text(rendered, encoding="utf-8")
+    print(f"wrote {gpath}")
     return 0
 
 

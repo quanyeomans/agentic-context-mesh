@@ -142,7 +142,7 @@ def test_main_writes_the_rendered_guide(tmp_path: Path, capsys: pytest.CaptureFi
     template = _seed_template(tmp_path)
     out = tmp_path / "guide.md"
 
-    rc = generate.main(["--template-path", str(template), "--guide-path", str(out)])
+    rc = generate.main([], template_path=template, guide_path=out)
 
     assert rc == 0
     assert out.read_text(encoding="utf-8") == generate.render_guide(_real_template())
@@ -152,9 +152,9 @@ def test_main_writes_the_rendered_guide(tmp_path: Path, capsys: pytest.CaptureFi
 def test_main_check_is_green_when_guide_is_current(tmp_path: Path) -> None:
     template = _seed_template(tmp_path)
     out = tmp_path / "guide.md"
-    generate.main(["--template-path", str(template), "--guide-path", str(out)])
+    generate.main([], template_path=template, guide_path=out)
 
-    rc = generate.main(["--check", "--template-path", str(template), "--guide-path", str(out)])
+    rc = generate.main(["--check"], template_path=template, guide_path=out)
     assert rc == 0
 
 
@@ -163,14 +163,14 @@ def test_main_check_fires_when_guide_is_stale(tmp_path: Path, capsys: pytest.Cap
     out = tmp_path / "guide.md"
     out.write_text("stale — not regenerated\n", encoding="utf-8")
 
-    rc = generate.main(["--check", "--template-path", str(template), "--guide-path", str(out)])
+    rc = generate.main(["--check"], template_path=template, guide_path=out)
     assert rc == 1
     assert "STALE" in capsys.readouterr().out
 
 
 def test_main_check_fires_when_guide_is_absent(tmp_path: Path) -> None:
     template = _seed_template(tmp_path)
-    rc = generate.main(["--check", "--template-path", str(template), "--guide-path", str(tmp_path / "missing.md")])
+    rc = generate.main(["--check"], template_path=template, guide_path=tmp_path / "missing.md")
     assert rc == 1
 
 
