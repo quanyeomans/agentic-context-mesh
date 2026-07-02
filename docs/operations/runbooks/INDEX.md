@@ -12,7 +12,7 @@ Operational procedures and incident runbooks for kairix deployments.
 | `kairix search` returns `vec=0, vec_failed=True` | [runbook-vector-search-failure](runbook-vector-search-failure.md) |
 | `kairix entity suggest` returns junk, agents miss known entities, or reflib recall regresses | [kairix-entity-audit](kairix-entity-audit.md) |
 | New documents not appearing in search after the embed cycle | [runbook-embedding-lag](runbook-embedding-lag.md) |
-| Agent memory saves silently fail, or a memory surface won't write after you point kairix at a new location (`:ro` mount, wrong ownership) | Run `kairix doctor` — its write-access preflight names the unwritable path, the exact permission problem, and a plain-language fix, so you catch it before an agent's write fails |
+| Agent memory saves silently fail, or a memory surface won't write after you point kairix at a new location (`:ro` mount, wrong ownership) | Run `kairix doctor agent` — its write-access preflight names the unwritable path, the exact permission problem, and a plain-language fix, so you catch it before an agent's write fails |
 | BM25 silently returning vector-only results, documents present but unsearchable | [integrity-and-preflight](integrity-and-preflight.md) — run `kairix worker preflight` |
 | Every `mcp-kairix__*` tool returns `-32602 Invalid request parameters` | [MCP-CLIENT-MIGRATION](../MCP-CLIENT-MIGRATION.md) — your client is on `/sse` and needs to move to `/mcp` |
 | NDCG@10 dropped after a config or index change | [runbook-benchmark-regression](runbook-benchmark-regression.md) |
