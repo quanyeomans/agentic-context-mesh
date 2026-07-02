@@ -66,21 +66,41 @@ Forbidden example:
   # surface either, so a `features_status` MCP call is tool-not-found."""
 
 
+# The CLI dispatch-wiring identifier(s) to read. Post-PLA-319 the literal is
+# ``_CLI_HANDLERS`` and ``COMMANDS`` is DERIVED from it + the catalogue (no
+# longer a dict literal); both are accepted so this reader stays correct across
+# the pre-/post-derivation shapes.
+_DISPATCH_NAMES = ("COMMANDS", "_CLI_HANDLERS")
+
+
+def _dispatch_dict_literal(node: ast.AST) -> ast.Dict | None:
+    """Return the dict literal assigned to a CLI dispatch-wiring name, else None.
+
+    Recognises the ``_CLI_HANDLERS`` wiring literal and the legacy ``COMMANDS``
+    literal, whether annotated (``AnnAssign``) or a plain ``Assign``.
+    """
+    if isinstance(node, ast.AnnAssign):
+        targets: list[ast.expr] = [node.target]
+    elif isinstance(node, ast.Assign):
+        targets = list(node.targets)
+    else:
+        return None
+    if not any(isinstance(t, ast.Name) and t.id in _DISPATCH_NAMES for t in targets):
+        return None
+    return node.value if isinstance(node.value, ast.Dict) else None
+
+
 def _commands_has_features(cli_path: Path) -> bool:
-    """Return True if kairix/cli.py COMMANDS dict has a 'features' key."""
+    """Return True if kairix/cli.py's dispatch wiring has a 'features' key."""
     try:
         tree = ast.parse(cli_path.read_text(encoding="utf-8"))
     except (SyntaxError, UnicodeDecodeError, OSError):
         return False
     for node in ast.walk(tree):
-        target_value: ast.expr | None = None
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "COMMANDS":
-            target_value = node.value
-        elif isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "COMMANDS" for t in node.targets):
-            target_value = node.value
-        if target_value is None or not isinstance(target_value, ast.Dict):
+        dispatch = _dispatch_dict_literal(node)
+        if dispatch is None:
             continue
-        for key in target_value.keys:
+        for key in dispatch.keys:
             if isinstance(key, ast.Constant) and key.value == "features":
                 return True
     return False

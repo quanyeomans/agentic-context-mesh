@@ -7,6 +7,10 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+### Removed
+
+- **The `vault` command is gone — use `store` instead.** `kairix vault` was an old name for `kairix store`. It has been removed. If a script calls `kairix vault`, change it to `kairix store` — it works exactly the same way.
+
 ## [2026.7.1] - 2026-07-01
 
 > **Upgrading?** Nothing breaks. Your searches, briefings, and agents keep working the way they do today. This release makes agents faster, and makes their answers easier to trust and follow up on.

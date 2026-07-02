@@ -63,7 +63,6 @@ _NO_MCP_AFFORDANCE_REQUIRED: frozenset[str] = frozenset(
         "config",
         "mcp",
         "bootstrap",
-        "vault",
         "research",
         "summarise",
         "classify",
@@ -182,13 +181,18 @@ Forbidden example:
 
 
 def _read_cli_commands() -> set[str]:
-    """Return the set of command keys from `kairix/cli.py`'s COMMANDS dict."""
+    """Return the set of command keys from `kairix/cli.py`'s dispatch wiring.
+
+    Post-PLA-319 the wiring literal is ``_CLI_HANDLERS`` and ``COMMANDS`` is
+    DERIVED from it + the catalogue (no longer a dict literal); both names are
+    accepted so the affordance gate reads the shipped subcommand set correctly.
+    """
     tree = ast.parse(CLI_FILE.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.AnnAssign)
             and isinstance(node.target, ast.Name)
-            and node.target.id == "COMMANDS"
+            and node.target.id in ("COMMANDS", "_CLI_HANDLERS")
             and isinstance(node.value, ast.Dict)
         ):
             keys: set[str] = set()

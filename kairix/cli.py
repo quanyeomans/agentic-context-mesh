@@ -52,6 +52,8 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from kairix.agents.mcp.server import CAPABILITIES_CATALOG, Capability
+
 
 def _default_mcp_dispatch(subcommand: str, argv: list[str]) -> int | None:
     """Production default for ``CliDeps.mcp_dispatch``.
@@ -83,9 +85,24 @@ class CliDeps:
     mcp_dispatch: Callable[[str, list[str]], int | None] = field(default=_default_mcp_dispatch)
 
 
-# Dispatch table: command name → (module_path, function_name, accepts_args)
-# Lazy imports keep startup fast — only the selected command is imported.
-COMMANDS: dict[str, tuple[str, str, bool]] = {
+# ---------------------------------------------------------------------------
+# CLI dispatch table — DERIVED from the capability catalogue, not hand-listed.
+# ---------------------------------------------------------------------------
+#
+# ``_CLI_HANDLERS`` is the ONE place a subcommand's target module lives — the
+# catalogue (:data:`CAPABILITIES_CATALOG`) owns the agent-facing surface but
+# carries no import wiring. ``COMMANDS`` — the table :func:`main` dispatches
+# through — is DERIVED from it at import by :func:`_derive_commands`: every key
+# must be backed either by a ``CAPABILITIES_CATALOG`` row (an agent-facing
+# capability, keyed by that row's ``cli`` field) or by an explicit
+# ``_INFRA_SUBCOMMANDS`` entry (an operator/infra command that is deliberately
+# not an agent capability). A handler that is neither raises at import, so a
+# subcommand can't silently drift from the catalogue and a retired alias — the
+# old ``vault`` → ``store`` alias — can't survive. Lazy imports in :func:`main`
+# keep startup fast: only the selected command's module is imported at dispatch.
+#
+# Command → (module_path, function_name, accepts_args).
+_CLI_HANDLERS: dict[str, tuple[str, str, bool]] = {
     "bootstrap": ("kairix.bootstrap_cli", "main", True),
     "embed": ("kairix.core.embed.cli", "main", True),
     "entity": ("kairix.knowledge.entities.cli", "main", True),
@@ -110,7 +127,6 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "usage-guide": ("kairix.agents.usage_guide.cli", "main", True),
     "contradict": ("kairix.knowledge.contradict.cli", "main", True),
     "store": ("kairix.knowledge.store.cli", "main", True),
-    "vault": ("kairix.knowledge.store.cli", "main", True),  # backwards-compat alias
     "mcp": ("kairix.agents.mcp.cli", "main", True),
     "onboard": ("kairix.platform.onboard.cli", "main", True),
     # F45-feature: tests/bdd/features/cli_doctor.feature
@@ -138,6 +154,104 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     # F45-feature: tests/bdd/features/install_system_mode.feature
     "uninstall": ("kairix.install.uninstall_cli", "main", True),
 }
+
+# Operator / infrastructure subcommands that are intentionally NOT agent
+# capabilities, so they carry no ``CAPABILITIES_CATALOG`` row. Each is a
+# deliberate human-facing command; anything listed here MUST have
+# ``_CLI_HANDLERS`` wiring, and any dispatchable subcommand that is neither
+# catalogue-backed nor listed here is rejected by :func:`_derive_commands`.
+_INFRA_SUBCOMMANDS: frozenset[str] = frozenset(
+    {
+        "mcp",  # MCP server transport
+        "setup",  # first-time onboarding wizard
+        "config",  # config-schema validator
+        "summarise",  # L0/L1 tiered context generation
+        "classify",  # auto-classify memory writes
+        "wikilinks",  # inject [[wikilinks]] on first mention
+        "curator",  # curator agent (entity health monitoring)
+        "eval",  # evaluation harness
+        "reference-library",  # reference library installer
+        "init",  # self-installer (FHS/XDG dir tree)
+        "uninstall",  # remove the install layout
+        "connect",  # operator-only OAuth2 token capture
+        "mcp-calls",  # mcp_call_log observability inspector
+        "slo",  # perf & affordance SLO harness
+        # The catalogue spells this capability "kairix facts about"; the shipped
+        # command is the hyphenated "facts-about", so it dispatches via infra.
+        "facts-about",
+    }
+)
+
+
+def _cli_subcommand(cli_invocation: str) -> str | None:
+    """Return the top-level ``kairix <sub>`` token of a catalogue ``cli`` field.
+
+    Catalogue rows whose ``cli`` is not a ``kairix …`` invocation — the probe /
+    soak escalation stubs run via ``python -c '…'`` — carry no dispatchable
+    subcommand and return ``None``.
+    """
+    parts = cli_invocation.split()
+    if len(parts) >= 2 and parts[0] == "kairix":
+        return parts[1]
+    return None
+
+
+def _derive_commands(
+    catalogue: tuple[Capability, ...],
+    handlers: dict[str, tuple[str, str, bool]],
+    infra: frozenset[str],
+) -> dict[str, tuple[str, str, bool]]:
+    """Build the dispatch table from the capability catalogue + infra list.
+
+    Agent-facing subcommands come from ``catalogue`` (each row's ``cli`` field
+    names the ``kairix <sub>`` command); operator/infra subcommands come from
+    ``infra``. Every resulting key is wired to its handler in ``handlers``. Two
+    invariants raise at import so the shipped table can't drift from the
+    catalogue:
+
+    * a ``handlers`` entry that is neither catalogue-backed nor infra-declared
+      is a stale/aliased subcommand — this is what keeps the retired ``vault``
+      alias from surviving; and
+    * an ``infra`` subcommand with no ``handlers`` wiring is a config gap.
+
+    A catalogue ``cli`` that names no shipped command (the MCP-only
+    ``capabilities`` surface, or ``facts about`` — shipped as ``facts-about``
+    through ``infra``) is simply not dispatched here.
+    """
+    catalogue_subs: set[str] = set()
+    for cap in catalogue:
+        sub = _cli_subcommand(cap.cli)
+        if sub is not None:
+            catalogue_subs.add(sub)
+
+    commands: dict[str, tuple[str, str, bool]] = {}
+    for sub in sorted(catalogue_subs & handlers.keys()):
+        commands[sub] = handlers[sub]
+    for sub in sorted(infra):
+        wiring = handlers.get(sub)
+        if wiring is None:
+            raise RuntimeError(
+                f"_INFRA_SUBCOMMANDS names {sub!r} but _CLI_HANDLERS has no wiring for it. "
+                f"fix: add a ('module', 'main', True) row to _CLI_HANDLERS. "
+                f"next: or drop {sub!r} from _INFRA_SUBCOMMANDS."
+            )
+        commands[sub] = wiring
+
+    orphans = handlers.keys() - commands.keys()
+    if orphans:
+        raise RuntimeError(
+            f"CLI handler(s) {sorted(orphans)} are neither backed by a CAPABILITIES_CATALOG "
+            f"capability nor declared in _INFRA_SUBCOMMANDS, so COMMANDS can't derive them. "
+            f"fix: add a catalogue row in kairix/agents/mcp/server.py for an agent-facing command, "
+            f"or add the subcommand to _INFRA_SUBCOMMANDS for an operator-only one. "
+            f"next: the retired `vault` alias is intentionally gone — use `store`."
+        )
+    return commands
+
+
+# Derived at import: keys come from the catalogue + the infra allow-list, so a
+# subcommand can't drift from the catalogue (and the old `vault` alias is gone).
+COMMANDS: dict[str, tuple[str, str, bool]] = _derive_commands(CAPABILITIES_CATALOG, _CLI_HANDLERS, _INFRA_SUBCOMMANDS)
 
 
 def main(

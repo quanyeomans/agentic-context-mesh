@@ -125,10 +125,13 @@ mechanically impossible."""
 
 
 def _extract_commands_keys(source: str) -> set[str]:
-    """Return every string key in the ``COMMANDS: dict[...]`` annotation.
+    """Return every string key in the CLI dispatch-wiring dict annotation.
 
-    Returns an empty set if the file does not declare ``COMMANDS`` or
-    parsing fails.
+    Post-PLA-319 the wiring literal is ``_CLI_HANDLERS: dict[...]`` and the
+    runtime ``COMMANDS`` table is DERIVED from it (so ``COMMANDS`` is no longer
+    a dict literal). Both identifiers are accepted so net-new-subcommand
+    detection stays correct across the pre-/post-derivation shapes. Returns an
+    empty set if neither is declared or parsing fails.
     """
     try:
         tree = ast.parse(source)
@@ -139,7 +142,7 @@ def _extract_commands_keys(source: str) -> set[str]:
         if (
             isinstance(node, ast.AnnAssign)
             and isinstance(node.target, ast.Name)
-            and node.target.id == "COMMANDS"
+            and node.target.id in ("COMMANDS", "_CLI_HANDLERS")
             and isinstance(node.value, ast.Dict)
         ):
             for k in node.value.keys:
@@ -387,8 +390,9 @@ def _collect_overrides_from_staged_surfaces(repo_root: Path) -> dict[tuple[str, 
 
 def _per_command_overrides(source: str) -> list[tuple[str, str, str]]:
     """Scan ``cli.py`` source line-by-line; emit ``(kind, name, path)``
-    for any ``# F45-feature: ...`` annotation found inside the
-    COMMANDS dict literal.
+    for any ``# F45-feature: ...`` annotation found inside the CLI
+    dispatch-wiring dict literal (``_CLI_HANDLERS`` post-PLA-319, or the
+    legacy ``COMMANDS`` literal).
 
     The annotation may sit on the same line as the row
     (``"foo": (..., ...),  # F45-feature: tests/...``) or on the line
@@ -400,7 +404,7 @@ def _per_command_overrides(source: str) -> list[tuple[str, str, str]]:
     for raw in source.splitlines():
         stripped = raw.strip()
         if not in_commands:
-            if stripped.startswith("COMMANDS"):
+            if stripped.startswith(("COMMANDS", "_CLI_HANDLERS")):
                 in_commands = True
             continue
         if stripped.startswith("}"):
