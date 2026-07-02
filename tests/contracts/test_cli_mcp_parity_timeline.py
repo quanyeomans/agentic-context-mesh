@@ -140,11 +140,16 @@ def test_mcp_tool_timeline_signature_matches_use_case_passthrough() -> None:
     The MCP signature uses string ``anchor_date`` (JSON wire format) which
     the adapter parses to ``date`` before delegating. All other parameters
     pass through unchanged.
+
+    Exclusion ``deps`` is the test-DI seam (a ``TimelineDeps`` injection
+    point), not an operator-facing arg — mirrors the search / entity / expand
+    parity tests, which all subtract ``deps`` from the surface set (PLA-322
+    brought the timeline adapter to the same ``deps``-seam parity).
     """
     from kairix.agents.mcp.server import tool_timeline
     from kairix.use_cases.timeline import run_timeline
 
-    mcp_params = set(inspect.signature(tool_timeline).parameters)
+    mcp_params = set(inspect.signature(tool_timeline).parameters) - {"deps"}
 
     # MCP exposes the JSON-friendly wire surface.
     expected_mcp = {"query", "anchor_date", "agent", "scope"}
@@ -171,12 +176,14 @@ def test_cli_argparse_exposes_every_mcp_user_facing_arg() -> None:
     Exclusion ``scope`` is the MCP-only Scope enum; CLI ergonomics use
     --since/--until/--type to bound the same query window so a verbatim
     ``--scope`` flag would be confusing. Exclude from parity expectation
-    here and document the lift on the use-case side.
+    here and document the lift on the use-case side. ``deps`` is likewise
+    excluded — it's the ``TimelineDeps`` test-DI seam (PLA-322), not an
+    operator-facing arg, matching the search / entity / expand parity tests.
     """
     from kairix.agents.mcp.server import tool_timeline
     from kairix.core.temporal import cli
 
-    mcp_params = set(inspect.signature(tool_timeline).parameters) - {"scope"}
+    mcp_params = set(inspect.signature(tool_timeline).parameters) - {"scope", "deps"}
     parser = cli.build_parser()
     cli_dests = {action.dest for action in parser._actions if action.dest not in {"help"}}
 

@@ -157,3 +157,42 @@ def test_flag_on_with_no_agent_id_uses_unknown_agent_fallback(
         "SELECT agent_id FROM pending_queries WHERE agent_id = 'unknown-agent' LIMIT 1",
     ).fetchone()
     assert row is not None
+
+
+def test_flag_on_with_default_queue_db_factory_makes_carry_along_a_noop(
+    wired_queue: sqlite3.Connection,
+) -> None:
+    """ON branch with the DEFAULT ``queue_db_factory`` (``_default_queue_db``).
+
+    PLA-322 folded the queue-aware search onto the use case; the production
+    default ``queue_db_factory`` returns ``None`` until the production
+    connection is wired through. This test leaves that field at its default
+    (only ``flag_reader`` + ``search_fn`` are stubbed) so the folded
+    ``_default_queue_db`` seam runs: the dispatch still records the row (via the
+    module's configured tmp connection), and carry-along is a safe no-op because
+    ``carry_along_prefix_safe(agent_id, None)`` returns ``""`` — so the envelope
+    carries no ``carry_along`` key.
+    """
+    captured: list[dict[str, Any]] = []
+
+    result = tool_search_queue_aware(
+        query="default-db",
+        agent_id="agent-default-db",
+        queue_deps=QueueAwareSearchDeps(
+            flag_reader=FakeFeatureFlagResolver().with_flag("agent_query_queue", True).get,
+            search_fn=_build_stub_search(captured),
+            # queue_db_factory left DEFAULT → _default_queue_db → None
+        ),
+    )
+
+    assert isinstance(result, dict)
+    assert "carry_along" not in result
+    assert len(captured) == 1
+    # The dispatch row was still written through the module's configured conn.
+    # F63-bounded: tmp-path DB read; test only writes one row.
+    row = wired_queue.execute(
+        "SELECT status FROM pending_queries WHERE agent_id = ? LIMIT 1",
+        ("agent-default-db",),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "delivered"

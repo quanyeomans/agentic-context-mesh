@@ -622,6 +622,169 @@ def run_search(
         )
 
 
+# ---------------------------------------------------------------------------
+# Queue-aware search (ADR-029 G.1) — folded from the MCP adapter (PLA-322).
+#
+# The queue-aware behaviour used to be a SECOND implementation living in
+# ``kairix/agents/mcp/tools/retrieval.py`` (``tool_search_queue_aware``) that
+# re-wrapped the ``tool_search`` adapter. It now lives ONCE here in the use
+# case layer as :func:`run_search_queue_aware`; the MCP adapter selects it via
+# the ``tool_search(queue_aware=True)`` parameter (and a thin backward-compat
+# ``tool_search_queue_aware`` shim). Both CLI and MCP reach the SAME
+# :func:`run_search` — queue-awareness is a use-case-layer composition over it,
+# not a parallel search path. This closes the residual retrieval-domain
+# duplication after the W1b adapter split.
+# ---------------------------------------------------------------------------
+
+
+def _default_flag_reader(name: str) -> bool:
+    """Production feature-flag reader — defers the import to call time."""
+    from kairix.core.features import flag
+
+    return flag(name)
+
+
+def _default_queue_db() -> Any:
+    """Default queue-db factory — None until the production conn is wired through."""
+    return None
+
+
+def _default_queue_search(
+    query: str,
+    agent: str | None = None,
+    scope: Scope = Scope.SHARED_AGENT,
+    budget: int = _DEFAULT_BUDGET,
+    limit: int = 10,
+    *,
+    deps: SearchDeps | None = None,
+) -> dict[str, Any]:
+    """Production search delegate for the queue path — run the use case, serialise.
+
+    The fold's key move (PLA-322): the default queue delegate calls
+    :func:`run_search` + :func:`search_output_to_envelope` directly, so the
+    queue-aware path no longer routes through the MCP adapter layer
+    (``tool_search``). The envelope dict it returns is exactly what carry-along
+    augments and the dispatch decorator records as ``result_json``.
+    """
+    return search_output_to_envelope(run_search(query, agent=agent, scope=scope, budget=budget, limit=limit, deps=deps))
+
+
+@dataclass(frozen=True)
+class QueueAwareSearchDeps:
+    """Injectable dependencies for :func:`run_search_queue_aware`.
+
+    F6-clean: every field has a ``default_factory`` so production callers
+    construct ``QueueAwareSearchDeps()`` and get the real boundary calls; tests
+    construct ``QueueAwareSearchDeps(flag_reader=lambda _: True, ...)`` and pass
+    it as a single argument. Matches ``SearchDeps``'s discipline.
+
+    Fields:
+      * ``flag_reader`` — feature-flag lookup; default :func:`_default_flag_reader`
+        (calls :func:`kairix.core.features.flag`).
+      * ``search_fn`` — the envelope-returning search delegate; default
+        :func:`_default_queue_search`, which runs :func:`run_search` and
+        serialises it. Tests pass a stub so the dispatch/queue surface is the
+        property under test, not the search pipeline.
+      * ``queue_db_factory`` — returns the SQLite connection used for
+        carry-along reads. Default returns ``None`` so production callers opt in
+        by passing a connection-returning callable; tests pass a
+        ``tmp_path``-backed factory.
+    """
+
+    flag_reader: Callable[[str], bool] = field(default_factory=lambda: _default_flag_reader)
+    search_fn: Callable[..., dict[str, Any]] = field(default_factory=lambda: _default_queue_search)
+    queue_db_factory: Callable[[], Any] = field(default_factory=lambda: _default_queue_db)
+
+
+def run_search_queue_aware(
+    query: str,
+    *,
+    agent: str | None = None,
+    scope: Scope = Scope.SHARED_AGENT,
+    budget: int = _DEFAULT_BUDGET,
+    limit: int = 10,
+    agent_id: str | None = None,
+    deps: SearchDeps | None = None,
+    queue_deps: QueueAwareSearchDeps | None = None,
+) -> dict[str, Any] | str:
+    """Queue-aware search (ADR-029 G.1) — the single implementation (PLA-322).
+
+    When the ``agent_query_queue`` feature flag is OFF (default), delegates
+    straight to the search delegate — the response shape is byte-identical to
+    the plain :func:`run_search` envelope. When ON, the call routes through
+    :func:`kairix.core.queue.dispatch.dispatch_or_queue` and any completed
+    ``pending_queries`` rows for ``agent_id`` are carried back as a prefix
+    string keyed under ``"carry_along"`` in the response envelope.
+
+    Args mirror :func:`run_search` plus two seams:
+
+    * ``agent_id`` — the canonical agent identifier from MCP session headers;
+      the dedup key for the queue. Falls back to ``"unknown-agent"`` when None.
+    * ``queue_deps`` — :class:`QueueAwareSearchDeps` holding the flag-reader /
+      search-delegate / queue-db factory. Production callers leave None and the
+      dataclass's ``default_factory`` shape wires the real boundary calls; tests
+      pass an instance with stubs to drive both branches.
+
+    Returns the same dict shape as the plain search envelope when the queue path
+    is OFF or the handler returns within budget. When the queue path is ON and
+    the budget is exceeded, returns the plain string
+    ``"Processing your request (id: q_<hash>)..."`` — NOT an error envelope — so
+    the agent interprets it as "accepted, continue".
+    """
+    from kairix.core.queue import carry_along
+    from kairix.core.queue.dispatch import dispatch_or_queue
+
+    resolved_deps = queue_deps if queue_deps is not None else QueueAwareSearchDeps()
+    delegate = resolved_deps.search_fn
+    reader = resolved_deps.flag_reader
+
+    if not reader("agent_query_queue"):
+        return delegate(query=query, agent=agent, scope=scope, budget=budget, limit=limit, deps=deps)
+
+    resolved_agent_id = agent_id or "unknown-agent"
+
+    @dispatch_or_queue(tool_name="tool_search")
+    def _handler(
+        query: str,
+        agent: str | None,
+        scope: Scope,
+        budget: int,
+        limit: int,
+        *,
+        agent_id: str,
+        deps: Any,
+    ) -> dict[str, Any]:
+        # `agent_id` is part of the dispatch_or_queue contract — the decorator
+        # reads it via kwargs.get('agent_id') on the wrapper layer to build the
+        # dedup hash + the pending_queries row owner; log it here so the
+        # parameter has a real consumer (F19 — every named parameter load-bearing).
+        logger.debug("tool_search dispatched for agent_id=%r", agent_id)
+        return delegate(query=query, agent=agent, scope=scope, budget=budget, limit=limit, deps=deps)
+
+    result: Any = _handler(
+        query,
+        agent,
+        scope,
+        budget,
+        limit,
+        agent_id=resolved_agent_id,
+        deps=deps,
+    )
+
+    # Plain-text queued path — pass through unchanged so the agent reads it as
+    # "accepted, continue".
+    if isinstance(result, str):
+        return result
+
+    # Non-plain-text: the delegate returned the envelope dict. Narrow to a typed
+    # dict so the return isn't a bare Any (mypy --strict no-any-return).
+    envelope: dict[str, Any] = result
+    prefix = carry_along.carry_along_prefix_safe(resolved_agent_id, resolved_deps.queue_db_factory())
+    if prefix:
+        return {**envelope, "carry_along": prefix}
+    return envelope
+
+
 def _search_next_action(health: KairixHealth) -> str:
     """Wrapper so ``_tool_health`` keeps a stable callable shape."""
     return search_next_action(health)
