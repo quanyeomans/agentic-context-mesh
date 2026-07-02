@@ -50,7 +50,7 @@ from typing import Any, TextIO
 logger = logging.getLogger(__name__)
 
 # The feature flag gating both recommender surfaces. The gate lives at the
-# ADAPTER level (CLI ``main`` + MCP ``tool_recommend``), NOT inside
+# ADAPTER level (CLI ``main`` + MCP ``tool_recommend_capabilities``), NOT inside
 # ``run_recommend`` — the use case stays flag-agnostic so it composes the
 # same way in tests and behind either surface. When the flag is OFF, the
 # adapter returns this disabled message WITHOUT calling ``run_recommend``.
@@ -392,7 +392,7 @@ def run_recommend(
 def recommend_output_to_envelope(out: RecommendOutput) -> dict[str, Any]:
     """Project a ``RecommendOutput`` to the JSON envelope callers receive.
 
-    Both adapters (the CLI ``--json`` path and the MCP ``tool_recommend``)
+    Both adapters (the CLI ``--json`` path and the MCP ``tool_recommend_capabilities``)
     serialise from this helper so the envelope shape has one definition.
     """
     return {
@@ -424,7 +424,7 @@ def default_recommender_flag_reader() -> bool:
     """Production flag-reader for the ``recommender`` flag.
 
     Thin wrapper around :func:`kairix.core.features.resolver.flag` so the
-    adapters (CLI :func:`main` + MCP ``tool_recommend``) inject a fake
+    adapters (CLI :func:`main` + MCP ``tool_recommend_capabilities``) inject a fake
     reader without monkey-patching the resolver module (F1/F2-clean).
     Cloned from
     :func:`kairix.core.search.boosts.default_entity_first_routing_flag_reader`.

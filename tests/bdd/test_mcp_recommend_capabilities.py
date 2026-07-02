@@ -1,7 +1,7 @@
 """pytest-bdd binder for mcp_recommend_capabilities.feature.
 
 Steps live in :mod:`tests.bdd.steps.mcp_recommend_steps`. Scenarios drive
-the production MCP adapter ``kairix.agents.mcp.server.tool_recommend`` with
+the production MCP adapter ``kairix.agents.mcp.server.tool_recommend_capabilities`` with
 deps + flag_reader injected — no @patch, no env vars.
 """
 

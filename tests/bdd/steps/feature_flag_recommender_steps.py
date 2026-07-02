@@ -4,7 +4,7 @@ Drives both flag-gated recommender surfaces through their production
 composition surfaces with the flag value pinned through the canonical
 :class:`FakeFeatureFlagResolver` from ``tests/fakes.py``:
 
-  * the adapter gate via ``kairix.agents.mcp.server.tool_recommend``
+  * the adapter gate via ``kairix.agents.mcp.server.tool_recommend_capabilities``
     (``flag_reader`` seam), and
   * the worker boot hook via
     ``kairix.worker.maybe_build_capability_corpus_at_boot`` (``read_flag``
@@ -24,7 +24,7 @@ from typing import Any
 import pytest
 from pytest_bdd import given, parsers, then, when
 
-from kairix.agents.mcp.server import tool_recommend
+from kairix.agents.mcp.server import tool_recommend_capabilities
 from kairix.use_cases.recommend import RecommendDeps
 from kairix.worker import maybe_build_capability_corpus_at_boot
 from tests.fakes import FakeFeatureFlagResolver, FakeSearchPipeline
@@ -89,7 +89,7 @@ def _adapter_deps(state: _FlagState) -> RecommendDeps:
 @when("the agent asks the recommend surface which tool fits a task")
 def _ask_surface(_flag_state: _FlagState) -> None:
     assert _flag_state.resolver is not None
-    _flag_state.envelope = tool_recommend(
+    _flag_state.envelope = tool_recommend_capabilities(
         task="check this against what we know",
         deps=_adapter_deps(_flag_state),
         flag_reader=lambda: _flag_state.resolver.get("recommender"),

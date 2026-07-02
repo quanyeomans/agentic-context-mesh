@@ -3,7 +3,7 @@
 Exercises both branches of the two flag-gated recommender surfaces through
 their production composition surfaces:
 
-  * **The MCP/CLI adapter gate** — :func:`kairix.agents.mcp.server.tool_recommend`
+  * **The MCP/CLI adapter gate** — :func:`kairix.agents.mcp.server.tool_recommend_capabilities`
     reads the ``recommender`` flag via an injected ``flag_reader`` dep. When
     OFF it returns a disabled envelope WITHOUT calling ``run_recommend``;
     when ON it delegates to ``run_recommend`` and returns its envelope.
@@ -13,7 +13,7 @@ their production composition surfaces:
     when ON it builds the capabilities corpus.
 
 F47 — the worker branch is reached via the production boot hook; the
-adapter branch through the production ``tool_recommend`` entry point. No
+adapter branch through the production ``tool_recommend_capabilities`` entry point. No
 direct ``*Pipeline(...)`` construction.
 
 F1/F2-clean: the flag value is threaded through the production
@@ -22,7 +22,7 @@ F1/F2-clean: the flag value is threaded through the production
 ``KAIRIX_FEATURE_*`` env vars.
 
 Sabotage proof (executed by the agent, restored on completion):
-inverting the gate in ``tool_recommend`` so the OFF branch delegates to
+inverting the gate in ``tool_recommend_capabilities`` so the OFF branch delegates to
 ``run_recommend`` — confirmed that ``test_recommender_flag_off_adapter_disabled``
 fails (the disabled envelope is replaced by a real recommendations
 envelope); restoring the gate returns it to green. See the Step 4.5 report
@@ -44,7 +44,7 @@ _DISABLED_FRAGMENT = "recommender is disabled"
 
 
 # ---------------------------------------------------------------------------
-# Adapter gate — tool_recommend
+# Adapter gate — tool_recommend_capabilities
 # ---------------------------------------------------------------------------
 
 
@@ -72,12 +72,12 @@ def _recommend_deps_with_one_hit() -> object:
 
 
 def test_recommender_flag_off_adapter_disabled() -> None:
-    """Flag OFF — ``tool_recommend`` returns a disabled envelope, no recs."""
-    from kairix.agents.mcp.server import tool_recommend
+    """Flag OFF — ``tool_recommend_capabilities`` returns a disabled envelope, no recs."""
+    from kairix.agents.mcp.server import tool_recommend_capabilities
 
     resolver = FakeFeatureFlagResolver().with_flag("recommender", False)
 
-    envelope = tool_recommend(
+    envelope = tool_recommend_capabilities(
         task="find prior work",
         deps=_recommend_deps_with_one_hit(),
         flag_reader=lambda: resolver.get("recommender"),
@@ -88,12 +88,12 @@ def test_recommender_flag_off_adapter_disabled() -> None:
 
 
 def test_recommender_flag_on_adapter_delegates() -> None:
-    """Flag ON — ``tool_recommend`` delegates to ``run_recommend``."""
-    from kairix.agents.mcp.server import tool_recommend
+    """Flag ON — ``tool_recommend_capabilities`` delegates to ``run_recommend``."""
+    from kairix.agents.mcp.server import tool_recommend_capabilities
 
     resolver = FakeFeatureFlagResolver().with_flag("recommender", True)
 
-    envelope = tool_recommend(
+    envelope = tool_recommend_capabilities(
         task="find prior work",
         deps=_recommend_deps_with_one_hit(),
         flag_reader=lambda: resolver.get("recommender"),

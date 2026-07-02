@@ -1,13 +1,13 @@
-"""F30 outcome test — ``tool_recommend`` MCP direct-handler surface.
+"""F30 outcome test — ``tool_recommend_capabilities`` MCP direct-handler surface.
 
-Per the F30 contract: call ``tool_recommend`` directly with deps injected
-and assert on the returned envelope via Subscript / Attribute access — not
-internal call-counts. The recommender's MCP adapter is a thin wrapper
+Per the F30 contract: call ``tool_recommend_capabilities`` directly with deps
+injected and assert on the returned envelope via Subscript / Attribute access —
+not internal call-counts. The recommender's MCP adapter is a thin wrapper
 around ``run_recommend`` + ``recommend_output_to_envelope``, gated by the
 ``recommender`` flag at the adapter level.
 
-DI seam: ``tool_recommend`` forwards ``deps`` to ``run_recommend`` and
-reads the flag via the injected ``flag_reader`` — production callers leave
+DI seam: ``tool_recommend_capabilities`` forwards ``deps`` to ``run_recommend``
+and reads the flag via the injected ``flag_reader`` — production callers leave
 both at their defaults. Tests pass a ``RecommendDeps`` backed by
 ``FakeSearchPipeline`` and a flag_reader returning True so the call
 exercises the composed adapter → use case → envelope path without a
@@ -29,10 +29,11 @@ from tests.fakes import FakeSearchPipeline
 
 pytestmark = pytest.mark.integration
 
-# ``tool_recommend_capabilities`` is the ``tool_<registered-tool-name>``
-# alias of ``tool_recommend`` (registered MCP tool: recommend_capabilities).
-# The F30 outcome-test scan keys on this name; calling it here exercises the
-# exact handler the MCP surface registers.
+# ``tool_recommend_capabilities`` is the single adapter for the registered
+# MCP tool ``recommend_capabilities`` — the wire name lives once in the
+# catalogue row's ``mcp_tool`` and this ``tool_<registered-tool-name>`` adapter
+# is named to match it (no short-form alias). The F30 outcome-test scan keys on
+# this name; calling it here exercises the exact handler the MCP surface registers.
 
 
 def _flag_on() -> bool:
