@@ -104,7 +104,6 @@ from kairix.agents.mcp.tools.orient import (
     tool_bootstrap,
     tool_entity_suggest,
     tool_entity_validate,
-    tool_recommend,
     tool_recommend_capabilities,
     tool_usage_guide,
 )
@@ -177,7 +176,6 @@ __all__ = [
     "tool_probe_burst",
     "tool_probe_config",
     "tool_probe_search",
-    "tool_recommend",
     "tool_recommend_capabilities",
     "tool_research",
     "tool_search",

@@ -1,7 +1,7 @@
 """Step definitions for mcp_recommend_capabilities.feature.
 
 Drives the production MCP adapter
-``kairix.agents.mcp.server.tool_recommend`` with deps + flag_reader
+``kairix.agents.mcp.server.tool_recommend_capabilities`` with deps + flag_reader
 injected through the public seams — no @patch, no env vars (F1/F2). The
 adapter is a thin wrapper around ``run_recommend`` + the envelope helper,
 flag-gated at the adapter level. F13-clean: agent/capability language only.
@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 from pytest_bdd import given, parsers, then, when
 
-from kairix.agents.mcp.server import tool_recommend
+from kairix.agents.mcp.server import tool_recommend_capabilities
 from kairix.use_cases.recommend import RecommendDeps
 from tests.fakes import FakeSearchPipeline
 
@@ -79,7 +79,7 @@ def _has_contradict(_mcp_recommend_state: _McpRecommendState) -> None:
 
 @when(parsers.parse('the agent asks the recommend tool which capability fits "{task}"'))
 def _agent_asks(_mcp_recommend_state: _McpRecommendState, task: str) -> None:
-    _mcp_recommend_state.envelope = tool_recommend(
+    _mcp_recommend_state.envelope = tool_recommend_capabilities(
         task=task,
         deps=_deps_for(_mcp_recommend_state),
         flag_reader=lambda: _mcp_recommend_state.flag_on,

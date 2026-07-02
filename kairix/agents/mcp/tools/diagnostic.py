@@ -521,8 +521,7 @@ def tool_maintenance_analyze(
     try:
         import sqlite3 as _sqlite3
 
-        from kairix.core.maintenance.cli import _count_documents, _explain_plan
-        from kairix.core.maintenance.periodic_analyze import run_periodic_analyze
+        from kairix.core.maintenance.cli import build_analyze_envelope
 
         if db_path is None:
             from kairix.paths import db_path as resolved_db_path
@@ -531,24 +530,14 @@ def tool_maintenance_analyze(
 
         db = _sqlite3.connect(str(db_path))
         try:
-            plan_before = _explain_plan(db)
-            result = run_periodic_analyze(db, stale_seconds=0.0)
-            plan_after = _explain_plan(db)
-            rows_analyzed = _count_documents(db)
+            # Same use case the CLI ``kairix maintenance analyze`` calls, so
+            # both surfaces render byte-identical envelope content; the MCP
+            # contract adds the always-present ``error`` key on top.
+            envelope = build_analyze_envelope(db)
         finally:
             db.close()
 
-        return {
-            "analyze_ran": result.ran,
-            "reason": result.reason,
-            "rows_analyzed": rows_analyzed,
-            "previous_doc_count": result.previous_doc_count,
-            "elapsed_ms": result.elapsed_ms,
-            "plan_before": plan_before,
-            "plan_after": plan_after,
-            "sample_query": "SELECT id FROM documents WHERE collection=? AND active=1",
-            "error": "",
-        }
+        return {**envelope, "error": ""}
     except Exception as exc:
         logger.warning("tool_maintenance_analyze failed: %s", exc, exc_info=True)
         return {

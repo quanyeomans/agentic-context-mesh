@@ -29,11 +29,17 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 from kairix.core.maintenance.periodic_analyze import run_periodic_analyze
 
-__all__ = ["AnalyzeCommandDeps", "build_parser", "main", "run_analyze_command"]
+__all__ = [
+    "AnalyzeCommandDeps",
+    "build_analyze_envelope",
+    "build_parser",
+    "main",
+    "run_analyze_command",
+]
 
 
 # Representative hot-path query — the 2026-06-02 production audit found
@@ -72,6 +78,36 @@ def _count_documents(db: sqlite3.Connection) -> int:
     except sqlite3.OperationalError:
         return 0
     return int(row[0]) if row else 0
+
+
+def build_analyze_envelope(db: sqlite3.Connection) -> dict[str, Any]:
+    """Run ANALYZE on ``db`` and return the shared result envelope.
+
+    The single use case behind both operator surfaces — the CLI
+    ``kairix maintenance analyze`` and the MCP ``tool_maintenance_analyze``.
+    It captures the before/after EXPLAIN QUERY PLAN on the representative
+    hot-path query, forces ANALYZE via ``run_periodic_analyze(stale_seconds=0)``
+    (so the ``kairix_meta`` bookkeeping stays consistent with the scheduler
+    step), and counts the documents. Callers own the connection lifecycle
+    (open + close); this function neither opens nor closes it. The returned
+    dict carries no ``error`` key — the CLI serialises it as-is and the MCP
+    adapter adds ``error: ""`` for its always-present-error-key contract — so
+    both adapters render byte-identical envelope content.
+    """
+    plan_before = _explain_plan(db)
+    result = run_periodic_analyze(db, stale_seconds=0.0)
+    plan_after = _explain_plan(db)
+    rows_analyzed = _count_documents(db)
+    return {
+        "analyze_ran": result.ran,
+        "reason": result.reason,
+        "rows_analyzed": rows_analyzed,
+        "previous_doc_count": result.previous_doc_count,
+        "elapsed_ms": result.elapsed_ms,
+        "plan_before": plan_before,
+        "plan_after": plan_after,
+        "sample_query": _EXPLAIN_SAMPLE_QUERY,
+    }
 
 
 def _open_db_for_analyze(db_path: Path | None) -> sqlite3.Connection:
@@ -134,41 +170,25 @@ def run_analyze_command(
     _ = err if err is not None else sys.stderr  # currently unused; reserved.
 
     resolved_deps = deps if deps is not None else AnalyzeCommandDeps()
+    # The operator surface always runs ANALYZE (ad-hoc remediation contract);
+    # ``build_analyze_envelope`` forces it via ``stale_seconds=0``. Callers own
+    # the connection lifecycle, so open + close it around the shared use case.
     db = resolved_deps.open_db(db_path)
     try:
-        plan_before = _explain_plan(db)
-        # Force ANALYZE to run by bypassing the periodic decision rule —
-        # the operator surface always runs (ad-hoc remediation contract).
-        # We still go through run_periodic_analyze so the kairix_meta
-        # bookkeeping stays consistent with the scheduler step. Passing
-        # ``stale_seconds=0`` means "always stale, run it".
-        result = run_periodic_analyze(db, stale_seconds=0.0)
-        plan_after = _explain_plan(db)
-        rows_analyzed = _count_documents(db)
+        envelope = build_analyze_envelope(db)
     finally:
         db.close()
-
-    envelope = {
-        "analyze_ran": result.ran,
-        "reason": result.reason,
-        "rows_analyzed": rows_analyzed,
-        "previous_doc_count": result.previous_doc_count,
-        "elapsed_ms": result.elapsed_ms,
-        "plan_before": plan_before,
-        "plan_after": plan_after,
-        "sample_query": _EXPLAIN_SAMPLE_QUERY,
-    }
 
     if as_json:
         out_stream.write(json.dumps(envelope, indent=2) + "\n")
     else:
         out_stream.write(
             f"maintenance analyze: ANALYZE complete\n"
-            f"  rows_analyzed={rows_analyzed}\n"
-            f"  elapsed_ms={result.elapsed_ms:.1f}\n"
-            f"  reason={result.reason}\n"
-            f"  plan before: {plan_before}\n"
-            f"  plan after:  {plan_after}\n"
+            f"  rows_analyzed={envelope['rows_analyzed']}\n"
+            f"  elapsed_ms={envelope['elapsed_ms']:.1f}\n"
+            f"  reason={envelope['reason']}\n"
+            f"  plan before: {envelope['plan_before']}\n"
+            f"  plan after:  {envelope['plan_after']}\n"
         )
     return 0
 

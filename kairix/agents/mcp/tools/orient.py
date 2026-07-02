@@ -26,7 +26,6 @@ __all__ = [
     "tool_bootstrap",
     "tool_entity_suggest",
     "tool_entity_validate",
-    "tool_recommend",
     "tool_recommend_capabilities",
     "tool_usage_guide",
 ]
@@ -60,7 +59,7 @@ def tool_usage_guide(
     return usage_guide_output_to_envelope(out)
 
 
-def tool_recommend(
+def tool_recommend_capabilities(
     task: str,
     *,
     agent: str | None = None,
@@ -73,6 +72,12 @@ def tool_recommend(
     when you are unsure which kairix tool, skill, slash-command, sub-agent,
     or workflow fits a task — describe the task and get a ranked list of
     capabilities, each with why-it-fits and a ready-to-call invocation.
+
+    Named for its registered MCP tool ``recommend_capabilities`` — the single
+    wire name lives in the catalogue row's ``mcp_tool`` and the registration
+    looks the binding up by it, so this adapter carries no short-form alias.
+    The F30 outcome-test convention + the capability-affordance gate key on the
+    ``tool_<registered-tool-name>`` shape, which this name satisfies directly.
 
     Flag-gated at THIS adapter level (not inside ``run_recommend``): when
     the ``recommender`` flag is OFF, returns a disabled envelope WITHOUT
@@ -92,15 +97,6 @@ def tool_recommend(
         return recommend_output_to_envelope(recommender_disabled_output(task))
     out = run_recommend(task, agent=agent, deps=deps)
     return recommend_output_to_envelope(out)
-
-
-# Canonical ``tool_<registered-tool-name>`` alias for the recommender. The
-# registered MCP tool is ``recommend_capabilities``; the F30 outcome-test
-# convention + the capability-affordance gate both key on the
-# ``tool_<name>`` shape, so this alias is the name outcome tests call. The
-# implementation lives on ``tool_recommend`` (the short adapter name the
-# CLI parity test + the registration both use).
-tool_recommend_capabilities = tool_recommend
 
 
 def tool_bootstrap(
@@ -214,7 +210,7 @@ def _make_recommend_capabilities(_ctx: RegistrationContext) -> Callable[..., Any
         # ``agent`` (default "") is forwarded as-is; ``run_recommend`` accepts
         # ``str | None`` and only logs it (v1 does not personalise ranking),
         # so the empty-string default is harmless — no ``or None`` coercion.
-        return tool_recommend(task=task, agent=agent)
+        return tool_recommend_capabilities(task=task, agent=agent)
 
     return recommend_capabilities
 

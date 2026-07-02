@@ -3,7 +3,7 @@
 The recommender ships one use case (``run_recommend``) behind two thin
 adapters: the CLI ``kairix recommend`` (``kairix.use_cases.recommend.main``,
 ``--json``) and the MCP ``recommend_capabilities`` tool
-(``kairix.agents.mcp.server.tool_recommend``). This contract proves the two
+(``kairix.agents.mcp.server.tool_recommend_capabilities``). This contract proves the two
 adapters return the SAME recommendation envelope for the same task — the
 CLI↔MCP parity invariant.
 
@@ -21,7 +21,7 @@ import json
 
 import pytest
 
-from kairix.agents.mcp.server import tool_recommend
+from kairix.agents.mcp.server import tool_recommend_capabilities
 from kairix.use_cases.recommend import RecommendDeps
 from kairix.use_cases.recommend import main as recommend_main
 from tests.fakes import FakeSearchPipeline
@@ -71,7 +71,7 @@ def _cli_envelope() -> dict:
 
 
 def _mcp_envelope() -> dict:
-    return tool_recommend(task=_TASK, deps=_shared_deps(), flag_reader=lambda: True)
+    return tool_recommend_capabilities(task=_TASK, deps=_shared_deps(), flag_reader=lambda: True)
 
 
 def test_cli_and_mcp_return_equivalent_recommendations() -> None:
@@ -90,7 +90,7 @@ def test_cli_and_mcp_agree_when_disabled() -> None:
     out, err = io.StringIO(), io.StringIO()
     recommend_main([_TASK, "--json"], out=out, err=err, deps=_shared_deps(), flag_reader=lambda: False)
     cli = json.loads(out.getvalue())
-    mcp = tool_recommend(task=_TASK, deps=_shared_deps(), flag_reader=lambda: False)
+    mcp = tool_recommend_capabilities(task=_TASK, deps=_shared_deps(), flag_reader=lambda: False)
 
     assert cli == mcp
     assert cli["recommendations"] == []
@@ -113,7 +113,7 @@ def test_mcp_tool_recommend_calls_run_recommend() -> None:
 
     from kairix.agents.mcp import server
 
-    src = inspect.getsource(server.tool_recommend)
+    src = inspect.getsource(server.tool_recommend_capabilities)
     assert "run_recommend(" in src
     assert "from kairix.use_cases.recommend import" in src
 
