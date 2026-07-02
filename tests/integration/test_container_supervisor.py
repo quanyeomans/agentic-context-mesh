@@ -56,7 +56,15 @@ def _docker_available() -> bool:
 
 @pytest.mark.integration
 @pytest.mark.docker
-@pytest.mark.timeout(300)
+# 600s, not 300s: in Stage-3 the same runner is executing the full ~1147-test
+# integration suite, so the neo4j JVM + kairix (torch/model) cold boot and their
+# `compose up --wait` healthchecks legitimately need more wall-clock than a
+# dedicated box. At the old 300s ceiling both containers were still booting
+# (`neo4j Waiting`, `kairix Starting` — not unhealthy, no image pull). The
+# container itself is healthy (verified by the Customer-Zero deploy smoke); this
+# ceiling is CI-load headroom, not a hang guard. (Durable fix: move this docker
+# test to a dedicated, uncontended job — tracked in #714.)
+@pytest.mark.timeout(600)
 def test_container_runs_both_api_and_worker_as_uid_995() -> None:
     """The unified container supervises api + worker as uid 995.
 
