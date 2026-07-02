@@ -45,6 +45,15 @@ __all__ = [
 
 _T = TypeVar("_T")
 
+# Escalation-command wire names (the catalogue's ``escalate_via`` values) —
+# declared once so the spec-table key, the ``_escalation_envelope`` call, and
+# the ``ToolBinding`` name share one edit site (F17: coupling made explicit).
+_ESC_PROBE_BURST = "probe_burst"
+_ESC_PROBE_CONFIG = "probe_config"
+_ESC_BENCHMARK_RUN = "benchmark_run"
+_ESC_STORE_CRAWL = "store_crawl"
+_ESC_EMBED_REBUILD_FTS = "embed_rebuild_fts"
+
 
 # ---------------------------------------------------------------------------
 # Escalation-envelope spec table — the single source of per-capability data the
@@ -127,7 +136,7 @@ _ESCALATION_SPECS: dict[str, _EscalationSpec] = {
         command=_soak_run_command,
         runtime=lambda params: 60 * int(params["repeat"]),
     ),
-    "probe_burst": _EscalationSpec(
+    _ESC_PROBE_BURST: _EscalationSpec(
         capability="probe burst",
         reason=(
             "Probe burst injects queries as fast as possible against the "
@@ -136,7 +145,7 @@ _ESCALATION_SPECS: dict[str, _EscalationSpec] = {
         command=_probe_burst_command,
         runtime=lambda params: max(30, int(params["total_queries"]) // 5),
     ),
-    "probe_config": _EscalationSpec(
+    _ESC_PROBE_CONFIG: _EscalationSpec(
         capability="probe-config",
         reason=(
             "probe-config runs an embed workload against the operator's configured "
@@ -146,7 +155,7 @@ _ESCALATION_SPECS: dict[str, _EscalationSpec] = {
         command=_const("kairix probe-config"),
         runtime=_const(60),
     ),
-    "benchmark_run": _EscalationSpec(
+    _ESC_BENCHMARK_RUN: _EscalationSpec(
         capability="benchmark run",
         reason="Benchmark runs take minutes and load the system; agents must escalate.",
         command=lambda params: f"kairix benchmark run --suite {params['suite']}",
@@ -158,13 +167,13 @@ _ESCALATION_SPECS: dict[str, _EscalationSpec] = {
         command=_embed_command,
         runtime=_const(300),
     ),
-    "store_crawl": _EscalationSpec(
+    _ESC_STORE_CRAWL: _EscalationSpec(
         capability="store crawl",
         reason="Crawl mutates Neo4j entity graph and takes minutes; agents must escalate.",
         command=_const("kairix store crawl"),
         runtime=_const(300),
     ),
-    "embed_rebuild_fts": _EscalationSpec(
+    _ESC_EMBED_REBUILD_FTS: _EscalationSpec(
         capability="embed rebuild-fts",
         reason="rebuild-fts drops and re-creates the documents_fts table; agents must escalate.",
         command=_const("kairix embed rebuild-fts"),
@@ -232,7 +241,7 @@ def tool_probe_burst(
     OperatorOnlyCapability envelope with the exact CLI command for the operator.
     """
     return _escalation_envelope(
-        "probe_burst",
+        _ESC_PROBE_BURST,
         suite=suite,
         total_queries=total_queries,
         peak_concurrency=peak_concurrency,
@@ -248,12 +257,12 @@ def tool_probe_config() -> dict[str, Any]:
     and surfaces config-shaped advice an operator (not an agent) applies; agents
     must escalate.
     """
-    return _escalation_envelope("probe_config")
+    return _escalation_envelope(_ESC_PROBE_CONFIG)
 
 
 def tool_benchmark_run(suite: str = "reflib") -> dict[str, Any]:
     """Stub for the benchmark capability — operator-only, escalation envelope."""
-    return _escalation_envelope("benchmark_run", suite=suite)
+    return _escalation_envelope(_ESC_BENCHMARK_RUN, suite=suite)
 
 
 def tool_embed(limit: int = 0) -> dict[str, Any]:
@@ -263,12 +272,12 @@ def tool_embed(limit: int = 0) -> dict[str, Any]:
 
 def tool_store_crawl() -> dict[str, Any]:
     """Stub for the store-crawl capability — operator-only, mutates Neo4j."""
-    return _escalation_envelope("store_crawl")
+    return _escalation_envelope(_ESC_STORE_CRAWL)
 
 
 def tool_embed_rebuild_fts() -> dict[str, Any]:
     """Stub for the FTS-rebuild capability — operator-only, destructive recovery action."""
-    return _escalation_envelope("embed_rebuild_fts")
+    return _escalation_envelope(_ESC_EMBED_REBUILD_FTS)
 
 
 def tool_cc_pair(verb: str = "list") -> dict[str, Any]:
@@ -405,15 +414,17 @@ def _make_cc_pair(_ctx: RegistrationContext) -> Callable[..., Any]:
 
 BINDINGS: tuple[ToolBinding, ...] = (
     ToolBinding(name="soak_run", description=_SOAK_RUN_DESCRIPTION, make=_make_soak_run, warm_gated=False),
-    ToolBinding(name="probe_burst", description=_PROBE_BURST_DESCRIPTION, make=_make_probe_burst, warm_gated=False),
-    ToolBinding(name="probe_config", description=_PROBE_CONFIG_DESCRIPTION, make=_make_probe_config, warm_gated=False),
+    ToolBinding(name=_ESC_PROBE_BURST, description=_PROBE_BURST_DESCRIPTION, make=_make_probe_burst, warm_gated=False),
     ToolBinding(
-        name="benchmark_run", description=_BENCHMARK_RUN_DESCRIPTION, make=_make_benchmark_run, warm_gated=False
+        name=_ESC_PROBE_CONFIG, description=_PROBE_CONFIG_DESCRIPTION, make=_make_probe_config, warm_gated=False
+    ),
+    ToolBinding(
+        name=_ESC_BENCHMARK_RUN, description=_BENCHMARK_RUN_DESCRIPTION, make=_make_benchmark_run, warm_gated=False
     ),
     ToolBinding(name="embed", description=_EMBED_DESCRIPTION, make=_make_embed, warm_gated=False),
-    ToolBinding(name="store_crawl", description=_STORE_CRAWL_DESCRIPTION, make=_make_store_crawl, warm_gated=False),
+    ToolBinding(name=_ESC_STORE_CRAWL, description=_STORE_CRAWL_DESCRIPTION, make=_make_store_crawl, warm_gated=False),
     ToolBinding(
-        name="embed_rebuild_fts",
+        name=_ESC_EMBED_REBUILD_FTS,
         description=_EMBED_REBUILD_FTS_DESCRIPTION,
         make=_make_embed_rebuild_fts,
         warm_gated=False,
