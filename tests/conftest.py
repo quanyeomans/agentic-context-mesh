@@ -342,6 +342,53 @@ pytest_plugins = [
     "tests.bdd.steps.slo_steps",
 ]
 
+
+def pytest_sessionstart() -> None:
+    """Purge orphaned staged-selection probes at true session start (SGO-199).
+
+    ``tests/checks/test_staged_selection.py`` proves the staged-dispatch
+    detectors by writing REAL ``zzz_staged_probe*`` files into the repo tree
+    (``kairix/``, ``tests/``) and unlinking each in a ``finally``. The
+    forbidden-import smoke stages ``kairix/core/zzz_staged_probe_f26.py`` for
+    the duration of a multi-second full ``_dispatch_staged`` run. If a run is
+    hard-killed inside that window (a loop timeout / ``Ctrl-C`` between the
+    ``write_text`` and the ``finally``), the probe is orphaned in the tree.
+
+    The NEXT run's early whole-tree gate tests then scan the tree and trip on
+    the orphan as a net-new F26 (core→providers) violation — the
+    ~50%-incidence flake SGO-199 root-caused:
+      * tests/architecture/test_f26_core_import_boundary.py::test_real_repo_gate_is_green
+      * tests/checks/test_catalogue_runner.py::test_in_process_verdict_matches_for_a_sample
+    Both run near the START of the suite (``tests/architecture`` / early
+    ``tests/checks``), long before ``test_staged_selection.py``'s own
+    session-scoped sweep — which is scoped to that module and only fires once
+    it is reached — can clean up. So that sweep never protected the victims.
+
+    Running the purge here, from the ROOT conftest at ``pytest_sessionstart``
+    (before collection and before any test), makes every invocation self-heal
+    regardless of how a prior run died: no orphan survives into the run that
+    scans for it. It also runs before collection, so an orphaned
+    ``tests/zzz_staged_probe_f8.py`` can never be mis-collected as a test.
+    Only ever removes uniquely-named ``zzz_staged_probe*`` paths, so it can
+    never touch a real source file.
+    """
+    import contextlib
+    import shutil
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parent.parent
+    for path in sorted(
+        repo_root.rglob("zzz_staged_probe*"),
+        key=lambda probe: len(probe.parts),
+        reverse=True,
+    ):
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            with contextlib.suppress(FileNotFoundError):
+                path.unlink()
+
+
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.
 # Gated on ``KAIRIX_PVT=1`` so the regex-catch-all parser doesn't intercept
 # every Given/When/Then across the layer-2 BDD suite when PVT is off (the
