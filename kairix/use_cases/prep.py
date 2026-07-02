@@ -36,6 +36,8 @@ from kairix.core.search.prep_summary_cache import (
 from kairix.core.search.scope import Scope
 from kairix.paths import trace_enabled
 from kairix.text import estimate_tokens
+from kairix.use_cases.enumeration import complete_enumeration, default_expand_callable
+from kairix.use_cases.expand import ExpandOutput
 
 logger = logging.getLogger(__name__)
 
@@ -271,6 +273,13 @@ class PrepDeps:
 
     search_fn: Callable[..., Any] = field(default_factory=lambda: default_search_callable)
     chat_fn: Callable[..., str] = field(default_factory=lambda: default_chat_callable)
+    # #437 — source-cohesion enumeration completion. When the top hits cohere
+    # on one enumerable source, this pulls that source's COMPLETE ordered
+    # chunk set so a list-of-techniques is surfaced whole, not clipped to the
+    # top-5 snippets. Production wires ``default_expand_callable`` (the expand
+    # backbone over the worker index); tests inject a fake returning a canned
+    # ``ExpandOutput``.
+    expand_fn: Callable[[str], ExpandOutput] = field(default_factory=lambda: default_expand_callable)
 
 
 _GROUND_RULES = (
@@ -385,7 +394,7 @@ def _classify_row(budgeted: Any, counters: _ContextCounters) -> tuple[SourceRef,
     return ref, f"[{title}]\n{snippet[:500]}"
 
 
-def _format_context(search_result: Any) -> tuple[str, list[SourceRef]]:
+def _format_context(search_result: Any) -> tuple[str, list[SourceRef], list[tuple[str, str]]]:
     """Project a SearchResult's top 5 hits into a context string + source refs.
 
     Chunk hits need ``_MIN_USEFUL_SNIPPET_CHARS`` of snippet content to
@@ -395,10 +404,12 @@ def _format_context(search_result: Any) -> tuple[str, list[SourceRef]]:
     intentionally compact entity-attribute-value triplets and are
     exempt from the chunk floor; they only need to be non-empty.
 
-    Returns ``("", [])`` when no hit has usable snippet content — the
+    Returns ``("", [], [])`` when no hit has usable snippet content — the
     caller treats this as "no relevant documents" rather than calling
     the LLM. The second element is a list of resolvable ``SourceRef``s
-    (PLA-274 / #437), not human title strings.
+    (PLA-274 / #437), not human title strings. The third element is the
+    parallel ``(source_uri, formatted_snippet)`` rows the caller feeds to
+    source-cohesion enumeration completion (#437).
 
     Emits a single ``KAIRIX_TRACE``-gated INFO log capturing how many
     chunk vs fact hits were considered vs kept and the resulting LLM
@@ -408,6 +419,7 @@ def _format_context(search_result: Any) -> tuple[str, list[SourceRef]]:
     """
     parts: list[str] = []
     sources: list[SourceRef] = []
+    rows: list[tuple[str, str]] = []
     counters = _ContextCounters()
     for budgeted in getattr(search_result, "results", [])[:5]:
         classified = _classify_row(budgeted, counters)
@@ -416,6 +428,7 @@ def _format_context(search_result: Any) -> tuple[str, list[SourceRef]]:
         ref, formatted = classified
         sources.append(ref)
         parts.append(formatted)
+        rows.append((ref.source_uri, formatted))
     context = "\n\n---\n\n".join(parts) if parts else ""
     if trace_enabled():
         logger.info(
@@ -426,7 +439,31 @@ def _format_context(search_result: Any) -> tuple[str, list[SourceRef]]:
             counters.facts_total,
             len(context),
         )
-    return context, sources
+    return context, sources, rows
+
+
+# Label for the completed-enumeration block spliced into the LLM context so
+# the model reads it as the authoritative full list, not another snippet.
+_ENUMERATION_BLOCK_LABEL = "Complete list from the source above (every item)"
+
+
+def _with_completed_enumeration(
+    context: str,
+    rows: list[tuple[str, str]],
+    expand_fn: Callable[[str], ExpandOutput],
+) -> str:
+    """Splice the dominant source's complete enumeration into ``context`` (#437).
+
+    When the top hits cohere on one enumerable source, appends that source's
+    full ordered content as a labelled block so the LLM enumerates every list
+    item — not just the score-ranked top-5 snippets. A no-op (returns
+    ``context`` unchanged) when no enumerable source dominates.
+    """
+    completed = complete_enumeration(rows, expand_fn=expand_fn)
+    if completed is None:
+        return context
+    _uri, full_text = completed
+    return f"{context}\n\n---\n\n[{_ENUMERATION_BLOCK_LABEL}]\n{full_text}"
 
 
 def run_prep(
@@ -455,7 +492,7 @@ def run_prep(
     try:
         budget = _L0_BUDGET if tier == "l0" else _L1_BUDGET
         sr = search(query=query, agent=agent, scope=scope, budget=budget)
-        context, sources = _format_context(sr)
+        context, sources, rows = _format_context(sr)
 
         if not context:
             return PrepOutput(
@@ -463,6 +500,10 @@ def run_prep(
                 tier=tier,
                 summary="No relevant documents found for this topic.",
             )
+
+        # #437 — when the top hits cohere on one enumerable source, complete
+        # its enumeration so a list-of-techniques is surfaced whole.
+        context = _with_completed_enumeration(context, rows, d.expand_fn)
 
         max_tokens = _L0_MAX_TOKENS if tier == "l0" else _L1_MAX_TOKENS
         messages = _build_messages(query, tier, context)

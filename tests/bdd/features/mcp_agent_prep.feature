@@ -22,3 +22,9 @@ Feature: MCP agent prep tool
     When the agent calls tool_prep with query "anything" at tier "l0"
     Then no prep exception was raised
     And the prep response is a valid dict
+
+  Scenario: Prep enumerates every item when one source holds a list of techniques
+    Given a reference source lists seven techniques spread across its chunks
+    When the agent asks prep to summarise the techniques in that source
+    Then the prep summary names every one of the seven techniques
+    And the prep response error is empty

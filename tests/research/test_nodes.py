@@ -10,6 +10,7 @@ import pytest
 from kairix.agents.research.nodes import (
     ClassifyIntentDeps,
     RetrieveDeps,
+    SynthesiseDeps,
     classify_intent,
     evaluate_sufficiency,
     refine_query,
@@ -18,6 +19,9 @@ from kairix.agents.research.nodes import (
     synthesise,
 )
 from kairix.agents.research.state import ResearcherState
+from kairix.core.protocols import SourceRef
+from kairix.use_cases.expand import ExpandedChunk, ExpandOutput
+from tests.fakes import FakeLLMBackend
 
 
 def _state(**overrides) -> ResearcherState:
@@ -259,6 +263,57 @@ class TestSynthesise:
             llm_backend=mock_backend,
         )
         assert result["confidence"] == pytest.approx(0.42)
+
+    @pytest.mark.unit
+    def test_synthesise_completes_enumeration_from_cohesive_source(self) -> None:
+        """#437 — when the accumulated chunks cohere on one enumerable source,
+        synthesise grounds the LLM in the COMPLETE ordered source, so a
+        list-of-techniques is answered whole rather than clipped to the top
+        snippets.
+
+        Sabotage-proof (executed 2026-07-03): reverting the
+        ``_augment_with_enumeration`` call in ``synthesise`` to a no-op leaves
+        the LLM grounded only in the top chunks, and the ``Pretend-to-Own`` /
+        ``Re-label`` assertions on the prompt fail.
+        """
+        source = "reflib://methods.md"
+        techniques = ["Mechanical Turk", "Pinocchio", "Fake Door", "Pretend-to-Own", "Re-label"]
+        # Only the first two techniques reach the accumulated (top) chunks.
+        chunks = [
+            {
+                "path": f"{source}#{i}",
+                "snippet": f"- {techniques[i]}: a technique for validating demand before building.",
+                "source_ref": SourceRef.of(path=f"{source}#{i}", source_uri=source).to_envelope(),
+            }
+            for i in range(2)
+        ]
+
+        def fake_expand(uri: str) -> ExpandOutput:
+            # The full source carries every technique, ordered across two chunks.
+            first = "\n".join(f"- {name}" for name in techniques[:3])
+            second = "\n".join(f"- {name}" for name in techniques[3:])
+            return ExpandOutput(
+                source_uri=uri,
+                chunks=[
+                    ExpandedChunk(path=f"{uri}#0", seq=0, text=first, tokens=10, source_uri=uri),
+                    ExpandedChunk(path=f"{uri}#1", seq=1, text=second, tokens=10, source_uri=uri),
+                ],
+            )
+
+        fake_llm = FakeLLMBackend(chat_response="Synthesised answer citing the sources.")
+        result = synthesise(
+            _state(retrieved_chunks=chunks),
+            llm_backend=fake_llm,
+            deps=SynthesiseDeps(expand_fn=fake_expand),
+        )
+
+        assert result["synthesis"] == "Synthesised answer citing the sources."
+        prompt = fake_llm.chat_calls[0]["messages"][1]["content"]
+        for name in techniques:
+            assert name in prompt, f"synthesis prompt dropped an enumerated technique: {name!r}"
+        # The clipped techniques prove the fix is load-bearing.
+        assert "Pretend-to-Own" in prompt
+        assert "Re-label" in prompt
 
 
 @pytest.mark.unit
