@@ -6,7 +6,9 @@ from typing import Any
 import pytest
 
 from kairix.knowledge.entities.canonical import (
+    FIRST_PARTY_CANONICAL_ENTITIES,
     CanonicalEntity,
+    merge_canonical_entities,
     parse_canonical_entities,
     seed_canonical_entities,
 )
@@ -38,6 +40,56 @@ class _FakeNeo4jClient:
 # ---------------------------------------------------------------------------
 # parse_canonical_entities
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_first_party_seed_declares_kairix() -> None:
+    """The built-in first-party seed (#467) always includes ``Kairix`` with a
+    non-empty summary, so ``facts_about('Kairix')`` resolves out of the box.
+
+    Sabotage-proof: remove the ``Kairix`` entry from
+    ``FIRST_PARTY_CANONICAL_ENTITIES`` → this lookup returns nothing and the
+    assertions below fail.
+    """
+    by_name = {e.name: e for e in FIRST_PARTY_CANONICAL_ENTITIES}
+    assert "Kairix" in by_name
+    assert by_name["Kairix"].summary.strip() != ""
+    assert "kairix" in by_name["Kairix"].aliases
+
+
+@pytest.mark.unit
+def test_merge_appends_first_party_floor_under_operator_declarations() -> None:
+    """Operator entries come first (declared order); un-shadowed built-ins
+    (#467) are appended, so ``Kairix`` is present alongside operator canon."""
+    operator = [CanonicalEntity(name="Acme Corp", entity_type="organisation", summary="Vendor.")]
+    merged = merge_canonical_entities(operator)
+    names = [e.name for e in merged]
+    assert names[0] == "Acme Corp"
+    assert "Kairix" in names
+    assert "Three Cubes" in names
+
+
+@pytest.mark.unit
+def test_merge_lets_operator_override_a_built_in_by_name() -> None:
+    """An operator who declares their own ``Kairix`` (case-insensitive) fully
+    overrides the built-in — the seed is a floor, never a ceiling (#467).
+
+    Sabotage-proof: drop the ``declared_names`` filter in
+    ``merge_canonical_entities`` → both the operator's Kairix and the built-in
+    Kairix appear, so the single-entry assertion below fails.
+    """
+    operator = [CanonicalEntity(name="kairix", entity_type="platform_component", summary="Operator override.")]
+    merged = merge_canonical_entities(operator)
+    kairix_entries = [e for e in merged if e.name.lower() == "kairix"]
+    assert len(kairix_entries) == 1
+    assert kairix_entries[0].summary == "Operator override."
+
+
+@pytest.mark.unit
+def test_merge_of_empty_operator_list_is_exactly_the_floor() -> None:
+    """No operator declarations → the merged list is exactly the built-in
+    floor, preserving its order."""
+    assert merge_canonical_entities([]) == list(FIRST_PARTY_CANONICAL_ENTITIES)
 
 
 @pytest.mark.unit

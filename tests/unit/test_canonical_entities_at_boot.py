@@ -20,7 +20,10 @@ from typing import Any
 import pytest
 
 from kairix.core.search.config_loader import load_canonical_entities
-from kairix.knowledge.entities.canonical import CanonicalEntity
+from kairix.knowledge.entities.canonical import (
+    FIRST_PARTY_CANONICAL_ENTITIES,
+    CanonicalEntity,
+)
 from kairix.worker import (
     CanonicalEntitySeedDeps,
     seed_canonical_entities_at_boot,
@@ -29,14 +32,19 @@ from kairix.worker import (
 pytestmark = pytest.mark.unit
 
 
+def _names(entities: list) -> list[str]:
+    return [e.name for e in entities]
+
+
 # ---------------------------------------------------------------------------
-# load_canonical_entities
+# load_canonical_entities  (#431 operator block + #467 first-party floor)
 # ---------------------------------------------------------------------------
 
 
 def test_load_canonical_entities_reads_yaml_block(tmp_path: Path) -> None:
-    """The loader pulls the ``canonical_entities:`` block from
-    kairix.config.yaml and returns a list of CanonicalEntity."""
+    """The loader pulls the operator ``canonical_entities:`` block AND
+    appends the first-party floor (#467). Operator entries come first in
+    declared order; ``Kairix`` is always present."""
     cfg = tmp_path / "kairix.config.yaml"
     cfg.write_text(
         textwrap.dedent(
@@ -54,34 +62,36 @@ def test_load_canonical_entities_reads_yaml_block(tmp_path: Path) -> None:
         ).lstrip()
     )
     entities = load_canonical_entities(cfg)
-    assert len(entities) == 2
+    # Operator declarations lead, in declared order.
     assert entities[0].name == "Shape"
     assert entities[0].entity_type == "agent"
     assert entities[1].aliases == ("Acme", "Acme Inc.")
+    # The first-party floor (#467) is appended — Kairix always resolves.
+    assert "Kairix" in _names(entities)
 
 
-def test_load_canonical_entities_returns_empty_when_block_absent(tmp_path: Path) -> None:
-    """A config file with no ``canonical_entities:`` block returns an
-    empty list — the loader doesn't manufacture canonicals out of
-    nothing."""
+def test_load_canonical_entities_returns_builtin_floor_when_block_absent(tmp_path: Path) -> None:
+    """A config file with no ``canonical_entities:`` block still yields
+    the first-party floor (#467) — the loader doesn't manufacture
+    OPERATOR canonicals out of nothing, but Kairix is always canon."""
     cfg = tmp_path / "kairix.config.yaml"
     cfg.write_text("provider: fake\nretrieval: {}\n")
-    assert load_canonical_entities(cfg) == []
+    assert load_canonical_entities(cfg) == list(FIRST_PARTY_CANONICAL_ENTITIES)
 
 
-def test_load_canonical_entities_returns_empty_when_path_missing(tmp_path: Path) -> None:
-    """A missing config path returns empty — the boot step won't crash
-    on a fresh install that hasn't placed a config yet."""
+def test_load_canonical_entities_returns_builtin_floor_when_path_missing(tmp_path: Path) -> None:
+    """A missing config path yields the first-party floor — a fresh
+    install with no config still resolves ``facts_about('Kairix')`` (#467)."""
     missing = tmp_path / "does-not-exist.yaml"
-    assert load_canonical_entities(missing) == []
+    assert load_canonical_entities(missing) == list(FIRST_PARTY_CANONICAL_ENTITIES)
 
 
-def test_load_canonical_entities_returns_empty_on_malformed_yaml(tmp_path: Path) -> None:
-    """Malformed YAML degrades to empty list with a logged warning —
-    operators can fix the YAML without crashlooping the worker."""
+def test_load_canonical_entities_returns_builtin_floor_on_malformed_yaml(tmp_path: Path) -> None:
+    """Malformed YAML degrades to the first-party floor with a logged
+    warning — operators can fix the YAML without losing ``Kairix`` (#467)."""
     cfg = tmp_path / "kairix.config.yaml"
     cfg.write_text("{{{{ invalid yaml :::::\n")
-    assert load_canonical_entities(cfg) == []
+    assert load_canonical_entities(cfg) == list(FIRST_PARTY_CANONICAL_ENTITIES)
 
 
 # ---------------------------------------------------------------------------

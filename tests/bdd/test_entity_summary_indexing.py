@@ -20,6 +20,14 @@ def test_description_keyword_query_surfaces_entity() -> None:
 
 @scenario(
     FEATURE,
+    "A first-party entity with no Wikidata id still surfaces by its description",
+)
+def test_first_party_entity_without_qid_surfaces_by_description() -> None:
+    """Body populated by @scenario from the .feature file."""
+
+
+@scenario(
+    FEATURE,
     "Description-keyword query returns no entity row when the flag is off",
 )
 def test_description_keyword_query_returns_no_entity_when_flag_off() -> None:

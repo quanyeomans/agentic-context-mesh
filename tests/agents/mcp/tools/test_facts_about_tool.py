@@ -468,6 +468,73 @@ def test_entity_summary_lookup_failure_is_isolated_from_facts() -> None:
     assert [h["value"] for h in out["hits"]] == ["widgets"]
 
 
+# ---------------------------------------------------------------------------
+# #467 — the first-party canonical seed (Kairix) resolves out of the box
+# ---------------------------------------------------------------------------
+
+
+def test_facts_about_resolves_kairix_from_first_party_seed(tmp_path: Path) -> None:
+    """``facts_about('Kairix')`` surfaces the canonical summary even when the
+    operator's config declares NO Kairix entity — the built-in first-party
+    seed (#467) is always merged in by ``load_canonical_entities``.
+
+    Composed path: the REAL ``load_canonical_entities`` runs against a
+    hermetic tmp config (only an unrelated operator entity declared) and
+    its output feeds ``tool_facts_about`` exactly as
+    ``_default_canonical_loader`` does in production.
+
+    Sabotage-proof: drop the ``Kairix`` entry from
+    ``FIRST_PARTY_CANONICAL_ENTITIES`` (or the appended ``floor`` in
+    ``merge_canonical_entities``) → the merge no longer contains Kairix,
+    ``out['canonical']`` is None, and the assertions below fail.
+    """
+    from kairix.core.search.config_loader import load_canonical_entities
+
+    cfg = tmp_path / "kairix.config.yaml"
+    cfg.write_text(
+        "provider: fake\ncanonical_entities:\n  - name: Acme Corp\n    type: organisation\n    summary: A vendor.\n"
+    )
+    resolved = load_canonical_entities(cfg)
+
+    out = tool_facts_about(
+        entity="Kairix",
+        canonicals=resolved,
+        fact_store=FakeFactStore(),
+        document_repo=_empty_doc_repo(),
+    )
+
+    assert out["error"] == ""
+    assert out["canonical"] is not None
+    assert out["canonical"]["name"] == "Kairix"
+    assert "knowledge store" in out["canonical"]["summary"].lower()
+
+
+def test_facts_about_resolves_kairix_by_alias_from_seed(tmp_path: Path) -> None:
+    """An alias form ('the kairix platform') resolves to the same canonical —
+    the seed's aliases cover how agents actually name the platform, beyond a
+    case-variant of 'Kairix'.
+
+    Sabotage-proof: empty the ``aliases`` tuple on the Kairix seed → 'the
+    kairix platform' no longer matches (it is not a case-variant of the
+    name), ``out['canonical']`` is None, and the assertion below fails.
+    """
+    from kairix.core.search.config_loader import load_canonical_entities
+
+    cfg = tmp_path / "kairix.config.yaml"
+    cfg.write_text("provider: fake\n")
+    resolved = load_canonical_entities(cfg)
+
+    out = tool_facts_about(
+        entity="the kairix platform",
+        canonicals=resolved,
+        fact_store=FakeFactStore(),
+        document_repo=_empty_doc_repo(),
+    )
+
+    assert out["canonical"] is not None
+    assert out["canonical"]["name"] == "Kairix"
+
+
 def _paths(tmp_path: Path) -> KairixPaths:
     """Per-test KairixPaths pinned under ``tmp_path`` (hermetic)."""
     return KairixPaths(

@@ -97,6 +97,31 @@ def test_build_entity_summary_chunk_carries_canonical_shape() -> None:
     assert chunk.metadata == {"entity_name": "Ada Lovelace Institute", "wikidata_qid": "Q42"}
 
 
+def test_build_entity_summary_chunk_uses_name_locator_when_qid_absent() -> None:
+    """A first-party canonical entity (#467) with no ``wikidata_qid`` keys its
+    chunk off the name — locator ``entity://name/<slug>`` + a ``name:`` tag —
+    so the summary still indexes (#429)."""
+    chunk = build_entity_summary_chunk(
+        summary="shared knowledge store",
+        qid="",
+        name="Three Cubes",
+        tick_iso=_FIXED_TICK,
+        content_hash="abc123",
+    )
+    assert chunk.source_uri == "entity://name/three_cubes"
+    assert "name:three_cubes" in chunk.tags
+    assert chunk.metadata == {"entity_name": "Three Cubes", "wikidata_qid": ""}
+
+
+def test_entity_summary_source_uri_prefers_qid_falls_back_to_name_slug() -> None:
+    """The locator prefers the Wikidata qid and falls back to a name slug
+    (#429) — the branch that lets no-qid canon entities index."""
+    from kairix.knowledge.entities.summary_projector import entity_summary_source_uri
+
+    assert entity_summary_source_uri(qid="Q42", name="Ada") == "entity://Q42"
+    assert entity_summary_source_uri(qid="", name="The Kairix Platform") == "entity://name/the_kairix_platform"
+
+
 # ---------------------------------------------------------------------------
 # Projector outcomes — through the public tick() surface
 # ---------------------------------------------------------------------------
@@ -176,12 +201,35 @@ def test_projector_updates_when_summary_hash_changed() -> None:
     assert writer.writes[0][0].text == "new text"
 
 
-def test_projector_skips_malformed_row_missing_qid() -> None:
-    """A polled row missing ``qid`` (rare — entity hadn't been
-    validated yet) is skipped silently rather than producing a
-    half-shaped chunk. Locks the safe-on-bad-data contract."""
+def test_projector_projects_no_qid_row_via_name_locator() -> None:
+    """A first-party canonical entity (#467) has a summary but no
+    ``wikidata_qid`` — the projector still indexes it, keyed off the
+    entity name (#429), so its summary reaches retrieval.
+
+    Sabotage-proof: restore the ``or not qid`` clause in
+    ``_process_one``'s guard and this row is skipped — ``writes`` empties
+    and both assertions below fail.
+    """
     neo4j = FakeGraphRepository(
-        cypher_rows=[_row(name="No-QID-Entity", qid="", summary="orphaned")],
+        cypher_rows=[_row(name="Kairix", qid="", summary="shared knowledge store")],
+    )
+    writer = FakeChunkWriter()
+    projector = EntitySummaryProjectorImpl(neo4j=neo4j, chunk_writer=writer, clock=_fixed_clock)
+
+    result = projector.tick(per_tick_max_items=10)
+    assert result.projected == 1
+    assert len(writer.writes) == 1
+    chunk = writer.writes[0][0]
+    assert chunk.source_uri == "entity://name/kairix"
+    assert chunk.text == "shared knowledge store"
+
+
+def test_projector_skips_row_missing_name_or_summary() -> None:
+    """A row with no ``name`` is skipped — the name is load-bearing for
+    the locator once ``qid`` is optional (#429). Locks the
+    safe-on-bad-data contract."""
+    neo4j = FakeGraphRepository(
+        cypher_rows=[_row(name="", qid="Q1", summary="orphaned")],
     )
     writer = FakeChunkWriter()
     projector = EntitySummaryProjectorImpl(neo4j=neo4j, chunk_writer=writer, clock=_fixed_clock)
