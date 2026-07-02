@@ -16,8 +16,15 @@ capability MUST be discoverable in the bundled guide, proven structurally by
 one of its invocation tokens appearing in the guide text:
 
   * its CLI invocation (``kairix <subcommand>``), OR
-  * its MCP tool name (``tool_<mcp_tool>``), OR
-  * for an operator-only escalation capability, ``tool_<escalate_via>``.
+  * its **bare** MCP tool name (``<mcp_tool>`` — the exact wire name an agent
+    puts on the wire, e.g. ``search``/``memory_write``, NOT ``tool_search``), OR
+  * for an operator-only escalation capability, its bare ``<escalate_via>`` name.
+
+The bare-name token is the one the wire actually uses: the guide is generated
+from the catalogue (``kairix/agents/usage_guide/generate.py``) with the bare
+``Capability.mcp_tool`` names, so scanning for ``tool_<name>`` would look for a
+prefix the guide no longer carries and pass only on the CLI token — masking a
+missing MCP name. The token set is the bare name plus the CLI string.
 
 Detection (AST walk over server.py + a substring scan of the guide):
 
@@ -81,10 +88,12 @@ kairix/agents/usage_guide/data/agent-usage-guide.md — a capability the guide
 never names is a capability agents never discover (this is how `expand` fell
 out after it shipped).
 
-fix: add the capability to the guide so ONE of its invocation tokens appears
-in the text — its CLI invocation `kairix <subcommand>`, its MCP tool name
-`tool_<mcp_tool>`, or (operator-only) `tool_<escalate_via>`. The
-"Capabilities — which surface to use" table is the index; add a row there.
+fix: the guide is generated from the catalogue — regenerate it so the new
+capability's row lands in the loop-ordered index:
+`python -m kairix.agents.usage_guide.generate`. Its bare MCP wire name
+`<mcp_tool>` and CLI `kairix <subcommand>` then appear in the text (or, for an
+operator-only capability, its bare `<escalate_via>` name). Stage the
+regenerated guide.
 
 next: re-run `python3 scripts/checks/check_f99_usage_guide_currency.py`
 to confirm the gate goes green.
@@ -92,11 +101,11 @@ run: bash scripts/safe-commit.sh "docs(guide): surface <capability> affordance"
 
 Pass example:
   # agent-usage-guide.md — the registered `expand` capability is discoverable
-  | `tool_expand` / `kairix expand` | pull the chunks around a search hit | both |
+  | `expand` | pull the chunks around a search hit | `kairix expand` | `expand` | yes |
 
 Forbidden example:
   # kairix/agents/mcp/server.py registers _cap(name="expand", mcp_tool="expand", ...)
-  # but agent-usage-guide.md never mentions `tool_expand` or `kairix expand`
+  # but agent-usage-guide.md never mentions `expand` or `kairix expand`
   # — F99 fires because a self-training agent can't discover the capability.
 
 If a capability is deliberately not advertised to agents (e.g. a flag-gated
@@ -157,9 +166,12 @@ def _catalogue_capabilities(tree: ast.Module, constants: dict[str, str]) -> list
 def _invocation_tokens(cap: dict[str, str | None]) -> list[str]:
     """Return the distinctive guide tokens that prove a capability is present.
 
-    A ``kairix <subcommand>`` CLI string, the ``tool_<mcp_tool>`` MCP name, and
-    the operator-only ``tool_<escalate_via>`` name are all distinctive enough
-    to scan for. A ``python -c '...'`` CLI is not, so it is not a token.
+    A ``kairix <subcommand>`` CLI string, the **bare** ``<mcp_tool>`` MCP wire
+    name, and the operator-only bare ``<escalate_via>`` name are all
+    distinctive enough to scan for. The guide is generated with the bare
+    ``Capability.mcp_tool`` names (no ``tool_`` prefix), so the bare token is
+    what the wire — and the guide — actually carry. A ``python -c '...'`` CLI
+    is not distinctive, so it is not a token.
     """
     tokens: list[str] = []
     cli = cap.get("cli")
@@ -167,10 +179,10 @@ def _invocation_tokens(cap: dict[str, str | None]) -> list[str]:
         tokens.append(cli)
     mcp_tool = cap.get("mcp_tool")
     if mcp_tool:
-        tokens.append(f"tool_{mcp_tool}")
+        tokens.append(mcp_tool)
     escalate_via = cap.get("escalate_via")
     if escalate_via:
-        tokens.append(f"tool_{escalate_via}")
+        tokens.append(escalate_via)
     return tokens
 
 

@@ -1511,9 +1511,10 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         summary=(
             "bundled usage guide stays in sync with the tool registry — every capability in "
             "tool_capabilities() (each registered MCP tool + CLI subcommand) is discoverable in "
-            "kairix/agents/usage_guide/data/agent-usage-guide.md via its CLI / tool_<name> token, so "
+            "kairix/agents/usage_guide/data/agent-usage-guide.md via its CLI / bare <mcp_tool> wire-name "
+            "token (the guide is generated from CAPABILITIES_CATALOG with the bare names), so "
             "an agent self-training from the guide can find every shipped tool (the drift class that "
-            "let `expand` fall out); flag-gated-off surfaces are excluded (PLA-299)"
+            "let `expand` fall out); flag-gated-off surfaces are excluded (PLA-299 / PLA-321)"
         ),
         adr_origin="PLA-299 — usage-guide ↔ tool-registry currency",
         tags=("agent-affordance",),
