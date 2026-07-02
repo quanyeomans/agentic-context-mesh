@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 
 import pytest
 
@@ -27,13 +28,26 @@ from kairix.agents.mcp.server import (
     CAP_CATEGORY_KNOWLEDGE_WRITE,
     CAP_CATEGORY_RETRIEVAL,
     CAP_CATEGORY_SYNTHESIS,
+    CAPABILITIES_CATALOG,
+    LOOP_GROUP_ORDER,
     MCP_PROBE_CONCURRENCY_CAP,
     MCP_PROBE_QUERIES_CAP,
+    RECOMMEND_CAPABILITIES_TOOL_NAME,
+    Capability,
+    agent_facing,
     build_server,
+    by_loop_group,
     tool_capabilities,
 )
 
 pytestmark = pytest.mark.unit
+
+# The frozen pre-PLA-317 output of ``tool_capabilities()``. The refactor that
+# promoted the ``_cap(...)`` rows out of the function body into the module-level
+# ``CAPABILITIES_CATALOG`` tuple MUST keep the emitted envelope byte-identical;
+# this snapshot is the guard. Regenerate it deliberately (and review the diff)
+# only when a capability is intentionally added / changed.
+_SNAPSHOT_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "mcp" / "tool_capabilities_snapshot.json"
 
 
 _WELL_KNOWN_CATEGORIES = {
@@ -169,3 +183,112 @@ def test_envelope_serialises_via_json_dumps() -> None:
     encoded = json.dumps(original)
     decoded = json.loads(encoded)
     assert decoded == original
+
+
+# ---------------------------------------------------------------------------
+# PLA-317 — catalogue promoted to importable typed data (CAPABILITIES_CATALOG),
+# with agent_facing() / by_loop_group() accessors. tool_capabilities() must
+# stay byte-identical.
+# ---------------------------------------------------------------------------
+
+
+def test_tool_capabilities_is_byte_identical_to_frozen_snapshot() -> None:
+    """`tool_capabilities()` matches the frozen pre-refactor snapshot exactly.
+
+    This is the byte-identical guard for the PLA-317 promotion: the rows moved
+    out of the function body into the module-level `CAPABILITIES_CATALOG`, but
+    the emitted envelope — same rows, same order, same field values, same key
+    order — must not drift. Structural equality catches drops/renames; the
+    `json.dumps` byte comparison additionally catches a reordered field (equal
+    dicts, different serialisation).
+    """
+    # Sabotage: drop a `when_to_use=...` kwarg from any CAPABILITIES_CATALOG row,
+    # reorder two rows, or reorder the keys in Capability.as_dict → this fails.
+    expected = json.loads(_SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    out = tool_capabilities()
+    assert out == expected, "tool_capabilities() drifted from the frozen snapshot (dropped/renamed field?)"
+    assert json.dumps(out) == json.dumps(expected), "tool_capabilities() field/row order drifted from the snapshot"
+
+
+def test_capabilities_catalog_is_typed_capability_rows() -> None:
+    """`CAPABILITIES_CATALOG` is importable typed data — a tuple of Capability.
+
+    Consumers (CLI dispatch, guide generator, E2E harness) read the catalogue
+    without executing MCP semantics, so it must be a plain frozen-dataclass
+    tuple, not the JSON envelope.
+    """
+    # Sabotage: make CAPABILITIES_CATALOG a list, or have _cap return a dict →
+    # one of these assertions fails.
+    assert isinstance(CAPABILITIES_CATALOG, tuple)
+    assert CAPABILITIES_CATALOG, "catalogue must not be empty"
+    assert all(isinstance(cap, Capability) for cap in CAPABILITIES_CATALOG)
+    # Frozen: a row can't be mutated after construction.
+    with pytest.raises((AttributeError, TypeError)):
+        CAPABILITIES_CATALOG[0].name = "mutated"  # type: ignore[misc]  # F3-rationale: assigning to a frozen dataclass field is deliberate here to prove the FrozenInstanceError guard fires at runtime.
+
+
+def test_tool_capabilities_projects_the_catalog() -> None:
+    """The envelope's `capabilities` list is exactly the catalog's `as_dict` rows."""
+    # Sabotage: have tool_capabilities() build its own rows instead of reading
+    # CAPABILITIES_CATALOG → the lengths/values diverge and this fails.
+    out = tool_capabilities()
+    assert out["capabilities"] == [cap.as_dict() for cap in CAPABILITIES_CATALOG]
+
+
+def test_agent_facing_excludes_escalation_stubs_and_flag_off_recommend() -> None:
+    """`agent_facing()` returns only directly-callable rows.
+
+    A row is agent-facing when it exposes an MCP tool, is not an operator-only
+    escalation stub, and is not the flag-off `recommend_capabilities`
+    recommender.
+    """
+    # Sabotage: drop the `escalate_via is None` clause (escalation stubs leak in)
+    # or the recommender exclusion (flag-off recommend leaks in) → this fails.
+    facing = agent_facing()
+    assert facing, "there must be agent-facing capabilities"
+    assert all(isinstance(cap, Capability) for cap in facing)
+    assert all(cap.mcp_tool is not None for cap in facing), "agent-facing rows must expose an MCP tool"
+    assert all(cap.escalate_via is None for cap in facing), "escalation stubs are not agent-facing"
+    assert all(cap.mcp_tool != RECOMMEND_CAPABILITIES_TOOL_NAME for cap in facing), "flag-off recommend excluded"
+    assert "recommend" not in {cap.name for cap in facing}
+    # It is a strict subset of the full catalogue (the excluded rows exist).
+    assert set(facing) < set(CAPABILITIES_CATALOG)
+
+
+def test_by_loop_group_places_every_agent_facing_cap_in_exactly_one_group() -> None:
+    """`by_loop_group()` buckets the catalogue into the loop-ordered IA.
+
+    Groups are keyed in loop order; every agent-facing capability lands in
+    exactly one group (and the six groups partition the whole catalogue).
+    """
+    # Sabotage: map a category to two groups, or append a cap to two buckets in
+    # by_loop_group → the exactly-one-group assertion fails.
+    grouped = by_loop_group()
+    assert list(grouped.keys()) == list(LOOP_GROUP_ORDER)
+
+    placements: dict[str, int] = {}
+    for members in grouped.values():
+        for cap in members:
+            placements[cap.name] = placements.get(cap.name, 0) + 1
+
+    # Every agent-facing capability is placed exactly once.
+    for cap in agent_facing():
+        assert placements.get(cap.name) == 1, f"{cap.name!r} is not in exactly one loop group"
+
+    # The six groups partition the entire catalogue (no row lost or duplicated).
+    total = sum(len(members) for members in grouped.values())
+    assert total == len(CAPABILITIES_CATALOG)
+    assert all(count == 1 for count in placements.values())
+
+
+def test_by_loop_group_routes_escalation_stubs_to_escalate() -> None:
+    """Operator-only escalation rows land in the `Escalate` group, whatever
+    their category — that's the rule that splits `knowledge-write` between
+    `Remember` (agent-callable writes) and `Escalate` (operator-only writes)."""
+    # Sabotage: drop the `escalate_via`-first branch in _loop_group_for →
+    # operator-only knowledge-write rows fall into Remember and this fails.
+    escalate = by_loop_group()["Escalate"]
+    assert escalate, "there must be escalation capabilities"
+    assert all(cap.escalate_via is not None for cap in escalate)
+    escalate_names = {cap.name for cap in escalate}
+    assert {"embed", "store_crawl", "soak_run"} <= escalate_names
