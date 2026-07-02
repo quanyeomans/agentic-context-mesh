@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from typing import Any
 
 from kairix.agents.mcp.cold_start import require_ready
 from kairix.agents.mcp.tools._common import DEFAULT_SCOPE, RegistrationContext, ToolBinding
 from kairix.core.search.scope import Scope
+from kairix.use_cases.search import QueueAwareSearchDeps
 
 logger = logging.getLogger(__name__)
 
@@ -161,8 +161,11 @@ def tool_search(
     limit: int = 10,
     max_tier: str = "L2",
     *,
+    queue_aware: bool = False,
+    agent_id: str | None = None,
     deps: Any = None,
-) -> dict[str, Any]:
+    queue_deps: QueueAwareSearchDeps | None = None,
+) -> dict[str, Any] | str:
     """Search the knowledge store.
 
     Thin adapter around ``kairix.use_cases.search.run_search``. CLI and
@@ -174,13 +177,33 @@ def tool_search(
     full snippets (the default). Use a cheaper ceiling to triage many hits
     within a tight token budget, then re-query a promising hit at ``"L2"``.
 
+    ``queue_aware`` (ADR-029 G.1, folded in PLA-322) selects the queue-aware
+    search path — a use-case-layer composition over the SAME ``run_search``.
+    When True the call routes through
+    ``kairix.use_cases.search.run_search_queue_aware`` so the
+    ``agent_query_queue`` flag chooses sync-only (OFF, today's behaviour) vs
+    dispatch-or-queue + carry-along (ON, the spike). ``agent_id`` /
+    ``queue_deps`` are the queue seams — ignored on the default (non-queue)
+    path.
+
     The optional ``deps`` parameter forwards a ``SearchDeps`` directly
     to the use case — production callers leave it None; tests pass a
     ``SearchDeps`` to drive without touching live services.
     """
-    from kairix.use_cases.search import run_search, search_output_to_envelope
+    from kairix.use_cases.search import run_search, run_search_queue_aware, search_output_to_envelope
 
-    logger.info("mcp.search: agent=%r scope=%r max_tier=%r", agent, scope, max_tier)
+    logger.info("mcp.search: agent=%r scope=%r max_tier=%r queue_aware=%s", agent, scope, max_tier, queue_aware)
+    if queue_aware:
+        return run_search_queue_aware(
+            query,
+            agent=agent,
+            scope=scope,
+            budget=budget,
+            limit=limit,
+            agent_id=agent_id,
+            deps=deps,
+            queue_deps=queue_deps,
+        )
     out = run_search(
         query,
         agent=agent,
@@ -193,48 +216,6 @@ def tool_search(
     return search_output_to_envelope(out)
 
 
-def _default_flag_reader(name: str) -> bool:
-    """Production feature-flag reader — defers the import to call time."""
-    from kairix.core.features import flag
-
-    return flag(name)
-
-
-@dataclass
-class QueueAwareSearchDeps:
-    """Injectable dependencies for :func:`tool_search_queue_aware`.
-
-    F6-clean: every field has a ``default_factory`` so production
-    callers construct ``QueueAwareSearchDeps()`` and get the real
-    boundary calls; tests construct
-    ``QueueAwareSearchDeps(flag_reader=lambda _: True, ...)`` and pass
-    it as a single argument. Matches :class:`WorkerDeps`'s discipline
-    for the sibling worker callables.
-
-    Fields:
-      * ``flag_reader`` — feature-flag lookup; default
-        :func:`_default_flag_reader` (calls
-        :func:`kairix.core.features.flag`).
-      * ``search_fn`` — search delegate; default :func:`tool_search`.
-        Tests pass a stub so the dispatch/queue surface is the
-        property under test, not the search pipeline.
-      * ``queue_db_factory`` — returns the SQLite connection used for
-        carry-along reads. Default returns ``None`` so production
-        callers opt-in by passing a connection-returning callable
-        once the production wiring is in place; tests pass a
-        ``tmp_path``-backed factory.
-    """
-
-    flag_reader: Callable[[str], bool] = field(default_factory=lambda: _default_flag_reader)
-    search_fn: Callable[..., dict[str, Any]] = field(default_factory=lambda: tool_search)
-    queue_db_factory: Callable[[], Any] = field(default_factory=lambda: _default_queue_db)
-
-
-def _default_queue_db() -> Any:
-    """Default queue-db factory — None until G.2 wires the production conn through."""
-    return None
-
-
 def tool_search_queue_aware(
     query: str,
     agent: str | None = None,
@@ -245,84 +226,28 @@ def tool_search_queue_aware(
     agent_id: str | None = None,
     deps: Any = None,
     queue_deps: QueueAwareSearchDeps | None = None,
-) -> Any:
-    """Queue-aware wrapper around :func:`tool_search` for the ADR-029 G.1 spike.
+) -> dict[str, Any] | str:
+    """Backward-compatible MCP shim for queue-aware search (PLA-322).
 
-    When the ``agent_query_queue`` feature flag is OFF (default),
-    delegates straight to :func:`tool_search` — the response shape is
-    byte-identical to the pre-spike behaviour. When ON, the call routes
-    through :func:`kairix.core.queue.dispatch_or_queue` and any
-    completed pending_queries rows for ``agent_id`` are carried back
-    as a prefix string keyed under ``"carry_along"`` in the response
-    envelope.
-
-    Args mirror :func:`tool_search` plus two seams:
-
-    * ``agent_id`` — the canonical agent identifier from MCP session
-      headers; used as the dedup key for the queue. Falls back to
-      ``"unknown-agent"`` when None (logged once per call via F21).
-    * ``queue_deps`` — :class:`QueueAwareSearchDeps` holding the
-      flag-reader / search-delegate / queue-db factory. Production
-      callers leave None and the dataclass's ``default_factory`` shape
-      wires the real boundary calls; tests pass an instance with
-      stubs to drive both branches without touching live services.
-
-    Returns the same dict shape as :func:`tool_search` when the queue
-    path is OFF or the handler returns within budget. When the queue
-    path is ON and the budget is exceeded, returns the plain string
-    ``"Processing your request (id: q_<hash>)..."`` — NOT an error
-    envelope — so the agent interprets it as "accepted, continue".
+    The queue-aware implementation was folded onto the use case in PLA-322:
+    it now lives ONCE as ``kairix.use_cases.search.run_search_queue_aware``,
+    and this adapter is a thin parse→call passthrough (the ADR-029 G.1 spike
+    surface + the existing F54 both-branch / BDD callers reach it here). New
+    call sites should prefer ``tool_search(..., queue_aware=True)`` — the
+    ``queue_aware`` parameter is the single canonical selector.
     """
-    from kairix.core.queue import carry_along
-    from kairix.core.queue.dispatch import dispatch_or_queue
+    from kairix.use_cases.search import run_search_queue_aware
 
-    resolved_deps = queue_deps if queue_deps is not None else QueueAwareSearchDeps()
-    delegate = resolved_deps.search_fn
-    reader = resolved_deps.flag_reader
-
-    if not reader("agent_query_queue"):
-        return delegate(query=query, agent=agent, scope=scope, budget=budget, limit=limit, deps=deps)
-
-    resolved_agent_id = agent_id or "unknown-agent"
-
-    @dispatch_or_queue(tool_name="tool_search")
-    def _handler(
-        query: str,
-        agent: str | None,
-        scope: Scope,
-        budget: int,
-        limit: int,
-        *,
-        agent_id: str,
-        deps: Any,
-    ) -> dict[str, Any]:
-        # `agent_id` is part of the dispatch_or_queue contract — the
-        # decorator reads it via kwargs.get('agent_id') on the wrapper
-        # layer to build the dedup hash + the pending_queries row owner;
-        # log it here so the parameter has a real consumer (F19 — every
-        # named parameter must be load-bearing).
-        logger.debug("tool_search dispatched for agent_id=%r", agent_id)
-        return delegate(query=query, agent=agent, scope=scope, budget=budget, limit=limit, deps=deps)
-
-    result = _handler(
+    return run_search_queue_aware(
         query,
-        agent,
-        scope,
-        budget,
-        limit,
-        agent_id=resolved_agent_id,
+        agent=agent,
+        scope=scope,
+        budget=budget,
+        limit=limit,
+        agent_id=agent_id,
         deps=deps,
+        queue_deps=queue_deps,
     )
-
-    # Plain-text queued path — pass through unchanged so the agent
-    # reads it as "accepted, continue".
-    if isinstance(result, str):
-        return result
-
-    prefix = carry_along.carry_along_prefix_safe(resolved_agent_id, resolved_deps.queue_db_factory())
-    if prefix and isinstance(result, dict):
-        result = {**result, "carry_along": prefix}
-    return result
 
 
 def tool_entity(
@@ -365,6 +290,8 @@ def tool_timeline(
     anchor_date: str | None = None,
     agent: str | None = None,
     scope: Scope = DEFAULT_SCOPE,
+    *,
+    deps: Any = None,
 ) -> dict[str, Any]:
     """Date-aware retrieval: rewrite a temporal query and fetch results.
 
@@ -373,6 +300,12 @@ def tool_timeline(
     Phase 1 of #168). The use case extracts a time window from the query
     (or accepts explicit since/until), tries the temporal-chunks index
     first, then falls through to the search pipeline.
+
+    The optional ``deps`` parameter forwards a ``TimelineDeps`` directly to
+    the use case — production callers leave it None; tests pass a
+    ``TimelineDeps`` to drive without touching live services. This brings the
+    timeline adapter to ``deps``-seam parity with the other retrieval adapters
+    (search / entity / expand) so all four are uniformly thin (PLA-322).
     """
     from datetime import date as _date
 
@@ -390,6 +323,7 @@ def tool_timeline(
         anchor_date=anchor,
         agent=agent,
         scope=scope,
+        deps=deps,
     )
 
     return timeline_output_to_envelope(result)
@@ -475,13 +409,15 @@ def _make_search(ctx: RegistrationContext) -> Callable[..., Any]:
     ) -> Any:
         """Search your knowledge store — finds the best answers to any question.
 
-        Routes through :func:`tool_search_queue_aware` so the ADR-029 G.1
-        agent_query_queue flag chooses sync-only (OFF, today's behaviour)
-        vs dispatch-or-queue + carry-along (ON, the spike).
+        Routes through :func:`tool_search` with ``queue_aware=True`` so the
+        ADR-029 G.1 agent_query_queue flag chooses sync-only (OFF, today's
+        behaviour) vs dispatch-or-queue + carry-along (ON, the spike). The
+        queue-aware implementation is single-sourced in the search use case
+        (``run_search_queue_aware``, PLA-322).
         """
         if cold := require_ready("search", ctx.readiness_check):
             return cold
-        return tool_search_queue_aware(query=query, agent=agent, scope=scope, budget=budget, limit=limit)
+        return tool_search(query=query, agent=agent, scope=scope, budget=budget, limit=limit, queue_aware=True)
 
     return search
 
