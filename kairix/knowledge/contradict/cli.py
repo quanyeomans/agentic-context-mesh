@@ -17,6 +17,7 @@ import sys
 from kairix.core.search.scope import Scope
 from kairix.use_cases.contradict import (
     ContradictDeps,
+    ContradictionOutcome,
     ContradictOutput,
     contradict_output_to_envelope,
     run_contradict,
@@ -67,7 +68,16 @@ def format_text(out: ContradictOutput, top_k: int, threshold: float) -> str:
     if out.error:
         return f"error: {out.error}"
     if not out.contradictions:
-        return f"No contradictions found (top_k={top_k}, threshold={threshold})"
+        # #468 — tell the operator WHY nothing was flagged: a store that is
+        # silent on a claim it holds related material for (unsupported) is a
+        # different signal from a store that holds nothing relevant at all
+        # (not_found). Neither is a contradiction.
+        scope_note = (
+            "has related content but nothing that supports or refutes this claim"
+            if out.outcome is ContradictionOutcome.UNSUPPORTED
+            else "has no relevant content on this claim"
+        )
+        return f"No contradictions found — the knowledge store {scope_note} (top_k={top_k}, threshold={threshold})"
 
     lines: list[str] = [f"⚠ {len(out.contradictions)} contradiction(s) found:", ""]
     for h in out.contradictions:

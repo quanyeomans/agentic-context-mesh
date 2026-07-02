@@ -14,7 +14,13 @@ from typing import Any
 import pytest
 
 from kairix.knowledge.contradict.cli import build_parser, format_text, to_json_envelope
-from kairix.use_cases.contradict import ContradictDeps, ContradictionHit, ContradictOutput
+from kairix.knowledge.contradict.detector import ContradictionReport
+from kairix.use_cases.contradict import (
+    ContradictDeps,
+    ContradictionHit,
+    ContradictionOutcome,
+    ContradictOutput,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -75,6 +81,28 @@ def test_format_text_no_contradictions_renders_default_message() -> None:
     assert "No contradictions found" in text
     assert "top_k=5" in text
     assert "threshold=0.45" in text
+
+
+def test_format_text_not_found_and_unsupported_render_distinct_lines() -> None:
+    """#468 — the two no-hit outcomes render different operator text: 'nothing
+    relevant' (not_found) vs 'related content but nothing that supports or
+    refutes' (unsupported). Both still carry the 'No contradictions found'
+    lead-in so the boolean-negative signal is unambiguous.
+
+    Sabotage-proof (executed): drop the ``out.outcome`` branch in
+    ``format_text`` so both outcomes render the same string → the
+    ``not_found_text != unsupported_text`` assertion fires. Restored.
+    """
+    not_found = ContradictOutput(content="c", outcome=ContradictionOutcome.NOT_FOUND)
+    unsupported = ContradictOutput(content="c", outcome=ContradictionOutcome.UNSUPPORTED)
+    not_found_text = format_text(not_found, top_k=5, threshold=0.45)
+    unsupported_text = format_text(unsupported, top_k=5, threshold=0.45)
+
+    assert "No contradictions found" in not_found_text
+    assert "No contradictions found" in unsupported_text
+    assert "no relevant content" in not_found_text
+    assert "supports or refutes" in unsupported_text
+    assert not_found_text != unsupported_text
 
 
 def test_format_text_renders_each_hit_with_category_score_path() -> None:
@@ -174,8 +202,8 @@ def _check_deps_returning_empty() -> ContradictDeps:
         def chat(self, _messages: list[dict[str, Any]]) -> str:
             return "{}"
 
-    def _check_fn(**_kwargs: Any) -> list[Any]:
-        return []
+    def _check_fn(**_kwargs: Any) -> ContradictionReport:
+        return ContradictionReport.of([])
 
     return ContradictDeps(check_fn=_check_fn, llm_backend=_NoopLLM())
 

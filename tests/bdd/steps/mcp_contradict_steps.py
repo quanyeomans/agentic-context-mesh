@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pytest_bdd import given, parsers, then, when
 
-from kairix.knowledge.contradict.detector import ContradictionResult
+from kairix.knowledge.contradict.detector import ContradictionReport, ContradictionResult
 from tests.fakes import FakeLLMBackend
 
 # Module-level state (simple, test-scoped)
@@ -14,6 +14,7 @@ _state: dict = {}
 @given("the search returns no contradicting documents")
 def given_no_contradictions():
     _state["mock_contradictions"] = []
+    _state["mock_candidates"] = 0
     _state["mock_raises"] = False
 
 
@@ -27,6 +28,23 @@ def given_contradiction_found():
             snippet="The system uses a microservices architecture...",
         ),
     ]
+    _state["mock_candidates"] = 1
+    _state["mock_raises"] = False
+
+
+@given("the search finds related content that neither supports nor refutes the claim")
+def given_related_but_unsupportive():
+    # #468 — candidates were retrieved and scored, but none rose to a
+    # contradiction: the store is silent on a claim it holds material for.
+    _state["mock_contradictions"] = []
+    _state["mock_candidates"] = 2
+    _state["mock_raises"] = False
+
+
+@given("the search finds nothing relevant to the claim")
+def given_nothing_relevant():
+    _state["mock_contradictions"] = []
+    _state["mock_candidates"] = 0
     _state["mock_raises"] = False
 
 
@@ -49,7 +67,10 @@ def call_tool_contradict(content):
     def _check_fn(**kwargs):
         if _state.get("mock_raises"):
             raise RuntimeError("search unavailable")
-        return _state["mock_contradictions"]
+        return ContradictionReport.of(
+            _state["mock_contradictions"],
+            candidates_considered=_state.get("mock_candidates"),
+        )
 
     deps = ContradictDeps(check_fn=_check_fn, llm_backend=fake_llm)
 
@@ -74,6 +95,13 @@ def has_contradictions_true():
 @then("the contradict response error is empty")
 def error_is_empty():
     assert _state["result"]["error"] == "", f"Expected empty error, got {_state['result']['error']!r}"
+
+
+@then(parsers.re(r'the contradict response outcome is "(?P<outcome>[^"]*)"'))
+def outcome_is(outcome):
+    assert _state["exception"] is None, f"tool_contradict raised: {_state['exception']}"
+    actual = _state["result"]["outcome"]
+    assert actual == outcome, f"Expected outcome {outcome!r}, got {actual!r}"
 
 
 @then("the contradict response contains at least one contradiction with a reason")

@@ -68,5 +68,9 @@ def test_envelope_keys_match_contradict_output_fields() -> None:
     src = inspect.getsource(uc.contradict_output_to_envelope)
     for key in ("content", "contradictions", "has_contradictions", "error"):
         assert f'"{key}"' in src, f"envelope projector missing key {key!r}"
+    # #468 — the tri-state verdict rides on the envelope (via the _KEY_OUTCOME
+    # constant) so CLI and MCP surface the same contradiction/unsupported/
+    # not_found distinction.
+    assert "out.outcome.value" in src, "envelope projector missing the tri-state outcome value"
     for hit_key in ("path", "score", "reason", "snippet", "category", "claim"):
         assert f'"{hit_key}"' in src, f"envelope projector hit missing key {hit_key!r}"
