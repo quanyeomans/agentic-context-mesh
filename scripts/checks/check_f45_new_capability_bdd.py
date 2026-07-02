@@ -64,6 +64,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+from _mcp_registry import registered_mcp_tool_names_from_source
 from tc_fitness import REPO_ROOT, gate
 
 CLI_PATH = Path("kairix") / "cli.py"
@@ -147,30 +148,16 @@ def _extract_commands_keys(source: str) -> set[str]:
     return out
 
 
-def _is_server_tool_decorator(dec: ast.expr) -> bool:
-    """True if the decorator is ``@server.tool(...)`` or ``@server.tool``."""
-    target = dec.func if isinstance(dec, ast.Call) else dec
-    return (
-        isinstance(target, ast.Attribute)
-        and target.attr == "tool"
-        and isinstance(target.value, ast.Name)
-        and target.value.id == "server"
-    )
-
-
 def _extract_mcp_tool_names(source: str) -> set[str]:
-    """Return every function name decorated with ``@server.tool(...)``."""
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return set()
-    out: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and any(
-            _is_server_tool_decorator(d) for d in node.decorator_list
-        ):
-            out.add(node.name)
-    return out
+    """Return every registered MCP tool name declared in server.py ``source``.
+
+    Post-PLA-318 registration is catalogue-driven — a new tool is a new
+    ``_cap(...)`` catalogue row (its ``mcp_tool`` / ``escalate_via`` name) plus
+    a matching adapter binding, not a new ``@server.tool`` def. F45 diffs this
+    catalogue-derived set (see ``_mcp_registry``) between HEAD and staged to
+    find the net-new tools that must ship a BDD feature.
+    """
+    return registered_mcp_tool_names_from_source(source)
 
 
 def _has_factory_symbol(source: str, factory_name: str) -> bool:

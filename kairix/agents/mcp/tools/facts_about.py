@@ -38,16 +38,18 @@ Errors:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from kairix.agents.mcp.tools._common import RegistrationContext, ToolBinding
 from kairix.core.facts.records import resolve_fact_source_uri
 from kairix.core.protocols import DocumentRepository, FactStore, SourceRef
 from kairix.paths import KairixPaths
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["FactView", "FactsAboutDeps", "tool_facts_about"]
+__all__ = ["BINDINGS", "FactView", "FactsAboutDeps", "facts_about_with_deps", "tool_facts_about"]
 
 
 ERROR_INVALID_INPUT = "InvalidInput"
@@ -394,3 +396,70 @@ def tool_facts_about(
         "error": "",
     }
     return response
+
+
+def facts_about_with_deps(
+    entity: str,
+    namespace: str | None = None,
+    top_k: int = 20,
+    *,
+    deps: FactsAboutDeps | None = None,
+) -> dict[str, Any]:
+    """Run ``facts_about`` with a :class:`FactsAboutDeps` injection seam.
+
+    The single deps-threading surface for the ``facts_about`` MCP tool: it
+    unpacks a :class:`FactsAboutDeps` (or the production default when ``None``)
+    into :func:`tool_facts_about`'s explicit seams. Consolidates what was a
+    separate ``tool_facts_about`` delegator on the server module (PLA-318 —
+    one adapter per capability, no double). ``build_server(facts_about_deps=...)``
+    threads fakes here so an integration test can drive the registered MCP tool
+    against scripted data — while cold — without touching the live tree
+    (F1/F2-clean — a constructor seam, not a monkeypatch).
+    """
+    resolved = deps if deps is not None else FactsAboutDeps()
+    return tool_facts_about(
+        entity=entity,
+        namespace=namespace,
+        top_k=top_k,
+        paths=resolved.paths,
+        fact_store=resolved.fact_store,
+        document_repo=resolved.document_repo,
+        canonicals=resolved.canonicals,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Registration binding — the agent-facing knowledge-introspection MCP tool.
+# ---------------------------------------------------------------------------
+
+_FACTS_ABOUT_DESCRIPTION = (
+    "Look up what kairix knows about an entity. Returns the current (non-superseded) "
+    "entity-attribute-value facts with confidence and source provenance, plus any "
+    "entity summary indexed for that name. Works even while kairix is still warming "
+    "up — it only reads local stores. Pass a namespace to restrict facts to a single "
+    "engagement scope; pass null/None to search across all namespaces."
+)
+
+
+def _make_facts_about(ctx: RegistrationContext) -> Callable[..., Any]:
+    # PLA-263 — NOT ``warm_gated``, on purpose. facts_about reads the SQLite
+    # fact store AND the synthetic ``entity-summaries`` collection (#467); both
+    # are cheap local SQLite reads (FTS5 + an indexed lookup) with no embedding
+    # model and no network, so an agent asking "what do you know about X?" at
+    # session start gets an answer instead of a ColdStart refusal.
+    # ``ctx.facts_about_deps`` is the injection seam (production leaves it None
+    # so the tool resolves the real SQLite-backed seams).
+    def facts_about(
+        entity: str,
+        namespace: str | None = None,
+        top_k: int = 20,
+    ) -> dict[str, Any]:
+        """Return facts + entity summaries about an entity."""
+        return facts_about_with_deps(entity=entity, namespace=namespace, top_k=top_k, deps=ctx.facts_about_deps)
+
+    return facts_about
+
+
+BINDINGS: tuple[ToolBinding, ...] = (
+    ToolBinding(name="facts_about", description=_FACTS_ABOUT_DESCRIPTION, make=_make_facts_about, warm_gated=False),
+)

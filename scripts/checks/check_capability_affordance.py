@@ -43,10 +43,15 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+from _mcp_registry import afforded_cli_commands
 from tc_fitness import REPO_ROOT, gate
 
 CLI_FILE = REPO_ROOT / "kairix" / "cli.py"
 MCP_SERVER_FILE = REPO_ROOT / "kairix" / "agents" / "mcp" / "server.py"
+# Post-PLA-318 the ``tool_<name>`` adapter bodies live in per-domain modules
+# under ``kairix/agents/mcp/tools/`` (server.py re-exports them); scan that tree
+# alongside server.py so the affordance gate finds each capability's adapter.
+MCP_TOOLS_DIR = REPO_ROOT / "kairix" / "agents" / "mcp" / "tools"
 
 # Commands that legitimately have no MCP equivalent — never agent-invokable
 # even via an escalation stub. The setup wizard and config validator are
@@ -194,15 +199,12 @@ def _read_cli_commands() -> set[str]:
     return set()
 
 
-def _read_mcp_tool_functions() -> set[str]:
-    """Return the set of `tool_<...>` function basenames defined in server.py.
-
-    A CLI top-level command satisfies the gate when at least one tool
-    function name starts with `tool_<command>` (with `-` normalised to `_`).
-    e.g. `kairix soak run` is satisfied by `tool_soak_run`;
-    `kairix store crawl` by `tool_store_crawl`.
-    """
-    tree = ast.parse(MCP_SERVER_FILE.read_text(encoding="utf-8"))
+def _tool_basenames_in_source(source: str) -> set[str]:
+    """Return the `tool_<name>` function basenames defined in one module ``source``."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return set()
     return {
         node.name.removeprefix("tool_")
         for node in ast.walk(tree)
@@ -210,12 +212,38 @@ def _read_mcp_tool_functions() -> set[str]:
     }
 
 
+def _read_mcp_tool_functions() -> set[str]:
+    """Return the set of `tool_<...>` function basenames across the MCP surface.
+
+    A CLI top-level command satisfies the gate when at least one tool
+    function name starts with `tool_<command>` (with `-` normalised to `_`).
+    e.g. `kairix soak run` is satisfied by `tool_soak_run`;
+    `kairix store crawl` by `tool_store_crawl`.
+
+    Post-PLA-318 the ``tool_<name>`` adapter bodies live in the per-domain
+    modules under ``kairix/agents/mcp/tools/`` (server.py re-exports them for
+    direct-call tests), so the scan covers that tree plus server.py.
+    """
+    names: set[str] = set()
+    if MCP_SERVER_FILE.is_file():
+        names |= _tool_basenames_in_source(MCP_SERVER_FILE.read_text(encoding="utf-8"))
+    if MCP_TOOLS_DIR.is_dir():
+        for module in sorted(MCP_TOOLS_DIR.glob("*.py")):
+            names |= _tool_basenames_in_source(module.read_text(encoding="utf-8"))
+    return names
+
+
 def main() -> int:
     cli_commands = _read_cli_commands()
     tool_names = _read_mcp_tool_functions()
+    # The catalogue's authoritative CLI↔MCP mapping — covers commands whose MCP
+    # tool name differs from the command (``kairix remember`` → ``memory_write``).
+    catalogue_afforded = afforded_cli_commands(MCP_SERVER_FILE)
     missing: set[Path] = set()
     for cmd in sorted(cli_commands):
         if cmd in _NO_MCP_AFFORDANCE_REQUIRED:
+            continue
+        if cmd in catalogue_afforded:
             continue
         normalised = cmd.replace("-", "_")
         # Tool name either matches exactly OR starts with the command prefix
