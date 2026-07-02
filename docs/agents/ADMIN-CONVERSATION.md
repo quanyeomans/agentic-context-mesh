@@ -51,7 +51,7 @@ The lines under each "Script:" heading are written for you to say verbatim to yo
 **Files / commands the admin needs:**
 
 - `systemctl status kairix-fetch-secrets.service` — current state of the secrets-fetch unit
-- `/run/secrets/kairix.env` — the tmpfs file the unit writes to (should contain `KAIRIX_PROVIDER_LLM_API_KEY`, `KAIRIX_LLM_ENDPOINT`)
+- `/run/secrets/kairix.env` — the tmpfs file the unit writes to (should contain `KAIRIX_PROVIDER_LLM_API_KEY`, `KAIRIX_PROVIDER_LLM_ENDPOINT`)
 - `kairix onboard check` — full diagnostic
 
 ---

@@ -36,10 +36,10 @@ SECRETS_FILE="${KAIRIX_SECRETS_FILE:-/run/secrets/kairix.env}"
 # Required env keys after secrets + service.env are merged. If any are
 # missing, vector search will degrade to BM25-only.
 REQUIRED_KEYS=(
-    "KAIRIX_LLM_API_KEY"
-    "KAIRIX_LLM_ENDPOINT"
-    "KAIRIX_EMBED_API_KEY"
-    "KAIRIX_EMBED_ENDPOINT"
+    "KAIRIX_PROVIDER_LLM_API_KEY"
+    "KAIRIX_PROVIDER_LLM_ENDPOINT"
+    "KAIRIX_PROVIDER_EMBED_API_KEY"
+    "KAIRIX_PROVIDER_EMBED_ENDPOINT"
 )
 
 log() {

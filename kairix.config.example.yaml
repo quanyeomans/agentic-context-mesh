@@ -46,8 +46,8 @@ _schema_version: 1
 #   anthropic      — Anthropic Claude direct
 #
 # Secrets the example expects (set in .env / /run/secrets/kairix.env):
-#   KAIRIX_LLM_API_KEY   — required for every cloud provider
-#   KAIRIX_LLM_ENDPOINT  — required for Azure / OpenAI-compatible / LiteLLM
+#   KAIRIX_PROVIDER_LLM_API_KEY   — required for every cloud provider
+#   KAIRIX_PROVIDER_LLM_ENDPOINT  — required for Azure / OpenAI-compatible / LiteLLM
 provider: azure_foundry
 
 # ──────────────────────────────────────────────────────────────────────────

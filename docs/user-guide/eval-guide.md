@@ -12,7 +12,7 @@ For the methodology and research basis, see [evaluation-methodology.md](../evalu
 
 - `kairix` installed and configured
 - `KAIRIX_KV_NAME` env var set (for Azure Key Vault credential resolution), **or**
-  `KAIRIX_LLM_API_KEY` + `KAIRIX_LLM_ENDPOINT` set directly
+  `KAIRIX_PROVIDER_LLM_API_KEY` + `KAIRIX_PROVIDER_LLM_ENDPOINT` set directly
 - Kairix index populated (`kairix embed` completed)
 - `kairix benchmark` working (`kairix benchmark validate --suite <suite>`)
 
