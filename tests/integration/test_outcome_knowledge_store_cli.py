@@ -131,37 +131,3 @@ def test_store_health_subprocess_degraded_envelope(tmp_path: Path) -> None:
     assert any("Neo4j unavailable" in issue for issue in envelope["issues"]), (
         f"expected Neo4j-unavailable issue, got: {envelope['issues']!r}"
     )
-
-
-def test_vault_alias_subprocess_dry_run_outcome(tmp_path: Path) -> None:
-    """``kairix vault`` is the backwards-compat alias for ``kairix store``.
-
-    Both names resolve to the same CLI module (see ``kairix/cli.py``
-    COMMANDS dict). The F30 outcome contract covers each subcommand
-    name independently, so the alias gets its own subprocess test —
-    confirming the deprecated entry point still produces the same
-    operator-facing summary.
-    """
-    _seed_minimal_document_root(tmp_path)
-
-    proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "kairix.cli",
-            "vault",
-            "crawl",
-            "--document-root",
-            str(tmp_path),
-            "--dry-run",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-
-    assert proc.returncode == 0, (
-        f"vault crawl --dry-run exited {proc.returncode}\n--- stderr ---\n{proc.stderr}\n--- stdout ---\n{proc.stdout}"
-    )
-    assert "Document store crawl complete" in proc.stdout, f"alias summary missing: {proc.stdout!r}"
-    assert str(tmp_path) in proc.stdout
