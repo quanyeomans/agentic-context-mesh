@@ -96,15 +96,20 @@ that motivated this rule."""
 def _extract_commands_dict(cli_path: Path) -> dict[str, str]:
     """Parse ``kairix/cli.py``; return {subcommand_name: module_path}.
 
-    The COMMANDS dict has the shape ``dict[str, tuple[str, str, bool]]``
-    where the first tuple element is the module path. Backwards-compat
-    aliases (e.g. ``"vault"`` → same module as ``"store"``) appear as
-    duplicate module paths; both keys remain in the dict.
+    The dispatch wiring lives in the ``_CLI_HANDLERS`` dict literal (shape
+    ``dict[str, tuple[str, str, bool]]``, first tuple element = module path);
+    the runtime ``COMMANDS`` table is DERIVED from it + the catalogue (PLA-319),
+    so ``COMMANDS`` is no longer a dict literal. Both names are accepted so this
+    reader stays correct against the pre-derivation and post-derivation shapes.
     """
     tree = ast.parse(cli_path.read_text())
     out: dict[str, str] = {}
     for node in ast.walk(tree):
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "COMMANDS":
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id in ("COMMANDS", "_CLI_HANDLERS")
+        ):
             if isinstance(node.value, ast.Dict):
                 for k, v in zip(node.value.keys, node.value.values, strict=False):
                     if isinstance(k, ast.Constant) and isinstance(k.value, str) and isinstance(v, ast.Tuple):
