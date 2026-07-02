@@ -47,6 +47,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+from _mcp_registry import registered_mcp_tool_names
 from tc_fitness import REPO_ROOT, gate, repo_relative
 
 REMEDIATION = """Refactor: every CLI subcommand and MCP tool MUST be
@@ -115,30 +116,16 @@ def _extract_commands_dict(cli_path: Path) -> dict[str, str]:
 # ---------- Step 2: enumerate MCP tool names from server.py @server.tool() ----------
 
 
-def _is_server_tool_decorator(dec: ast.expr) -> bool:
-    """Return True if the decorator is ``@server.tool(...)`` or ``@server.tool``."""
-    target = dec.func if isinstance(dec, ast.Call) else dec
-    return (
-        isinstance(target, ast.Attribute)
-        and target.attr == "tool"
-        and isinstance(target.value, ast.Name)
-        and target.value.id == "server"
-    )
-
-
 def _extract_mcp_tool_names(server_path: Path) -> set[str]:
-    """Walk ``server.py`` for nested FunctionDef nodes decorated with @server.tool.
+    """Return the registered MCP tool names from the catalogue in ``server.py``.
 
-    The function's ``__name__`` is the MCP tool name (FastMCP convention,
-    documented at ``kairix/agents/mcp/server.py:88``).
+    Post-PLA-318 registration is catalogue-driven — ``build_server`` walks
+    ``CAPABILITIES_CATALOG`` and registers one tool per row (its ``mcp_tool``
+    or, for operator-only stubs, its ``escalate_via`` name), so the registered
+    set is read from the ``_cap(...)`` rows (see ``_mcp_registry``) rather than
+    from ``@server.tool`` decorators that no longer exist.
     """
-    tree = ast.parse(server_path.read_text())
-    tools: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            if any(_is_server_tool_decorator(d) for d in node.decorator_list):
-                tools.add(node.name)
-    return tools
+    return registered_mcp_tool_names(server_path)
 
 
 # ---------- Step 3: scan tests/ for outcome-test signatures ----------

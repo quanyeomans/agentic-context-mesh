@@ -39,6 +39,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+from _mcp_registry import registered_mcp_tool_names
 from tc_fitness import REPO_ROOT, gate, repo_relative
 
 REMEDIATION = """Refactor the step file to route work through a sanctioned
@@ -90,34 +91,17 @@ _STEP_DECORATOR_NAMES: frozenset[str] = frozenset({"given", "when", "then", "ste
 
 
 def _discover_mcp_tool_names(repo_root: Path) -> set[str]:
-    """Return the set of function names registered via ``@server.tool()``
-    in ``kairix/agents/mcp/server.py``.
+    """Return the set of registered MCP tool names from the catalogue in
+    ``kairix/agents/mcp/server.py``.
 
     A step that calls one of these names by bare identifier (e.g.
     ``search(...)``, ``entity(...)``) counts as routing through the MCP
-    tool surface.
+    tool surface. Post-PLA-318 registration is catalogue-driven, so the set
+    is read from the ``_cap(...)`` rows (each row's ``mcp_tool`` /
+    ``escalate_via``; see ``_mcp_registry``) rather than from ``@server.tool``
+    decorators that no longer exist.
     """
-    server_path = repo_root / "kairix" / "agents" / "mcp" / "server.py"
-    if not server_path.exists():
-        return set()
-    try:
-        tree = ast.parse(server_path.read_text(encoding="utf-8"), filename=str(server_path))
-    except (SyntaxError, UnicodeDecodeError, OSError):
-        return set()
-    names: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        for deco in node.decorator_list:
-            # @server.tool(...)
-            if isinstance(deco, ast.Call) and isinstance(deco.func, ast.Attribute) and deco.func.attr == "tool":
-                names.add(node.name)
-                break
-            # @server.tool (no parens)
-            if isinstance(deco, ast.Attribute) and deco.attr == "tool":
-                names.add(node.name)
-                break
-    return names
+    return registered_mcp_tool_names(repo_root / "kairix" / "agents" / "mcp" / "server.py")
 
 
 def _call_callee(call: ast.Call) -> tuple[str | None, bool]:

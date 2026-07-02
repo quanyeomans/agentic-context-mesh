@@ -4,9 +4,11 @@ F53 enforces that the operator surface for feature flags exists:
 
   1. ``kairix/cli.py:COMMANDS`` has a ``"features"`` entry.
   2. ``kairix/agents/mcp/server.py`` registers a ``features_status`` MCP
-     tool — an ``@server.tool()``-decorated function named
-     ``features_status`` (codebase convention) or the ``tool_`` adapter
-     form.
+     tool. Post-PLA-318 registration is catalogue-driven: ``build_server``
+     registers one tool per ``CAPABILITIES_CATALOG`` row, so the detector
+     reads ``registered_mcp_tool_names`` off the ``_cap(...)`` rows — a row
+     whose ``mcp_tool`` (agent-callable) OR ``escalate_via`` (operator-stub
+     adapter) resolves to ``features_status`` IS the registered tool.
   3. Neither appears in the F30 baseline as missing an outcome test.
 
 These tests exercise the AST-presence helpers against synthetic source
@@ -77,21 +79,28 @@ def test_commands_missing_features_returns_false(tmp_path: Path) -> None:
 
 
 def test_mcp_registers_features_status_convention_name_returns_true(tmp_path: Path) -> None:
-    """An @server.tool()-decorated ``features_status`` function (the
-    codebase convention) passes — this is the registration shape the
-    real server.py uses.
+    """A catalogue ``_cap(mcp_tool="features_status", ...)`` row — the shape
+    ``build_server`` walks to register the tool — passes.
 
-    Sabotage proof: change the decorator check to require ``@app.tool``
-    instead of ``@server.tool`` and this assertion flips to False.
+    Post-PLA-318 registration is catalogue-driven, so this mirrors the real
+    server.py row (``mcp_tool="features_status"``) rather than the retired
+    ``@server.tool()`` decorator form.
+
+    Sabotage proof: rename this row's ``mcp_tool`` value to a different tool
+    (``"features_status"`` → ``"other_tool"``) and the detector no longer sees
+    ``features_status`` registered, flipping this assertion to False.
     """
     detector = _load_detector()
     mcp = tmp_path / "server.py"
     mcp.write_text(
-        """server = FastMCP("kairix")
-
-@server.tool()
-def features_status() -> dict:
-    return {"flags": []}
+        """CAPABILITIES_CATALOG = (
+    _cap(
+        name="features_status",
+        mcp_tool="features_status",
+        cli="kairix features status",
+        category=CAP_CATEGORY_DIAGNOSTIC,
+    ),
+)
 """,
         encoding="utf-8",
     )
@@ -99,20 +108,29 @@ def features_status() -> dict:
 
 
 def test_mcp_registers_features_status_adapter_name_returns_true(tmp_path: Path) -> None:
-    """The ``tool_features_status`` adapter form is also accepted
-    (forward-compat for a future direct-decoration refactor).
+    """The alternate ``escalate_via="features_status"`` registration also
+    passes — a ``_cap`` row registers a tool by its ``mcp_tool``
+    (agent-callable) OR its ``escalate_via`` (operator-stub adapter) name,
+    and the catalogue reader recognizes both.
 
-    Sabotage proof: drop ``tool_features_status`` from
-    ``_FEATURES_TOOL_NAMES`` and this assertion flips to False.
+    This exercises the ``escalate_via`` branch of ``registered_mcp_tool_names``
+    (the real shape used by the operator-only stub rows in server.py).
+
+    Sabotage proof: rename the registration keyword to a non-registration
+    argument (``escalate_via`` → ``note``) and the detector stops resolving a
+    tool name from this row, flipping this assertion to False.
     """
     detector = _load_detector()
     mcp = tmp_path / "server.py"
     mcp.write_text(
-        """server = FastMCP("kairix")
-
-@server.tool()
-def tool_features_status() -> dict:
-    return {"flags": []}
+        """CAPABILITIES_CATALOG = (
+    _cap(
+        name="features_status",
+        escalate_via="features_status",
+        cli="kairix features status",
+        category=CAP_CATEGORY_DIAGNOSTIC,
+    ),
+)
 """,
         encoding="utf-8",
     )
@@ -120,19 +138,23 @@ def tool_features_status() -> dict:
 
 
 def test_mcp_missing_features_status_returns_false(tmp_path: Path) -> None:
-    """A different decorated tool does NOT satisfy F53.
+    """A catalogue that registers a different tool does NOT satisfy F53.
 
-    Sabotage proof: widen ``_FEATURES_TOOL_NAMES`` to include
-    ``search`` and this assertion flips.
+    Sabotage proof: change ``_FEATURES_TOOL_NAME`` in the detector to
+    ``"search"`` (the tool this catalogue row registers) and this assertion
+    flips to True.
     """
     detector = _load_detector()
     mcp = tmp_path / "server.py"
     mcp.write_text(
-        """server = FastMCP("kairix")
-
-@server.tool()
-def search(q: str) -> dict:
-    return {"hits": []}
+        """CAPABILITIES_CATALOG = (
+    _cap(
+        name="search",
+        mcp_tool="search",
+        cli="kairix search",
+        category=CAP_CATEGORY_AGENT,
+    ),
+)
 """,
         encoding="utf-8",
     )

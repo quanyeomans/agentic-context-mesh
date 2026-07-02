@@ -26,6 +26,9 @@ import ast
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _mcp_registry import registered_mcp_tool_names
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 CLI_REL_PATH = Path("kairix/cli.py")
@@ -83,47 +86,22 @@ def _commands_has_features(cli_path: Path) -> bool:
     return False
 
 
-def _is_server_tool_decorator(dec: ast.expr) -> bool:
-    """Return True if ``dec`` is ``@server.tool()`` or ``@server.tool``."""
-    target = dec.func if isinstance(dec, ast.Call) else dec
-    return (
-        isinstance(target, ast.Attribute)
-        and target.attr == "tool"
-        and isinstance(target.value, ast.Name)
-        and target.value.id == "server"
-    )
-
-
-# The registered MCP tool name resolves to this capability. The codebase
-# convention (worker_status, caches_status, …) names the inner
-# @server.tool() function after the capability — ``features_status`` —
-# and delegates to the module-level ``tool_features_status`` adapter. The
-# bare ``tool_features_status`` form is also accepted so the gate stays
-# green if a future refactor decorates the adapter directly.
-_FEATURES_TOOL_NAMES = frozenset({"features_status", "tool_features_status"})
+# The registered MCP tool name that resolves to this capability. Post-PLA-318
+# registration is catalogue-driven — ``build_server`` registers one tool per
+# ``CAPABILITIES_CATALOG`` row, so ``features_status`` is registered iff the
+# catalogue declares a ``mcp_tool="features_status"`` row (see ``_mcp_registry``).
+_FEATURES_TOOL_NAME = "features_status"
 
 
 def _mcp_registers_features_status(mcp_path: Path) -> bool:
     """Return True if server.py registers a ``features_status`` MCP tool.
 
-    Looks for an ``@server.tool()``-decorated function whose name is the
-    ``features_status`` capability (or the ``tool_`` adapter form) — i.e.
-    the runtime MCP tool an agent calls. FastMCP derives the tool name
-    from the function's ``__name__``, so the function name IS the tool
-    name.
+    Reads the catalogue-driven registration: ``features_status`` is the
+    ``mcp_tool`` of a ``_cap(...)`` row that ``build_server`` walks and
+    registers, so the presence of that catalogue row IS the runtime MCP tool
+    an agent calls.
     """
-    try:
-        tree = ast.parse(mcp_path.read_text(encoding="utf-8"))
-    except (SyntaxError, UnicodeDecodeError, OSError):
-        return False
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            continue
-        if node.name not in _FEATURES_TOOL_NAMES:
-            continue
-        if any(_is_server_tool_decorator(d) for d in node.decorator_list):
-            return True
-    return False
+    return _FEATURES_TOOL_NAME in registered_mcp_tool_names(mcp_path)
 
 
 def _f30_baseline_entries() -> set[str]:

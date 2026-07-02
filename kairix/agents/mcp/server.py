@@ -14,8 +14,16 @@ Provides the following tools:
 The server uses FastMCP (from the ``mcp`` package). Install via:
     pip install kairix[agents]
 
-Tool functions are pure Python functions importable without FastMCP installed —
-import them directly for unit testing or programmatic use.
+Registration is catalogue-driven (PLA-318): every tool body lives in a
+per-domain adapter module under :mod:`kairix.agents.mcp.tools` (``retrieval`` /
+``synthesis`` / ``orient`` / ``diagnostic`` / ``operator`` plus the agent-write
+adapters ``ingest_chat`` / ``facts_about`` / ``memory_write``), each publishing
+a :data:`~kairix.agents.mcp.tools._common.ToolBinding`. :func:`build_server`
+walks :data:`CAPABILITIES_CATALOG` and registers the matching binding for each
+row, so the agent surface has a single source of truth (the catalogue) instead
+of ~37 hand-written ``@server.tool`` defs. The ``tool_<name>`` bodies are
+re-exported here so direct-call unit tests and the ``kairix.use_cases`` helpers
+keep importing them from ``kairix.agents.mcp.server``.
 
 Design principles:
   - Never raises; returns error dicts on failure so agents can handle gracefully
@@ -27,16 +35,96 @@ from __future__ import annotations
 
 import functools
 import logging
-import os
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
-from kairix.agents.mcp.cold_start import require_ready, warm_retrieval_stack
 from kairix.agents.mcp.errors import async_tool_handler
-from kairix.core.search.scope import Scope
+from kairix.agents.mcp.tools import (
+    diagnostic as _diagnostic,
+)
+from kairix.agents.mcp.tools import (
+    facts_about as _facts_about,
+)
+from kairix.agents.mcp.tools import (
+    ingest_chat as _ingest_chat,
+)
+from kairix.agents.mcp.tools import (
+    memory_write as _memory_write,
+)
+from kairix.agents.mcp.tools import (
+    operator as _operator,
+)
+from kairix.agents.mcp.tools import (
+    orient as _orient,
+)
+from kairix.agents.mcp.tools import (
+    retrieval as _retrieval,
+)
+from kairix.agents.mcp.tools import (
+    synthesis as _synthesis,
+)
+from kairix.agents.mcp.tools._common import (
+    MCP_PROBE_CONCURRENCY_CAP,
+    MCP_PROBE_QUERIES_CAP,
+    RETRIEVAL_RUNBOOK,
+    RegistrationContext,
+    ToolBinding,
+)
+
+# Re-exported tool bodies + DI seams. The ``tool_<name>`` adapters now live in
+# the per-domain modules; direct-call unit tests and the ``kairix.use_cases``
+# helpers import them from here, so this module keeps exposing them under the
+# historical ``kairix.agents.mcp.server`` names.
+from kairix.agents.mcp.tools.diagnostic import (
+    tool_caches_status,
+    tool_dead_letter_status,
+    tool_doctor_check_agent,
+    tool_doctor_check_all,
+    tool_features_status,
+    tool_maintenance_analyze,
+    tool_onboard_agent,
+    tool_onboard_check,
+    tool_onboard_scan,
+    tool_probe_search,
+    tool_warm,
+    tool_worker_status,
+)
+from kairix.agents.mcp.tools.operator import (
+    tool_benchmark_run,
+    tool_cc_pair,
+    tool_embed,
+    tool_embed_rebuild_fts,
+    tool_probe_burst,
+    tool_probe_config,
+    tool_soak_run,
+    tool_store_crawl,
+)
+from kairix.agents.mcp.tools.orient import (
+    tool_bootstrap,
+    tool_entity_suggest,
+    tool_entity_validate,
+    tool_recommend,
+    tool_recommend_capabilities,
+    tool_usage_guide,
+)
+from kairix.agents.mcp.tools.retrieval import (
+    QueueAwareSearchDeps,
+    tool_entity,
+    tool_expand,
+    tool_search,
+    tool_search_queue_aware,
+    tool_timeline,
+)
+from kairix.agents.mcp.tools.retrieval import (
+    _fetch_entity_card as _fetch_entity_card,  # re-export: kairix.use_cases.{entity_get,search} import this seam
+)
+from kairix.agents.mcp.tools.synthesis import (
+    tool_brief,
+    tool_contradict,
+    tool_prep,
+    tool_research,
+)
 
 if TYPE_CHECKING:
     from kairix.agents.mcp.tools.facts_about import FactsAboutDeps
@@ -44,17 +132,64 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Module-import time — the MCP process's effective birth moment for the
-# operator-facing ``process_uptime_s`` field on ``tool_caches_status``.
-# Captured once at module import so every subsequent call reports
-# wall-clock seconds since the long-running process started.
-_PROCESS_STARTED_AT_MONOTONIC: float = time.monotonic()
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-DEFAULT_SCOPE: Scope = Scope.SHARED_AGENT
+__all__ = [
+    "CAPABILITIES_CATALOG",
+    "CAPABILITIES_TOOL_NAME",
+    "CAP_CATEGORY_AGENT",
+    "CAP_CATEGORY_CONFIGURATION",
+    "CAP_CATEGORY_DIAGNOSTIC",
+    "CAP_CATEGORY_DIAGNOSTIC_OPERATOR_ONLY",
+    "CAP_CATEGORY_KNOWLEDGE_WRITE",
+    "CAP_CATEGORY_RETRIEVAL",
+    "CAP_CATEGORY_SYNTHESIS",
+    "CONTRADICT_TOOL_NAME",
+    "LOOP_GROUP_ORDER",
+    "MCP_PROBE_CONCURRENCY_CAP",
+    "MCP_PROBE_QUERIES_CAP",
+    "RECOMMEND_CAPABILITIES_TOOL_NAME",
+    "Capability",
+    "QueueAwareSearchDeps",
+    "agent_facing",
+    "build_server",
+    "by_loop_group",
+    "tool_benchmark_run",
+    "tool_bootstrap",
+    "tool_brief",
+    "tool_caches_status",
+    "tool_capabilities",
+    "tool_cc_pair",
+    "tool_contradict",
+    "tool_dead_letter_status",
+    "tool_doctor_check_agent",
+    "tool_doctor_check_all",
+    "tool_embed",
+    "tool_embed_rebuild_fts",
+    "tool_entity",
+    "tool_entity_suggest",
+    "tool_entity_validate",
+    "tool_expand",
+    "tool_features_status",
+    "tool_maintenance_analyze",
+    "tool_onboard_agent",
+    "tool_onboard_check",
+    "tool_onboard_scan",
+    "tool_prep",
+    "tool_probe_burst",
+    "tool_probe_config",
+    "tool_probe_search",
+    "tool_recommend",
+    "tool_recommend_capabilities",
+    "tool_research",
+    "tool_search",
+    "tool_search_queue_aware",
+    "tool_soak_run",
+    "tool_store_crawl",
+    "tool_timeline",
+    "tool_usage_guide",
+    "tool_warm",
+    "tool_worker_status",
+    "warm_gate",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -94,24 +229,15 @@ def warm_gate(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]
     """Decorator: short-circuit MCP tool calls with the ColdStart envelope
     while kairix is warming.
 
-    Apply ABOVE the function (closest to the body), BELOW
-    ``@async_tool_handler``. Decorator order in the registration stack:
+    Applied by :func:`_register_binding` to every binding whose ``warm_gated``
+    flag is set, BELOW ``@async_tool_handler`` and ABOVE the body closure. The
+    tool name passed to the cold-start envelope is taken from ``fn.__name__`` —
+    by convention each registered tool's body closure is named identically to
+    its MCP tool name, so no explicit parameter is needed.
 
-        @server.tool(description="...")    # outermost — registers the wrapped fn
-        @async_tool_handler                # sync → async wrapping
-        @warm_gate                          # innermost — gate before the body
-        def my_tool(...) -> dict[str, Any]:
-            return tool_my_tool(...)
-
-    The tool name passed to the cold-start envelope is taken from
-    ``fn.__name__`` — by convention each ``@server.tool``-registered
-    function in ``build_server`` is named identically to its MCP tool
-    name, so no explicit parameter is needed.
-
-    Sabotage-proof: remove ``@warm_gate`` from any gated tool and the
-    parametrized cold-start test for that tool fails because the tool
-    body runs against the not-yet-warm pipeline instead of returning the
-    envelope.
+    Sabotage-proof: clear a binding's ``warm_gated`` flag and the parametrized
+    cold-start test for that tool fails because the tool body runs against the
+    not-yet-warm pipeline instead of returning the envelope.
     """
 
     @functools.wraps(fn)
@@ -124,1375 +250,11 @@ def warm_gate(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]
     return wrapper
 
 
-# ---------------------------------------------------------------------------
-# Shared service helpers — MCP tools call these, not each other
-# ---------------------------------------------------------------------------
-
-
-def _build_entity_summary(row: dict[str, Any]) -> str:
-    """Build human-readable summary line from type-specific Neo4j entity fields.
-
-    Each branch appends 0 or 1 phrase; ``industry`` may be a list (joined).
-    """
-    parts: list[str] = []
-    if row.get("role"):
-        parts.append(row["role"])
-    if row.get("org"):
-        parts.append(f"at {row['org']}")
-    if row.get("tier"):
-        parts.append(f"Tier {row['tier']}")
-    if row.get("engagement_status"):
-        parts.append(f"({row['engagement_status']})")
-    industry = row.get("industry")
-    if industry:
-        parts.append(", ".join(industry) if isinstance(industry, list) else industry)
-    if row.get("domain"):
-        parts.append(row["domain"])
-    if row.get("category"):
-        parts.append(row["category"])
-    return " — ".join(parts) if parts else ""
-
-
-def _default_neo4j_client_factory() -> Any:
-    """Production factory — defers the heavy graph-client import until call time."""
-    from kairix.knowledge.graph.client import get_client
-
-    return get_client()
-
-
-def _resolve_neo4j_client(
-    neo4j_client: Any | None,
-    *,
-    client_factory: Callable[[], Any] = _default_neo4j_client_factory,
-) -> Any:
-    """Return the supplied client, or fall back to ``client_factory()``.
-
-    The ``client_factory`` kwarg is the public DI seam: production callers
-    leave it at the default; tests pass a stub factory to exercise the
-    fallback path without monkey-patching ``graph_client.get_client``.
-    """
-    if neo4j_client is not None:
-        return neo4j_client
-    return client_factory()
-
-
-def _entity_card_from_row(row: dict[str, Any]) -> dict[str, Any]:
-    """Map a Neo4j row into the entity-card dict shape."""
-    return {
-        "id": row.get("id", ""),
-        "name": row.get("name", ""),
-        "type": row.get("type", ""),
-        "summary": _build_entity_summary(row),
-        "vault_path": row.get("vault_path") or "",
-    }
-
-
-# Match order matters: slug-id first (cheapest, most precise), then exact
-# canonical-name match, then alias match. Without the alias check the
-# common "lookup the entity I call X but the crawler stored it as Y"
-# case returned not-found — #253. coalesce() guards against nodes that
-# pre-date the aliases field (older Neo4j upserts didn't always set it).
-_ENTITY_CARD_CYPHER = (
-    "MATCH (n) WHERE n.id = $id "
-    "   OR toLower(n.name) = toLower($name) "
-    "   OR any(alias IN coalesce(n.aliases, []) WHERE toLower(alias) = toLower($name)) "
-    "RETURN labels(n)[0] AS type, n.id AS id, n.name AS name, "
-    "n.vault_path AS vault_path, "
-    "n.role AS role, n.org AS org, "
-    "n.tier AS tier, n.engagement_status AS engagement_status, "
-    "n.domain AS domain, n.industry AS industry, "
-    "n.category AS category "
-    "LIMIT 1"
-)
-
-
-def _fetch_entity_card(
-    name: str,
-    *,
-    neo4j_client: Any | None = None,
-    client_factory: Callable[[], Any] = _default_neo4j_client_factory,
-) -> dict[str, Any] | None:
-    """Fetch entity card directly from Neo4j, bypassing MCP tool layer.
-
-    Returns a dict with id, name, type, summary, vault_path on success,
-    or None if the entity is not found or Neo4j is unavailable.
-
-    Args:
-        neo4j_client: Injectable Neo4j client for testing.
-                      Defaults to the production client via ``client_factory``.
-        client_factory: Public DI seam — tests pass a stub factory to
-                        exercise the "no client → factory()" fallback.
-    """
-    try:
-        from kairix.utils import slugify as _slugify
-
-        neo4j = _resolve_neo4j_client(neo4j_client, client_factory=client_factory)
-        if not neo4j.available:
-            return None
-        rows = neo4j.cypher(_ENTITY_CARD_CYPHER, {"id": _slugify(name), "name": name})
-        if not rows:
-            return None
-        return _entity_card_from_row(rows[0])
-    except (ImportError, RuntimeError, OSError, KeyError) as exc:
-        logger.warning("_fetch_entity_card failed: %s", exc, exc_info=True)
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Tool implementations — pure Python, no mcp dependency
-# ---------------------------------------------------------------------------
-
-
-def tool_search(
-    query: str,
-    agent: str | None = None,
-    scope: Scope = Scope.SHARED_AGENT,
-    budget: int = 3000,
-    limit: int = 10,
-    max_tier: str = "L2",
-    *,
-    deps: Any = None,
-) -> dict[str, Any]:
-    """Search the knowledge store.
-
-    Thin adapter around ``kairix.use_cases.search.run_search``. CLI and
-    MCP both delegate to the same use case so the surfaces stay aligned
-    (closes Phase-2 drift in #168).
-
-    ``max_tier`` (PLA-270) lets the agent request the cheapest sufficient
-    context per hit: ``"L0"`` abstracts, ``"L1"`` overviews, or ``"L2"``
-    full snippets (the default). Use a cheaper ceiling to triage many hits
-    within a tight token budget, then re-query a promising hit at ``"L2"``.
-
-    The optional ``deps`` parameter forwards a ``SearchDeps`` directly
-    to the use case — production callers leave it None; tests pass a
-    ``SearchDeps`` to drive without touching live services.
-    """
-    from kairix.use_cases.search import run_search, search_output_to_envelope
-
-    logger.info("mcp.search: agent=%r scope=%r max_tier=%r", agent, scope, max_tier)
-    out = run_search(
-        query,
-        agent=agent,
-        scope=scope,
-        budget=budget,
-        limit=limit,
-        max_tier=max_tier,
-        deps=deps,
-    )
-    return search_output_to_envelope(out)
-
-
-def _default_flag_reader(name: str) -> bool:
-    """Production feature-flag reader — defers the import to call time."""
-    from kairix.core.features import flag
-
-    return flag(name)
-
-
-@dataclass
-class QueueAwareSearchDeps:
-    """Injectable dependencies for :func:`tool_search_queue_aware`.
-
-    F6-clean: every field has a ``default_factory`` so production
-    callers construct ``QueueAwareSearchDeps()`` and get the real
-    boundary calls; tests construct
-    ``QueueAwareSearchDeps(flag_reader=lambda _: True, ...)`` and pass
-    it as a single argument. Matches :class:`WorkerDeps`'s discipline
-    for the sibling worker callables.
-
-    Fields:
-      * ``flag_reader`` — feature-flag lookup; default
-        :func:`_default_flag_reader` (calls
-        :func:`kairix.core.features.flag`).
-      * ``search_fn`` — search delegate; default :func:`tool_search`.
-        Tests pass a stub so the dispatch/queue surface is the
-        property under test, not the search pipeline.
-      * ``queue_db_factory`` — returns the SQLite connection used for
-        carry-along reads. Default returns ``None`` so production
-        callers opt-in by passing a connection-returning callable
-        once the production wiring is in place; tests pass a
-        ``tmp_path``-backed factory.
-    """
-
-    flag_reader: Callable[[str], bool] = field(default_factory=lambda: _default_flag_reader)
-    search_fn: Callable[..., dict[str, Any]] = field(default_factory=lambda: tool_search)
-    queue_db_factory: Callable[[], Any] = field(default_factory=lambda: _default_queue_db)
-
-
-def _default_queue_db() -> Any:
-    """Default queue-db factory — None until G.2 wires the production conn through."""
-    return None
-
-
-def tool_search_queue_aware(
-    query: str,
-    agent: str | None = None,
-    scope: Scope = Scope.SHARED_AGENT,
-    budget: int = 3000,
-    limit: int = 10,
-    *,
-    agent_id: str | None = None,
-    deps: Any = None,
-    queue_deps: QueueAwareSearchDeps | None = None,
-) -> Any:
-    """Queue-aware wrapper around :func:`tool_search` for the ADR-029 G.1 spike.
-
-    When the ``agent_query_queue`` feature flag is OFF (default),
-    delegates straight to :func:`tool_search` — the response shape is
-    byte-identical to the pre-spike behaviour. When ON, the call routes
-    through :func:`kairix.core.queue.dispatch_or_queue` and any
-    completed pending_queries rows for ``agent_id`` are carried back
-    as a prefix string keyed under ``"carry_along"`` in the response
-    envelope.
-
-    Args mirror :func:`tool_search` plus two seams:
-
-    * ``agent_id`` — the canonical agent identifier from MCP session
-      headers; used as the dedup key for the queue. Falls back to
-      ``"unknown-agent"`` when None (logged once per call via F21).
-    * ``queue_deps`` — :class:`QueueAwareSearchDeps` holding the
-      flag-reader / search-delegate / queue-db factory. Production
-      callers leave None and the dataclass's ``default_factory`` shape
-      wires the real boundary calls; tests pass an instance with
-      stubs to drive both branches without touching live services.
-
-    Returns the same dict shape as :func:`tool_search` when the queue
-    path is OFF or the handler returns within budget. When the queue
-    path is ON and the budget is exceeded, returns the plain string
-    ``"Processing your request (id: q_<hash>)..."`` — NOT an error
-    envelope — so the agent interprets it as "accepted, continue".
-    """
-    from kairix.core.queue import carry_along
-    from kairix.core.queue.dispatch import dispatch_or_queue
-
-    resolved_deps = queue_deps if queue_deps is not None else QueueAwareSearchDeps()
-    delegate = resolved_deps.search_fn
-    reader = resolved_deps.flag_reader
-
-    if not reader("agent_query_queue"):
-        return delegate(query=query, agent=agent, scope=scope, budget=budget, limit=limit, deps=deps)
-
-    resolved_agent_id = agent_id or "unknown-agent"
-
-    @dispatch_or_queue(tool_name="tool_search")
-    def _handler(
-        query: str,
-        agent: str | None,
-        scope: Scope,
-        budget: int,
-        limit: int,
-        *,
-        agent_id: str,
-        deps: Any,
-    ) -> dict[str, Any]:
-        # `agent_id` is part of the dispatch_or_queue contract — the
-        # decorator reads it via kwargs.get('agent_id') on the wrapper
-        # layer to build the dedup hash + the pending_queries row owner;
-        # log it here so the parameter has a real consumer (F19 — every
-        # named parameter must be load-bearing).
-        logger.debug("tool_search dispatched for agent_id=%r", agent_id)
-        return delegate(query=query, agent=agent, scope=scope, budget=budget, limit=limit, deps=deps)
-
-    result = _handler(
-        query,
-        agent,
-        scope,
-        budget,
-        limit,
-        agent_id=resolved_agent_id,
-        deps=deps,
-    )
-
-    # Plain-text queued path — pass through unchanged so the agent
-    # reads it as "accepted, continue".
-    if isinstance(result, str):
-        return result
-
-    prefix = carry_along.carry_along_prefix_safe(resolved_agent_id, resolved_deps.queue_db_factory())
-    if prefix and isinstance(result, dict):
-        result = {**result, "carry_along": prefix}
-    return result
-
-
-def tool_entity(
-    name: str,
-    *,
-    deps: Any = None,
-    neo4j_client: Any | None = None,
-    client_factory: Callable[[], Any] = _default_neo4j_client_factory,
-) -> dict[str, Any]:
-    """Look up a specific person, company, or topic by name.
-
-    Thin adapter around ``kairix.use_cases.entity_get.run_entity_get``.
-    This is a quick, direct lookup from the knowledge graph (Neo4j) —
-    use it when you already know the name of what you're looking for.
-
-    The optional ``deps`` parameter forwards an ``EntityGetDeps`` directly
-    to the use case — production callers leave it None.
-
-    Two test seams sit below ``deps``:
-      - ``neo4j_client``: legacy explicit-client kwarg; overrides the
-        default ``_fetch_entity_card`` helper's Neo4j client when set.
-      - ``client_factory``: drives the "no client → factory()" fallback
-        path in ``_resolve_neo4j_client`` without monkey-patching the
-        ``graph_client.get_client`` import.
-    Prefer ``deps`` for new code.
-    """
-    from kairix.use_cases.entity_get import EntityGetDeps, entity_get_output_to_envelope, run_entity_get
-
-    if deps is None:
-        deps = EntityGetDeps(
-            fetch_fn=lambda n: _fetch_entity_card(n, neo4j_client=neo4j_client, client_factory=client_factory)
-        )
-
-    out = run_entity_get(name, deps=deps)
-    return entity_get_output_to_envelope(out)
-
-
-def tool_prep(
-    query: str,
-    agent: str | None = None,
-    tier: Literal["l0", "l1"] = "l0",
-    scope: Scope = DEFAULT_SCOPE,
-    *,
-    deps: Any = None,
-) -> dict[str, Any]:
-    """Get a short summary of a topic before committing to a full search.
-
-    Thin adapter around ``kairix.use_cases.prep.run_prep``. Choose 'l0'
-    for 2-3 sentences or 'l1' for a structured overview. Uses less
-    resources than a full search — good for quick context checks.
-    Retrieves relevant documents first, then summarises from them.
-
-    The optional ``deps`` parameter forwards a ``PrepDeps`` directly
-    to the use case — production callers leave it None.
-    """
-    from kairix.use_cases.prep import prep_output_to_envelope, run_prep
-
-    out = run_prep(query, agent=agent, scope=scope, tier=tier, deps=deps)
-    return prep_output_to_envelope(out)
-
-
-def tool_timeline(
-    query: str,
-    anchor_date: str | None = None,
-    agent: str | None = None,
-    scope: Scope = DEFAULT_SCOPE,
-) -> dict[str, Any]:
-    """Date-aware retrieval: rewrite a temporal query and fetch results.
-
-    Thin adapter around ``kairix.use_cases.timeline.run_timeline``. CLI and
-    MCP both call the same use case so behaviour is identical (closes #163,
-    Phase 1 of #168). The use case extracts a time window from the query
-    (or accepts explicit since/until), tries the temporal-chunks index
-    first, then falls through to the search pipeline.
-    """
-    from datetime import date as _date
-
-    from kairix.use_cases.timeline import run_timeline, timeline_output_to_envelope
-
-    anchor: _date | None = None
-    if anchor_date:
-        try:
-            anchor = _date.fromisoformat(anchor_date)
-        except ValueError:
-            pass
-
-    result = run_timeline(
-        query,
-        anchor_date=anchor,
-        agent=agent,
-        scope=scope,
-    )
-
-    return timeline_output_to_envelope(result)
-
-
-def tool_research(
-    query: str,
-    agent: str | None = None,
-    max_turns: int = 4,
-    *,
-    deps: Any = None,
-) -> dict[str, Any]:
-    """Ask a research question. The system searches multiple times, refining
-    its approach until it finds a good answer or reports what's missing.
-
-    Thin adapter around ``kairix.use_cases.research.run_research_use_case``.
-    Use this for complex questions that need more than a quick search.
-    For simple lookups, use search instead — it's faster.
-
-    The optional ``deps`` parameter forwards a ``ResearchDeps`` directly
-    to the use case — production callers leave it None.
-
-    ``agent`` is accepted for signature parity with the other tools and
-    logged for traceability; the research use case is agent-agnostic
-    today (no per-agent scope/tier filtering), so it isn't threaded
-    further.
-    """
-    from kairix.use_cases.research import research_output_to_envelope, run_research_use_case
-
-    logger.info("mcp.research: agent=%r turns<=%d", agent, max_turns)
-    out = run_research_use_case(query, max_turns=max_turns, deps=deps)
-    return research_output_to_envelope(out)
-
-
-def tool_expand(
-    source_uri: str,
-    seq: int | None = None,
-    token_budget: int = 2000,
-    *,
-    deps: Any = None,
-) -> dict[str, Any]:
-    """Expand a search hit to its neighbouring chunks within a token budget.
-
-    Thin adapter around ``kairix.use_cases.expand.run_expand``. CLI and MCP
-    both delegate to the same use case so the surfaces stay aligned (#168).
-
-    Call this after a search / recall hit when you need the surrounding
-    context: pass the hit's ``source_uri`` + ``seq`` (the typed PLA-270
-    fields on every ``SearchHit``) and expand returns the matched chunk plus
-    the preceding and following chunks — so you read context WITHOUT
-    re-ingesting the whole document. For a doc / section-level (L2) hit whose
-    ``seq`` is null, omit ``seq`` (PLA-297): expand resolves the document's
-    chunks by ``source_uri`` and anchors on the first, so the handoff never
-    dead-ends. When the source has no finer chunks, the envelope returns the
-    whole-document content with ``no_finer_chunks=True``.
-
-    The optional ``deps`` parameter forwards an ``ExpandDeps`` directly to the
-    use case — production callers leave it None; tests pass an ``ExpandDeps``
-    carrying a fake chunk reader to drive without touching SQLite.
-    """
-    from kairix.use_cases.expand import expand_output_to_envelope, run_expand
-
-    logger.info("mcp.expand: source_uri=%r seq=%s budget=%d", source_uri, seq, token_budget)
-    out = run_expand(source_uri, seq, token_budget=token_budget, deps=deps)
-    return expand_output_to_envelope(out)
-
-
-def tool_usage_guide(
-    topic: str = "",
-    *,
-    guide_path: Path | None = None,
-    deps: Any = None,
-) -> dict[str, Any]:
-    """
-    Return the kairix agent usage guide, or a section of it filtered by topic.
-
-    Thin adapter around ``kairix.use_cases.usage_guide.run_usage_guide``.
-    Use this tool when you are unsure how to use kairix, when a search
-    returns unexpected results, or when you want to understand a feature.
-
-    The optional ``deps`` parameter forwards a ``UsageGuideDeps`` directly
-    to the use case — production callers leave it None. The legacy
-    ``guide_path`` parameter is preserved as the operator-facing override.
-    """
-    from kairix.use_cases.usage_guide import run_usage_guide, usage_guide_output_to_envelope
-
-    out = run_usage_guide(topic, guide_path=guide_path, deps=deps)
-    return usage_guide_output_to_envelope(out)
-
-
-def tool_recommend(
-    task: str,
-    *,
-    agent: str | None = None,
-    deps: Any = None,
-    flag_reader: Callable[[], bool] | None = None,
-) -> dict[str, Any]:
-    """Recommend which kairix tool or local skill fits a described task.
-
-    Thin adapter around ``kairix.use_cases.recommend.run_recommend``. Use
-    when you are unsure which kairix tool, skill, slash-command, sub-agent,
-    or workflow fits a task — describe the task and get a ranked list of
-    capabilities, each with why-it-fits and a ready-to-call invocation.
-
-    Flag-gated at THIS adapter level (not inside ``run_recommend``): when
-    the ``recommender`` flag is OFF, returns a disabled envelope WITHOUT
-    calling ``run_recommend``. ``deps`` forwards a ``RecommendDeps`` to the
-    use case; ``flag_reader`` is the flag DI seam (default reads
-    ``flag("recommender")``). Production callers leave both None.
-    """
-    from kairix.use_cases.recommend import (
-        default_recommender_flag_reader,
-        recommend_output_to_envelope,
-        recommender_disabled_output,
-        run_recommend,
-    )
-
-    read_flag = flag_reader if flag_reader is not None else default_recommender_flag_reader
-    if not read_flag():
-        return recommend_output_to_envelope(recommender_disabled_output(task))
-    out = run_recommend(task, agent=agent, deps=deps)
-    return recommend_output_to_envelope(out)
-
-
-# Canonical ``tool_<registered-tool-name>`` alias for the recommender. The
-# registered MCP tool is ``recommend_capabilities``; the F30 outcome-test
-# convention + the capability-affordance gate both key on the
-# ``tool_<name>`` shape, so this alias is the name outcome tests call. The
-# implementation lives on ``tool_recommend`` (the short adapter name the
-# CLI parity test + the registration both use).
-tool_recommend_capabilities = tool_recommend
-
-
-def tool_contradict(
-    content: str,
-    agent: str | None = None,
-    top_k: int = 5,
-    threshold: float = 0.45,
-    top_claims: int = 3,
-    scope: Scope = DEFAULT_SCOPE,
-    *,
-    deps: Any = None,
-) -> dict[str, Any]:
-    """Check new content against existing knowledge for contradictions.
-
-    Thin adapter around ``kairix.use_cases.contradict.run_contradict``.
-    Use before writing new facts — catches conflicts with what's already
-    in the knowledge base. Returns a list of contradicting documents with
-    scores and explanations.
-
-    The optional ``deps`` parameter forwards a ``ContradictDeps`` directly
-    to the use case — production callers leave it None.
-    """
-    from kairix.use_cases.contradict import contradict_output_to_envelope, run_contradict
-
-    out = run_contradict(
-        content,
-        agent=agent,
-        scope=scope,
-        top_k=top_k,
-        threshold=threshold,
-        top_claims=top_claims,
-        deps=deps,
-    )
-    return contradict_output_to_envelope(out)
-
-
-def tool_entity_suggest(
-    text: str,
-    *,
-    deps: Any = None,
-) -> dict[str, Any]:
-    """Suggest entities found in arbitrary text by running NER + Neo4j cross-ref.
-
-    Thin adapter around ``kairix.use_cases.entity.run_entity_suggest``.
-    Use to spot people, organisations, places mentioned in prose so an
-    operator (or another agent) can decide whether to add them to the
-    knowledge graph.
-    """
-    from kairix.use_cases.entity import entity_suggest_output_to_envelope, run_entity_suggest
-
-    out = run_entity_suggest(text, deps=deps)
-    return entity_suggest_output_to_envelope(out)
-
-
-def tool_entity_validate(
-    name: str,
-    update: bool = False,
-    *,
-    deps: Any = None,
-) -> dict[str, Any]:
-    """Validate an entity against Wikidata and optionally update Neo4j.
-
-    Thin adapter around ``kairix.use_cases.entity.run_entity_validate``.
-    Use to confirm a graph entity has a real-world match (qid) and
-    optionally write that qid back to the Neo4j node.
-    """
-    from kairix.use_cases.entity import entity_validate_output_to_envelope, run_entity_validate
-
-    out = run_entity_validate(name, update=update, deps=deps)
-    return entity_validate_output_to_envelope(out)
-
-
-def tool_brief(
-    agent: str,
-    *,
-    deps: Any = None,
-) -> dict[str, Any]:
-    """Generate a session briefing and return its content + path.
-
-    Thin adapter around ``kairix.use_cases.brief.run_brief``. Use before
-    starting work — gives an agent the operator's recent decisions,
-    notes, and entity stub in one structured payload.
-
-    The optional ``deps`` parameter forwards a ``BriefDeps`` directly to
-    the use case — production callers leave it None.
-    """
-    from kairix.use_cases.brief import brief_output_to_envelope, run_brief
-
-    out = run_brief(agent, deps=deps)
-    return brief_output_to_envelope(out)
-
-
-def tool_bootstrap(
-    agent: str,
-    max_memory_days: int = 3,
-    *,
-    deps: Any = None,
-) -> dict[str, Any]:
-    """Return the agent orientation envelope (#246 W1).
-
-    Thin adapter around ``kairix.use_cases.bootstrap.run_bootstrap``.
-    Returns the agent's role, current ``Board.md``, recent memory
-    entries, active goals, and a structured health snapshot — the
-    single call an agent makes at session start (or topic switch) to
-    absorb its current state. Never raises; degradation is surfaced via
-    the ``health`` field with a prescriptive ``next_action``.
-
-    The optional ``deps`` parameter forwards a ``BootstrapDeps`` directly
-    to the use case — production callers leave it None.
-    """
-    from kairix.use_cases.bootstrap import bootstrap_output_to_envelope, run_bootstrap
-
-    out = run_bootstrap(agent, deps=deps, max_memory_days=max_memory_days)
-    return bootstrap_output_to_envelope(out)
-
-
-# ---------------------------------------------------------------------------
-# Diagnostic capabilities — read-only kairix state for agents to introspect
-# ---------------------------------------------------------------------------
-
-
-def tool_onboard_check() -> dict[str, Any]:
-    """Run the kairix deployment health probes and return the structured envelope.
-
-    Mirrors ``kairix onboard check --json`` — the same Python API
-    (``run_onboard_check``) backs both surfaces, so CLI and MCP return
-    byte-identical envelopes for the same kairix state.
-
-    Read-only, bounded runtime (a few seconds at the worst case).
-    """
-    from dataclasses import asdict
-
-    from kairix.platform.onboard.check import run_onboard_check
-
-    try:
-        outcome = run_onboard_check()
-        return {
-            "passed": outcome.passed,
-            "total": outcome.total,
-            "fully_passed": outcome.fully_passed,
-            "failures": [asdict(f) for f in outcome.failures],
-            "error": "",
-        }
-    except Exception as exc:
-        logger.warning("tool_onboard_check failed: %s", exc, exc_info=True)
-        return {
-            "passed": 0,
-            "total": 0,
-            "fully_passed": False,
-            "failures": [],
-            "error": f"{type(exc).__name__}: {exc}",
-        }
-
-
-def tool_onboard_scan(
-    memory_root: str,
-    workspace_root: str = "",
-) -> dict[str, Any]:
-    """Discover agent scopes on disk and return them as an envelope.
-
-    Mirrors ``kairix onboard scan --json``. Wraps
-    :func:`kairix.agents.onboarding.scanner.scan_for_agents` so the
-    CLI + MCP return byte-identical envelopes for the same disk state.
-
-    Never raises — disk IO failures collapse into an empty ``agents``
-    list with the exception string preserved on ``error``.
-    """
-    from kairix.agents.onboarding.cli import scope_to_envelope
-    from kairix.agents.onboarding.scanner import scan_for_agents
-
-    try:
-        scopes = scan_for_agents(
-            memory_root=Path(memory_root),
-            workspace_root=Path(workspace_root) if workspace_root else None,
-        )
-        return {
-            "agents": [scope_to_envelope(s) for s in scopes],
-            "error": "",
-        }
-    except Exception as exc:
-        logger.warning("tool_onboard_scan failed: %s", exc, exc_info=True)
-        return {
-            "agents": [],
-            "error": f"{type(exc).__name__}: {exc}",
-        }
-
-
-def tool_onboard_agent(
-    agent_name: str,
-    memory_root: str,
-    workspace_root: str = "",
-    harness: str = "",
-) -> dict[str, Any]:
-    """Discover surfaces for one named agent and return as an envelope.
-
-    Mirrors ``kairix onboard agent --name <name> --json``. Returns
-    ``{"agent": None, "error": "..."}`` when the agent has no detector
-    matches AND no .md files at ``memory_root/<name>`` — never raises.
-    """
-    from kairix.agents.onboarding.cli import scope_to_envelope
-    from kairix.agents.onboarding.scanner import discover_single_agent
-
-    try:
-        scope = discover_single_agent(
-            agent_name,
-            memory_root=Path(memory_root),
-            workspace_root=Path(workspace_root) if workspace_root else None,
-            harness=harness or None,
-        )
-        return {"agent": scope_to_envelope(scope), "error": ""}
-    except ValueError as exc:
-        # ValueError is the documented "no proposal" signal; surface
-        # the agent name so callers can branch on it.
-        return {"agent": None, "error": str(exc)}
-    except Exception as exc:
-        logger.warning("tool_onboard_agent failed: %s", exc, exc_info=True)
-        return {"agent": None, "error": f"{type(exc).__name__}: {exc}"}
-
-
-def tool_doctor_check_all(
-    *,
-    config: dict[str, object] | None = None,
-) -> dict[str, Any]:
-    """Re-validate every configured agent scope against disk state.
-
-    Mirrors ``kairix doctor agent --all --json`` — same Python API
-    (``doctor_check_all`` + ``report_to_envelope``) backs both
-    surfaces, so CLI and MCP return byte-identical envelopes for the
-    same configured + on-disk state.
-
-    Never raises — disk-IO errors collapse into per-surface issues.
-    """
-    from kairix.agents.onboarding.doctor import doctor_check_all
-    from kairix.agents.onboarding.doctor_cli import report_to_envelope
-
-    try:
-        report = doctor_check_all(config=config)
-        return report_to_envelope(report)
-    except Exception as exc:
-        logger.warning("tool_doctor_check_all failed: %s", exc, exc_info=True)
-        return {
-            "agents": [],
-            "overall": "error",
-            "summary_text": "",
-            "error": f"{type(exc).__name__}: {exc}",
-        }
-
-
-def tool_doctor_check_agent(
-    agent_name: str,
-    *,
-    config: dict[str, object] | None = None,
-) -> dict[str, Any]:
-    """Re-validate a single configured agent scope against disk state.
-
-    Mirrors ``kairix doctor agent --name <name> --json``. Never raises
-    — unknown agents collapse into an :class:`AgentHealth` with
-    ``overall="error"`` and the error captured in ``issues``.
-    """
-    from kairix.agents.onboarding.doctor import doctor_check_agent
-    from kairix.agents.onboarding.doctor_cli import agent_health_to_envelope
-
-    try:
-        health = doctor_check_agent(agent_name, config=config)
-        return {"agent": agent_health_to_envelope(health), "error": ""}
-    except Exception as exc:
-        logger.warning("tool_doctor_check_agent failed: %s", exc, exc_info=True)
-        return {"agent": None, "error": f"{type(exc).__name__}: {exc}"}
-
-
-def tool_warm() -> dict[str, Any]:
-    """Pre-load kairix caches + pay factory-init costs.
-
-    Mirrors ``kairix warm`` — calls the same Python API. Idempotent and
-    fast once warm, so agents can call this as a health probe ('is
-    kairix warm?'); the first invocation costs ~200 MB and a few hundred
-    ms, every subsequent call is sub-millisecond.
-    """
-    try:
-        from kairix.platform.warm import run_warm
-
-        return run_warm().to_envelope()
-    except Exception as exc:
-        logger.warning("tool_warm failed: %s", exc, exc_info=True)
-        return {
-            "ok": False,
-            "total_duration_s": 0.0,
-            "steps": [],
-            "failures": [{"step": "tool_warm", "detail": f"{type(exc).__name__}: {exc}"}],
-        }
-
-
-def _default_topology_v2_db_path() -> Path:
-    """Production callable that returns the configured kairix SQLite path."""
-    from kairix.paths import db_path
-
-    return db_path()
-
-
-def tool_features_status(
-    topology_v2: bool = False,
-    *,
-    read_db_path: Callable[[], Path] = _default_topology_v2_db_path,
-) -> dict[str, Any]:
-    """Per F53 + the feature-flag-architecture spec §3.5, agents introspect
-    the live flag state through this tool. Thin adapter — delegates to
-    :func:`kairix.core.features.status` so CLI and MCP stay aligned and
-    the returned envelope matches ``kairix features status --json``.
-
-    ``topology_v2=True`` extends the envelope with a ``topology_v2``
-    key carrying the Wave D diagnostics (declared cc_pairs +
-    per-actor scope-profile resolution). Default-off so existing agents
-    see byte-identical pre-Wave-D output.
-
-    ``read_db_path`` is the unit-test DI seam: leaving it ``None``
-    routes through the production :func:`kairix.paths.db_path` resolver;
-    tests pass a callable returning a tmp_path so the topology v2 read
-    hits the test-built schema without env-var monkeypatching (F2-clean).
-
-    On exception, surfaces a typed error string and an empty flags list
-    so the agent can decide whether to fall back or escalate.
-    """
-    from dataclasses import asdict
-
-    try:
-        from kairix.core.features import status as features_status
-
-        entries = features_status()
-        envelope: dict[str, Any] = {
-            "flags": [asdict(entry) for entry in entries],
-            "error": "",
-        }
-        if topology_v2:
-            envelope["topology_v2"] = _read_topology_v2_diagnostics_for_mcp(read_db_path)
-        return envelope
-    except Exception as exc:
-        logger.warning("tool_features_status failed: %s", exc, exc_info=True)
-        return {
-            "flags": [],
-            "error": f"{type(exc).__name__}: {exc}",
-        }
-
-
-def _read_topology_v2_diagnostics_for_mcp(
-    read_db_path: Callable[[], Path] = _default_topology_v2_db_path,
-) -> dict[str, Any]:
-    """Read the Wave D topology v2 diagnostics for the MCP envelope.
-
-    Isolated helper so :func:`tool_features_status` stays under the
-    F16 cognitive-complexity ceiling AND the topology v2 read can
-    degrade independently (a missing topology v2 schema returns the
-    zero-snapshot rather than crashing the whole MCP envelope).
-
-    ``read_db_path`` is the DI seam — production callers leave it
-    ``None`` to delegate to :func:`kairix.paths.db_path`; tests pass a
-    tmp-path-returning callable.
-    """
-    import sqlite3
-    from contextlib import closing
-
-    from kairix.core.features.topology_v2_status import (
-        build_topology_v2_diagnostics,
-        render_topology_v2_json,
-    )
-
-    resolved = read_db_path()
-
-    try:
-        conn = sqlite3.connect(str(resolved))
-        with closing(conn):
-            diag = build_topology_v2_diagnostics(conn)
-        return render_topology_v2_json(diag)
-    except sqlite3.Error as exc:
-        logger.warning("topology v2 diagnostics read failed: %s", exc, exc_info=True)
-        return {"cc_pairs": [], "actor_scopes": []}
-
-
-def tool_worker_status() -> dict[str, Any]:
-    """Read the kairix-worker state file and return its current envelope.
-
-    Mirrors ``kairix worker status`` — read-only, sub-second. Returns
-    phase, counters, last-run timestamp, last-error string when present.
-    """
-    from dataclasses import asdict
-
-    try:
-        from kairix.paths import worker_state_path
-        from kairix.worker_state import read_state
-
-        state = read_state(worker_state_path())
-        if state is None:
-            return {
-                "phase": "unknown",
-                "available": False,
-                "error": "worker state file not found",
-            }
-        return {"available": True, "error": "", **asdict(state)}
-    except Exception as exc:
-        logger.warning("tool_worker_status failed: %s", exc, exc_info=True)
-        return {"available": False, "error": f"{type(exc).__name__}: {exc}"}
-
-
-def _default_dead_letter_db_path() -> Path:
-    """Production callable that returns the configured kairix SQLite path."""
-    from kairix.paths import db_path
-
-    return db_path()
-
-
-def tool_dead_letter_status(
-    source_name: str | None = None,
-    *,
-    read_db_path: Callable[[], Path] = _default_dead_letter_db_path,
-) -> dict[str, Any]:
-    """Per-source dead-letter triage envelope.
-
-    Mirrors ``kairix dead-letter status --json``. Agents call this to
-    decide whether the operator should run a re-extract or whether the
-    failure class needs an upstream code fix. Returns the same shape
-    documented in the dispatch brief: ``{total, per_source: [...]}``.
-
-    On any exception, surfaces a typed error string and an empty
-    ``per_source`` list so the agent can decide whether to fall back
-    or escalate.
-
-    ``read_db_path`` is the unit-test DI seam: leaving it at the
-    default routes through :func:`kairix.paths.db_path`; tests pass a
-    callable returning a tmp_path so the read hits a sandbox.
-    """
-    import sqlite3 as _sqlite3
-    from contextlib import closing as _closing
-
-    from kairix.core.observability.dead_letter_status import (
-        build_status as _build_status,
-    )
-    from kairix.core.observability.dead_letter_status import (
-        render_json as _render_json,
-    )
-
-    try:
-        resolved = read_db_path()
-        conn = _sqlite3.connect(str(resolved))
-        with _closing(conn):
-            report = _build_status(conn, source_name=source_name)
-        envelope = _render_json(report)
-        envelope["error"] = ""
-        return envelope
-    except Exception as exc:
-        logger.warning("tool_dead_letter_status failed: %s", exc, exc_info=True)
-        return {
-            "total": 0,
-            "per_source": [],
-            "error": f"{type(exc).__name__}: {exc}",
-        }
-
-
-def tool_caches_status() -> dict[str, Any]:
-    """Return per-cache stats for every TTL LRU in this MCP process.
-
-    Wraps the same ``_collect_*`` collectors used by ``kairix caches``
-    CLI in-process mode, but executed inside the MCP server's address
-    space so the returned stats reflect the warm long-lived process
-    (the CLI's freshly-spawned process always sees zeros — this tool
-    is how operators see real cache effectiveness).
-
-    PR 3.1 / #422 — paired with the CLI dispatcher routing so
-    ``kairix caches`` shows MCP-side cache state by default.
-
-    Envelope shape::
-
-        {
-            "caches": [
-                {"name": str, "size": int, "hits": int, "misses": int,
-                 "evictions": int, "hit_rate_pct": float},
-                ...
-            ],
-            "process_pid": int,        # operator sanity-check that this is the MCP process
-            "process_uptime_s": float, # how long this MCP process has been up
-        }
-    """
-    from kairix.quality.probe.caches_cli import (
-        _collect_all_rows,
-        caches_rows_to_envelope,
-    )
-
-    rows = _collect_all_rows()
-    envelope = caches_rows_to_envelope(rows)
-    envelope["process_pid"] = os.getpid()
-    envelope["process_uptime_s"] = round(time.monotonic() - _PROCESS_STARTED_AT_MONOTONIC, 3)
-    return envelope
-
-
-def tool_remember(
-    agent: str,
-    content: str,
-    kind: str = "note",
-    *,
-    deps: RememberDeps | None = None,
-) -> dict[str, Any]:
-    """Real MCP binding for ``kairix remember`` (#472) — F25 affordance.
-
-    Delegates to :func:`kairix.agents.mcp.tools.memory_write.tool_memory_write`,
-    which calls the SAME :func:`kairix.use_cases.remember.remember` use case
-    the CLI uses. Agents see this capability registered under the tool name
-    ``memory_write`` in :func:`build_server`.
-
-    ``deps`` is the injection seam: production callers (and the registered
-    ``memory_write`` closure) leave it ``None`` so the use case wires the
-    real config / paths / clock / index step; ``build_server(remember_deps=...)``
-    threads a tmp-path ``RememberDeps`` here so an integration test can drive
-    the registered MCP tool against a temp knowledge store without touching
-    the live tree (F1/F2-clean — a constructor seam, not a monkeypatch).
-    """
-    from kairix.agents.mcp.tools.memory_write import tool_memory_write
-
-    return tool_memory_write(agent=agent, content=content, kind=kind, deps=deps)
-
-
-def tool_facts_about(
-    entity: str,
-    namespace: str | None = None,
-    top_k: int = 20,
-    *,
-    deps: FactsAboutDeps | None = None,
-) -> dict[str, Any]:
-    """Real MCP binding for ``kairix facts-about`` (PLA-263) — F25 affordance.
-
-    Delegates to :func:`kairix.agents.mcp.tools.facts_about.tool_facts_about`,
-    the SAME use case the ``kairix facts-about`` CLI calls — so an entity
-    lookup answers identically over MCP and at the shell. Agents see this
-    capability registered under the tool name ``facts_about`` in
-    :func:`build_server`.
-
-    ``deps`` is the injection seam: production callers (and the registered
-    ``facts_about`` closure) leave it ``None`` so the use case resolves the
-    real SQLite fact store + document repository; ``build_server(facts_about_deps=...)``
-    threads fakes here so an integration test can drive the registered MCP
-    tool against scripted data — while cold — without touching the live tree
-    (F1/F2-clean — a constructor seam, not a monkeypatch).
-    """
-    from kairix.agents.mcp.tools.facts_about import FactsAboutDeps as _FactsAboutDeps
-    from kairix.agents.mcp.tools.facts_about import tool_facts_about as _facts_about_use_case
-
-    resolved = deps if deps is not None else _FactsAboutDeps()
-    return _facts_about_use_case(
-        entity=entity,
-        namespace=namespace,
-        top_k=top_k,
-        paths=resolved.paths,
-        fact_store=resolved.fact_store,
-        document_repo=resolved.document_repo,
-        canonicals=resolved.canonicals,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Operator-only capability stubs — agents that call these get a structured
-# escalation envelope naming the exact CLI command to ask their admin to run.
-# ---------------------------------------------------------------------------
-
-# Canonical runbook reference for every operator-only escalation envelope.
-_RETRIEVAL_RUNBOOK = "docs/runbooks/kairix-retrieval-health.md"
-
-
-def _operator_only_envelope(
-    capability: str,
-    operator_command: str,
-    reason: str,
-    expected_runtime_seconds: int,
-    see_also: list[str] | None = None,
-) -> dict[str, Any]:
-    return {
-        "error": "OperatorOnlyCapability",
-        "capability": capability,
-        "reason": reason,
-        "operator_command": operator_command,
-        "expected_runtime_seconds": expected_runtime_seconds,
-        "see_also": see_also or [],
-    }
-
-
-def tool_soak_run(suite: str = "reflib", repeat: int = 3) -> dict[str, Any]:
-    """Stub for the soak capability — operator-only, escalation envelope.
-
-    Soak runs take minutes and stress the system under sustained load.
-    Agents that hit this tool receive the exact CLI command and
-    runbook pointer so they can escalate to an operator.
-    """
-    # The legacy ``kairix soak run`` CLI was retired in v2026.6; until the
-    # unified ``kairix benchmark run --mode soak`` dispatcher lands (P3.c),
-    # operators drive soak from the Python API. The envelope names the
-    # canonical entry point and the runbook for context.
-    return _operator_only_envelope(
-        capability="soak run",
-        operator_command=(
-            f"python -c 'from kairix.quality.soak import run_soak; print(run_soak(suite=\"{suite}\", repeat={repeat}))'"
-        ),
-        reason="Soak runs take minutes and stress the system under sustained load. Agents must escalate.",
-        expected_runtime_seconds=60 * repeat,
-        see_also=[_RETRIEVAL_RUNBOOK],
-    )
-
-
-# Agent-safe caps for the probe surface — exceeding either dimension routes
-# the call into the operator-only escalation envelope instead of running.
-# Rationale: 20 queries at ~300 ms with concurrency 3 stays under ~6 s
-# wallclock and matches typical teaming load. Anything bigger stresses the
-# system enough that an operator should be in the loop.
-MCP_PROBE_QUERIES_CAP = 20
-MCP_PROBE_CONCURRENCY_CAP = 3
-
-
-def _default_probe_search_runner(**kwargs: Any) -> Any:
-    """Production runner — defers the heavy probe import until call time."""
-    from kairix.quality.probe import run_probe_search
-
-    return run_probe_search(**kwargs)
-
-
-def tool_probe_search(
-    suite: str = "reflib",
-    queries: int = 20,
-    concurrency: int = 3,
-    seed: int = 0,
-    *,
-    probe_runner: Callable[..., Any] = _default_probe_search_runner,
-) -> dict[str, Any]:
-    """Concurrent-load latency probe — capped for agent safety.
-
-    Below the cap (queries<=20 AND concurrency<=3) runs the probe and returns
-    the ProbeResult envelope. Above the cap, returns an OperatorOnlyCapability
-    envelope pointing the agent at the CLI command for the operator.
-
-    Reason this isn't escalation-only: a small probe is the only way for an
-    agent to confirm retrieval is healthy before committing to a long task.
-    Larger probes stress the system and must be operator-driven.
-
-    The ``probe_runner`` kwarg is the public DI seam: tests pass a stub
-    runner instead of monkey-patching the production module attribute.
-    """
-    if queries > MCP_PROBE_QUERIES_CAP or concurrency > MCP_PROBE_CONCURRENCY_CAP:
-        # The legacy ``kairix probe search`` CLI was retired in v2026.6;
-        # operators drive the probe directly from the Python API until the
-        # unified ``kairix benchmark run --mode concurrent`` dispatcher
-        # lands (P3.b).
-        return _operator_only_envelope(
-            capability="probe search (above cap)",
-            operator_command=(
-                f"python -c 'from kairix.quality.probe import run_probe_search; "
-                f'print(run_probe_search(suite="{suite}", queries={queries}, '
-                f"concurrency={concurrency}, seed={seed}))'"
-            ),
-            reason=(
-                f"Probe above the agent-safe cap (queries<={MCP_PROBE_QUERIES_CAP}, "
-                f"concurrency<={MCP_PROBE_CONCURRENCY_CAP}) stresses the system; agents must escalate."
-            ),
-            expected_runtime_seconds=max(30, queries * 2),
-            see_also=[_RETRIEVAL_RUNBOOK],
-        )
-
-    result = probe_runner(
-        suite=suite,
-        queries=queries,
-        concurrency=concurrency,
-        seed=seed,
-    )
-    envelope: dict[str, Any] = result.to_envelope()
-    return envelope
-
-
-def tool_probe_burst(
-    suite: str = "reflib",
-    total_queries: int = 200,
-    peak_concurrency: int = 20,
-) -> dict[str, Any]:
-    """Stub for the burst-probe capability — operator-only, escalation envelope.
-
-    Burst is load-generating by design (rapid query injection to measure
-    post-warmup throughput drop). Agents calling this tool receive the
-    OperatorOnlyCapability envelope with the exact CLI command for the operator.
-    """
-    # The legacy ``kairix probe burst`` CLI was retired in v2026.6; operators
-    # drive the burst probe directly from the Python API.
-    return _operator_only_envelope(
-        capability="probe burst",
-        operator_command=(
-            f"python -c 'from kairix.quality.probe import run_probe_burst; "
-            f'print(run_probe_burst(suite="{suite}", total_queries={total_queries}, '
-            f"peak_concurrency={peak_concurrency}))'"
-        ),
-        reason=(
-            "Probe burst injects queries as fast as possible against the "
-            "production retrieval pipeline; load-generating by design. Agents must escalate."
-        ),
-        expected_runtime_seconds=max(30, total_queries // 5),
-        see_also=[_RETRIEVAL_RUNBOOK],
-    )
-
-
-def tool_probe_config() -> dict[str, Any]:
-    """Stub for the probe-config capability — operator-only, escalation envelope.
-
-    ``kairix probe-config`` runs a small representative embed workload against
-    the operator's configured provider to verify the setup and emit tuning
-    recommendations. It is load-generating against the provider's real endpoint
-    and surfaces config-shaped advice an operator (not an agent) applies; agents
-    must escalate.
-    """
-    return _operator_only_envelope(
-        capability="probe-config",
-        operator_command="kairix probe-config",
-        reason=(
-            "probe-config runs an embed workload against the operator's configured "
-            "provider endpoint and surfaces config-tuning advice the operator applies. "
-            "Agents must escalate."
-        ),
-        expected_runtime_seconds=60,
-        see_also=[_RETRIEVAL_RUNBOOK],
-    )
-
-
-def tool_benchmark_run(suite: str = "reflib") -> dict[str, Any]:
-    """Stub for the benchmark capability — operator-only, escalation envelope."""
-    return _operator_only_envelope(
-        capability="benchmark run",
-        operator_command=f"kairix benchmark run --suite {suite}",
-        reason="Benchmark runs take minutes and load the system; agents must escalate.",
-        expected_runtime_seconds=120,
-        see_also=[_RETRIEVAL_RUNBOOK],
-    )
-
-
-def tool_embed(limit: int = 0) -> dict[str, Any]:
-    """Stub for the embed capability — operator-only, mutates state."""
-    flag = "" if limit == 0 else f" --limit {limit}"
-    return _operator_only_envelope(
-        capability="embed",
-        operator_command=f"kairix embed{flag}",
-        reason="Embed mutates the vector index and is metered against an Azure quota; agents must escalate.",
-        expected_runtime_seconds=300,
-        see_also=[_RETRIEVAL_RUNBOOK],
-    )
-
-
-def tool_store_crawl() -> dict[str, Any]:
-    """Stub for the store-crawl capability — operator-only, mutates Neo4j."""
-    return _operator_only_envelope(
-        capability="store crawl",
-        operator_command="kairix store crawl",
-        reason="Crawl mutates Neo4j entity graph and takes minutes; agents must escalate.",
-        expected_runtime_seconds=300,
-        see_also=[_RETRIEVAL_RUNBOOK],
-    )
-
-
-def tool_embed_rebuild_fts() -> dict[str, Any]:
-    """Stub for the FTS-rebuild capability — operator-only, destructive recovery action."""
-    return _operator_only_envelope(
-        capability="embed rebuild-fts",
-        operator_command="kairix embed rebuild-fts",
-        reason="rebuild-fts drops and re-creates the documents_fts table; agents must escalate.",
-        expected_runtime_seconds=60,
-        see_also=[_RETRIEVAL_RUNBOOK],
-    )
-
-
-def tool_maintenance_analyze(
-    *,
-    db_path: Path | None = None,
-) -> dict[str, Any]:
-    """Run ``ANALYZE`` on the kairix index DB and return the result envelope.
-
-    Operator-callable diagnostic that refreshes ``sqlite_stat1`` so the
-    query planner picks the right index for hot-path queries (#376).
-    Mirrors ``kairix maintenance analyze`` — same envelope shape.
-
-    Parameters
-    ----------
-    db_path:
-        Optional path to the SQLite index. ``None`` resolves via
-        :func:`kairix.paths.db_path`. Tests pass an explicit ``tmp_path``
-        so the call is F2-clean (no env-var manipulation).
-
-    Returns
-    -------
-    dict
-        Success: ``{"analyze_ran", "reason", "rows_analyzed",
-        "previous_doc_count", "elapsed_ms", "plan_before", "plan_after",
-        "sample_query", "error": ""}``. The ``error`` key is always
-        present (empty string on success) so agents can branch on it
-        consistently.
-        Failure: ``{"error": "<Name>", "detail": "...", ...}``.
-    """
-    try:
-        import sqlite3 as _sqlite3
-
-        from kairix.core.maintenance.cli import _count_documents, _explain_plan
-        from kairix.core.maintenance.periodic_analyze import run_periodic_analyze
-
-        if db_path is None:
-            from kairix.paths import db_path as resolved_db_path
-
-            db_path = resolved_db_path()
-
-        db = _sqlite3.connect(str(db_path))
-        try:
-            plan_before = _explain_plan(db)
-            result = run_periodic_analyze(db, stale_seconds=0.0)
-            plan_after = _explain_plan(db)
-            rows_analyzed = _count_documents(db)
-        finally:
-            db.close()
-
-        return {
-            "analyze_ran": result.ran,
-            "reason": result.reason,
-            "rows_analyzed": rows_analyzed,
-            "previous_doc_count": result.previous_doc_count,
-            "elapsed_ms": result.elapsed_ms,
-            "plan_before": plan_before,
-            "plan_after": plan_after,
-            "sample_query": "SELECT id FROM documents WHERE collection=? AND active=1",
-            "error": "",
-        }
-    except Exception as exc:
-        logger.warning("tool_maintenance_analyze failed: %s", exc, exc_info=True)
-        return {
-            "analyze_ran": False,
-            "rows_analyzed": 0,
-            "elapsed_ms": 0.0,
-            "error": type(exc).__name__,
-            "detail": f"{type(exc).__name__}: {exc}",
-        }
-
-
-def tool_cc_pair(verb: str = "list") -> dict[str, Any]:
-    """Stub for the cc-pair capability — Wave D lifecycle is operator-owned.
-
-    cc_pair create / pause / resume / delete mutate the topology v2 state
-    machine (kairix.core.connectors.cc_pair F57 lifecycle); agents must
-    escalate to an operator running `kairix cc-pair <verb>` so the
-    transition gets logged + observable via `kairix features status
-    --topology-v2`. The read-only ``list`` verb is also returned through
-    the escalation envelope so agents get one consistent shape per
-    capability.
-    """
-    suffix = "" if verb == "list" else " --id <id>"
-    return _operator_only_envelope(
-        capability="cc-pair",
-        operator_command=f"kairix cc-pair {verb}{suffix}",
-        reason=(
-            "cc-pair mutates the topology v2 cc_pair lifecycle (status state machine "
-            "+ topology_cc_pairs rows); operators run via the CLI so transitions are "
-            "audited. Agents read state via `tool_features_status(topology_v2=True)`."
-        ),
-        expected_runtime_seconds=5,
-        see_also=[_RETRIEVAL_RUNBOOK],
-    )
+# Canonical runbook reference surfaced in the capability catalogue's
+# ``see_also``. The escalation stubs reference the shared copy in
+# ``kairix.agents.mcp.tools._common``; this alias keeps the historical name
+# for the catalogue projection.
+_RETRIEVAL_RUNBOOK = RETRIEVAL_RUNBOOK
 
 
 # Capability catalogue constants.
@@ -1685,8 +447,9 @@ def _loop_group_for(cap: Capability) -> str:
 # read these rows directly (via :data:`CAPABILITIES_CATALOG` /
 # :func:`agent_facing` / :func:`by_loop_group`) without booting the MCP server;
 # ``tool_capabilities()`` projects them to the JSON introspection envelope. F99
-# (usage-guide currency) AST-walks these ``_cap(...)`` rows. Hand-maintained —
-# F25 (capability-affordance) keeps it in sync with the CLI/MCP surface.
+# (usage-guide currency) AST-walks these ``_cap(...)`` rows. ``build_server``
+# registers a per-row ``ToolBinding`` by walking this catalogue. Hand-maintained
+# — F25 (capability-affordance) keeps it in sync with the CLI/MCP surface.
 CAPABILITIES_CATALOG: tuple[Capability, ...] = (
     # Retrieval
     _cap(
@@ -2003,718 +766,95 @@ def tool_capabilities() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# FastMCP server — only constructed when mcp package is available
+# capabilities MCP tool — coupled to the catalogue, so its binding lives here
+# rather than in a domain adapter module.
 # ---------------------------------------------------------------------------
 
-
-def _register_retrieval_tools(server: Any, readiness_check: Callable[[], bool] | None) -> None:
-    """Register the cold-start-aware retrieval surface.
-
-    Every tool here is warm-gated AND returns the ColdStart envelope when the
-    readiness check is unsatisfied. Tools that only need @warm_gate (and not
-    require_ready) live in ``_register_synthesis_and_diagnostic_tools``.
-    """
-
-    @server.tool(
-        description=(
-            "Call before answering any factual question about prior work, decisions, or context — "
-            "kairix indexes the team's knowledge store and finds relevant prior material. "
-            "Use this proactively at session start and whenever a question touches the team's history. "
-            "If the result has error_code=KAIRIX_COLD_START, do not answer from memory or fallback; "
-            "wait retry_after_ms and retry the same call once. "
-            "Expected p99: 3s warm, 15s cold. Recommended client timeout: 30s."
-        )
-    )
-    @async_tool_handler
-    @warm_gate
-    def search(
-        query: str,
-        agent: str | None = None,
-        scope: Scope = DEFAULT_SCOPE,
-        budget: int = 3000,
-        limit: int = 10,
-    ) -> Any:
-        """Search your knowledge store — finds the best answers to any question.
-
-        Routes through :func:`tool_search_queue_aware` so the ADR-029 G.1
-        agent_query_queue flag chooses sync-only (OFF, today's behaviour)
-        vs dispatch-or-queue + carry-along (ON, the spike).
-        """
-        if cold := require_ready("search", readiness_check):
-            return cold
-        return tool_search_queue_aware(query=query, agent=agent, scope=scope, budget=budget, limit=limit)
-
-    @server.tool(
-        description=(
-            "Call when you need facts about a specific named entity (person, company, project) — "
-            "direct knowledge-graph lookup, faster than search. "
-            "Expected p99: 5s warm, 10s cold. Recommended client timeout: 30s."
-        )
-    )
-    @async_tool_handler
-    @warm_gate
-    def entity(name: str) -> dict[str, Any]:
-        """Entity lookup from Neo4j."""
-        return tool_entity(name=name)
-
-    @server.tool(
-        description=(
-            "Call when you need lightweight context preparation before deeper work. "
-            "If the result has error_code=KAIRIX_COLD_START, wait retry_after_ms and retry; "
-            "do not substitute memory-only context. "
-            "Expected p99: 10s warm, 30s cold. Recommended client timeout: 60s."
-        )
-    )
-    @async_tool_handler
-    @warm_gate
-    def prep(
-        query: str,
-        agent: str | None = None,
-        tier: Literal["l0", "l1"] = "l0",
-        scope: Scope = DEFAULT_SCOPE,
-    ) -> dict[str, Any]:
-        """Context preparation: tiered L0/L1 summary generation."""
-        if cold := require_ready("prep", readiness_check):
-            return cold
-        return tool_prep(query=query, agent=agent, tier=tier, scope=scope)
-
-    @server.tool(
-        description=(
-            "Call for date-aware retrieval when a question depends on timing. "
-            "If the result has error_code=KAIRIX_COLD_START, wait retry_after_ms and retry the same call. "
-            "Expected p99: 15s warm, 30s cold. Recommended client timeout: 60s."
-        )
-    )
-    @async_tool_handler
-    @warm_gate
-    def timeline(
-        query: str,
-        anchor_date: str | None = None,
-        agent: str | None = None,
-        scope: Scope = DEFAULT_SCOPE,
-    ) -> dict[str, Any]:
-        """Temporal query rewriting + date-aware retrieval."""
-        if cold := require_ready("timeline", readiness_check):
-            return cold
-        return tool_timeline(
-            query=query,
-            anchor_date=anchor_date,
-            agent=agent,
-            scope=scope,
-        )
-
-    @server.tool(
-        description=(
-            "Call for complex research questions that need iterative retrieval. "
-            "If the result has error_code=KAIRIX_COLD_START, wait retry_after_ms and retry before answering."
-        )
-    )
-    @async_tool_handler
-    @warm_gate
-    def research(query: str, agent: str | None = None, max_turns: int = 4) -> dict[str, Any]:
-        """Research a complex question. Searches iteratively until it finds a good answer."""
-        if cold := require_ready("research", readiness_check):
-            return cold
-        return tool_research(query=query, agent=agent, max_turns=max_turns)
-
-    @server.tool(
-        description=(
-            "Call before writing new facts to check for contradictions against existing knowledge. "
-            "If the result has error_code=KAIRIX_COLD_START, wait retry_after_ms and retry before proceeding. "
-            "Expected p99: 30s warm, 90s cold. Recommended client timeout: 120s."
-        )
-    )
-    @async_tool_handler
-    @warm_gate
-    def contradict(
-        content: str,
-        agent: str | None = None,
-        top_k: int = 5,
-        threshold: float = 0.45,
-        top_claims: int = 3,
-        scope: Scope = DEFAULT_SCOPE,
-    ) -> dict[str, Any]:
-        """Check new content against existing knowledge for contradictions."""
-        if cold := require_ready(CONTRADICT_TOOL_NAME, readiness_check):
-            return cold
-        return tool_contradict(
-            content=content,
-            agent=agent,
-            top_k=top_k,
-            threshold=threshold,
-            top_claims=top_claims,
-            scope=scope,
-        )
+_CAPABILITIES_DESCRIPTION = (
+    "Programmatic capability catalogue — every kairix capability with its "
+    "MCP tool name, CLI command, category, and (for capped MCP variants) "
+    "the agent-safe caps. AI-driven SRE agents call this to discover the "
+    "surface instead of guessing. See affordance pattern 4."
+)
 
 
-def _register_synthesis_and_diagnostic_tools(
-    server: Any,
-    readiness_check: Callable[[], bool] | None,
-    mark_ready: Callable[[], None] | None,
-) -> None:
-    """Register synthesis (brief/bootstrap) + diagnostic (warm/probe) tools.
-
-    These tools are *not* the cold-aware retrieval surface — they include the
-    warm() entry-point itself plus health/diagnostic envelopes that must remain
-    callable during a cold state so operators can diagnose the cold state.
-    """
-
-    @server.tool()
-    @async_tool_handler
-    def usage_guide(topic: str = "") -> dict[str, Any]:
-        """Return the kairix agent usage guide. Call this when unsure how to use kairix.
-
-        Expected p99: 1s warm, 2s cold. Recommended client timeout: 10s.
-        """
-        return tool_usage_guide(topic=topic)
-
-    # PLA-268 — expand is NOT ``@warm_gate``-decorated, on purpose. It reads
-    # neighbouring chunks by key from the local SQLite index (no embedding
-    # model, no network), so an agent expanding a hit while kairix is still
-    # warming gets its answer — same cold-safe rationale as facts_about
-    # (PLA-263). With no injected deps the body resolves the real (empty/
-    # fresh) index and returns an actionable miss, never the ColdStart
-    # short-circuit.
-    @server.tool(
-        description=(
-            "Call after a search/recall hit when you need the surrounding context — "
-            "expand pulls the matched chunk's neighbouring chunks (the preceding and "
-            "following ones) within a token budget, so you read context WITHOUT "
-            "re-ingesting the whole document. Pass the hit's source_uri + seq (the "
-            "typed fields on every search result). For a document/section-level hit "
-            "whose seq is null, pass source_uri alone and expand resolves the "
-            "document's chunks for you. Works even while kairix is still "
-            "warming up — it only reads the local index."
-        )
-    )
-    @async_tool_handler
-    def expand(source_uri: str, seq: int | None = None, token_budget: int = 2000) -> dict[str, Any]:
-        """Expand a search hit to its neighbouring chunks within a token budget."""
-        return tool_expand(source_uri=source_uri, seq=seq, token_budget=token_budget)
-
-    @server.tool(
-        description=(
-            "Call when you want a synthesised view of a topic — kairix runs a small research loop "
-            "across the knowledge store and returns a structured briefing. "
-            "Use it when you'd otherwise be tempted to summarise from memory. "
-            "If the result has error_code=KAIRIX_COLD_START, do not summarise from memory; "
-            "wait retry_after_ms and retry the same call. "
-            "Expected p99: 15s warm, 45s cold. Recommended client timeout: 90s."
-        )
-    )
-    @async_tool_handler
-    @warm_gate
-    def brief(agent: str) -> dict[str, Any]:
-        """Generate a session briefing for an agent. Returns content + on-disk path."""
-        if cold := require_ready("brief", readiness_check):
-            return cold
-        return tool_brief(agent=agent)
-
-    @server.tool(
-        description=(
-            "Call at session start or whenever you switch topics. "
-            "Returns your agent role, current board, recent memory, and active goals — "
-            "orients you in the team's current state. "
-            "If health.vector_search != 'ok', surface that to your human. "
-            "If the result has error_code=KAIRIX_COLD_START, wait retry_after_ms and retry; "
-            "do not begin the task context-blind. "
-            "Expected p99: 5s warm, 10s cold. Recommended client timeout: 30s."
-        )
-    )
-    @async_tool_handler
-    @warm_gate
-    def bootstrap(agent: str, max_memory_days: int = 3) -> dict[str, Any]:
-        """Return the agent orientation envelope: role, board, recent memory, goals, health."""
-        if cold := require_ready("bootstrap", readiness_check):
-            return cold
-        return tool_bootstrap(agent=agent, max_memory_days=max_memory_days)
-
-    @server.tool()
-    @async_tool_handler
-    @warm_gate
-    def entity_suggest(text: str) -> dict[str, Any]:
-        """Suggest entities (people, organisations, places) found in text via NER + Neo4j cross-ref."""
-        return tool_entity_suggest(text=text)
-
-    @server.tool()
-    @async_tool_handler
-    @warm_gate
-    def entity_validate(name: str, update: bool = False) -> dict[str, Any]:
-        """Validate a named entity against Wikidata and optionally write the qid to Neo4j."""
-        return tool_entity_validate(name=name, update=update)
-
-    @server.tool(
-        description=(
-            "Run the kairix deployment health probes. Call when search seems degraded, "
-            "before triaging 'I expected more results', or after a config change. "
-            "Returns {passed, total, fully_passed, failures[]} — same shape as `kairix onboard check --json`."
-        )
-    )
-    @async_tool_handler
-    def onboard_check() -> dict[str, Any]:
-        """Health-probe envelope. Read-only. Identical to `kairix onboard check --json`."""
-        return tool_onboard_check()
-
-    @server.tool(
-        description=(
-            "Discover agent scopes on disk under memory_root and propose "
-            "`agents:` config blocks for kairix.config.yaml. Read-only. "
-            "Identical envelope to `kairix onboard scan --json`. Call this "
-            "during first-time onboarding or when adding a new agent to "
-            "an existing kairix install."
-        )
-    )
-    @async_tool_handler
-    # F45-feature: tests/bdd/features/onboard_scan_discovers_agents.feature
-    def onboard_scan(memory_root: str, workspace_root: str = "") -> dict[str, Any]:
-        """Discovery envelope. Read-only. Identical to `kairix onboard scan --json`."""
-        return tool_onboard_scan(memory_root=memory_root, workspace_root=workspace_root)
-
-    @server.tool(
-        description=(
-            "Discover surfaces for one named agent — single-target counterpart "
-            "to `onboard_scan`. Returns {agent: {...}, error: ''} or "
-            "{agent: None, error: '<why>'} when nothing matches. Read-only."
-        )
-    )
-    @async_tool_handler
-    # F45-feature: tests/bdd/features/onboard_scan_discovers_agents.feature
-    def onboard_agent(
-        agent_name: str,
-        memory_root: str,
-        workspace_root: str = "",
-        harness: str = "",
-    ) -> dict[str, Any]:
-        """Single-agent discovery envelope. Read-only."""
-        return tool_onboard_agent(
-            agent_name=agent_name,
-            memory_root=memory_root,
-            workspace_root=workspace_root,
-            harness=harness,
-        )
-
-    @server.tool(
-        description=(
-            "Re-validate every configured agent scope against disk state. "
-            "Returns drift (missing dirs, stale memory, glob misses, ambiguous "
-            "cross-agent overlap) before agents hit it. Read-only. Identical "
-            "envelope to `kairix doctor agent --all --json`. Call this after "
-            "changing kairix.config.yaml or rotating an agent's memory tree."
-        )
-    )
-    @async_tool_handler
-    # F45-feature: tests/bdd/features/cli_doctor.feature
-    def doctor_check_all(config: dict[str, object] | None = None) -> dict[str, Any]:
-        """Bulk doctor envelope. Read-only. Identical to `kairix doctor agent --all --json`."""
-        return tool_doctor_check_all(config=config)
-
-    @server.tool(
-        description=(
-            "Re-validate one configured agent's scope against disk state — "
-            "single-target counterpart to `doctor_check_all`. Returns "
-            "{agent: {...}, error: ''} with the per-surface health probe. "
-            "Read-only."
-        )
-    )
-    @async_tool_handler
-    # F45-feature: tests/bdd/features/cli_doctor.feature
-    def doctor_check_agent(
-        agent_name: str,
-        config: dict[str, object] | None = None,
-    ) -> dict[str, Any]:
-        """Single-agent doctor envelope. Read-only."""
-        return tool_doctor_check_agent(agent_name=agent_name, config=config)
-
-    @server.tool(
-        description=(
-            "Read the kairix-worker state file. Call to verify the embed/maintenance loop is running. "
-            "Returns the worker's phase, counters, last-run timestamp, and last-error string."
-        )
-    )
-    @async_tool_handler
-    def worker_status() -> dict[str, Any]:
-        """Worker state envelope. Read-only. Identical to `kairix worker status`."""
-        return tool_worker_status()
-
-    @server.tool(
-        description=(
-            "List the registered kairix feature flags + their effective values. "
-            "Use to self-introspect what's enabled before relying on flag-gated behaviour. "
-            "Read-only. Identical envelope to `kairix features status --json`."
-        )
-    )
-    @async_tool_handler
-    def features_status() -> dict[str, Any]:
-        """Feature-flag status envelope. Read-only. Identical to `kairix features status --json`."""
-        return tool_features_status()
-
-    @server.tool(
-        description=(
-            "Operator-facing credential preflight. Walks every kairix-bound secret "
-            "(LLM, embed, Neo4j, every connector) and reports which canonical KV "
-            "names resolve, which resolve via a deprecated legacy alias, and which "
-            "are MISSING. Never returns secret VALUES — only canonical names + "
-            "resolution status. Use when an agent or operator wants to know "
-            "'is auth healthy on this deployment?' without docker exec access. "
-            "Read-only. Identical envelope to `kairix secrets verify --json`."
-        )
-    )
-    @async_tool_handler
-    def secrets_verify() -> dict[str, Any]:
-        """Secrets resolution envelope. Read-only. Identical to `kairix secrets verify --json`."""
-        from kairix.agents.mcp.secrets_status import tool_secrets_verify
-
-        return tool_secrets_verify()
-
-    @server.tool(
-        description=(
-            "Operator-facing dead-letter triage view. Returns per-source counts, "
-            "failure-class buckets (best-effort regex on last_error), "
-            "MIME breakdown (LEFT JOIN on bronze_records), and the oldest five failures. "
-            "Read-only. Identical envelope to `kairix dead-letter status --json`."
-        )
-    )
-    @async_tool_handler
-    def dead_letter_status(source_name: str | None = None) -> dict[str, Any]:
-        """Dead-letter status envelope. Read-only. Identical to `kairix dead-letter status --json`."""
-        return tool_dead_letter_status(source_name=source_name)
-
-    @server.tool(
-        description=(
-            "Per-cache stats for every TTL LRU in this MCP process. Use to see "
-            "how effective the warm caches are after a session of agent work. "
-            "Includes process_pid + process_uptime_s so operators confirm the "
-            "envelope reflects the warm MCP process, not a freshly-spawned CLI. "
-            "Read-only. Identical envelope to `kairix caches --json` when routed "
-            "through warm MCP."
-        )
-    )
-    @async_tool_handler
-    def caches_status() -> dict[str, Any]:
-        """Cache stats envelope. Read-only. Reflects the warm MCP process's state."""
-        return tool_caches_status()
-
-    @server.tool(
-        description=(
-            "Warm kairix retrieval caches + pay factory-init costs. Retryable cold-start "
-            "affordance: first call constructs the SearchPipeline and runs a tiny read-only "
-            "probe; agents and entrypoint scripts call this at session start and retry if "
-            "cold-start is reported (ready=False). Idempotent — subsequent calls are sub-ms. "
-            "Expected p99: 120s warm, 120s cold. Recommended client timeout: 180s."
-        )
-    )
-    @async_tool_handler
-    def warm() -> dict[str, Any]:
-        """Warm kairix retrieval caches via the cold-start affordance.
-
-        On ready=True the readiness gate is flipped so /healthz/ready returns 200.
-        See ``kairix.agents.mcp.cold_start.warm_retrieval_stack`` for the
-        production warm semantics this tool exposes.
-        """
-        result = warm_retrieval_stack()
-        if result.get("ready") is True and mark_ready is not None:
-            mark_ready()
-        return result
-
-    @server.tool(
-        description=(
-            "Concurrent-load latency probe — capped agent-safe surface "
-            f"(queries<={MCP_PROBE_QUERIES_CAP}, concurrency<={MCP_PROBE_CONCURRENCY_CAP}). "
-            "Returns probe envelope below cap; OperatorOnlyCapability envelope above. "
-            "Use to confirm retrieval is healthy before a long task."
-        )
-    )
-    @async_tool_handler
-    def probe_search(
-        suite: str = "reflib",
-        queries: int = 20,
-        concurrency: int = 3,
-        seed: int = 0,
-    ) -> dict[str, Any]:
-        """Agent-safe capped probe. Returns ProbeResult envelope or escalation envelope."""
-        return tool_probe_search(suite=suite, queries=queries, concurrency=concurrency, seed=seed)
-
-    @server.tool(
-        description=(
-            "Programmatic capability catalogue — every kairix capability with its "
-            "MCP tool name, CLI command, category, and (for capped MCP variants) "
-            "the agent-safe caps. AI-driven SRE agents call this to discover the "
-            "surface instead of guessing. See affordance pattern 4."
-        )
-    )
-    @async_tool_handler
+def _make_capabilities(_ctx: RegistrationContext) -> Callable[..., Any]:
     def capabilities() -> dict[str, Any]:
         """Full kairix capability catalogue. Read-only. Identical to tool_capabilities()."""
         return tool_capabilities()
 
-    @server.tool(
-        description=(
-            "Call when you are unsure which kairix tool, skill, slash-command, "
-            "sub-agent, or workflow fits a task. Describe the task; get a ranked "
-            "list of capabilities, each with why-it-fits and a ready-to-call "
-            "invocation. Read-only — no LLM between you and your tools. "
-            "Gated by the 'recommender' feature flag (returns a disabled "
-            "envelope when OFF). Expected p99: 1s warm. Recommended client timeout: 10s."
-        )
-    )
-    @async_tool_handler
-    def recommend_capabilities(task: str, agent: str = "") -> dict[str, Any]:
-        """Rank kairix tools + local skills for a task. Read-only."""
-        # ``agent`` (default "") is forwarded as-is; ``run_recommend`` accepts
-        # ``str | None`` and only logs it (v1 does not personalise ranking),
-        # so the empty-string default is harmless — no ``or None`` coercion.
-        return tool_recommend(task=task, agent=agent)
+    return capabilities
 
 
-def _register_operator_and_ingest_tools(
-    server: Any,
-    *,
-    remember_deps: RememberDeps | None = None,
-    facts_about_deps: FactsAboutDeps | None = None,
-) -> None:
-    """Register operator-only escalation stubs + Plan B-parity ingest surface.
+_CAPABILITIES_BINDING = ToolBinding(
+    name=CAPABILITIES_TOOL_NAME,
+    description=_CAPABILITIES_DESCRIPTION,
+    make=_make_capabilities,
+    warm_gated=False,
+)
 
-    Operator stubs return ``OperatorOnlyCapability`` envelopes that point the
-    calling agent at the exact CLI command to surface to its admin. The
-    ``ingest_chat`` / ``facts_about`` tools sit alongside because they share
-    the same agent-driven ingest/recall surface; ``ingest_chat`` stays
-    warm-gated (it touches the LLM extractor), while ``facts_about`` does not.
 
-    ``memory_write`` and ``facts_about`` are deliberately NOT warm-gated:
+# ---------------------------------------------------------------------------
+# Catalogue-driven FastMCP registration.
+# ---------------------------------------------------------------------------
 
-    - ``memory_write`` (PLA-257): an agent is most likely to record a
-      decision at session start, exactly when the embedding model is still
-      warming, and the write does not depend on warmth. The file is always
-      persisted and BM25-indexed immediately; vector embedding follows at the
-      next embed tick, and if immediate indexing can't complete the use case
-      returns a "saved, queued for indexing" status rather than rejecting.
-    - ``facts_about`` (PLA-263): both legs it reads — the SQLite fact store
-      and the synthetic ``entity-summaries`` collection — are cheap local
-      SQLite reads with no embedding model and no network, so an agent
-      introspecting "what do you know about X?" at session start gets an
-      answer instead of a ColdStart refusal.
 
-    ``remember_deps`` / ``facts_about_deps`` are the injection seams threaded
-    to the ``memory_write`` / ``facts_about`` closures (see
-    :func:`tool_remember` and :func:`kairix.agents.mcp.tools.facts_about`);
-    production leaves them ``None``.
+def _all_bindings() -> dict[str, ToolBinding]:
+    """Index every domain adapter's :class:`ToolBinding` by its registered name.
+
+    The union of the per-domain ``BINDINGS`` tuples (plus the catalogue-coupled
+    ``capabilities`` binding) is the registry :func:`build_server` looks each
+    ``CAPABILITIES_CATALOG`` row up in.
     """
+    bindings: dict[str, ToolBinding] = {}
+    for group in (
+        _retrieval.BINDINGS,
+        _synthesis.BINDINGS,
+        _orient.BINDINGS,
+        _diagnostic.BINDINGS,
+        _operator.BINDINGS,
+        _ingest_chat.BINDINGS,
+        _facts_about.BINDINGS,
+        _memory_write.BINDINGS,
+        (_CAPABILITIES_BINDING,),
+    ):
+        for binding in group:
+            bindings[binding.name] = binding
+    return bindings
 
-    # ---- Operator-only escalation stubs ----
-    # These capabilities take minutes, mutate state, or are destructive
-    # recovery actions. Agents that call them receive a structured
-    # OperatorOnlyCapability envelope with the exact CLI command to
-    # surface to their admin.
 
-    @server.tool(
-        description=(
-            "Soak test escalation — soak runs are multi-minute load tests. Returns the "
-            "OperatorOnlyCapability envelope pointing the operator at the "
-            "`kairix.quality.soak.run_soak` Python API (the legacy `kairix soak run` CLI was retired in v2026.6)."
-        )
-    )
-    @async_tool_handler
-    def soak_run(suite: str = "reflib", repeat: int = 3) -> dict[str, Any]:
-        """Operator-only soak test. Returns escalation envelope for the agent's admin."""
-        return tool_soak_run(suite=suite, repeat=repeat)
+def _register_binding(server: Any, binding: ToolBinding, ctx: RegistrationContext) -> None:
+    """Register one binding's body closure on the FastMCP ``server``.
 
-    @server.tool(
-        description=(
-            "Burst-probe escalation — load-generating throughput-drop probe. Returns the "
-            "OperatorOnlyCapability envelope pointing the operator at the "
-            "`kairix.quality.probe.run_probe_burst` Python API "
-            "(the legacy `kairix probe burst` CLI was retired in v2026.6)."
-        )
-    )
-    @async_tool_handler
-    def probe_burst(
-        suite: str = "reflib",
-        total_queries: int = 200,
-        peak_concurrency: int = 20,
-    ) -> dict[str, Any]:
-        """Operator-only burst probe. Returns escalation envelope."""
-        return tool_probe_burst(suite=suite, total_queries=total_queries, peak_concurrency=peak_concurrency)
+    Rebuilds the historical decorator stack from the binding's data: build the
+    correctly-signed body via ``make(ctx)``, wrap in ``@warm_gate`` when the
+    binding is warm-gated, then ``@async_tool_handler``, then
+    ``@server.tool(description=...)`` (FastMCP falls back to the closure's
+    docstring when ``description`` is ``None``).
+    """
+    body = binding.make(ctx)
+    gated = warm_gate(body) if binding.warm_gated else body
+    wrapped = async_tool_handler(gated)
+    server.tool(description=binding.description)(wrapped)
 
-    @server.tool(
-        description=(
-            "Probe-config escalation — runs an embed workload against the configured "
-            "provider endpoint and emits tuning advice the operator applies. Returns the "
-            "OperatorOnlyCapability envelope with the exact `kairix probe-config` command."
-        )
-    )
-    @async_tool_handler
-    def probe_config() -> dict[str, Any]:
-        """Operator-only probe-config. Returns escalation envelope."""
-        return tool_probe_config()
 
-    @server.tool(
-        description=(
-            "Benchmark escalation — benchmark runs take minutes and load the system. "
-            "Returns the OperatorOnlyCapability envelope with the exact `kairix benchmark run` command."
-        )
-    )
-    @async_tool_handler
-    def benchmark_run(suite: str = "reflib") -> dict[str, Any]:
-        """Operator-only benchmark run. Returns escalation envelope."""
-        return tool_benchmark_run(suite=suite)
+def _register_from_catalogue(server: Any, ctx: RegistrationContext) -> None:
+    """Register every ``CAPABILITIES_CATALOG`` row's tool on ``server``.
 
-    @server.tool(
-        description=(
-            "Embed escalation — embed mutates the vector index against an Azure quota. "
-            "Returns the OperatorOnlyCapability envelope with the exact `kairix embed` command."
-        )
-    )
-    @async_tool_handler
-    def embed(limit: int = 0) -> dict[str, Any]:
-        """Operator-only embed. Returns escalation envelope."""
-        return tool_embed(limit=limit)
-
-    @server.tool(
-        description=(
-            "Store-crawl escalation — mutates Neo4j entity graph. Returns the "
-            "OperatorOnlyCapability envelope with the exact `kairix store crawl` command."
-        )
-    )
-    @async_tool_handler
-    def store_crawl() -> dict[str, Any]:
-        """Operator-only graph crawl. Returns escalation envelope."""
-        return tool_store_crawl()
-
-    @server.tool(
-        description=(
-            "FTS-rebuild escalation — drops + re-creates the documents_fts table. "
-            "Returns the OperatorOnlyCapability envelope with the exact recovery command."
-        )
-    )
-    @async_tool_handler
-    def embed_rebuild_fts() -> dict[str, Any]:
-        """Operator-only FTS recovery. Returns escalation envelope."""
-        return tool_embed_rebuild_fts()
-
-    @server.tool(
-        description=(
-            "cc-pair escalation — Wave D topology v2 cc_pair lifecycle (list / create / "
-            "pause / resume / delete) mutates the state machine; agents must escalate. "
-            "Returns the OperatorOnlyCapability envelope with the exact `kairix cc-pair` command."
-        )
-    )
-    @async_tool_handler
-    def cc_pair(verb: str = "list") -> dict[str, Any]:
-        """Operator-only cc_pair lifecycle. Returns escalation envelope."""
-        return tool_cc_pair(verb=verb)
-
-    @server.tool(
-        description=(
-            "Run ANALYZE on the kairix SQLite index to refresh planner statistics. "
-            "Use after large ingests or when query plans look wrong. Reports the "
-            "EXPLAIN QUERY PLAN before/after on a representative hot-path query so "
-            "callers can confirm the planner picked up the new stats. Equivalent of "
-            "the operator-side `kairix maintenance analyze` (#376)."
-        )
-    )
-    @async_tool_handler
-    def maintenance_analyze() -> dict[str, Any]:
-        """Refresh SQLite planner stats. Returns the analyze envelope."""
-        return tool_maintenance_analyze()
-
-    # ---- Plan B-parity Week 5 Stream A — agent-driven ingest + recall ----
-    # ingest_chat lets the agent push JSONL transcripts into the conversation
-    # store; facts_about gives the agent a direct introspection surface over
-    # the fact store + the entity-summaries collection. ingest_chat is
-    # warm-gated because it drives the LLM fact extractor against the
-    # not-yet-warm pipeline; facts_about is NOT (PLA-263) — it only runs two
-    # cheap local SQLite reads, so it must answer while kairix is still warming.
-
-    @server.tool(
-        description=(
-            "Ingest a JSONL chat transcript supplied inline. Use this to push a recently-completed "
-            "conversation into the knowledge store so future search/prep/recall can see it. "
-            "Pass the agent's own engagement namespace — cross-engagement calls are rejected."
-        )
-    )
-    @async_tool_handler
-    @warm_gate
-    def ingest_chat(
-        jsonl_content: str,
-        conversation_id: str,
-        namespace: str,
-        window_turns: int = 5,
-        no_extract: bool = False,
-    ) -> dict[str, Any]:
-        """Push a JSONL chat transcript into the knowledge store."""
-        from kairix.agents.mcp.tools.ingest_chat import tool_ingest_chat
-
-        # ``allowed_namespace`` mirrors ``namespace`` at the FastMCP wire — the
-        # agent's session is pinned upstream to a single engagement scope and
-        # the bootstrap-derived namespace is the same value the agent passes
-        # here. Tests bypass this surface and call ``tool_ingest_chat``
-        # directly with both values to exercise the reject branch.
-        return tool_ingest_chat(
-            jsonl_content=jsonl_content,
-            conversation_id=conversation_id,
-            namespace=namespace,
-            allowed_namespace=namespace,
-            window_turns=window_turns,
-            no_extract=no_extract,
-        )
-
-    # PLA-263 — NOT ``@warm_gate``-decorated, on purpose. facts_about reads
-    # the SQLite fact store AND the synthetic ``entity-summaries`` collection
-    # (#467); both are cheap local SQLite reads (FTS5 + an indexed lookup) with
-    # no embedding model and no network, so an agent asking "what do you know
-    # about X?" at session start gets an answer instead of a ColdStart refusal.
-    # ``facts_about_deps`` is the injection seam (see FactsAboutDeps); production
-    # leaves it ``None`` so the tool resolves the real SQLite-backed seams.
-    @server.tool(
-        description=(
-            "Look up what kairix knows about an entity. Returns the current (non-superseded) "
-            "entity-attribute-value facts with confidence and source provenance, plus any "
-            "entity summary indexed for that name. Works even while kairix is still warming "
-            "up — it only reads local stores. Pass a namespace to restrict facts to a single "
-            "engagement scope; pass null/None to search across all namespaces."
-        )
-    )
-    @async_tool_handler
-    def facts_about(
-        entity: str,
-        namespace: str | None = None,
-        top_k: int = 20,
-    ) -> dict[str, Any]:
-        """Return facts + entity summaries about an entity."""
-        return tool_facts_about(entity=entity, namespace=namespace, top_k=top_k, deps=facts_about_deps)
-
-    # #472 — the agent-facing memory-write verb. Same use case as the
-    # ``kairix remember`` CLI (kairix/use_cases/remember.py).
-    # F45-feature: tests/bdd/features/mcp_memory_write.feature
-    #
-    # PLA-257 — NOT ``@warm_gate``-decorated, on purpose. An agent records a
-    # decision/fact most often at session start, when the embedding model is
-    # still warming (tens of seconds). The write doesn't depend on warmth, so
-    # gating it would refuse the agent's memory exactly when it most needs to
-    # persist. The body always writes the file and BM25-indexes it (a SQLite
-    # FTS rebuild — cold-safe); vector embedding follows at the next embed
-    # tick. If immediate indexing can't complete, the use case returns a
-    # "saved, queued for indexing" status (indexed=False + a re-index
-    # affordance) rather than rejecting the write.
-    @server.tool(
-        description=(
-            "Save a memory for an agent. Writes the text as a dated markdown file in the "
-            "agent's memory folder inside the knowledge store, and indexes it for search. "
-            "Works even while kairix is still warming up: the file is always saved, and if "
-            "search indexing can't run yet the memory is queued for the next indexing pass. "
-            "Use it whenever the agent learns something worth keeping: a note (default), a "
-            "decision, or a fact — pass kind to say which. The agent name must be in the "
-            "team's agent configuration."
-        )
-    )
-    @async_tool_handler
-    def memory_write(
-        agent: str,
-        content: str,
-        kind: str = "note",
-    ) -> dict[str, Any]:
-        """Write a memory for an agent into the knowledge store."""
-        return tool_remember(agent=agent, content=content, kind=kind, deps=remember_deps)
+    Each row maps to exactly one binding by its ``mcp_tool`` (agent-callable)
+    or ``escalate_via`` (operator-only stub) name — the catalogue is the single
+    source of truth for the agent surface, so a new capability is registered by
+    adding its catalogue row + a matching adapter binding, never by hand-writing
+    a ``@server.tool`` def here.
+    """
+    bindings = _all_bindings()
+    for cap in CAPABILITIES_CATALOG:
+        # Every registrable row carries a non-None mcp_tool OR escalate_via;
+        # ``cap.name`` is the never-None final fallback so the key type is str
+        # (a name with no matching binding raises KeyError below — a loud
+        # registration bug, never a silent skip).
+        key = cap.mcp_tool or cap.escalate_via or cap.name
+        _register_binding(server, bindings[key], ctx)
 
 
 def build_server(
@@ -2766,7 +906,11 @@ def build_server(
         ) from exc
 
     server = FastMCP("kairix", host=host, port=port)
-    _register_retrieval_tools(server, readiness_check)
-    _register_synthesis_and_diagnostic_tools(server, readiness_check, mark_ready)
-    _register_operator_and_ingest_tools(server, remember_deps=remember_deps, facts_about_deps=facts_about_deps)
+    ctx = RegistrationContext(
+        readiness_check=readiness_check,
+        mark_ready=mark_ready,
+        remember_deps=remember_deps,
+        facts_about_deps=facts_about_deps,
+    )
+    _register_from_catalogue(server, ctx)
     return server
