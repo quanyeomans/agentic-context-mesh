@@ -66,6 +66,8 @@ __all__ = [
     "IngestChatResult",
     "ingest_chat",
     "main",
+    "resolve_production_fact_extractor",
+    "resolve_production_fact_store",
 ]
 
 
@@ -698,13 +700,20 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _resolve_production_fact_store(db_path: Path) -> FactStore:
+def resolve_production_fact_store(db_path: Path) -> FactStore:
     """Return a production FactStore or raise ImportError with actionable hint.
 
-    Capability #3 (sister subagent) owns ``SQLiteFactStore`` under
-    ``kairix.core.facts``; until that branch lands, ``ingest-chat``
-    can still serve ``--no-extract`` runs — but every other path needs
-    a real store, so we raise ImportError with a fix-now message.
+    Public because BOTH the ``kairix ingest-chat`` CLI (:func:`main`) and
+    the ``ingest_chat`` MCP tool
+    (``kairix/agents/mcp/tools/ingest_chat.py``) resolve the production
+    store from this single site — the adapters stay "parse → call →
+    serialise" and never re-inline ``SQLiteFactStore(...)`` construction
+    (W5c DRY consolidation, PLA-324).
+
+    ``SQLiteFactStore`` lives under ``kairix.core.facts``; the import is
+    lazy so a chunks-only ``--no-extract`` run that supplies its own
+    store never pays for it, and a genuinely-missing store raises
+    ImportError with a fix-now message rather than an opaque failure.
     """
     try:
         from kairix.core.facts import SQLiteFactStore
@@ -717,14 +726,16 @@ def _resolve_production_fact_store(db_path: Path) -> FactStore:
     return store
 
 
-def _resolve_production_fact_extractor() -> FactExtractor:
+def resolve_production_fact_extractor() -> FactExtractor:
     """Return a production FactExtractor wired to the configured LLM backend.
 
-    Capability #2 lands :class:`LLMFactExtractor` — the production path
-    that drives the operator's configured provider plug-in via
-    :func:`kairix.platform.llm.get_default_backend`. Until that import
-    succeeds, callers fall back to the null extractor so chunks-only
-    ingest still works.
+    Public for the same reason as :func:`resolve_production_fact_store`:
+    both the CLI and the MCP tool resolve the extractor from this single
+    site so the production wiring lives in exactly one place (W5c DRY
+    consolidation, PLA-324).
+
+    :class:`LLMFactExtractor` drives the operator's configured provider
+    plug-in via :func:`kairix.platform.llm.get_default_backend`.
     """
     from kairix.core.facts import LLMFactExtractor
     from kairix.platform.llm import get_default_backend
@@ -801,7 +812,7 @@ def main(
 
     if fact_store is None:
         try:
-            fact_store = _resolve_production_fact_store(resolved_paths.db_path)
+            fact_store = resolve_production_fact_store(resolved_paths.db_path)
         except ImportError as exc:
             err_sink.write(f"kairix ingest-chat: {exc}\n")
             return 2
@@ -814,7 +825,7 @@ def main(
         # parameter. The null extractor stays the cheapest stand-in.
         resolved_extractor = _NullFactExtractor()
     else:
-        resolved_extractor = _resolve_production_fact_extractor()
+        resolved_extractor = resolve_production_fact_extractor()
 
     session_metadata = _load_metadata_arg(args.metadata, err_sink)
 

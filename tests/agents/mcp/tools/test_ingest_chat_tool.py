@@ -275,15 +275,15 @@ def test_no_extract_mode_skips_facts(tmp_path: Path) -> None:
 def test_default_fact_store_and_extractor_are_resolved_when_omitted(tmp_path: Path) -> None:
     """When DI kwargs are omitted, the tool resolves production defaults.
 
-    Drives the production-wiring branches:
-
-      - Lines 178-180 — default SQLiteFactStore is constructed when
-        ``fact_store=None``.
-      - Lines 182-185 — default LLMFactExtractor + AzureOpenAIBackend are
-        constructed when ``fact_extractor=None``.
+    Drives the production-wiring branches — the ``if fact_store is None:``
+    / ``if fact_extractor is None:`` blocks that delegate to the shared
+    use-case factories ``resolve_production_fact_store`` /
+    ``resolve_production_fact_extractor`` (W5c DRY consolidation,
+    PLA-324): a default SQLiteFactStore is constructed for the store, and
+    a default LLMFactExtractor + backend for the extractor.
 
     We pass ``no_extract=True`` so the extractor is constructed (covering
-    the import + AzureOpenAIBackend init lines) but never actually
+    the import + backend init) but never actually
     called — the ingest_chat use case skips ``extract`` when
     ``no_extract`` is set. SQLiteFactStore is also never queried for
     facts in no-extract mode (only chunks are written), so this test
@@ -294,7 +294,7 @@ def test_default_fact_store_and_extractor_are_resolved_when_omitted(tmp_path: Pa
     tool_ingest_chat → the call reaches ``ingest_chat(...,
     fact_store=None, ...)`` and the use case raises AttributeError on
     the missing ``add`` method, breaking this test with an unhandled
-    exception. Mutate-confirmed against lines 178-180.
+    exception. Mutate-confirmed.
     """
     paths = _paths(tmp_path)
 
