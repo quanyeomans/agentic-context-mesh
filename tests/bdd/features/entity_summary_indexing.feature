@@ -17,6 +17,14 @@ Feature: Operator searches find content via entity descriptions
     When the operator searches for 'AI policy research institute'
     Then the results include a chunk with source uri prefix 'entity://'
 
+  @on @no_qid
+  Scenario: A first-party entity with no Wikidata id still surfaces by its description
+    Given a first-party entity 'Kairix' described as 'shared knowledge store for human and agent teams'
+    And the entity-summary-indexing flag is true
+    And the worker has run a projector tick
+    When the operator searches for 'shared knowledge store for human and agent teams'
+    Then the results include a chunk with source uri prefix 'entity://name/'
+
   @off
   Scenario: Description-keyword query returns no entity row when the flag is off
     Given an entity 'Ada Lovelace Institute' enriched with description 'AI policy research institute'

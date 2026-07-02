@@ -116,6 +116,22 @@ def _seed_entity(entity_summary_ctx: _Ctx, name: str, description: str) -> None:
     )
 
 
+@given(parsers.parse("a first-party entity '{name}' described as '{description}'"))
+def _seed_first_party_entity(entity_summary_ctx: _Ctx, name: str, description: str) -> None:
+    # #467/#429 — a first-party canonical entity carries a summary but NO
+    # wikidata_qid; the projector keys its chunk off the name
+    # (entity://name/<slug>) so the description still reaches retrieval.
+    entity_summary_ctx.entities.append(
+        {
+            "name": name,
+            "qid": "",
+            "summary": description,
+            "prior_hash": "",
+            "summary_source": "",
+        }
+    )
+
+
 @given(parsers.parse("the entity-summary-indexing flag is {state}"))
 def _set_flag(entity_summary_ctx: _Ctx, state: str) -> None:
     entity_summary_ctx.flag_on = state.strip().lower() == "true"

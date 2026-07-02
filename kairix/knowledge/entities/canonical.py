@@ -62,6 +62,60 @@ class CanonicalEntity:
     aliases: tuple[str, ...] = ()
 
 
+# ---------------------------------------------------------------------------
+# First-party canonical seed (#467)
+# ---------------------------------------------------------------------------
+
+# Kairix itself — and the company that builds it — are always platform-canon,
+# regardless of the operator's ``canonical_entities:`` block. Without this seed
+# ``facts_about('Kairix')`` returned nothing on a fresh install even with
+# ``entity_summary_indexing_enabled=true``, because the operator overlay only
+# lists the operator's own domain entities (#467, from the 2026-06-09 dogfood
+# verdict — "this is exactly the kind of entity agents will ask about"). These
+# merge UNDER the operator's declarations: an operator who declares their own
+# ``Kairix`` entry (same name, case-insensitive) fully overrides the built-in,
+# so the seed is a floor, never a ceiling.
+FIRST_PARTY_CANONICAL_ENTITIES: tuple[CanonicalEntity, ...] = (
+    CanonicalEntity(
+        name="Kairix",
+        entity_type="platform_component",
+        summary=(
+            "Kairix is a shared knowledge store for human and AI agent teams. "
+            "It takes in your documents and conversations, then lets people and "
+            "agents search and recall what the team knows."
+        ),
+        aliases=("kairix", "the kairix platform", "kairix knowledge store"),
+    ),
+    CanonicalEntity(
+        name="Three Cubes",
+        entity_type="organisation",
+        summary=(
+            "Three Cubes is the company that builds Kairix, a shared knowledge store for human and AI agent teams."
+        ),
+        aliases=("Three Cubes Ventures", "three-cubes"),
+    ),
+)
+
+
+def merge_canonical_entities(
+    operator_declared: list[CanonicalEntity],
+    *,
+    built_in: tuple[CanonicalEntity, ...] = FIRST_PARTY_CANONICAL_ENTITIES,
+) -> list[CanonicalEntity]:
+    """Merge the first-party seed under the operator's declarations (#467).
+
+    The operator's declarations come first, in their declared order, so
+    callers that rely on operator-order (seed determinism, facts_about
+    first-match) are unchanged. Any built-in whose ``name`` the operator
+    has NOT declared (case-insensitive) is appended, so ``Kairix`` is
+    always present out of the box while an operator who declares their own
+    ``Kairix`` fully overrides the built-in summary.
+    """
+    declared_names = {e.name.strip().lower() for e in operator_declared}
+    floor = [b for b in built_in if b.name.strip().lower() not in declared_names]
+    return list(operator_declared) + floor
+
+
 def parse_canonical_entities(raw: object) -> list[CanonicalEntity]:
     """Parse a ``canonical_entities:`` YAML block into a typed list.
 

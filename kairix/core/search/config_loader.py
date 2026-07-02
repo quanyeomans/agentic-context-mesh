@@ -630,30 +630,39 @@ def load_reference_library(config_path: Path | str | None = None) -> ReferenceLi
 
 
 def load_canonical_entities(config_path: Path | str | None = None) -> list:
-    """Load the operator's ``canonical_entities:`` YAML block (#431).
+    """Resolve the canonical entities to seed (#431 + #467).
 
-    Returns a list of :class:`CanonicalEntity` — empty when the block
-    is absent, malformed, or the config file isn't resolvable.
-    Never raises — the worker boot stage feeds the result straight to
-    :func:`seed_canonical_entities` which is itself failure-isolated.
+    Merges the built-in first-party seed (``Kairix`` + ``Three Cubes``,
+    always present so ``facts_about('Kairix')`` resolves on a fresh
+    install — #467) UNDER the operator's ``canonical_entities:`` YAML
+    block. The operator's declarations win on name conflict, so an
+    operator can override a built-in summary but never loses ``Kairix``.
+
+    Never raises — an absent, missing, or malformed config degrades to
+    the built-in floor. The worker boot stage feeds the result straight
+    to :func:`seed_canonical_entities` which is itself failure-isolated.
 
     The ``config_path`` kwarg is the F2-clean test seam mirroring
     :func:`load_collections`.
     """
-    from kairix.knowledge.entities.canonical import parse_canonical_entities
+    from kairix.knowledge.entities.canonical import (
+        merge_canonical_entities,
+        parse_canonical_entities,
+    )
 
+    operator_declared: list = []
     path = resolve_config_path(config_path)
-    if path is None:
-        return []
-    try:
-        import yaml
+    if path is not None:
+        try:
+            import yaml
 
-        with path.open(encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-    except Exception as exc:
-        logger.warning("load_canonical_entities: failed to read %s — %s", path, exc)
-        return []
-    return parse_canonical_entities(data.get("canonical_entities"))
+            with path.open(encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            operator_declared = parse_canonical_entities(data.get("canonical_entities"))
+        except Exception as exc:
+            logger.warning("load_canonical_entities: failed to read %s — %s", path, exc)
+            operator_declared = []
+    return merge_canonical_entities(operator_declared)
 
 
 def _parse_entity(d: dict) -> EntityBoostConfig:

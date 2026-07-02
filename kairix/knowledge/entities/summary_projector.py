@@ -89,6 +89,31 @@ def hash_summary(summary: str) -> str:
     return hashlib.sha256(summary.encode("utf-8")).hexdigest()
 
 
+def entity_name_slug(name: str) -> str:
+    """URL-safe slug for an entity name — lowercase, spaces/hyphens → ``_``.
+
+    Matches :func:`kairix.knowledge.entities.canonical._slug_for` so a
+    first-party entity's graph node id and its summary-chunk locator stay
+    relatable. Public (F5-clean) so tests drive it without a private import.
+    """
+    return name.strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def entity_summary_source_uri(*, qid: str, name: str) -> str:
+    """Stable ``entity://`` locator for an entity's summary chunk (#429).
+
+    Wikidata-enriched entities key off their ``qid`` (``entity://Q42``).
+    First-party canonical entities (#467 — ``Kairix`` and friends) carry a
+    summary but no ``wikidata_qid``, so they key off a name-derived slug
+    (``entity://name/kairix``). Both keep the well-known ``entity://``
+    prefix the routing boost + facts_about + CLI badge recognise, so a
+    no-qid summary is indexed and retrievable just like a Wikidata one.
+    """
+    if qid:
+        return f"entity://{qid}"
+    return f"entity://name/{entity_name_slug(name)}"
+
+
 def build_entity_summary_chunk(
     *,
     summary: str,
@@ -104,17 +129,22 @@ def build_entity_summary_chunk(
     alongside this slice). The chunker namespace
     ``entity-summary:v1`` is the F55 chunker-version stamp so a
     future re-chunk sweep can filter the affected corpus by stamp.
+
+    ``qid`` may be empty for a first-party canonical entity (#467/#429):
+    the locator + secondary tag then key off the entity name via
+    :func:`entity_summary_source_uri` so the summary still indexes.
     """
+    tag = f"qid:{qid}" if qid else f"name:{entity_name_slug(name)}"
     return Chunk(
         text=summary,
         content_hash=content_hash,
         source_name="wikidata",
-        source_uri=f"entity://{qid}",
+        source_uri=entity_summary_source_uri(qid=qid, name=name),
         source_modified_at=tick_iso,
         source_page=None,
         sensitivity="public",
         chunker_version="entity-summary:v1",
-        tags=("entity-summary", f"qid:{qid}"),
+        tags=("entity-summary", tag),
         metadata={"entity_name": name, "wikidata_qid": qid},
     )
 
@@ -231,13 +261,17 @@ class EntitySummaryProjectorImpl:
         name = str(row.get("name") or "")
         prior_hash = str(row.get("prior_hash") or "")
 
-        if not summary or not qid or not name:
+        # #429: ``qid`` is optional — a first-party canonical entity (#467)
+        # has a summary but no ``wikidata_qid`` and must still index, keyed
+        # off its name. Only summary + name are load-bearing.
+        if not summary or not name:
             return "skipped"
 
         current_hash = hash_summary(summary)
         if prior_hash == current_hash:
             return "skipped"
 
+        source_uri = entity_summary_source_uri(qid=qid, name=name)
         chunk = build_entity_summary_chunk(
             summary=summary,
             qid=qid,
@@ -250,7 +284,7 @@ class EntitySummaryProjectorImpl:
             # Re-projection: drop the prior chunk so the new content_hash
             # doesn't leave a stale row behind. Idempotent on the
             # never-projected branch via the prior_hash truthiness check.
-            self._chunk_writer.delete_by_source_uri(f"entity://{qid}")
+            self._chunk_writer.delete_by_source_uri(source_uri)
         self._chunk_writer.upsert([chunk])
 
         self._mark_indexed(name=name, content_hash=current_hash, tick_iso=tick_iso)
