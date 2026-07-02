@@ -146,6 +146,6 @@ If entity-enriched search shows no entity context for a topic you expect:
 
 ## See also
 
-- `runbook-entity-graph-stale.md` — for incremental staleness; less invasive than a full rebuild.
+- `kairix-entity-audit.md` — detect junk/stale entities and repair paths; less invasive than a full rebuild.
 - `kairix entity suggest` — discover candidate entities from new content.
 - `kairix entity validate` — Wikidata cross-check on existing entities.

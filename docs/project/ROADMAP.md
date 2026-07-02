@@ -18,7 +18,7 @@ Kairix is the alternative: a private, on-infrastructure retrieval layer that bot
 
 ---
 
-## Current state — v2026.6.24.1 (released 2026-06-24)
+## Current state — v2026.7.1 (released 2026-07-01)
 
 **v2026.6.24 highlights:** the Linear connector ships (behind the `connector_linear` flag, default-off — pulls a Linear workspace's roadmap and docs into the knowledge store), and kairix now requires **Python 3.12 or newer** (recreate any host-venv / systemd environment on 3.12+ before upgrading; Docker images already ship 3.12).
 
@@ -46,7 +46,7 @@ Earlier in this release line, the capability/skill recommender (`kairix recommen
 | LLM-typed relationship enrichment | ✅ Shipped | Nightly cron, GPT-4o-mini batch classifier |
 | Procedural query boost | ✅ Shipped | Path-weighted re-rank for how-to and runbook queries |
 | Neo4j graph layer | ✅ Shipped | Community Edition, Bolt, `kairix.graph` module |
-| Vault crawler | ✅ Shipped | Entity discovery from vault structure |
+| Knowledge store crawler | ✅ Shipped | Entity discovery from knowledge store structure |
 | LLM backend abstraction | ✅ Shipped | `LLMBackend` protocol, `AzureOpenAIBackend` adapter |
 | Deployment-specific collections | ✅ Shipped | `KAIRIX_EXTRA_COLLECTIONS` env var |
 | Contradiction detection | ✅ Shipped | `kairix contradict check` — hybrid search + LLM conflict detection |

@@ -28,18 +28,20 @@ Do NOT use this runbook for:
 
 ## 2. First diagnostic — `kairix onboard check --json`
 
-Always start here. The check runs nine independent subsystem probes in dependency order (PATH → secrets → document root → vector search → Neo4j → agent knowledge → chunk_date → MCP service) and emits a structured envelope you can act on without further parsing.
+Always start here. The check runs a set of independent subsystem probes in dependency order (PATH → secrets → document root → vector search → Neo4j → agent knowledge → chunk_date → MCP service → agent memory writable, plus any optional-subsystem probes your deployment has enabled — topology_v2 config, SharePoint credentials, maintenance loop, extractor libraries) and emits a structured envelope you can act on without further parsing. Gate on `fully_passed: true`, not a fixed passed/total count — `total` grows with the optional subsystems + flags a deployment enables (≈19 checks today).
 
 ```bash
 kairix onboard check --json
 ```
 
-Expected envelope shape:
+Expected envelope shape (the `passed`/`total` counts vary with the optional
+subsystems + flags your deployment enables — gate on `fully_passed: true`,
+never a specific count):
 
 ```json
 {
-  "passed": 9,
-  "total": 9,
+  "passed": 19,
+  "total": 19,
   "fully_passed": true,
   "failures": [],
   "env_source": "/run/secrets/kairix.env"
@@ -50,8 +52,8 @@ Failure envelope:
 
 ```json
 {
-  "passed": 6,
-  "total": 9,
+  "passed": 16,
+  "total": 19,
   "fully_passed": false,
   "failures": [
     {
@@ -149,6 +151,19 @@ Two sub-causes:
    If empty, your sync mechanism (Obsidian Sync, git pull, rsync) is out of date. Re-sync and re-run `kairix onboard check`.
 
 **Next action:** confirm `${KAIRIX_DOCUMENT_ROOT}/04-Agent-Knowledge/` has expected agent directories. If yes but no memory files, run an agent session. If no agent directories, re-sync the document store.
+
+### `agent_memory_writable: false`
+
+This probe resolves each agent's memory destination through `resolve_writable_memory_dir` — the exact path a runtime memory write uses — and confirms the agent can persist there. It prefers the `04-Agent-Knowledge` overlay and falls back to `data_dir()/agent-memory` when the overlay is read-only.
+
+**Green is green — including `ok(fallback)`.** On a hardened / read-only-root deploy the overlay is legitimately mounted `:ro`, so the check resolves to the data-dir fallback and reports `ok(fallback)`. That is the correct, expected location on those deployments — treat it as a pass, not a degradation.
+
+The check hard-fails ONLY when the agent can persist *nowhere* — a non-fallback error such as `ENOSPC` (disk full), or the data-dir fallback itself unwritable (ownership/permissions). When it fails:
+
+- `ENOSPC` / disk full → free space on the data volume, then re-run `kairix onboard check`.
+- data dir unwritable → fix ownership/permissions on `data_dir()/agent-memory` so the kairix process user owns it, then re-run.
+
+**Next action:** if the failure detail names a non-fallback errno, treat it as a disk-space or permissions problem on the data dir — free space or fix ownership — then re-run `kairix onboard check`. A plain `ok(fallback)` needs no action.
 
 ### `chunk_date_populated: false`
 
@@ -404,7 +419,7 @@ kairix worker resume
 
 # 7. Confirm every subsystem green.
 kairix onboard check --json | jq '{passed, total, fully_passed}'
-# Expected: {"passed": 9, "total": 9, "fully_passed": true}
+# Gate on fully_passed: true only (counts vary with optional subsystems + flags; ~19 checks today).
 
 # 8. Confirm recall canary is at or above 0.85.
 kairix benchmark run --suite reflib | tail -20

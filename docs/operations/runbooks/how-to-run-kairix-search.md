@@ -137,7 +137,7 @@ kairix entity "Kairix"
 # Mentioned in: [N document-store files]
 # Last seen: YYYY-MM-DD
 
-# If entity not found: check the document store has wikilinks → runbook-entity-graph-stale.md
+# If entity not found: check the document store has wikilinks → kairix-entity-audit.md (junk/stale entities) or how-to-rebuild-entity-graph.md (rebuild the graph)
 ```
 
 ---
@@ -162,17 +162,17 @@ kairix curator health --verbose
 
 ## kairix onboard check
 
-Full integration test suite. Run after any config change or service restart.
+Full integration test suite. Run after any config change or service restart. It runs the full deployment check set (~19 probes today, including `agent_memory_writable`, plus any optional-subsystem probes your deployment enables). `fully_passed: true` (exit 0) is the pass signal — gate on that, not a fixed passed/total count, since `total` grows with the subsystems + flags you have on. Add `--json` for the machine-readable envelope.
 
 ```bash
 kairix onboard check
 
-# Tests:
+# Sample of what it tests (dependency order):
 # ✓ Secrets loaded (embedding API key, embedding endpoint, neo4j-password)
 # ✓ Vector search (embedding API reachable)
 # ✓ BM25 search (index accessible)
 # ✓ Entity graph (Neo4j reachable)
-# ✓ Curator (brief generation working)
+# ✓ Agent memory writable (ok, or ok(fallback) on a read-only-root deploy)
 ```
 
 ---
@@ -206,4 +206,5 @@ kairix brief agent-alpha --focus="kairix platform"
 - how-to-debug-search-ranking.md — tune RRF weights and category scores
 - runbook-embedding-lag.md — if new content not appearing in results
 - runbook-vector-search-failure.md — if vec=0
-- runbook-entity-graph-stale.md — if entity queries return outdated data
+- kairix-entity-audit.md — if entity queries return junk or outdated data
+- how-to-rebuild-entity-graph.md — rebuild the Neo4j entity graph from the document store

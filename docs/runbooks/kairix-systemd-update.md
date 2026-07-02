@@ -12,7 +12,7 @@ Closes [#257](https://github.com/three-cubes/kairix/issues/257) (migrated from a
 
 Reach for this runbook when you are about to:
 
-- Bump the deployed kairix image tag (`KAIRIX_IMAGE_TAG` → `docker compose pull` → restart `kairix.service`, or your operator-owned `kairix-deploy.sh` from a sibling infrastructure repo).
+- Bump the deployed kairix image tag (`KAIRIX_IMAGE_TAG` → `docker compose pull` → restart `kairix.service`, or the canonical box-side `scripts/deploy/apply-alpha.sh` — normally CI-driven; this runbook is the by-hand fallback for when CI / auto-deploy is unavailable).
 - Change the `kairix.service` unit file (dependency ordering, environment, `ExecStartPre`, `Restart=` policy) or the compose stack it drives.
 - Change the `kairix-fetch-secrets.service` unit file or its rendered `/run/secrets/kairix.env` writer (the docker-compose `vault-agent` analogue for the VM).
 
@@ -40,9 +40,12 @@ cat /tmp/kairix-preupdate-version.txt
 # 2. Full subsystem envelope — the gate baseline.
 docker compose exec kairix kairix onboard check --json > /tmp/kairix-preupdate-onboard.json
 jq '{passed, total, fully_passed}' /tmp/kairix-preupdate-onboard.json
-# Expected: {"passed": 9, "total": 9, "fully_passed": true}
-# If not every check passes BEFORE the update, stop. Fix the deployment first via
-# kairix-retrieval-health.md; do not update on top of a degraded baseline.
+# Gate signal: fully_passed must be true. `total` is now ~19 and `passed` varies
+# with the optional subsystems + flags a deployment has enabled, so gate on
+# `fully_passed: true` — the durable acceptance signal — never a fixed
+# passed/total count.
+# If fully_passed is not true BEFORE the update, stop. Fix the deployment first
+# via kairix-retrieval-health.md; do not update on top of a degraded baseline.
 
 # 3. Worker phase + counters — proves nothing is mid-embed.
 docker compose exec kairix kairix worker status > /tmp/kairix-preupdate-worker.txt
@@ -54,7 +57,7 @@ docker compose exec kairix kairix benchmark run --suite reflib \
 # Note the filename printed; this is your pre-update score for §3 step 6.
 ```
 
-**Next action:** confirm `fully_passed: true` and `passed: 9`. If the envelope is not green, stop and run [`kairix-retrieval-health.md`](kairix-retrieval-health.md) before continuing.
+**Next action:** confirm `fully_passed: true`. If the envelope is not green, stop and run [`kairix-retrieval-health.md`](kairix-retrieval-health.md) before continuing.
 
 ---
 
@@ -80,18 +83,23 @@ docker compose exec kairix kairix worker status
 Bump the image tag, then pull. The worker is paused, so this is safe.
 
 ```bash
-# Preferred — operator-owned deploy script (lives in your infrastructure repo,
-# not in the kairix repo — e.g. a separate ops repo with systemd units + apply scripts).
-sudo /opt/kairix/bin/kairix-deploy.sh --version <NEW_VERSION>
-
-# Fallback — bump KAIRIX_IMAGE_TAG in the operator .env, then pull the image.
+# This manual sequence is the FALLBACK for when CI / auto-deploy is unavailable.
+# The canonical deploy is the in-repo box-side script scripts/deploy/apply-alpha.sh
+# (invoked by CI's azure-vm-deploy): it pulls the tag, force-recreates the
+# container, then gates on `kairix onboard check --json` (require
+# fully_passed: true) PLUS the reflib benchmark regression gate, and
+# AUTO-ROLLS-BACK to the prior known-good image on failure
+# (exit 11 = automated rollback impossible — roll back by hand per §5;
+#  exit 12 = rollback itself failed, prod is down — page a human).
+#
+# Manual fallback — bump KAIRIX_IMAGE_TAG in the operator .env, then pull.
 # The stack is ghcr.io/three-cubes/kairix:${KAIRIX_IMAGE_TAG}; restarting the
 # unit in step 3 recreates the container from the pulled image.
 sudo sed -i 's/^KAIRIX_IMAGE_TAG=.*/KAIRIX_IMAGE_TAG=<NEW_VERSION>/' /opt/kairix/app/.env
 docker compose pull kairix
 ```
 
-**Known gap:** today `kairix-deploy.sh` (whatever your equivalent is called) typically ignores the `kairix onboard check` exit code and has no `--rollback` flag. Track the fix in your infrastructure repo's issue tracker; until it lands, you are the gate — run §3 step 4 manually and refuse to proceed unless every check passes.
+**Gate reminder:** running this fallback by hand, YOU are the gate `apply-alpha.sh` would otherwise apply — run §3 step 4 (`kairix onboard check --json`, require `fully_passed: true`) manually and refuse to proceed unless it passes.
 
 **Next action:** confirm `docker compose pull kairix` reports the new tag downloaded (or "up to date" if already cached). The version check happens after the restart in step 4.
 
@@ -132,7 +140,8 @@ docker compose exec kairix kairix --version
 
 docker compose exec kairix kairix onboard check --json > /tmp/kairix-postupdate-onboard.json
 jq '{passed, total, fully_passed}' /tmp/kairix-postupdate-onboard.json
-# Expected: {"passed": 9, "total": 9, "fully_passed": true}
+# Gate on fully_passed: true only (see §2 — `total` is now ~19 and `passed`
+# varies with the deployment's optional subsystems + flags).
 ```
 
 **Next action:** if `fully_passed: false`, stop and follow [`kairix-retrieval-health.md`](kairix-retrieval-health.md) §3 with the failure list from `/tmp/kairix-postupdate-onboard.json`. Do NOT resume the worker. Do NOT mark the update complete. If retrieval-health cannot restore green within your incident window, roll back via §5.
@@ -208,9 +217,9 @@ sudo systemctl restart kairix.service
 
 **Next action:** re-run §3 step 4 (`kairix onboard check --json`) and confirm `secrets_loaded: true`. If the secrets file is still empty after the fetch unit runs, escalate per §6 — the upstream secrets source has dropped the credentials.
 
-### `kairix onboard check` returns 7/9 after the update
+### `kairix onboard check` reports `fully_passed: false` after the update (retrieval checks fail)
 
-**Symptom:** secrets passed but two checks fail — typically `vector_search_working` and `chunk_date_populated`, or `bm25_search_working` indirectly and `agent_knowledge_populated`. Indicates retrieval state went bad during the swap, not the systemd plumbing.
+**Symptom:** secrets passed but a couple of checks fail — typically `vector_search_working` and `chunk_date_populated`, or `bm25_search_working` indirectly and `agent_knowledge_populated`. Indicates retrieval state went bad during the swap, not the systemd plumbing.
 
 **Next action:** stop the update flow and follow [`kairix-retrieval-health.md`](kairix-retrieval-health.md) §3, branching on the first failed check in `/tmp/kairix-postupdate-onboard.json`. Do not run §3 step 5 (resume) until retrieval-health returns all checks green. If retrieval-health cannot restore green inside your incident window, roll back via §5.
 
@@ -245,7 +254,7 @@ See [`kairix-retrieval-health.md`](kairix-retrieval-health.md) §4 ("No vectors 
 
 ## 5. Rollback
 
-Rollback today is manual — there is no `kairix-deploy.sh --rollback` flag yet. Track the gap in your infrastructure repo's issue tracker. If your operator-side checklist for deployment lives in that sibling repo (e.g. `infra/config/kairix-deployment-checklist.md`), it should follow the same procedure below.
+The canonical deploy path — `scripts/deploy/apply-alpha.sh`, run by CI — captures the prior known-good image before it mutates the stack and auto-rolls-back to it when its onboard-check (`fully_passed: true`) or reflib regression gate fails, so you rarely reach here. This manual rollback is the fallback for when CI / auto-deploy is unavailable, or when `apply-alpha.sh` exits 11 (automated rollback was impossible and a human must roll back by hand).
 
 Use rollback when:
 
@@ -274,9 +283,9 @@ sudo systemctl restart kairix.service
 # Confirm the running container matches the prior version.
 docker compose exec kairix kairix --version
 
-# 4. Hard gate: onboard check must pass every check against the rolled-back version.
+# 4. Hard gate: onboard check must return fully_passed against the rolled-back version.
 docker compose exec kairix kairix onboard check --json | jq '{passed, total, fully_passed}'
-# Expected: {"passed": 9, "total": 9, "fully_passed": true}
+# Gate on fully_passed: true only (see §2 — `total` ~19, `passed` varies).
 
 # 5. Resume the worker.
 docker compose exec kairix kairix worker resume
@@ -292,7 +301,7 @@ docker compose exec kairix kairix benchmark compare \
 
 **Next action:** confirm rollback restored `fully_passed: true` and the benchmark is back at baseline. File an incident issue per §6 with both pre-update and post-update onboard envelopes attached so the regression can be triaged before re-attempting the update.
 
-**Forward link:** once your infrastructure repo's deploy-script gap is closed, rollback becomes `sudo /opt/kairix/bin/kairix-deploy.sh --rollback` (or your equivalent); this section will collapse to that one command and the gating sequence above will move into the script.
+**Forward link:** on the canonical path this whole section is automatic — `scripts/deploy/apply-alpha.sh` captures the prior known-good image before it mutates the stack and re-pins to it if the onboard-check or reflib gate fails. Reach for this manual sequence only when CI / auto-deploy is unavailable or `apply-alpha.sh` reports automated rollback impossible (exit 11).
 
 ---
 
@@ -353,6 +362,6 @@ If rollback restores the image but onboard check still cannot return all checks 
 - [`kairix-entity-audit.md`](../operations/runbooks/kairix-entity-audit.md) — audit the entity graph if entity-driven queries regress post-update.
 - [`how-to-upgrade-kairix.md`](../operations/runbooks/how-to-upgrade-kairix.md) — Docker-compose upgrade procedure; this runbook is the systemd-on-VM counterpart.
 - [`runbook-benchmark-regression.md`](../operations/runbooks/runbook-benchmark-regression.md) — bisect workflow when §3 step 6 or §5 step 6 shows a regression.
-- Your infrastructure repo's `kairix-deploy.sh` resilience tracker — rollback flag, onboard-check exit-code gating.
+- [`scripts/deploy/apply-alpha.sh`](../../scripts/deploy/apply-alpha.sh) — the canonical box-side deploy script CI runs: pull → recreate → onboard `fully_passed: true` gate → reflib regression gate → auto-rollback (exit 11 = manual rollback needed, 12 = rollback failed).
 - [kairix#243](https://github.com/three-cubes/kairix/issues/243) — SRE worker design: collapses `kairix-fetch-secrets.service` into a managed step inside `kairix.service`, eliminating the disabled-after-reboot failure mode in §4.
 - `kairix-secrets-rotation.md` — the next runbook the operator owes; covers `KAIRIX_PROVIDER_LLM_API_KEY` / `KAIRIX_LLM_ENDPOINT` rotation without an image change. Will live in this same directory.

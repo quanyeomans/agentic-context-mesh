@@ -3,7 +3,7 @@
 **Give your agents the same knowledge as your team — without giving it away.**
 
 [![Apache 2.0](https://img.shields.io/badge/licence-Apache%202.0-blue)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-9200%2B_passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-11000%2B_passing-brightgreen)]()
 [![Hit@5](https://img.shields.io/badge/Hit%405-98.5%25-orange)]()
 
 ---
@@ -22,7 +22,7 @@ Kairix gives your agents a shared knowledge layer they can search, write to, and
 
 **Your agents find answers instead of guessing.** One tool call returns ranked, relevant content — ~1,500 tokens instead of dumping 10,000–50,000 tokens of full documents into the prompt. In a 200K context window, that's 58 searches per session instead of 5. Your agents can actually research a topic instead of running out of room after the first question.
 
-**Agents pull just the context around a hit, and can always cite it.** When a result points at one part of a document, your agent pulls the parts around it — the part before, the part after, the section it sits in — with `expand` / `tool_expand`, instead of re-reading the whole file. And every result, from search to briefings to fact lookups, comes with a source link you can open, so you and your agents can trace any answer back to where it came from.
+**Agents pull just the context around a hit, and can always cite it.** When a result points at one part of a document, your agent pulls the parts around it — the part before, the part after, the section it sits in — with `expand`, instead of re-reading the whole file. And every result, from search to briefings to fact lookups, comes with a source link you can open, so you and your agents can trace any answer back to where it came from.
 
 **Agents stop putting documents in the wrong place.** The classifier knows the difference between a decision, a runbook, a meeting note, and a research output. When an agent writes something new, kairix routes it to the right location in your knowledge store — no filing instructions needed.
 
@@ -200,9 +200,9 @@ The `kairix-memory-prompt` plugin ships with kairix (since #246 W5) at `/opt/kai
 }
 ```
 
-**Tell your agent what to do with kairix:** the canonical operating contract is in [`docs/agents/AGENT-SETUP.md`](docs/agents/AGENT-SETUP.md) — when to call `tool_search`, when to call `tool_brief`, how to read the `health` envelope, and what to do when kairix degrades. Point your agent at that file first.
+**Tell your agent what to do with kairix:** the canonical operating contract is in [`docs/agents/AGENT-SETUP.md`](docs/agents/AGENT-SETUP.md) — when to call `search`, when to call `brief`, how to read the `health` envelope, and what to do when kairix degrades. Point your agent at that file first.
 
-**At session start, agents call `kairix bootstrap <agent>`** to get a one-shot orientation envelope: role, current `Board.md`, last N daily memory entries, active goals, and a `health` field showing what's online (`vector_search`, `bm25`, `chat`, `secrets_loaded`). Markdown by default, `--json` for tooling. The MCP equivalent is `tool_bootstrap(agent, max_memory_days=3)`. The openclaw plugin shipped at `/opt/kairix/plugins/openclaw/memory-prompt/` runs this automatically and injects the result into the session prompt — agents start oriented, not reactive.
+**At session start, agents call `kairix bootstrap <agent>`** to get a one-shot orientation envelope: role, current `Board.md`, last N daily memory entries, active goals, and a `health` field showing what's online (`vector_search`, `bm25`, `chat`, `secrets_loaded`). Markdown by default, `--json` for tooling. The MCP equivalent is `bootstrap(agent, max_memory_days=3)`. The openclaw plugin shipped at `/opt/kairix/plugins/openclaw/memory-prompt/` runs this automatically and injects the result into the session prompt — agents start oriented, not reactive.
 
 **Every MCP tool response carries a `health` field** (`vector_search` / `bm25` / `chat` / `secrets_loaded` / `degraded_reason` / `next_action`). When kairix is partially down, agents still get whatever subsystem works, plus a concrete instruction to surface to the admin — they never silently fail.
 
@@ -267,7 +267,7 @@ pytest tests/                      # bare test run
 ruff check kairix/ tests/          # lint only
 ```
 
-`scripts/safe-commit.sh` is the single entry point — it runs every gate the CI runs in the same order before letting the commit through; failing gates print the exact fix command. See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture and PR process, and [docs/architecture/fitness-functions.md](docs/architecture/fitness-functions.md) for the F1–F24 architecture fitness functions that enforce structural invariants.
+`scripts/safe-commit.sh` is the single entry point — it runs every gate the CI runs in the same order before letting the commit through; failing gates print the exact fix command. See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture and PR process, and [docs/architecture/fitness-functions.md](docs/architecture/fitness-functions.md) for the architecture fitness functions (F-series) that enforce structural invariants.
 
 ---
 
