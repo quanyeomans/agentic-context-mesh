@@ -1,4 +1,4 @@
-.PHONY: setup setup-dev setup-check fitness-config lint format check test test-unit test-bdd test-contract test-integration test-all test-ci type-check security commit clean \
+.PHONY: setup setup-dev setup-check fitness-config lint format check smoke test test-unit test-bdd test-contract test-integration test-all test-ci type-check security commit clean \
         go-modules go-fmt go-vet go-lint go-test go-build go-check
 
 # Developer-environment setup — wires the pre-commit hooks so first-commit
@@ -100,6 +100,17 @@ test-ci:
 	  --junitxml=results-unit.xml \
 	  -v --tb=short
 	uv run python3 scripts/checks/check_per_file_coverage.py coverage.xml
+
+# Fast-feedback tier (SGO-100) — the <60s inner-loop smoke. A lean, fail-fast
+# subset of the gate: package + CLI import smoke, ruff lint/format, a
+# collect-only import-breakage guard over the unit+contract surface, and the
+# fast contract tier (no coverage, no `-n auto`). Catches the common import and
+# contract breakages in ~25s so you get a signal before the full ~10min gate.
+# It does NOT replace `make check` / CI — the full architecture-fitness
+# catalogue, mypy --strict, coverage floors, and the whole test suite remain
+# the merge bar. See scripts/smoke.sh for the leg-by-leg rationale.
+smoke:
+	bash scripts/smoke.sh
 
 # Security
 security:
