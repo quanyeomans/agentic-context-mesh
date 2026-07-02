@@ -116,6 +116,7 @@ def test_every_use_case_has_a_per_feature_parity_test() -> None:
         "test_cli_mcp_parity_usage_guide",
         "test_cli_mcp_parity_recommend",
         "test_cli_mcp_parity_expand",
+        "test_cli_mcp_parity_synthesis",  # W5b (PLA-323): consolidated synthesis-domain parity body
         "test_cli_mcp_parity_invariants",  # this file
     }
     missing = expected_tests - parity_tests
