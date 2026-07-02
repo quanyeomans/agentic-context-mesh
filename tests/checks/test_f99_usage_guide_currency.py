@@ -4,9 +4,11 @@ The F99 detector
 (``scripts/checks/check_f99_usage_guide_currency.py``) reads the tool
 registry (``tool_capabilities()`` in the MCP server) and asserts every
 registered capability is discoverable in the bundled agent usage guide via
-one of its invocation tokens (``kairix <cli>`` / ``tool_<mcp_tool>`` /
-``tool_<escalate_via>``). This is the currency lock that closes the drift
-class that let ``expand`` fall out of the guide after it shipped.
+one of its invocation tokens (``kairix <cli>`` / the bare ``<mcp_tool>`` wire
+name / the bare ``<escalate_via>`` name). This is the currency lock that
+closes the drift class that let ``expand`` fall out of the guide after it
+shipped. Post-PLA-321 the guide is generated with the bare MCP names, so the
+token scanned for is the bare ``<mcp_tool>``, not ``tool_<mcp_tool>``.
 
 Sabotage proof (unit-level): ``test_missing_capability_is_a_violation``
 seeds a synthetic registry whose ``contradict`` capability is NOT mentioned
@@ -94,13 +96,13 @@ def test_missing_capability_is_a_violation(tmp_path: Path) -> None:
 
 def test_constant_resolved_capability_present_is_clean(tmp_path: Path) -> None:
     """`_cap(name=CONTRADICT_TOOL_NAME, ...)` resolves the constant and passes
-    when the guide names `tool_contradict`."""
+    when the guide names the bare `contradict` wire name."""
     root = _seed_repo(
         tmp_path,
         server_body=_server_with(
             '        _cap(name=CONTRADICT_TOOL_NAME, mcp_tool=CONTRADICT_TOOL_NAME, cli="kairix contradict"),\n'
         ),
-        guide_text="The `tool_contradict` MCP tool checks new content.\n",
+        guide_text="The `contradict` MCP tool checks new content.\n",
     )
     assert collect_violations(root) == set()
 
@@ -120,22 +122,22 @@ def test_excluded_recommender_is_not_a_violation(tmp_path: Path) -> None:
 
 def test_operator_only_matched_on_escalate_via_token(tmp_path: Path) -> None:
     """An operator-only capability (mcp_tool=None) is discoverable via its
-    `tool_<escalate_via>` token even when its CLI is a python snippet."""
+    bare `<escalate_via>` token even when its CLI is a python snippet."""
     root = _seed_repo(
         tmp_path,
         server_body=_server_with(
             '        _cap(name="soak_run", mcp_tool=None, cli="python -c \'...\'", escalate_via="soak_run"),\n'
         ),
-        guide_text="Operators run the `tool_soak_run` escalation.\n",
+        guide_text="Operators run the `soak_run` escalation.\n",
     )
     assert collect_violations(root) == set()
 
 
 def test_python_snippet_cli_is_not_a_token() -> None:
     """A bare ``python -c`` CLI is not a distinctive guide token; only the
-    tool_<mcp_tool> / tool_<escalate_via> names are."""
+    bare <mcp_tool> / <escalate_via> wire names are."""
     tokens = _invocation_tokens({"name": "probe_search", "mcp_tool": "probe_search", "cli": "python -c '...'"})
-    assert tokens == ["tool_probe_search"]
+    assert tokens == ["probe_search"]
 
 
 def test_real_repo_is_currently_clean() -> None:
