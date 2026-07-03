@@ -2,6 +2,8 @@
 Shared pytest fixtures for the kairix test suite.
 
 Fixture hierarchy:
+  _hermetic_data_dirs (session, autouse) — points HOME / XDG_* / KAIRIX_DOCUMENT_ROOT
+    at clean session temp dirs so no test reads the dev's real dogfood data (PLA-285)
   no_azure_calls (autouse, all non-e2e tests) — blocks accidental Azure API calls
   _hermetic_user_config (autouse) — hides the developer's real ~/.config/kairix
   fake_llm_backend — FakeLLM satisfying LLMBackend Protocol
@@ -435,6 +437,90 @@ def no_azure_calls(monkeypatch, request):
     if "e2e" not in request.keywords:
         monkeypatch.delenv("KAIRIX_AZURE_API_KEY", raising=False)
         monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
+
+
+# Operator-override env vars a dev running kairix may have exported in their
+# shell. Each one wins over the clean XDG/HOME defaults the session fixture
+# installs, so they are cleared for the whole run — otherwise a dev's
+# ``export KAIRIX_DATA_DIR=...`` would still route tests at the real dogfood
+# store even after HOME/XDG were redirected. ``LOG_DIR`` is the non-KAIRIX_
+# sibling ``KairixPaths.resolve`` reads for the log dir.
+_HERMETIC_DATA_ENV_OVERRIDES = (
+    "KAIRIX_DATA_DIR",
+    "KAIRIX_CACHE_DIR",
+    "KAIRIX_DB_PATH",
+    "KAIRIX_WORKSPACE_ROOT",
+    "KAIRIX_LOG_DIR",
+    "LOG_DIR",
+)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _hermetic_data_dirs(tmp_path_factory):
+    """Redirect every default-data env kairix reads at clean session temp dirs (PLA-285).
+
+    Root-cause fix for a whole class of local-vs-CI test divergence. Any dev
+    running kairix (all six dogfood agents do) has real data under ``$HOME``,
+    ``$XDG_DATA_HOME`` and ``KAIRIX_DOCUMENT_ROOT`` — so tests that resolve a
+    kairix default path (``kairix/paths.py``: ``data_dir`` / ``cache_dir`` /
+    ``config_dir`` / ``document_root``, plus the ``~/.local/share/kairix``,
+    ``~/.cache/kairix``, ``~/Documents`` fallbacks) read the dev's live
+    dogfood store instead of an isolated dir. That makes ``safe-commit`` /
+    local ``pytest`` diverge from CI's clean env (e.g.
+    ``test_doctor.py::test_completely_unknown_agent_returns_error_agent_health``
+    resolved a real ``04-Agent-Knowledge/ghost`` dir, and the PLA-284 MCP
+    warm-state tests raced the real ``~/.local/share/kairix/index.sqlite``),
+    and it makes concurrent worktree agents contend on the shared
+    ``~/.local/share/kairix/vectors.usearch``.
+
+    This session-scoped, autouse baseline replicates CI's clean env for the
+    whole run: ``HOME``, ``XDG_DATA_HOME``, ``XDG_CACHE_HOME``,
+    ``XDG_CONFIG_HOME`` and ``KAIRIX_DOCUMENT_ROOT`` point at empty
+    per-session temp dirs, and the operator-override vars in
+    :data:`_HERMETIC_DATA_ENV_OVERRIDES` are cleared so a dev's shell export
+    can't shadow those defaults. It is only the BASELINE — a test that needs
+    specific data injects it explicitly (``tmp_path`` / ``FakePaths`` / the
+    per-test ``monkeypatch`` fixtures, which layer on top and undo after each
+    test).
+
+    These are env-boundary safety nets (like ``no_azure_calls`` and
+    ``_hermetic_user_config``), not test-shaping hacks — the session
+    ``pytest.MonkeyPatch`` is undone at session teardown so the real env is
+    restored for the process.
+    """
+    # tmp_path_factory / the builtin ``monkeypatch`` fixture are function-
+    # scoped; a session fixture builds its own MonkeyPatch and undoes it at
+    # session teardown.
+    monkeypatch = pytest.MonkeyPatch()
+    base = tmp_path_factory.mktemp("hermetic-home")
+    home = base / "home"
+    xdg_data = base / "xdg-data"
+    xdg_cache = base / "xdg-cache"
+    xdg_config = base / "xdg-config"
+    documents = base / "documents"
+    for clean_dir in (home, xdg_data, xdg_cache, xdg_config, documents):
+        clean_dir.mkdir(parents=True, exist_ok=True)
+
+    # ``Path.home()`` reads ``HOME`` on POSIX, so this redirects every
+    # ``~/...`` fallback in kairix/paths.py; the XDG vars redirect the
+    # XDG-first branches; KAIRIX_DOCUMENT_ROOT redirects the document root.
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_data))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(xdg_cache))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config))
+    monkeypatch.setenv("KAIRIX_DOCUMENT_ROOT", str(documents))
+    for name in _HERMETIC_DATA_ENV_OVERRIDES:
+        monkeypatch.delenv(name, raising=False)
+
+    # Drop any path resolution cached before the env was redirected so the
+    # first resolve() in the run sees the clean dirs (mirrors the
+    # clear_cache() the integration real_document_root fixture does).
+    from kairix.paths import clear_cache
+
+    clear_cache()
+    yield
+    clear_cache()
+    monkeypatch.undo()
 
 
 @pytest.fixture(autouse=True)
