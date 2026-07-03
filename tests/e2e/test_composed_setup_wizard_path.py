@@ -29,8 +29,9 @@ probes, ``build_search_pipeline`` (the F47 factory), the real
 ``topology_updates_for_source``, and ``parse_topology_v2`` reading the
 emitted overlay back.
 
-F54 both-branch: the OFF test proves a flag-OFF deployment mounts no
-``/setup`` routes while the MCP surfaces serve unchanged.
+The wizard is always mounted (the ``setup_wizard_web`` cutover flag
+retired post-validation, PLA-287); this path exercises the composed
+``/setup`` journey end to end.
 
 Sabotage-proof (executed): making ``complete_source_callback`` accept a
 forged ``state`` (deleting the mismatch rejection in
@@ -84,7 +85,6 @@ from kairix.platform.setup.wizard import persist_llm_credentials  # noqa: E402
 from kairix.secrets import canonical_env_var, set_secret  # noqa: E402
 from kairix.use_cases.remember import RememberDeps, remember  # noqa: E402
 from tests.fakes import (  # noqa: E402
-    FakeFeatureFlagResolver,
     FakeMcpTransportServer,
     FakeOAuth2Flow,
     FakePaths,
@@ -95,7 +95,6 @@ from tests.fakes import (  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
-_FLAG = "setup_wizard_web"
 _LOOPBACK = ("127.0.0.1", 9999)
 # The docker bridge gateway a stock-Docker browser peer presents — never
 # loopback (#500). Composed non-loopback journeys ride this client addr.
@@ -339,8 +338,8 @@ def _wizard_service_deps(world: _WizardWorld) -> SetupServiceDeps:
     )
 
 
-def _compose_client(world: _WizardWorld, *, flag_on: bool) -> TestClient:
-    """The REAL transport composer + REAL backend, flag via the resolver seam."""
+def _compose_client(world: _WizardWorld) -> TestClient:
+    """The REAL transport composer + REAL backend — wizard mounted unconditionally."""
     paths = FakePaths(
         document_root=world.docs,
         db_path=world.db_path,
@@ -348,12 +347,10 @@ def _compose_client(world: _WizardWorld, *, flag_on: bool) -> TestClient:
         workspace_root=world.db_path.parent / "workspaces",
     )
     service = build_setup_service(paths=paths, deps=_wizard_service_deps(world))
-    resolver = FakeFeatureFlagResolver().with_flag(_FLAG, flag_on)
     app = build_mcp_app(
         FakeMcpTransportServer(),
         setup_service_factory=lambda: service,
         setup_secrets=FakeSecretsLoader(),
-        setup_wizard_enabled=lambda: resolver.get(_FLAG),
     )
     return TestClient(app, client=_LOOPBACK)
 
@@ -556,22 +553,6 @@ def _drive_done_screen(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_flag_off_mounts_no_setup_routes(tmp_path: Path) -> None:
-    """F54 OFF branch: no /setup surface, MCP + health byte-compatible."""
-    resolver = FakeFeatureFlagResolver().with_flag(_FLAG, False)
-    app = build_mcp_app(
-        FakeMcpTransportServer(),
-        setup_service_factory=lambda: pytest.fail("the wizard backend must not be resolved when the flag is OFF"),
-        setup_secrets=FakeSecretsLoader(),
-        setup_wizard_enabled=lambda: resolver.get(_FLAG),
-    )
-    client = TestClient(app, client=_LOOPBACK)
-    assert client.get("/setup", follow_redirects=True).status_code == 404
-    assert client.get("/setup/source").status_code == 404
-    assert client.get("/mcp").status_code == 200
-    assert client.get("/healthz").status_code == 200
-
-
 def test_composed_setup_wizard_journey(tmp_path: Path) -> None:
     """Flag ON: the full operator journey against composed production code.
 
@@ -584,7 +565,7 @@ def test_composed_setup_wizard_journey(tmp_path: Path) -> None:
     naming the five MCP tools.
     """
     world = _build_world(tmp_path)
-    client = _compose_client(world, flag_on=True)
+    client = _compose_client(world)
 
     _drive_provider_step(client, world)
     _drive_folder_and_index(client, world)
@@ -614,12 +595,10 @@ def test_composed_remote_browser_grant_journey(tmp_path: Path) -> None:
         workspace_root=world.db_path.parent / "workspaces",
     )
     service = build_setup_service(paths=paths, deps=_wizard_service_deps(world))
-    resolver = FakeFeatureFlagResolver().with_flag(_FLAG, True)
     app = build_mcp_app(
         FakeMcpTransportServer(),
         setup_service_factory=lambda: service,
         setup_secrets=FakeSecretsLoader(values={_OPERATOR_TOKEN_IDENTITY: _GRANT_TOKEN}),
-        setup_wizard_enabled=lambda: resolver.get(_FLAG),
     )
     bridge = TestClient(app, client=_BRIDGE)
 

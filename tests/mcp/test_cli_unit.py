@@ -100,7 +100,6 @@ def _build_deps(
     fake_server: _FakeMcpServer | None = None,
     fake_runner: _RunRecorder | None = None,
     warm_result: dict[str, Any] | None = None,
-    wizard_enabled: bool = False,
     operator_token: str | None = None,
 ) -> tuple[McpCliDeps, list[dict], _RunRecorder]:
     fake_server = fake_server or _FakeMcpServer()
@@ -127,11 +126,12 @@ def _build_deps(
         # ambient KAIRIX_* creds. The placeholder / fatal preflight paths
         # have their own dedicated tests that inject their own env.
         serve_env=_GOOD_SERVE_ENV,
-        # #500 — pin the wizard-URL boot-print seams through the DI so the
-        # default tests don't reach the real flag resolver / SecretsLoader
-        # (F2-clean — no KAIRIX_INFRA_OPERATOR_TOKEN setenv). Default OFF so
-        # the pre-existing serve assertions are unaffected.
-        wizard_enabled_fn=lambda: wizard_enabled,
+        # #500 — pin the wizard-URL boot-print seam through the DI so the
+        # default tests don't reach the real SecretsLoader (F2-clean — no
+        # KAIRIX_INFRA_OPERATOR_TOKEN setenv). The wizard is always mounted
+        # (the setup_wizard_web cutover flag retired, PLA-287), so the print
+        # is gated only on an operator token; default None leaves the
+        # pre-existing serve assertions unaffected.
         operator_token_fn=lambda: operator_token,
     )
     return deps, build_calls, fake_runner
@@ -224,14 +224,15 @@ def test_serve_http_transport_with_no_sse_flag(monkeypatch) -> None:
 
 
 @pytest.mark.unit
-def test_serve_prints_tokened_wizard_url_when_wizard_on_and_token_set(monkeypatch) -> None:
-    """#500 — when the setup_wizard_web flag is ON and an operator token is
-    configured, serve prints the one-time tokened URL to stderr so
-    `docker compose logs` surfaces the browser onboarding step."""
+def test_serve_prints_tokened_wizard_url_when_token_set(monkeypatch) -> None:
+    """#500 — the wizard is always mounted (the setup_wizard_web cutover
+    flag retired, PLA-287), so when an operator token is configured serve
+    prints the one-time tokened URL to stderr so `docker compose logs`
+    surfaces the browser onboarding step."""
     monkeypatch.setattr(sys, "argv", ["kairix", "mcp", "serve", "--port", "18093"])
     # Fixture token, injected through the DI seam — not a real credential.
     token = "boot-print-fake-token"  # pragma: allowlist secret — fake fixture
-    deps, _calls, _runner = _build_deps(wizard_enabled=True, operator_token=token)
+    deps, _calls, _runner = _build_deps(operator_token=token)
 
     _stdout, stderr, code = _drive(["serve", "--transport", "http", "--port", "18093"], deps)
 
@@ -241,27 +242,11 @@ def test_serve_prints_tokened_wizard_url_when_wizard_on_and_token_set(monkeypatc
 
 
 @pytest.mark.unit
-def test_serve_omits_tokened_url_when_wizard_off(monkeypatch) -> None:
-    """Loopback / pip-install default: the wizard flag is OFF, so no
-    tokened URL (and no token) is printed."""
-    monkeypatch.setattr(sys, "argv", ["kairix", "mcp", "serve", "--port", "18092"])
-    token = "must-not-appear-token"  # pragma: allowlist secret — fake fixture
-    deps, _calls, _runner = _build_deps(wizard_enabled=False, operator_token=token)
-
-    _stdout, stderr, code = _drive(["serve", "--transport", "http", "--port", "18092"], deps)
-
-    assert code == 0
-    assert "operator_token=" not in stderr
-    assert token not in stderr
-
-
-@pytest.mark.unit
 def test_serve_omits_tokened_url_when_no_token_configured(monkeypatch) -> None:
-    """Wizard ON but no operator token configured (loopback-only): nothing
-    to print — the URL only matters when a non-loopback browser needs the
-    grant cookie."""
+    """No operator token configured (loopback-only): nothing to print — the
+    URL only matters when a non-loopback browser needs the grant cookie."""
     monkeypatch.setattr(sys, "argv", ["kairix", "mcp", "serve", "--port", "18091"])
-    deps, _calls, _runner = _build_deps(wizard_enabled=True, operator_token=None)
+    deps, _calls, _runner = _build_deps(operator_token=None)
 
     _stdout, stderr, code = _drive(["serve", "--transport", "http", "--port", "18091"], deps)
 

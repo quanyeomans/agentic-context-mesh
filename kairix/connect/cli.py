@@ -18,7 +18,8 @@ Each subcommand:
      ``--client-secret``; GitHub App: ``--app-id`` + ``--private-key-path``).
   2. Starts the localhost callback listener (``--port``, default 8080).
   3. Opens the browser to the consent / install screen.
-  4. Captures the callback via the listener (timeout 120s by default).
+  4. Captures the callback via the listener (``--timeout``, default 120s,
+     threaded into ``wait_for_callback``).
   5. Exchanges the captured value for tokens (Google: code → tokens;
      GitHub App: installation_id + JWT → installation access token).
   6. Writes the tokens to the chosen store (``--store``, default ``file``).
@@ -470,7 +471,7 @@ def _run(args: argparse.Namespace, deps: ConnectDeps) -> int:
         return 1
     try:
         client = flow.discover_client_credentials()
-        tokens = flow.authorize(listener=listener)
+        tokens = flow.authorize(listener=listener, timeout_s=args.timeout)
     except ConnectError as exc:
         listener.close()
         deps.stderr.write(str(exc) + "\n")

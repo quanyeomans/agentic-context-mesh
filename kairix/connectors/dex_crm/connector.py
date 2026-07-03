@@ -29,7 +29,7 @@ plaintext; diagnostic logs name the endpoint or record kind only.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -134,25 +134,6 @@ class _PreBoundApiKeyAuth(ApiKeyAuth):
         return BearerHeaders(mapping={"Authorization": f"Bearer {self.api_key}"})
 
 
-def _default_flag_reader(name: str) -> bool:
-    """Production default for the topology-v2-dex_crm flag check.
-
-    Delegates to :func:`kairix.core.features.flag` so the production
-    path threads through the env-var → config-overlay → registry
-    resolution chain. Tests inject a different callable (typically one
-    backed by :class:`tests.fakes.FakeFeatureFlagResolver`) so the
-    branch under test is pinned without monkey-patching the resolver
-    module (F1-clean / F2-clean).
-
-    Lifted to a module-level helper so the connector's signature can
-    carry a real callable default (F6-clean) without a per-call
-    ``Optional[...] = None`` shape.
-    """
-    from kairix.core.features import flag as _prod_flag
-
-    return _prod_flag(name)
-
-
 @dataclass(frozen=True)
 class DexCrmRecord:
     """One record fetched from the Dex API, kind-tagged.
@@ -233,7 +214,6 @@ class DexCrmConnector:
         client: DexCrmClient | None = None,
         client_config: DexCrmClientConfig | None = None,
         sensitivity: Sensitivity = "internal",
-        flag_reader: Callable[[str], bool] = _default_flag_reader,
         secrets: SecretsResolver | None = None,
     ) -> None:
         cfg = client_config if client_config is not None else DexCrmClientConfig()
@@ -272,7 +252,6 @@ class DexCrmConnector:
             # downstream code mid-migration) keep working.
             self._client = DexCrmClient(config=cfg)
         self._sensitivity: Sensitivity = sensitivity
-        self._flag_reader = flag_reader
         # Cache of last-fetched records keyed by item_id so ``fetch``
         # can return the bytes the connector already pulled in
         # ``list_changes`` without a second API roundtrip.
@@ -283,16 +262,6 @@ class DexCrmConnector:
         # before the first drain; preserves the prior value on a
         # zero-event tick so we don't clobber a real cursor with None.
         self._last_max_modified_at: str | None = None
-        # Diagnostic introspection — records which Wave E branch
-        # :meth:`list_changes_for_container` took on the most recent
-        # call (``"legacy"`` = Wave B shim delegation when the
-        # ``topology_v2_dex_crm`` flag is OFF; ``"scoped"`` = the Wave E
-        # per-container helper when the flag is ON). Used by F54
-        # both-branch tests to assert the flag-OFF inertness contract
-        # without needing to observe a wire-side behavioural difference
-        # (the single-tenant Dex API makes both paths reach identical
-        # endpoints).
-        self._last_path_taken: str | None = None
 
     # ------------------------------------------------------------------
     # SourceConnector Protocol surface
@@ -494,7 +463,6 @@ class DexCrmConnector:
         ``topology_v2_dex_crm`` retired post-cutover (task #132); the
         per-container path is now the only behaviour.
         """
-        self._last_path_taken = "scoped"
         return self._list_changes_scoped(container)
 
     def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:

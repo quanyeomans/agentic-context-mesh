@@ -147,25 +147,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _default_flag_reader(name: str) -> bool:
-    """Production default for the topology-v2-github flag check.
-
-    Delegates to :func:`kairix.core.features.flag` so the production
-    path threads through the env-var → config-overlay → registry
-    resolution chain. Tests inject a different callable (typically one
-    backed by :class:`tests.fakes.FakeFeatureFlagResolver`) so the
-    branch under test is pinned without monkey-patching the resolver
-    module (F1-clean / F2-clean).
-
-    Lifted to a module-level helper so the connector's signature can
-    carry a real callable default (F6-clean) without a per-call
-    ``Optional[...] = None`` shape.
-    """
-    from kairix.core.features import flag as _prod_flag
-
-    return _prod_flag(name)
-
-
 @dataclass
 class PerRepoCursorState:
     """Per-repo cursor tracking — code + issues ``since=`` boundary.
@@ -217,9 +198,6 @@ class GitHubConnector:
         :class:`httpx.MockTransport` so no real GitHub call leaks.
       * ``client_config`` — :class:`GitHubClientConfig`; carries
         timeouts, base URL, and concurrency budget.
-      * ``flag_reader`` — :func:`_default_flag_reader`. Tests inject a
-        ``FakeFeatureFlagResolver().get`` callable so flag branches
-        are pinned without monkey-patching.
       * ``default_sensitivity`` — Wave E F39 tier; defaults to
         ``client-confidential`` per spec §1 (private repos are the
         default GitHub assumption; public/internal repos opt down).
@@ -249,13 +227,11 @@ class GitHubConnector:
         client: GitHubApiClient | None = None,
         client_builder: Callable[[GitHubCredentials], GitHubApiClient] | None = None,
         client_config: GitHubClientConfig | None = None,
-        flag_reader: Callable[[str], bool] = _default_flag_reader,
         default_sensitivity: Sensitivity = _DEFAULT_SENSITIVITY,
         webhook_secret: str | None = None,
         secrets: SecretsResolver | None = None,
         repos_allowlist: Iterable[str] | None = None,
     ) -> None:
-        self._flag_reader = flag_reader
         self._default_sensitivity: Sensitivity = default_sensitivity
         # F15: webhook_secret stored as an instance attribute; this
         # attribute is consumed only by the verify_and_parse helper in
@@ -294,12 +270,6 @@ class GitHubConnector:
         # Per-tick envelope cache for fetch() resolution without a
         # second API roundtrip.
         self._envelope_cache: dict[str, Mapping[str, Any]] = {}
-        # Diagnostic introspection — records which Wave E branch
-        # :meth:`list_changes_for_container` took on the most recent
-        # call (``"legacy"`` = Wave B shim delegation when the
-        # ``topology_v2_github`` flag is OFF; ``"scoped"`` = the Wave E
-        # per-repo helper when the flag is ON).
-        self._last_path_taken: str | None = None
         # Set of seen webhook delivery_ids; idempotency guard so a
         # GitHub redelivery doesn't double-emit ChangeEvents.
         self._seen_deliveries: set[str] = set()
@@ -457,7 +427,6 @@ class GitHubConnector:
         ``topology_v2_github`` retired post-cutover (task #132); the
         per-repo path is now the only behaviour.
         """
-        self._last_path_taken = "scoped"
         return self._drain_one_container(container)
 
     def retrieve_all_slim_docs(self, container: Container) -> Iterator[str]:
@@ -906,7 +875,6 @@ class GitHubConnector:
             "installation_token_rotations": client_stats.installation_token_rotations,
             "repos_tracked": len(self._per_repo_cursors),
             "deliveries_seen": len(self._seen_deliveries),
-            "last_path_taken": self._last_path_taken or "",
         }
 
     # ------------------------------------------------------------------

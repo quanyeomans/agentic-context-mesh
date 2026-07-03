@@ -57,7 +57,6 @@ def _build_client(
     *,
     service: SetupService | None = None,
     secrets: FakeSecretsLoader | None = None,
-    flag_on: bool = True,
     client_addr: tuple[str, int] = _LOOPBACK,
     use_default_factory: bool = False,
     readiness_check: object = None,
@@ -73,7 +72,6 @@ def _build_client(
     app = build_mcp_app(
         FakeMcpTransportServer(),
         setup_secrets=secrets if secrets is not None else FakeSecretsLoader(),
-        setup_wizard_enabled=lambda: flag_on,
         readiness_check=readiness_check,  # type: ignore[arg-type]  # F3 rationale: None or callable; build_mcp_app accepts both.
         **kwargs,  # type: ignore[arg-type]  # F3 rationale: heterogeneous kwargs dict for an optional seam; build_mcp_app validates the shape.
     )
@@ -81,29 +79,22 @@ def _build_client(
 
 
 # ---------------------------------------------------------------------------
-# Flag gating
+# Mount (wizard is always served — the setup_wizard_web cutover flag retired,
+# PLA-287)
 # ---------------------------------------------------------------------------
 
 
-def test_flag_off_means_no_setup_routes() -> None:
-    client = _build_client(flag_on=False)
-    assert client.get("/setup", follow_redirects=True).status_code == 404
-    assert client.get("/setup/provider").status_code == 404
-    # The MCP transport surface is unchanged.
-    assert client.get("/mcp").status_code == 200
+def test_wizard_mounts_out_of_box() -> None:
+    """A fresh install with all defaults mounts ``/setup`` out of the box.
 
-
-def test_flag_default_reader_mounts_wizard_out_of_box() -> None:
-    """No ``setup_wizard_enabled`` seam, no env/overlay → the production
-    default reader resolves the registry default (now ON, cutover) and
-    mounts ``/setup``, so a fresh install reaches the wizard out of the box.
-
-    Sabotage-proof for the cutover: reverting the registry default back to
-    False turns this 200 into a 404.
+    Builds the app with no explicit service factory so the production
+    default (the lazy ``build_setup_service`` stub) is exercised; the
+    welcome screen must return 200 while the MCP transport is unchanged.
     """
     app = build_mcp_app(FakeMcpTransportServer())
     client = TestClient(app, client=_LOOPBACK)
     assert client.get("/setup", follow_redirects=True).status_code == 200
+    assert client.get("/mcp").status_code == 200
 
 
 # ---------------------------------------------------------------------------
@@ -1051,7 +1042,6 @@ def test_unknown_client_address_fails_closed() -> None:
         FakeMcpTransportServer(),
         setup_service_factory=lambda: service,
         setup_secrets=FakeSecretsLoader(),
-        setup_wizard_enabled=lambda: True,
     )
     client = TestClient(app, client=None)  # type: ignore[arg-type]  # F3 rationale: TestClient accepts None to strip the peer address; the stub types only the tuple form.
     assert client.get("/setup/provider").status_code == 403
@@ -1064,7 +1054,6 @@ def test_default_secrets_seam_serves_loopback_without_config() -> None:
     app = build_mcp_app(
         FakeMcpTransportServer(),
         setup_service_factory=lambda: service,
-        setup_wizard_enabled=lambda: True,
     )
     client = TestClient(app, client=_LOOPBACK)
     response = client.get("/setup/provider")

@@ -67,7 +67,6 @@ def _build_client(
         FakeMcpTransportServer(),
         setup_service_factory=lambda: resolved_service,
         setup_secrets=secrets if secrets is not None else FakeSecretsLoader(),
-        setup_wizard_enabled=lambda: True,
     )
     return TestClient(app, client=client_addr)
 

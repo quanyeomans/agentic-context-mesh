@@ -50,7 +50,7 @@ from kairix.connectors.github.webhook import (
     compute_signature,
 )
 from kairix.core.protocols import ContainerTransientError, CredentialExpiredError, RawArtefact
-from tests.fakes import FakeFeatureFlagResolver, FakeSecretsLoader
+from tests.fakes import FakeSecretsLoader
 
 pytestmark = pytest.mark.unit
 
@@ -820,8 +820,7 @@ def test_connector_iter_containers_marks_archived_as_revoked() -> None:
 
 def test_connector_list_changes_for_container_unknown_repo_yields_access_lost() -> None:
     """If the container's repo is no longer in the installation, emit access_lost."""
-    resolver = FakeFeatureFlagResolver().with_flag("topology_v2_github", True)
-    connector = GitHubConnector(client=_StubClient(), flag_reader=resolver.get)  # type: ignore[arg-type]  # F3 rationale: local stub mirrors GitHubApiClient shape but isn't typed as the Protocol — boundary-only suppression for the test seam
+    connector = GitHubConnector(client=_StubClient())  # type: ignore[arg-type]  # F3 rationale: local stub mirrors GitHubApiClient shape but isn't typed as the Protocol — boundary-only suppression for the test seam
     from kairix.core.protocols import Container
 
     container = Container(
@@ -914,7 +913,6 @@ def test_connector_stats_returns_diagnostic_counters() -> None:
     assert "rest_requests" in snapshot
     assert "repos_tracked" in snapshot
     assert "deliveries_seen" in snapshot
-    assert "last_path_taken" in snapshot
 
 
 def test_connector_reindex_per_item_replay_emits_change_event() -> None:

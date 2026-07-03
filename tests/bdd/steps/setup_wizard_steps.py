@@ -1,15 +1,14 @@
-"""Step definitions for setup_wizard.feature + feature_flag_setup_wizard_web.feature.
+"""Step definitions for setup_wizard.feature.
 
 F46-compliant composition: every scenario builds the real ASGI app
 through ``kairix.agents.mcp.transport.build_mcp_app`` with the
 canonical fakes from ``tests/fakes.py`` injected through the public
-seams (``setup_service_factory`` / ``setup_secrets`` /
-``setup_wizard_enabled``), then drives it with Starlette's TestClient
-from a loopback client address — exactly the laptop-first shape the
-wizard ships for.
+seams (``setup_service_factory`` / ``setup_secrets``), then drives it
+with Starlette's TestClient from a loopback client address — exactly
+the laptop-first shape the wizard ships for. The wizard is always
+mounted (the ``setup_wizard_web`` cutover flag retired, PLA-287).
 
-F1/F2-clean: no monkey-patching, no env-var manipulation; the flag is
-pinned per scenario via ``FakeFeatureFlagResolver``.
+F1/F2-clean: no monkey-patching, no env-var manipulation.
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ from pytest_bdd import given, parsers, then, when
 
 from kairix.agents.mcp.transport import build_mcp_app
 from tests.fakes import (
-    FakeFeatureFlagResolver,
     FakeMcpTransportServer,
     FakeSecretsLoader,
     FakeSetupService,
@@ -29,7 +27,6 @@ from tests.fakes import (
 
 pytestmark = pytest.mark.bdd
 
-_FLAG_NAME = "setup_wizard_web"
 _LOOPBACK = ("127.0.0.1", 9999)
 # Fixture credential for the fake service, not a real key.
 _SAVE_KEY_PAYLOAD = {
@@ -46,15 +43,13 @@ def _wizard_state() -> dict[str, Any]:
     return {}
 
 
-def _compose_client(state: dict[str, Any], *, flag_on: bool, service: FakeSetupService) -> None:
+def _compose_client(state: dict[str, Any], *, service: FakeSetupService) -> None:
     from starlette.testclient import TestClient
 
-    resolver = FakeFeatureFlagResolver().with_flag(_FLAG_NAME, flag_on)
     app = build_mcp_app(
         FakeMcpTransportServer(),
         setup_service_factory=lambda: service,
         setup_secrets=FakeSecretsLoader(),
-        setup_wizard_enabled=lambda: resolver.get(_FLAG_NAME),
     )
     state["service"] = service
     state["client"] = TestClient(app, client=_LOOPBACK)
@@ -62,12 +57,12 @@ def _compose_client(state: dict[str, Any], *, flag_on: bool, service: FakeSetupS
 
 @given("the setup wizard is enabled with a ready wizard backend")
 def _wizard_enabled_ready(_wizard_state: dict[str, Any]) -> None:
-    _compose_client(_wizard_state, flag_on=True, service=FakeSetupService())
+    _compose_client(_wizard_state, service=FakeSetupService())
 
 
 @given("the setup wizard is enabled with a wizard backend that rejects provider keys")
 def _wizard_enabled_rejecting(_wizard_state: dict[str, Any]) -> None:
-    _compose_client(_wizard_state, flag_on=True, service=FakeSetupService(validate_ok=False))
+    _compose_client(_wizard_state, service=FakeSetupService(validate_ok=False))
 
 
 @given("the setup wizard is enabled with a wizard backend whose config file cannot be written")
@@ -75,19 +70,8 @@ def _wizard_enabled_read_only_config(_wizard_state: dict[str, Any]) -> None:
     read_only = OSError(30, "Read-only file system", "/etc/kairix/kairix.config.yaml")
     _compose_client(
         _wizard_state,
-        flag_on=True,
         service=FakeSetupService(save_provider_raises=read_only, save_source_raises=read_only),
     )
-
-
-@given("the setup wizard flag is ON")
-def _wizard_flag_on(_wizard_state: dict[str, Any]) -> None:
-    _compose_client(_wizard_state, flag_on=True, service=FakeSetupService())
-
-
-@given("the setup wizard flag is OFF")
-def _wizard_flag_off(_wizard_state: dict[str, Any]) -> None:
-    _compose_client(_wizard_state, flag_on=False, service=FakeSetupService())
 
 
 @when("the operator opens the setup wizard")
@@ -102,11 +86,6 @@ def _welcome_invites(_wizard_state: dict[str, Any]) -> None:
     assert response.status_code == 200, f"expected 200, got {response.status_code}"
     assert "Welcome to kairix" in response.text
     assert "Get started" in response.text
-
-
-@then("the server reports there is no such page")
-def _no_such_page(_wizard_state: dict[str, Any]) -> None:
-    assert _wizard_state["response"].status_code == 404
 
 
 @when("the operator continues to the provider step")
@@ -311,7 +290,7 @@ def _finish_celebrates(_wizard_state: dict[str, Any]) -> None:
 def _wizard_enabled_fresh_store(_wizard_state: dict[str, Any]) -> None:
     # A fresh knowledge store has nothing to brief on yet — the briefing
     # sample must explain that honestly rather than fabricate content.
-    _compose_client(_wizard_state, flag_on=True, service=FakeSetupService(tour_brief_preview=""))
+    _compose_client(_wizard_state, service=FakeSetupService(tour_brief_preview=""))
 
 
 @when("the operator opens the capability tour")

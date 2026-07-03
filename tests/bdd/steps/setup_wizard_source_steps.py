@@ -51,7 +51,6 @@ def _compose_source_client(state: dict[str, Any], service: FakeSetupService) -> 
         FakeMcpTransportServer(),
         setup_service_factory=lambda: service,
         setup_secrets=FakeSecretsLoader(),
-        setup_wizard_enabled=lambda: True,
     )
     state["service"] = service
     state["client"] = TestClient(app, client=_LOOPBACK)
