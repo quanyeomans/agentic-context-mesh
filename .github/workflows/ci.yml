@@ -278,7 +278,9 @@ jobs:
         # transport composer's coverage measures as 0% even though the unit
         # tests exist, and F7 fails the per-file floor.
         run: |
+          pip install --upgrade pip  # PEP 735 --group support (pip >= 25.1)
           pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
+          pip install --group fitness  # tc-fitness engine — moved out of the dev extra (PLA-286) so the published wheel stays PyPI-clean; required by tests/checks + tests/architecture
 
       - name: Type checking -- mypy strict
         # Engineering hub: "mypy -- zero errors". Strict mode from Phase 1.
@@ -449,7 +451,10 @@ jobs:
         # tests/integration/test_mcp_build_server.py — those probes exercise
         # the production build_server() wiring and need the real FastMCP
         # package, not a stub.
-        run: pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
+        run: |
+          pip install --upgrade pip  # PEP 735 --group support (pip >= 25.1)
+          pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
+          pip install --group fitness  # tc-fitness engine — moved out of the dev extra (PLA-286); required by the tests/checks + tests/architecture conftests collected here
 
       - name: Enable systemd --user bus for install-mode tests
         # Plan 1 integration tests (tests/integration/test_cli_init.py +
@@ -571,7 +576,10 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
+        run: |
+          pip install --upgrade pip  # PEP 735 --group support (pip >= 25.1)
+          pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
+          pip install --group fitness  # tc-fitness engine — moved out of the dev extra (PLA-286); required by the tests/checks + tests/architecture conftests collected here
 
       - name: Enable systemd --user bus for install-mode tests
         # Plan 1 install BDD + E2E need a logind session bus to run

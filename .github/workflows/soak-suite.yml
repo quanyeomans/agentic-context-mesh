@@ -78,7 +78,10 @@ jobs:
         # Same extras as Stage 2 + Stage 3 so the import surface matches
         # the per-commit gates exactly. Soak tests don't need extra
         # packages — they just exercise existing production code at scale.
-        run: pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
+        run: |
+          pip install --upgrade pip  # PEP 735 --group support (pip >= 25.1)
+          pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
+          pip install --group fitness  # tc-fitness engine — moved out of the dev extra (PLA-286); required so tests/checks/test_catalogue_runner_soak.py is collected under -m soak
 
       - name: Soak tests (pytest -m soak)
         # F66 / ADR-024 §"Soak tier" — soak tests use injectable fakes
