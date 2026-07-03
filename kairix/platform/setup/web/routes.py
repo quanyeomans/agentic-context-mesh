@@ -1,8 +1,9 @@
 """Web setup wizard — Starlette routes + Jinja2/HTMX screens.
 
 Mounted at ``/setup`` by :func:`kairix.agents.mcp.transport.build_mcp_app`
-when the ``setup_wizard_web`` feature flag is ON. Same container, same
-port as the MCP transport — no second service to deploy.
+(unconditionally — the ``setup_wizard_web`` cutover flag retired,
+PLA-287). Same container, same port as the MCP transport — no second
+service to deploy.
 
 Composition idioms mirror the transport composer:
 

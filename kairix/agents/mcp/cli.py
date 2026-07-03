@@ -227,17 +227,6 @@ def _default_operator_token() -> str | None:
     return SecretsLoader().get("infra", "operator", None, "token")
 
 
-def _default_wizard_enabled() -> bool:
-    """Default reader for the ``setup_wizard_web`` flag (#500).
-
-    Lazy-imported so the flag resolver isn't loaded when the wizard stays
-    OFF (the default). Mirrors transport.py's ``_default_setup_wizard_enabled``.
-    """
-    from kairix.core.features import flag
-
-    return flag("setup_wizard_web")
-
-
 @dataclass
 class McpCliDeps:
     """Injection seam for the MCP CLI so tests can drive it without binding ports.
@@ -278,10 +267,11 @@ class McpCliDeps:
     serve_env: Mapping[str, str] = field(default_factory=lambda: os.environ)
     exit_fn: Callable[[int], None] = field(default_factory=lambda: cast("Callable[[int], None]", sys.exit))
     # #500 — tokened wizard-URL boot print. Production defaults resolve the
-    # operator token + the setup_wizard_web flag through their real seams;
-    # tests inject fakes (F2-clean — no KAIRIX_INFRA_OPERATOR_TOKEN setenv).
+    # operator token through its real seam; tests inject a fake (F2-clean —
+    # no KAIRIX_INFRA_OPERATOR_TOKEN setenv). The wizard is always mounted
+    # (the setup_wizard_web cutover flag retired, PLA-287), so the print is
+    # gated only on an operator token being configured.
     operator_token_fn: Callable[[], str | None] = field(default_factory=lambda: _default_operator_token)
-    wizard_enabled_fn: Callable[[], bool] = field(default_factory=lambda: _default_wizard_enabled)
 
 
 def main(argv: list[str] | None = None, *, deps: McpCliDeps | None = None) -> None:
@@ -411,19 +401,18 @@ def _preflight_or_warn(*, deps: McpCliDeps) -> bool:
 def _maybe_print_wizard_url(*, port: int, deps: McpCliDeps) -> None:
     """Print the one-time tokened wizard URL when the wizard is reachable (#500).
 
-    Only fires when the ``setup_wizard_web`` flag is ON and an operator
-    token is configured — exactly the case where a browser needs the
-    tokened URL to set its grant cookie (stock Docker presents every
-    published-port peer as the bridge IP, never loopback). Loopback /
-    pip-install operators reach the wizard header-free and see no print.
+    The wizard is always mounted (the ``setup_wizard_web`` cutover flag
+    retired, PLA-287), so this fires whenever an operator token is
+    configured — exactly the case where a browser needs the tokened URL to
+    set its grant cookie (stock Docker presents every published-port peer
+    as the bridge IP, never loopback). Loopback / pip-install operators
+    reach the wizard header-free and see no print.
 
     This is the sanctioned onboarding surface for the token (the Jupyter
     precedent): it goes to stderr so ``docker compose logs`` surfaces it,
     and it is the ONLY place the token is emitted — no app-level logger
     ever sees it (F15).
     """
-    if not deps.wizard_enabled_fn():
-        return
     token = deps.operator_token_fn()
     if not token:
         return

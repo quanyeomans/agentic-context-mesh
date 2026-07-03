@@ -3,8 +3,8 @@
 F46-compliant composition: every scenario builds the real ASGI app
 through ``kairix.agents.mcp.transport.build_mcp_app`` with the canonical
 fakes from ``tests/fakes.py`` injected through the public seams
-(``setup_service_factory`` / ``setup_secrets`` / ``setup_wizard_enabled``),
-then drives it with Starlette's TestClient. The "docker bridge" browser is
+(``setup_service_factory`` / ``setup_secrets``), then drives it with
+Starlette's TestClient. The "docker bridge" browser is
 modelled by a non-loopback client address — the unit-level stand-in for the
 bridge gateway IP a stock-Docker peer presents (the real bridge-source-IP
 proof lives in the Linux-only fresh-install-smoke browser stage).
@@ -47,7 +47,6 @@ def _app() -> Any:
         FakeMcpTransportServer(),
         setup_service_factory=lambda: FakeSetupService(),
         setup_secrets=FakeSecretsLoader(values={_OPERATOR_TOKEN_IDENTITY: _FAKE_TOKEN}),
-        setup_wizard_enabled=lambda: True,
     )
 
 

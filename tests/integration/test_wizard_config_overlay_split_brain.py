@@ -202,23 +202,23 @@ def test_feature_flags_in_overlay_are_honoured(tmp_path: Path) -> None:
     """Overlay branch ON: a ``features:`` block in the overlay wins."""
     base, overlay, env = _overlay_pair(tmp_path)
     base.write_text(
-        "provider: fake_provider\nfeatures:\n  setup_wizard_web: false\n",
+        "provider: fake_provider\nfeatures:\n  maintenance_loop: false\n",
         encoding="utf-8",
     )
     overlay.parent.mkdir(parents=True, exist_ok=True)
-    overlay.write_text("features:\n  setup_wizard_web: true\n", encoding="utf-8")
+    overlay.write_text("features:\n  maintenance_loop: true\n", encoding="utf-8")
 
-    assert feature_flag_config_overlay(environ=env) == {"setup_wizard_web": True}
+    assert feature_flag_config_overlay(environ=env) == {"maintenance_loop": True}
 
 
 def test_feature_flags_in_single_file_mode_are_honoured(tmp_path: Path) -> None:
     """Overlay branch OFF: legacy single-file ``features:`` keeps working."""
     config = tmp_path / "kairix.config.yaml"
-    config.write_text("features:\n  setup_wizard_web: true\n", encoding="utf-8")
+    config.write_text("features:\n  maintenance_loop: true\n", encoding="utf-8")
 
     flags = feature_flag_config_overlay(environ={"KAIRIX_CONFIG_PATH": str(config)})
 
-    assert flags == {"setup_wizard_web": True}
+    assert flags == {"maintenance_loop": True}
 
 
 # ---------------------------------------------------------------------------
@@ -354,7 +354,6 @@ def _wizard_client(service: Any) -> Any:
     app = build_mcp_app(
         FakeMcpTransportServer(),
         setup_secrets=FakeSecretsLoader(),
-        setup_wizard_enabled=lambda: True,
         setup_service_factory=lambda: service,
     )
     return TestClient(app, client=("127.0.0.1", 9999))

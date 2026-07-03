@@ -86,20 +86,6 @@ def ensure_composers_loaded() -> None:
     import kairix.agents.mcp._composer_init  # noqa: F401 — side-effect registration
 
 
-def _default_text_mode_flag_reader() -> bool:
-    """Default reader for ``cli_routes_through_warm_mcp`` — defers the import.
-
-    Lazy-imported so that early CLI startup (and ``--json`` invocations
-    which don't need text-mode routing) don't pay the feature-flag
-    resolver import cost. The flag defaults to True at the registry
-    level so this reader returning True is the "no overlay set"
-    behaviour.
-    """
-    from kairix.core.features import flag
-
-    return flag("cli_routes_through_warm_mcp")
-
-
 logger = logging.getLogger(__name__)
 
 # Default detection budget. The CLI must NEVER block startup when MCP
@@ -569,11 +555,6 @@ class DispatcherDeps:
     endpoint_fn: Callable[[], str] = field(default=mcp_endpoint)
     routing_enabled_fn: Callable[[], bool] = field(default=mcp_routing_enabled)
     detection_timeout_s: float = _DETECTION_TIMEOUT_S
-    # ``cli_routes_through_warm_mcp`` flag reader. Production callers
-    # leave the default which resolves through ``kairix.core.features.flag``;
-    # tests pass a lambda that reads ``FakeFeatureFlagResolver``. The flag
-    # gates text-mode routing only — JSON mode is never gated.
-    text_mode_flag_reader: Callable[[], bool] = field(default=_default_text_mode_flag_reader)
 
 
 def _wants_json_output(argv: list[str]) -> bool:
@@ -647,14 +628,13 @@ def try_dispatch_via_mcp(
     composer = get_composer(subcommand)
 
     if not wants_json:
-        # Text mode: gate on composer availability + the flag. No
-        # composer registered → fall through (gives subcommands like
+        # Text mode: gate on composer availability. No composer
+        # registered → fall through (gives subcommands like
         # ``features``/``worker`` without composers the in-process path
-        # until their composers land). Flag OFF → operator chose the
-        # legacy fall-through; honour it.
+        # until their composers land). Warm-MCP text routing is now the
+        # only behaviour — the ``cli_routes_through_warm_mcp`` cutover
+        # flag retired post-validation (PLA-287).
         if composer is None:
-            return None
-        if not effective_deps.text_mode_flag_reader():
             return None
 
     client = effective_deps.client or HttpMcpDispatchClient()

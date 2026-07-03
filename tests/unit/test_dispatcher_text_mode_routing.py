@@ -10,12 +10,13 @@ through the new composer-registry gate:
   (falls through to in-process). This is the registry-as-gate property.
 * With ``--json`` present → routes regardless of composer registration
   (JSON mode never needed the composer).
-* With the ``cli_routes_through_warm_mcp`` flag OFF → text-mode
-  invocations fall through even when a composer is registered.
 
-F1/F2-clean: uses ``FakeMcpDispatchClient`` from ``tests/fakes.py`` and
-``FakeFeatureFlagResolver`` for flag state — no monkeypatch on kairix
-internals.
+Warm-MCP text routing is now the only behaviour — the
+``cli_routes_through_warm_mcp`` cutover flag retired post-validation
+(PLA-287), so there is no OFF branch to gate.
+
+F1/F2-clean: uses ``FakeMcpDispatchClient`` from ``tests/fakes.py`` — no
+monkeypatch on kairix internals.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ from kairix.agents.mcp.text_mode_composers import (
     TextModeComposer,
     register_composer,
 )
-from tests.fakes import FakeFeatureFlagResolver, FakeMcpDispatchClient
+from tests.fakes import FakeMcpDispatchClient
 
 pytestmark = pytest.mark.unit
 
@@ -80,18 +81,16 @@ def _register_text_composer(subcommand: str, *, rendered: str) -> None:
     )
 
 
-def _flag_on_deps(client: FakeMcpDispatchClient) -> DispatcherDeps:
-    resolver = FakeFeatureFlagResolver().with_flag("cli_routes_through_warm_mcp", True)
+def _routing_deps(client: FakeMcpDispatchClient) -> DispatcherDeps:
     return DispatcherDeps(
         client=client,
         endpoint_fn=lambda: "http://localhost:8080/mcp",
         routing_enabled_fn=lambda: True,
-        text_mode_flag_reader=lambda: resolver.get("cli_routes_through_warm_mcp"),
     )
 
 
 # ---------------------------------------------------------------------------
-# 1. Composer present + flag ON + responsive → text mode routes
+# 1. Composer present + responsive → text mode routes
 # ---------------------------------------------------------------------------
 
 
@@ -99,12 +98,12 @@ def _flag_on_deps(client: FakeMcpDispatchClient) -> DispatcherDeps:
 # dispatcher so text mode always fell through; this test failed
 # because captured stdout was empty and exit_code was None. Restored
 # the registry-then-route branch.
-def test_text_mode_routes_when_composer_registered_and_flag_on(capsys: pytest.CaptureFixture[str]) -> None:
-    """With composer + flag ON + responsive, text mode renders via warm MCP."""
+def test_text_mode_routes_when_composer_registered(capsys: pytest.CaptureFixture[str]) -> None:
+    """With composer + responsive, text mode renders via warm MCP."""
     subcommand = "search"  # the canonical composer-equipped subcommand
     _register_text_composer(subcommand, rendered="warm-mcp-rendered")
     client = FakeMcpDispatchClient(responsive=True, envelope=_SENTINEL_ENVELOPE)
-    deps = _flag_on_deps(client)
+    deps = _routing_deps(client)
 
     exit_code = try_dispatch_via_mcp(subcommand, ["needle"], deps=deps)
 
@@ -117,7 +116,7 @@ def test_text_mode_routes_when_composer_registered_and_flag_on(capsys: pytest.Ca
 
 
 # ---------------------------------------------------------------------------
-# 2. No composer + flag ON + text mode → falls through to in-process
+# 2. No composer + text mode → falls through to in-process
 # ---------------------------------------------------------------------------
 
 
@@ -126,14 +125,14 @@ def test_text_mode_routes_when_composer_registered_and_flag_on(capsys: pytest.Ca
 # client.calls was non-empty and exit_code was 0. Restored the
 # "composer is None → return None" branch.
 def test_text_mode_falls_through_when_no_composer_registered() -> None:
-    """A subcommand without a composer returns None even when flag is ON."""
+    """A subcommand without a composer returns None (registry-as-gate)."""
     # Use a never-registered subcommand by clearing it via the public surface.
     from kairix.agents.mcp.text_mode_composers import unregister_composer
 
     unregister_composer("worker")
 
     client = FakeMcpDispatchClient(responsive=True, envelope={"x": 1})
-    deps = _flag_on_deps(client)
+    deps = _routing_deps(client)
 
     exit_code = try_dispatch_via_mcp("worker", ["status"], deps=deps)
 
@@ -161,7 +160,7 @@ def test_json_mode_routes_without_composer(capsys: pytest.CaptureFixture[str]) -
     unregister_composer("worker")
 
     client = FakeMcpDispatchClient(responsive=True, envelope={"status": "alive"})
-    deps = _flag_on_deps(client)
+    deps = _routing_deps(client)
 
     exit_code = try_dispatch_via_mcp("worker", ["status", "--json"], deps=deps)
 
@@ -174,62 +173,34 @@ def test_json_mode_routes_without_composer(capsys: pytest.CaptureFixture[str]) -
 
 
 # ---------------------------------------------------------------------------
-# 4. Flag OFF disables text-mode routing
+# 4. JSON mode routes for a composer-equipped subcommand (the composer gate
+#    applies to text mode only)
 # ---------------------------------------------------------------------------
 
 
-# Sabotage-proof (executed): removed the flag check from the
-# dispatcher; this test failed because client.calls was non-empty
-# despite the OFF flag. Restored flag short-circuit.
-def test_flag_off_falls_through_for_text_mode() -> None:
-    """When the cli_routes_through_warm_mcp flag is OFF, text mode falls through."""
-    subcommand = "search"
-    _register_text_composer(subcommand, rendered="should-not-appear")
-    client = FakeMcpDispatchClient(responsive=True, envelope=_SENTINEL_ENVELOPE)
-    # Flag explicitly OFF
-    resolver = FakeFeatureFlagResolver().with_flag("cli_routes_through_warm_mcp", False)
-    deps = DispatcherDeps(
-        client=client,
-        endpoint_fn=lambda: "http://localhost:8080/mcp",
-        routing_enabled_fn=lambda: True,
-        text_mode_flag_reader=lambda: resolver.get("cli_routes_through_warm_mcp"),
-    )
+# Sabotage-proof (executed): extended the composer gate to JSON mode
+# too; this test failed because JSON mode stopped routing for the
+# composer-equipped ``search``. Restored "JSON mode bypasses the
+# text-mode composer gate" branch.
+def test_json_mode_routes_for_composer_equipped_subcommand(capsys: pytest.CaptureFixture[str]) -> None:
+    """JSON mode routes even for a subcommand that HAS a text composer.
 
-    exit_code = try_dispatch_via_mcp(subcommand, ["needle"], deps=deps)
-
-    assert exit_code is None, "text mode with flag OFF must fall through"
-    assert client.calls == [], "call_tool must NOT run when text-mode flag is OFF"
-
-
-# ---------------------------------------------------------------------------
-# 5. Flag OFF does NOT disable JSON-mode routing (default-safe property)
-# ---------------------------------------------------------------------------
-
-
-# Sabotage-proof (executed): made the flag gate apply to JSON mode
-# too; this test failed because JSON mode stopped routing. Restored
-# "JSON mode always routes regardless of text-mode flag" branch.
-def test_flag_off_still_routes_json_mode(capsys: pytest.CaptureFixture[str]) -> None:
-    """JSON-mode routing was always enabled — text-mode flag does not gate it."""
+    The composer-availability gate only applies to text mode; ``--json``
+    always routes when MCP is responsive.
+    """
     subcommand = "search"
     client = FakeMcpDispatchClient(responsive=True, envelope={"q": "x"})
-    resolver = FakeFeatureFlagResolver().with_flag("cli_routes_through_warm_mcp", False)
-    deps = DispatcherDeps(
-        client=client,
-        endpoint_fn=lambda: "http://localhost:8080/mcp",
-        routing_enabled_fn=lambda: True,
-        text_mode_flag_reader=lambda: resolver.get("cli_routes_through_warm_mcp"),
-    )
+    deps = _routing_deps(client)
 
     exit_code = try_dispatch_via_mcp(subcommand, ["needle", "--json"], deps=deps)
 
-    assert exit_code == 0, "JSON mode routes regardless of text-mode flag"
+    assert exit_code == 0, "JSON mode routes for a composer-equipped subcommand"
     captured = capsys.readouterr()
     assert json.loads(captured.out) == {"q": "x"}
 
 
 # ---------------------------------------------------------------------------
-# 6. Composer + flag ON + NOT responsive → falls through (probe failure)
+# 6. Composer + NOT responsive → falls through (probe failure)
 # ---------------------------------------------------------------------------
 
 
@@ -237,11 +208,11 @@ def test_flag_off_still_routes_json_mode(capsys: pytest.CaptureFixture[str]) -> 
 # was checked AFTER call_tool; this test failed because call_tool ran
 # despite the probe returning False. Restored probe-first order.
 def test_text_mode_falls_through_when_mcp_not_responsive() -> None:
-    """A non-responsive MCP probe falls through even with composer + flag ON."""
+    """A non-responsive MCP probe falls through even with a composer registered."""
     subcommand = "search"
     _register_text_composer(subcommand, rendered="should-not-render")
     client = FakeMcpDispatchClient(responsive=False)
-    deps = _flag_on_deps(client)
+    deps = _routing_deps(client)
 
     exit_code = try_dispatch_via_mcp(subcommand, ["needle"], deps=deps)
 
@@ -265,7 +236,7 @@ def test_text_mode_renderer_sees_envelope_payload(capsys: pytest.CaptureFixture[
     _register_text_composer(subcommand, rendered="payload-receiver")
     payload = {"query": "needle", "results": [], "diagnostic": "ok"}
     client = FakeMcpDispatchClient(responsive=True, envelope=payload)
-    deps = _flag_on_deps(client)
+    deps = _routing_deps(client)
 
     try_dispatch_via_mcp(subcommand, ["needle"], deps=deps)
 
@@ -290,7 +261,7 @@ def test_text_mode_renderer_receives_argv(capsys: pytest.CaptureFixture[str]) ->
     _register_text_composer(subcommand, rendered="argv-receiver")
     payload = {"original_query": "agent-alpha joined", "results": []}
     client = FakeMcpDispatchClient(responsive=True, envelope=payload)
-    deps = _flag_on_deps(client)
+    deps = _routing_deps(client)
 
     try_dispatch_via_mcp(subcommand, ["agent-alpha joined", "--limit", "5"], deps=deps)
 
@@ -314,7 +285,7 @@ def test_text_mode_is_error_returns_exit_code_one(capsys: pytest.CaptureFixture[
     _register_text_composer(subcommand, rendered="err-render")
     cold_envelope = {"error_code": "KAIRIX_COLD_START"}
     client = FakeMcpDispatchClient(responsive=True, envelope=cold_envelope, is_error=True)
-    deps = _flag_on_deps(client)
+    deps = _routing_deps(client)
 
     exit_code = try_dispatch_via_mcp(subcommand, ["topic"], deps=deps)
 

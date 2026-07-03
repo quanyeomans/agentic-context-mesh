@@ -168,15 +168,6 @@ retrieval:
 #   maintenance_loop: true                # background orphan-vector cleanup
 #   pipeline_status_emit: true            # per-item per-stage status rows
 #   agent_query_queue: true               # queue slow searches, carry results forward
-#
-#   # ── CLI routing (default-ON; set false to force the in-process path)
-#   cli_routes_through_warm_mcp: false
-#
-#   # ── Onboarding (default-ON; set false to NOT serve the /setup wizard).
-#   # The in-box web setup wizard serves at /setup out of the box. Same-machine
-#   # access is unauthenticated by design; remote access requires the operator
-#   # token. Set false to keep /setup unmounted (requests there 404).
-#   setup_wizard_web: false
 
 # ──────────────────────────────────────────────────────────────────────────
 # topology_v2 — connectors / collections / scope profiles / skills

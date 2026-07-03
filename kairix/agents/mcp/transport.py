@@ -268,20 +268,6 @@ class ColdStartMiddleware:
         await response(scope, receive, send)
 
 
-def _default_setup_wizard_enabled() -> bool:
-    """Default reader for the ``setup_wizard_web`` feature flag.
-
-    The flag defaults ON (cutover) — the wizard is the out-of-the-box
-    onboarding surface — so an env-unset / config-unset install resolves
-    to True here and mounts ``/setup``. Lazy-imported so MCP transport
-    composition only pays the feature-flag resolver import cost when the
-    mount is actually being decided.
-    """
-    from kairix.core.features import flag
-
-    return flag("setup_wizard_web")
-
-
 def _default_setup_service_factory() -> SetupService:
     """Production default for the wizard's service seam.
 
@@ -323,7 +309,6 @@ def build_mcp_app(
     capability_probe: Callable[[], dict[str, Any]] | None = None,
     setup_service_factory: Callable[[], SetupService] = _default_setup_service_factory,
     setup_secrets: SecretsResolver | None = None,
-    setup_wizard_enabled: Callable[[], bool] = _default_setup_wizard_enabled,
 ) -> Starlette:
     """Compose the kairix MCP ASGI app.
 
@@ -337,10 +322,12 @@ def build_mcp_app(
           ``capability_probe()`` and reports per-capability detail.
           Resolves the #167 gap where ``/healthz`` returned
           ``ready=true`` while vector search was broken.
-    - When the ``setup_wizard_web`` feature flag is ON, also mounts the
-      in-box web setup wizard at ``/setup`` (same container, same
-      port). When OFF — the default — no ``/setup`` routes exist and
-      requests there 404 exactly as before this flag landed.
+    - Always mounts the in-box web setup wizard at ``/setup`` (same
+      container, same port). The ``setup_wizard_web`` cutover flag
+      retired post-validation (PLA-287) — the wizard is the
+      out-of-the-box onboarding surface. Non-loopback callers still
+      need the ``X-Kairix-Operator-Token`` header (that guard lives in
+      the mount, independent of any flag).
 
     The composer is the only place in the codebase that knows about
     FastMCP's transport apps. CLI entry points construct via this function;
@@ -367,10 +354,6 @@ def build_mcp_app(
             the lazy ``kairix.platform.setup.service.build_setup_service``.
         setup_secrets: Optional secrets resolver for the wizard's
             operator-token guard; defaults to the production loader.
-        setup_wizard_enabled: Reader for the wizard flag — tests pass
-            ``lambda: resolver.get("setup_wizard_web")`` with a
-            ``FakeFeatureFlagResolver``; the production default reads
-            the ``setup_wizard_web`` registry flag.
 
     Returns:
         A composed :class:`starlette.applications.Starlette` instance with
@@ -389,20 +372,17 @@ def build_mcp_app(
     routes.append(_make_healthz_route(healthz_path, readiness_check))
     routes.append(_make_ready_route(healthz_ready_path, capability_probe))
 
-    # Flag-gated setup wizard (F52 — the default reader resolves the
-    # registry's ``setup_wizard_web`` entry). OFF means the mount is
-    # never appended: ``/setup/*`` 404s from Starlette's default, so
-    # merging the wizard is structurally a no-op for operators.
-    wizard_on = bool(setup_wizard_enabled())
-    if wizard_on:
-        from kairix.platform.setup.web.routes import build_setup_wizard_mount
+    # Setup wizard is mounted unconditionally — the ``setup_wizard_web``
+    # cutover flag retired post-validation (PLA-287). Non-loopback callers
+    # still need the operator-token header (that guard is inside the mount).
+    from kairix.platform.setup.web.routes import build_setup_wizard_mount
 
-        routes.append(
-            build_setup_wizard_mount(
-                service_factory=setup_service_factory,
-                secrets=setup_secrets,
-            )
+    routes.append(
+        build_setup_wizard_mount(
+            service_factory=setup_service_factory,
+            secrets=setup_secrets,
         )
+    )
 
     # Preserve the streamable app's lifespan so FastMCP's session manager
     # starts/stops correctly when the composed app is served.
@@ -415,10 +395,10 @@ def build_mcp_app(
     # Cold-start gate (KFEAT-020): when a readiness check is wired, every
     # non-health request returns HTTP 503 + Retry-After until ready, so MCP
     # clients see a retryable status instead of fetch_failed at the
-    # transport layer. The setup wizard (when mounted) bypasses the gate —
-    # it exists for first-boot operators who arrive before warm completes.
+    # transport layer. The setup wizard bypasses the gate — it exists for
+    # first-boot operators who arrive before warm completes.
     if readiness_check is not None:
-        bypass = _HEALTH_PATH_PREFIXES + ((_SETUP_PATH_PREFIX,) if wizard_on else ())
+        bypass = (*_HEALTH_PATH_PREFIXES, _SETUP_PATH_PREFIX)
         app.add_middleware(
             ColdStartMiddleware,
             readiness_check=readiness_check,

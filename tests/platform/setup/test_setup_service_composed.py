@@ -99,7 +99,6 @@ def test_real_service_drives_the_full_wizard_journey(tmp_path: Path) -> None:
         FakeMcpTransportServer(),
         setup_service_factory=lambda: service,
         setup_secrets=FakeSecretsLoader(),
-        setup_wizard_enabled=lambda: True,
     )
     client = TestClient(app, client=_LOOPBACK)
 
