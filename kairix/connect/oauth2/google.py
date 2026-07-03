@@ -34,9 +34,9 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from kairix.connect.oauth2.base import AuthorizationCodeFlow
 from kairix.connect.protocols import (
     BrowserLauncher,
-    CallbackListener,
     CapturedTokens,
     ClientCredentials,
 )
@@ -129,7 +129,7 @@ def _parse_client_secret_file(path: Path) -> _ClientSecretBlob:
     return _ClientSecretBlob(client_id=client_id, client_secret=client_secret)
 
 
-class GoogleOAuth2Flow:
+class GoogleOAuth2Flow(AuthorizationCodeFlow):
     """Run the authorize-and-exchange flow for one Google service area.
 
     Args:
@@ -179,21 +179,12 @@ class GoogleOAuth2Flow:
         blob = _parse_client_secret_file(self._client_secret_path)
         return ClientCredentials(client_id=blob.client_id, client_secret=blob.client_secret)
 
-    def authorize(self, *, listener: CallbackListener) -> CapturedTokens:
-        """Run the consent dance + token exchange against ``listener``.
-
-        The default token exchanger uses ``google-auth-oauthlib``'s
-        :class:`InstalledAppFlow.run_local_server` minus the server
-        component (we own the listener) — specifically the
-        ``fetch_token(code=...)`` call. Tests inject a recording
-        exchanger to avoid pulling the Google library in unit tests.
-        """
-        client = self.discover_client_credentials()
-        redirect_uri = listener.redirect_uri
-        authorize_url = self._build_authorize_url(client, redirect_uri)
-        self._browser.open(authorize_url)
-        callback = listener.wait_for_callback()
-        return self._exchange_code(client, callback.code, redirect_uri)
+    # ``authorize`` is inherited from :class:`AuthorizationCodeFlow` — the
+    # shared dance opens the browser, blocks on ``wait_for_callback`` with
+    # the operator-supplied ``timeout_s``, and exchanges the code. The
+    # default token exchanger uses ``google-auth-oauthlib``'s
+    # ``fetch_token(code=...)`` (via :meth:`_exchange_code`); tests inject
+    # a recording exchanger to avoid pulling the Google library.
 
     def _build_authorize_url(self, client: ClientCredentials, redirect_uri: str) -> str:
         if self._authorize_url_builder is not None:

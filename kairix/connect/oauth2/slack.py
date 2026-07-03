@@ -45,9 +45,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from kairix.connect.oauth2.base import AuthorizationCodeFlow
 from kairix.connect.protocols import (
     BrowserLauncher,
-    CallbackListener,
     CapturedTokens,
     ClientCredentials,
 )
@@ -93,7 +93,7 @@ _RUN_HINT = "run: kairix connect slack --workspace <name> --client-id <id> --cli
 _REDIRECT_URI_KEY = "redirect_uri"
 
 
-class SlackOAuth2Flow:
+class SlackOAuth2Flow(AuthorizationCodeFlow):
     """Run the Slack OAuth v2 authorize-and-exchange flow for one workspace.
 
     Args:
@@ -178,24 +178,11 @@ class SlackOAuth2Flow:
         """
         return ClientCredentials(client_id=self._client_id, client_secret=self._client_secret)
 
-    def authorize(self, *, listener: CallbackListener) -> CapturedTokens:
-        """Run the consent dance + token exchange against ``listener``.
-
-        Steps:
-          1. Build the authorize URL with the listener's ``redirect_uri``.
-          2. Open the operator's browser to the consent screen.
-          3. Block on ``listener.wait_for_callback`` for the code.
-          4. Exchange the code for tokens via Slack's
-             ``oauth.v2.access`` endpoint.
-          5. Return the typed :class:`CapturedTokens` — ``bot_token``
-             populated, ``refresh_token=""`` (documented partial state).
-        """
-        client = self.discover_client_credentials()
-        redirect_uri = listener.redirect_uri
-        authorize_url = self._build_authorize_url(client, redirect_uri)
-        self._browser.open(authorize_url)
-        callback = listener.wait_for_callback()
-        return self._exchange_code(client, callback.code, redirect_uri)
+    # ``authorize`` is inherited from :class:`AuthorizationCodeFlow` — the
+    # shared dance opens the browser, blocks on ``wait_for_callback`` with
+    # the operator-supplied ``timeout_s``, and delegates the exchange to
+    # :meth:`_exchange_code` (Slack's ``oauth.v2.access`` endpoint, which
+    # also records ``team_id`` / ``team_name`` for the success summary).
 
     def _build_authorize_url(self, client: ClientCredentials, redirect_uri: str) -> str:
         if self._authorize_url_builder is not None:

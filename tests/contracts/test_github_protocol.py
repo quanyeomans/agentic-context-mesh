@@ -209,9 +209,6 @@ def test_github_connector_hierarchy_parent_before_child() -> None:
     check. Restoring the canonical org-first / repos-second / dirs-third
     order returns the test to green.
     """
-    from tests.fakes import FakeFeatureFlagResolver
-
-    resolver = FakeFeatureFlagResolver().with_flag("topology_v2_github", True)
     connector = GitHubConnector(
         client=_ScriptedClient(
             [
@@ -229,12 +226,11 @@ def test_github_connector_hierarchy_parent_before_child() -> None:
                 },
             ]
         ),  # type: ignore[arg-type]  # F3 rationale: local stub mirrors GitHubApiClient shape but isn't typed as the Protocol — boundary-only suppression for the test seam
-        flag_reader=resolver.get,
     )
     assert isinstance(connector, HierarchyConnector), "GitHubConnector must satisfy HierarchyConnector Protocol"
     emitted: set[str] = set()
     nodes: list[HierarchyNode] = list(connector.load_hierarchy(cc_pair_id=42))
-    assert nodes, "load_hierarchy must emit at least one node when flag is ON"
+    assert nodes, "load_hierarchy must emit at least one node"
     for node in nodes:
         if node.raw_parent_id is not None:
             assert node.raw_parent_id in emitted, (
