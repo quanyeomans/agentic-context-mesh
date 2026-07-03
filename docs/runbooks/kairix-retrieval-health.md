@@ -84,7 +84,7 @@ Interim sanity check while waiting for that runbook to ship:
 
 ```bash
 # Confirm the secrets file exists and has both required keys.
-grep -E '^(KAIRIX_LLM_API_KEY|KAIRIX_LLM_ENDPOINT)=' /run/secrets/kairix.env
+grep -E '^(KAIRIX_PROVIDER_LLM_API_KEY|KAIRIX_PROVIDER_LLM_ENDPOINT)=' /run/secrets/kairix.env
 # Expected: two lines, one per key, non-empty values.
 ```
 
@@ -103,7 +103,7 @@ Three sub-causes, in order of likelihood:
 
    - HTTP 401 → rotate via `kairix-secrets-rotation.md`.
    - HTTP 429 → reduce `--batch-size` (default 250) or slow the embed schedule.
-   - Connection error → check network reach from the kairix host to `KAIRIX_LLM_ENDPOINT`.
+   - Connection error → check network reach from the kairix host to `KAIRIX_PROVIDER_LLM_ENDPOINT`.
 
 2. **Vectors were never embedded.** No chunks in `content_vectors`. Run:
 
@@ -473,4 +473,4 @@ Tag the issue with whichever dogfood agent reported the symptom — that's the p
 - [`runbook-benchmark-regression.md`](../operations/runbooks/runbook-benchmark-regression.md) — NDCG dropped after a config or index change.
 - [`how-to-debug-search-ranking.md`](../operations/runbooks/how-to-debug-search-ranking.md) — specific queries score poorly; per-intent dispatch tuning.
 - [`how-to-rebuild-entity-graph.md`](../operations/runbooks/how-to-rebuild-entity-graph.md) — Neo4j entity graph repopulation procedure.
-- `kairix-secrets-rotation.md` — the next runbook the operator owes; covers `KAIRIX_LLM_API_KEY` / `KAIRIX_LLM_ENDPOINT` rotation and the kairix-fetch-secrets service. Will live in this same directory.
+- `kairix-secrets-rotation.md` — the next runbook the operator owes; covers `KAIRIX_PROVIDER_LLM_API_KEY` / `KAIRIX_PROVIDER_LLM_ENDPOINT` rotation and the kairix-fetch-secrets service. Will live in this same directory.

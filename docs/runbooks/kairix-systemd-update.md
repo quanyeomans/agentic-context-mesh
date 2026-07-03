@@ -115,7 +115,7 @@ sudo systemctl status kairix-fetch-secrets.service --no-pager
 
 # 2. Confirm the rendered secrets file exists and has both required keys
 #    BEFORE you restart the stack.
-sudo grep -E '^(KAIRIX_PROVIDER_LLM_API_KEY|KAIRIX_LLM_ENDPOINT)=' /run/secrets/kairix.env
+sudo grep -E '^(KAIRIX_PROVIDER_LLM_API_KEY|KAIRIX_PROVIDER_LLM_ENDPOINT)=' /run/secrets/kairix.env
 # Expected: two lines, one per key, non-empty values.
 
 # 3. kairix.service second — its `docker compose up -d` recreates the
@@ -208,7 +208,7 @@ sudo systemctl restart kairix.service
 sudo systemctl restart kairix-fetch-secrets.service
 
 # Confirm both required keys landed.
-sudo grep -E '^(KAIRIX_PROVIDER_LLM_API_KEY|KAIRIX_LLM_ENDPOINT)=' /run/secrets/kairix.env
+sudo grep -E '^(KAIRIX_PROVIDER_LLM_API_KEY|KAIRIX_PROVIDER_LLM_ENDPOINT)=' /run/secrets/kairix.env
 # Expected: two non-empty lines.
 
 # Restart the stack so the container picks up the fresh environment.
@@ -277,7 +277,7 @@ docker compose pull kairix
 #    `kairix.service`'s `docker compose up -d` recreates the container from the
 #    rolled-back image.
 sudo systemctl restart kairix-fetch-secrets.service
-sudo grep -E '^(KAIRIX_PROVIDER_LLM_API_KEY|KAIRIX_LLM_ENDPOINT)=' /run/secrets/kairix.env
+sudo grep -E '^(KAIRIX_PROVIDER_LLM_API_KEY|KAIRIX_PROVIDER_LLM_ENDPOINT)=' /run/secrets/kairix.env
 sudo systemctl restart kairix.service
 
 # Confirm the running container matches the prior version.
@@ -364,4 +364,4 @@ If rollback restores the image but onboard check still cannot return all checks 
 - [`runbook-benchmark-regression.md`](../operations/runbooks/runbook-benchmark-regression.md) — bisect workflow when §3 step 6 or §5 step 6 shows a regression.
 - [`scripts/deploy/apply-alpha.sh`](../../scripts/deploy/apply-alpha.sh) — the canonical box-side deploy script CI runs: pull → recreate → onboard `fully_passed: true` gate → reflib regression gate → auto-rollback (exit 11 = manual rollback needed, 12 = rollback failed).
 - [kairix#243](https://github.com/three-cubes/kairix/issues/243) — SRE worker design: collapses `kairix-fetch-secrets.service` into a managed step inside `kairix.service`, eliminating the disabled-after-reboot failure mode in §4.
-- `kairix-secrets-rotation.md` — the next runbook the operator owes; covers `KAIRIX_PROVIDER_LLM_API_KEY` / `KAIRIX_LLM_ENDPOINT` rotation without an image change. Will live in this same directory.
+- `kairix-secrets-rotation.md` — the next runbook the operator owes; covers `KAIRIX_PROVIDER_LLM_API_KEY` / `KAIRIX_PROVIDER_LLM_ENDPOINT` rotation without an image change. Will live in this same directory.

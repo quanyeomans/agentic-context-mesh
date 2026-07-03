@@ -124,8 +124,8 @@ Every kairix tool response includes a `health` envelope:
   "failures": [
     {
       "check": "secrets_loaded",
-      "detail": "LLM credentials not found in environment or secrets file: KAIRIX_PROVIDER_LLM_API_KEY, KAIRIX_LLM_ENDPOINT",
-      "remediation": "Run `sudo systemctl enable --now kairix-fetch-secrets.service` on the host; if that fails, confirm `/run/secrets/kairix.env` exists and contains `KAIRIX_PROVIDER_LLM_API_KEY=...` and `KAIRIX_LLM_ENDPOINT=...`."
+      "detail": "LLM credentials not found in environment or secrets file: KAIRIX_PROVIDER_LLM_API_KEY, KAIRIX_PROVIDER_LLM_ENDPOINT",
+      "remediation": "Run `sudo systemctl enable --now kairix-fetch-secrets.service` on the host; if that fails, confirm `/run/secrets/kairix.env` exists and contains `KAIRIX_PROVIDER_LLM_API_KEY=...` and `KAIRIX_PROVIDER_LLM_ENDPOINT=...`."
     }
   ]
 }
