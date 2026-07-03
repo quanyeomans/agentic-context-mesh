@@ -229,6 +229,15 @@ Phase gate rule: Phase N+1 does not start until Phase N benchmark confirms gate 
 
 Re-tiering caveat (see §3.2): a per-function `@pytest.mark.soak` STACKS on a module-level `pytestmark = pytest.mark.unit` rather than replacing it, so the decorated test still runs on the per-commit path. Move it into a dedicated soak module to actually re-tier it.
 
+### 3.8 Assertion strength — no assertions that pass either way
+
+A test that passes on its first run, right after you wrote the code it covers, is suspect: if it would *also* pass against broken code, it documents the implementation rather than verifying it. Two shapes produce this:
+
+- **Conditional assertions** — `results = search(...); assert isinstance(results, list); if results: assert results[0].path == "…"`. If the fixture is half-built (e.g. `documents` seeded but `documents_fts` never rebuilt) `search` returns `[]`, the `if` is skipped, and the test passes while testing nothing — the guard collapses the test to a type check.
+- **Disjunctive assertions** — `assert any(c.path == "X" for c in cands) or all(isinstance(c, Pooled) for c in cands)`. The `or` lets a structural fallback that always holds satisfy the assertion, so the behavioural branch never has to.
+
+Rules: every assertion names a **specific outcome** ("the list contains `/eng/docker-deployment-guide.md`", not "returns a list"); no `if <result>:` guard around an assertion unless the guard *is* the assertion; no `or` between a behavioural check and a structural fallback. The mechanical proof is the sabotage check (§3.7) — if breaking the production path, or skipping a fixture step, leaves the test green, the assertion is too weak: tighten or delete it.
+
 ---
 
 ## 4. Security Standards
