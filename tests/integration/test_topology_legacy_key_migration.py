@@ -41,6 +41,17 @@ _LEGACY_SECTION: dict[str, Any] = {
 }
 
 
+# A base that ships the canonical ``topology:`` key (the post-PLA-287 image
+# default) with its own placeholder source — the shape an operator upgrades
+# INTO while their overlay still carries the legacy ``topology_v2:`` key.
+_BASE_CANONICAL_SECTION: dict[str, Any] = {
+    "connectors": [{"id": "img-default", "kind": "slack", "name": "image-default"}],
+    "cc_pairs": [
+        {"id": "img-pair", "connector": "img-default", "credential": None, "name": "image-default-pair"},
+    ],
+}
+
+
 def _overlay_env(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     """A shipped-compose-shaped (overlay_path, env) pair with a read-only base."""
     base = tmp_path / "etc" / "kairix.config.yaml"
@@ -68,17 +79,18 @@ def _applied_cc_pair_names(db_path: Path) -> list[str]:
 def test_legacy_config_resolves_through_the_layered_reader(tmp_path: Path) -> None:
     """A legacy-keyed operator config parses to the same topology tree.
 
-    The on-disk file keeps the old key; the layered reader hands it to the
-    parser unchanged; the parser normalizes it in memory. Remove the compat
-    branch and the parser reads ``topology`` (absent) → an empty config →
-    the source is orphaned and this fails.
+    The on-disk file keeps the old key; the layered reader aliases it to the
+    canonical key IN MEMORY (never rewriting the file); downstream reads the
+    canonical block. Remove the compat branch and the reader/parser reads
+    ``topology`` (absent) → an empty config → the source is orphaned and this fails.
     """
     overlay, env = _overlay_env(tmp_path)
     overlay.write_text(yaml.safe_dump({LEGACY_TOPOLOGY_CONFIG_KEY: _LEGACY_SECTION}), encoding="utf-8")
 
     merged = load_merged_mapping(env=env)
-    # The reader does NOT rewrite the operator's file — the legacy key survives on disk.
-    assert LEGACY_TOPOLOGY_CONFIG_KEY in merged
+    # The reader does NOT rewrite the operator's file — the legacy key survives ON DISK
+    # (it is aliased to the canonical key only in the returned in-memory mapping).
+    assert LEGACY_TOPOLOGY_CONFIG_KEY in yaml.safe_load(overlay.read_text())
 
     parsed = parse_topology(merged)
     assert [c.kind for c in parsed.connectors] == ["obsidian"]
@@ -126,3 +138,41 @@ def test_wizard_migrates_legacy_key_and_writes_the_canonical_key(tmp_path: Path)
     parsed = parse_topology(load_merged_mapping(env=env))
     # The legacy Obsidian source survives AND the new Slack source is added.
     assert {c.kind for c in parsed.connectors} == {"obsidian", "slack"}
+
+
+def test_upgrade_base_canonical_does_not_shadow_operator_legacy_overlay(tmp_path: Path) -> None:
+    """Upgrade path: a fresh base shipping ``topology:`` must not orphan the
+    operator's legacy ``topology_v2:`` overlay sources.
+
+    The real Customer-Zero upgrade shape: the new image base ships the
+    canonical ``topology:`` key (the example was renamed in PLA-287) while the
+    operator's persisted OVERLAY still carries the legacy ``topology_v2:`` key.
+    Merging the layers raw leaves BOTH keys in the result, and
+    ``normalize_topology_key``'s "canonical wins" rule then drops the operator's
+    overlay block on read — every configured source silently orphaned at runtime
+    with zero operator action. The layered reader now aliases the legacy key
+    per-layer BEFORE the merge, so the operator's overlay overrides the base
+    default (normal overlay layering) instead of being shadowed by it.
+
+    Sabotage-proof: revert the per-layer ``normalize_topology_key`` in
+    ``load_merged_mapping`` and the operator's ``obsidian-main`` source vanishes
+    (only the base ``image-default`` slack source survives) — this test fails.
+    """
+    base = tmp_path / "etc" / "kairix.config.yaml"
+    base.parent.mkdir(parents=True, exist_ok=True)
+    # Post-PLA-287 image base ships the canonical topology: key.
+    base.write_text(
+        yaml.safe_dump({"provider": "fake_provider", "topology": _BASE_CANONICAL_SECTION}),
+        encoding="utf-8",
+    )
+    overlay = tmp_path / "data" / "kairix.config.local.yaml"
+    overlay.parent.mkdir(parents=True, exist_ok=True)
+    # Operator's persisted config still on the legacy key (pre-rename wizard writes).
+    overlay.write_text(yaml.safe_dump({LEGACY_TOPOLOGY_CONFIG_KEY: _LEGACY_SECTION}), encoding="utf-8")
+    env = {"KAIRIX_CONFIG_BASE_PATH": str(base), "KAIRIX_CONFIG_OVERLAY_PATH": str(overlay)}
+
+    parsed = parse_topology(load_merged_mapping(env=env))
+    # The operator's overlay (legacy key) overrides the base default — their real
+    # source survives; it is NOT shadowed by the base-shipped topology block.
+    assert [c.kind for c in parsed.connectors] == ["obsidian"]
+    assert [p.name for p in parsed.cc_pairs] == ["obsidian-main-pair"]
