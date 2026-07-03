@@ -246,8 +246,20 @@ def load_merged_mapping(
     ``validate_schema_compat`` gate.
     """
     base_path, overlay_path = resolve_layered_paths(env=env, image_base_default=image_base_default)
-    base_data = load_yaml_mapping(base_path)
-    overlay_data = load_yaml_mapping(overlay_path) if overlay_path is not None else {}
+    # Alias the legacy topology key PER-LAYER before the merge (overlay
+    # split-brain, same #492 class). An operator overlay written before the
+    # PLA-287 rename carries ``topology_v2:`` while a freshly-upgraded image base
+    # ships the canonical ``topology:``. Merging raw leaves BOTH keys in the
+    # result, and ``normalize_topology_key``'s "canonical wins" rule then
+    # silently drops the operator's overlay sources on read — orphaning every
+    # configured source at runtime with no operator action. Normalizing each
+    # layer first makes the legacy key participate in normal overlay layering
+    # (overlay overrides base) instead of being shadowed by a base-shipped
+    # canonical block.
+    from kairix.config.topology import normalize_topology_key
+
+    base_data = normalize_topology_key(load_yaml_mapping(base_path))
+    overlay_data = normalize_topology_key(load_yaml_mapping(overlay_path)) if overlay_path is not None else {}
     if overlay_data:
         return deep_merge(base_data, overlay_data)
     return base_data
