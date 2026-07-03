@@ -53,19 +53,26 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Smoke-testing PyPI version: ${VERSION}"
 
-      - name: Wait for PyPI propagation
-        # Alpha env has 0-min propagation, so this 90s buffer is all we have
-        # before pip might 404 on a freshly-published file.
-        run: sleep 90
-
-      - name: Install from PyPI
+      - name: Install from PyPI (poll until published — no fixed-sleep race)
         env:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          # --pre because alphas are pre-releases and pip won't pick them up by default.
-          # The PyPI distribution name (kairix-agentic-knowledge-mgt) differs from
-          # the Python import name (kairix); pip resolves the long form.
-          pip install --pre "kairix-agentic-knowledge-mgt==${VERSION}"
+          # publish-pypi.yml is dispatched by the release and runs concurrently,
+          # so poll (up to ~15 min) until the freshly-published version installs
+          # rather than racing it with a fixed 90s sleep (the #713 smoke-race).
+          # --pre because alphas are pre-releases pip won't pick up by default;
+          # the PyPI distribution name (kairix-agentic-knowledge-mgt) differs from
+          # the import name (kairix).
+          for attempt in $(seq 1 30); do
+            if pip install --pre "kairix-agentic-knowledge-mgt==${VERSION}"; then
+              echo "installed on attempt ${attempt}"
+              exit 0
+            fi
+            echo "attempt ${attempt}/30: ${VERSION} not yet on PyPI — waiting 30s"
+            sleep 30
+          done
+          echo "::error::kairix ${VERSION} was not installable from PyPI within ~15 min"
+          exit 1
 
       - name: Smoke checks
         run: |
@@ -107,10 +114,23 @@ jobs:
           echo "docker_tag=${DOCKER_TAG}" >> "$GITHUB_OUTPUT"
           echo "Smoke-testing container tag: ${DOCKER_TAG}"
 
-      - name: Pull image
+      - name: Pull image (poll until manifest published — no race)
         env:
           DOCKER_TAG: ${{ steps.tag.outputs.docker_tag }}
-        run: docker pull "${IMAGE}:${DOCKER_TAG}"
+        run: |
+          # docker-publish.yml runs concurrently with this smoke, so poll (up to
+          # ~15 min) for the manifest rather than racing it with a single pull
+          # (the #713 "manifest unknown" smoke-race).
+          for attempt in $(seq 1 30); do
+            if docker pull "${IMAGE}:${DOCKER_TAG}"; then
+              echo "pulled on attempt ${attempt}"
+              exit 0
+            fi
+            echo "attempt ${attempt}/30: ${IMAGE}:${DOCKER_TAG} manifest not yet published — waiting 30s"
+            sleep 30
+          done
+          echo "::error::image ${IMAGE}:${DOCKER_TAG} manifest not available within ~15 min"
+          exit 1
 
       - name: Verify import inside container
         env:
