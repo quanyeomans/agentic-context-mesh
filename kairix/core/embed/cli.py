@@ -215,9 +215,16 @@ def acquire_lock(*, lockfile: Path | None = None, wait_secs: float | None = None
     so tests can pin a tmp lock path + short wait without reassigning
     module constants. Production callers leave both ``None``.
     """
-    lock_path = lockfile if lockfile is not None else LOCKFILE
+    # Resolve the default lazily (not the import-time LOCKFILE constant) so the
+    # lock honours a runtime path redirect — a fresh/hermetic data dir, or a
+    # test's config-steered db_path — instead of the path captured at import.
+    lock_path = lockfile if lockfile is not None else _default_lockfile()
     timeout = wait_secs if wait_secs is not None else LOCK_WAIT_SECS
 
+    # Fresh-install robustness: the data dir the lock lives in (beside the SQLite
+    # index) may not exist yet on a clean host — create it rather than crashing
+    # with ENOENT before the pipeline can even start.
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_fh = open(lock_path, "w")
     deadline = time.time() + timeout
     while time.time() < deadline:
