@@ -8,3 +8,8 @@ Feature: Research always gives the best answer it can
     When the agent completes research
     Then the research state has a non-empty synthesis
     And the research state confidence is greater than zero
+
+  Scenario: Research enumerates every item when one source holds a list
+    Given the research finds one source that lists several techniques
+    When the agent completes research over that source
+    Then the research answer draws on every technique in the source

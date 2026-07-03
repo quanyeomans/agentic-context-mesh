@@ -14,6 +14,7 @@ from typing import Any
 from kairix.agents.research.nodes import (
     ClassifyIntentDeps,
     RetrieveDeps,
+    SynthesiseDeps,
     classify_intent,
     evaluate_sufficiency,
     refine_query,
@@ -22,6 +23,8 @@ from kairix.agents.research.nodes import (
     synthesise,
 )
 from kairix.agents.research.state import DEFAULT_MAX_TURNS, ResearcherState
+from kairix.use_cases.enumeration import default_expand_callable
+from kairix.use_cases.expand import ExpandOutput
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +79,10 @@ class ResearchGraphDeps:
 
     search_fn: Callable[..., Any] = field(default_factory=_default_search)
     classify_fn: Callable[..., Any] = field(default_factory=_default_classify)
+    # #437 — the source-cohesion enumeration pull seam threaded into the
+    # synthesise node. Production wires the expand backbone; tests inject a
+    # fake returning a canned ``ExpandOutput``.
+    expand_fn: Callable[[str], ExpandOutput] = field(default_factory=lambda: default_expand_callable)
     # llm_backend and confidence_parser are not test-only-callable kwargs —
     # they are stateful objects (or absent) and live as plain object slots.
     llm_backend: Any = None
@@ -127,7 +134,13 @@ def build_researcher_graph(
         _eval_kwargs["confidence_parser"] = d.confidence_parser
     _eval = partial(evaluate_sufficiency, **_eval_kwargs) if _eval_kwargs else evaluate_sufficiency
 
-    _synth = partial(synthesise, llm_backend=d.llm_backend) if d.llm_backend else synthesise
+    # #437 — always thread the synthesise Deps (carrying the enumeration
+    # expand seam); add llm_backend only when the caller set one.
+    _synth_deps = SynthesiseDeps(expand_fn=d.expand_fn)
+    if d.llm_backend is not None:
+        _synth = partial(synthesise, llm_backend=d.llm_backend, deps=_synth_deps)
+    else:
+        _synth = partial(synthesise, deps=_synth_deps)
 
     graph.add_node(_NODE_CLASSIFY_INTENT, _classify)
     graph.add_node("retrieve", _retrieve)

@@ -24,3 +24,9 @@ def test_prep_no_docs_returns_message():
 @scenario(FEATURE, "Prep tool never raises to the caller")
 def test_prep_never_raises():
     """Body populated by @scenario from the .feature file."""
+
+
+@pytest.mark.bdd
+@scenario(FEATURE, "Prep enumerates every item when one source holds a list of techniques")
+def test_prep_enumerates_full_list():
+    """Body populated by @scenario from the .feature file."""

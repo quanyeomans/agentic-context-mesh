@@ -12,3 +12,9 @@ FEATURE = str(Path(__file__).parent / "features" / "research_synthesis.feature")
 @scenario(FEATURE, "Agent gets a best-effort answer when evidence is incomplete")
 def test_low_confidence_synthesis():
     """Body populated by @scenario from the .feature file."""
+
+
+@pytest.mark.bdd
+@scenario(FEATURE, "Research enumerates every item when one source holds a list")
+def test_research_enumerates_full_list():
+    """Body populated by @scenario from the .feature file."""

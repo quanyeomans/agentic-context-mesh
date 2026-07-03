@@ -4,12 +4,20 @@ from __future__ import annotations
 
 from pytest_bdd import given, then, when
 
-from kairix.agents.research.nodes import evaluate_sufficiency, synthesise
+from kairix.agents.research.nodes import SynthesiseDeps, evaluate_sufficiency, synthesise
 from kairix.agents.research.state import ResearcherState
+from kairix.core.protocols import SourceRef
+from kairix.use_cases.expand import ExpandedChunk, ExpandOutput
 from tests.fakes import FakeLLMBackend
 
 # Module-level state (simple, test-scoped)
 _state: dict = {}
+
+# #437 — the technique catalogue the enumerable source holds. Only the first
+# two reach the accumulated (top) chunks; the rest are surfaced by
+# source-cohesion enumeration completion.
+_ENUM_TECHNIQUES = ["Mechanical Turk", "Pinocchio", "Fake Door", "Pretend-to-Own", "Re-label"]
+_ENUM_SOURCE = "reflib://pretotyping-methods.md"
 
 
 def _base_state(**overrides) -> ResearcherState:
@@ -90,3 +98,54 @@ def synthesis_is_non_empty():
 def confidence_greater_than_zero():
     confidence = _state["research_state"].get("confidence", 0.0)
     assert confidence > 0.0, f"Expected confidence > 0.0, got {confidence}"
+
+
+# ---------------------------------------------------------------------------
+# #437 — source-cohesion enumeration completion
+# ---------------------------------------------------------------------------
+
+
+@given("the research finds one source that lists several techniques")
+def given_enumerable_research_source():
+    # The accumulated chunks only carry the first two techniques.
+    chunks = [
+        {
+            "path": f"{_ENUM_SOURCE}#{i}",
+            "snippet": f"- {_ENUM_TECHNIQUES[i]}: a technique for validating demand before building.",
+            "source_ref": SourceRef.of(path=f"{_ENUM_SOURCE}#{i}", source_uri=_ENUM_SOURCE).to_envelope(),
+        }
+        for i in range(2)
+    ]
+    _state["enum_state"] = _base_state(query="what techniques does this source describe", retrieved_chunks=chunks)
+
+    def _fake_expand(uri: str) -> ExpandOutput:
+        # The full source carries every technique, ordered across two chunks.
+        first = "\n".join(f"- {name}" for name in _ENUM_TECHNIQUES[:3])
+        second = "\n".join(f"- {name}" for name in _ENUM_TECHNIQUES[3:])
+        return ExpandOutput(
+            source_uri=uri,
+            chunks=[
+                ExpandedChunk(path=f"{uri}#0", seq=0, text=first, tokens=10, source_uri=uri),
+                ExpandedChunk(path=f"{uri}#1", seq=1, text=second, tokens=10, source_uri=uri),
+            ],
+        )
+
+    _state["enum_expand"] = _fake_expand
+    _state["enum_llm"] = FakeLLMBackend(chat_response="A synthesised answer citing the source.")
+
+
+@when("the agent completes research over that source")
+def when_research_over_source():
+    updates = synthesise(
+        _state["enum_state"],
+        llm_backend=_state["enum_llm"],
+        deps=SynthesiseDeps(expand_fn=_state["enum_expand"]),
+    )
+    _state["enum_state"].update(updates)
+
+
+@then("the research answer draws on every technique in the source")
+def then_research_draws_on_all_techniques():
+    prompt = _state["enum_llm"].chat_calls[0]["messages"][1]["content"]
+    missing = [name for name in _ENUM_TECHNIQUES if name not in prompt]
+    assert not missing, f"research dropped enumerated techniques: {missing}"

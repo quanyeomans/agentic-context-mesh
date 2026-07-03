@@ -9,6 +9,7 @@ import pytest
 
 from kairix.core.protocols import SourceRef
 from kairix.core.search.scope import Scope
+from kairix.use_cases.enumeration import default_expand_callable
 from kairix.use_cases.prep import (
     PrepDeps,
     PrepOutput,
@@ -31,6 +32,7 @@ def _titles(sources: list[SourceRef]) -> list[str]:
 class _FakeInner:
     title: str = ""
     path: str = ""
+    source_uri: str = ""
 
 
 @dataclass
@@ -127,6 +129,54 @@ def test_sources_use_path_when_title_empty() -> None:
     # pointer built from the path (source_uri falls back to path).
     assert [s.path for s in out.sources] == ["/notes/foo.md"]
     assert out.sources[0].source_uri == "/notes/foo.md"
+
+
+def test_run_prep_completes_enumeration_when_top_hits_cohere_on_one_source() -> None:
+    """#437 — when >=2 top hits come from one enumerable source, run_prep
+    splices that source's COMPLETE ordered list into the LLM context so the
+    summary enumerates every item, not just the top snippets.
+
+    Sabotage-proof (executed 2026-07-03): dropping the
+    ``_with_completed_enumeration`` call in ``run_prep`` reverts to the top
+    snippets and the ``Fake Door`` / ``Re-label`` assertions fail because the
+    top hits only carry the first two techniques.
+    """
+    from kairix.use_cases.expand import ExpandedChunk, ExpandOutput
+
+    source = "reflib://methods.md"
+    techniques = ["Mechanical Turk", "Pinocchio", "Fake Door", "Re-label"]
+    # Two top hits from the SAME source, bulleted (enumerable), carrying only
+    # the first two techniques.
+    sr = _FakeSearchResult(
+        results=[
+            _FakeBudgeted(
+                result=_FakeInner(title="Methods", path=f"{source}#{i}", source_uri=source),
+                content=f"- {techniques[i]}: a technique for validating demand before building the product.",
+            )
+            for i in range(2)
+        ]
+    )
+
+    def fake_expand(uri: str) -> ExpandOutput:
+        first = "\n".join(f"- {name}" for name in techniques[:2])
+        second = "\n".join(f"- {name}" for name in techniques[2:])
+        return ExpandOutput(
+            source_uri=uri,
+            chunks=[
+                ExpandedChunk(path=f"{uri}#0", seq=0, text=first, tokens=8, source_uri=uri),
+                ExpandedChunk(path=f"{uri}#1", seq=1, text=second, tokens=8, source_uri=uri),
+            ],
+        )
+
+    deps = PrepDeps(search_fn=lambda **_: sr, chat_fn=lambda **kw: kw["messages"][1]["content"], expand_fn=fake_expand)
+    out = run_prep("what techniques does this source describe", tier="l1", deps=deps)
+
+    assert out.error == ""
+    for name in techniques:
+        assert name in out.summary, f"prep dropped an enumerated technique: {name!r}"
+    # Load-bearing: the last two techniques were absent from the top hits.
+    assert "Fake Door" in out.summary
+    assert "Re-label" in out.summary
 
 
 def test_only_top_5_results_become_sources() -> None:
@@ -500,6 +550,8 @@ def test_prep_deps_default_factories_resolve_to_public_callables() -> None:
     deps = PrepDeps()
     assert deps.search_fn is default_search_callable
     assert deps.chat_fn is default_chat_callable
+    # #437 — the enumeration pull seam defaults to the public expand adapter.
+    assert deps.expand_fn is default_expand_callable
 
 
 # ---------------------------------------------------------------------------

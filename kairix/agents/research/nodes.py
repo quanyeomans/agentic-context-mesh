@@ -20,6 +20,8 @@ from kairix.agents.research.state import (
     ResearcherState,
 )
 from kairix.core.protocols import SourceRef
+from kairix.use_cases.enumeration import complete_enumeration, default_expand_callable
+from kairix.use_cases.expand import ExpandOutput
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +118,22 @@ class RetrieveDeps:
     """
 
     search_fn: Callable[..., Any] = field(default_factory=_default_search)
+
+
+@dataclass
+class SynthesiseDeps:
+    """Injectable dependencies for ``synthesise``.
+
+    ``expand_fn`` is the #437 source-cohesion pull seam — when the
+    accumulated chunks cohere on one enumerable source, synthesise pulls that
+    source's COMPLETE ordered content so the answer enumerates every list
+    item, not just the top-N snippets. Production callers leave ``deps=None``
+    and the default factory wires ``default_expand_callable`` (the expand
+    backbone over the worker index); tests construct
+    ``SynthesiseDeps(expand_fn=fake)``.
+    """
+
+    expand_fn: Callable[[str], ExpandOutput] = field(default_factory=lambda: default_expand_callable)
 
 
 def classify_intent(
@@ -286,12 +304,54 @@ def refine_query(state: ResearcherState) -> dict[str, Any]:
     return {"turns": turns + 1}
 
 
-def synthesise(state: ResearcherState, *, llm_backend: Any = None) -> dict[str, Any]:
+def _source_uri_of(chunk: dict[str, Any]) -> str:
+    """Resolve a research chunk's canonical source_uri from its breadcrumb.
+
+    Reads the embedded ``source_ref`` breadcrumb (post-PLA-274) when present,
+    else falls back to the flat chunk dict — ``SourceRef.from_envelope`` reads
+    the ``path`` and applies the source_uri→path fallback, so an older chunk
+    still resolves to a usable pointer.
+    """
+    breadcrumb = chunk.get("source_ref")
+    source = breadcrumb if isinstance(breadcrumb, dict) else chunk
+    return SourceRef.from_envelope(source).source_uri
+
+
+def _augment_with_enumeration(
+    found_summary: str,
+    chunks: list[dict[str, Any]],
+    expand_fn: Callable[[str], ExpandOutput],
+) -> str:
+    """Append the dominant enumerable source's complete list to ``found_summary`` (#437).
+
+    When the accumulated chunks cohere on one enumerable source, the
+    score-ranked top-N snippets are only a sample of the list. This pulls the
+    source's COMPLETE ordered content so synthesis enumerates every item. A
+    no-op when no enumerable source dominates.
+    """
+    rows = [(_source_uri_of(c), str(c.get("snippet", "") or "")) for c in chunks]
+    completed = complete_enumeration(rows, expand_fn=expand_fn)
+    if completed is None:
+        return found_summary
+    _uri, full_text = completed
+    return f"{found_summary}\n\nComplete list from the source above (every item):\n{full_text}"
+
+
+def synthesise(
+    state: ResearcherState,
+    *,
+    llm_backend: Any = None,
+    deps: SynthesiseDeps | None = None,
+) -> dict[str, Any]:
     """Build a clear answer from the search results, citing sources."""
     query = state["query"]
     chunks = _get_chunks(state)
+    d = deps or SynthesiseDeps()
 
     found_summary = "\n".join(f"Source: {r.get('path', '?')}\n{r.get('snippet', '')[:300]}\n" for r in chunks[:8])
+    # #437 — complete the enumeration when the top chunks cohere on one
+    # enumerable source, so a list-of-techniques is answered whole.
+    found_summary = _augment_with_enumeration(found_summary, chunks[:8], d.expand_fn)
 
     messages = [
         {
