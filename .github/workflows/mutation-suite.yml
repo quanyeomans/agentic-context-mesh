@@ -86,7 +86,10 @@ jobs:
       - name: Install dependencies
         # Same extras as Stage 2 so the import + test surface matches the
         # per-commit gate exactly.
-        run: pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
+        run: |
+          pip install --upgrade pip  # PEP 735 --group support (pip >= 25.1)
+          pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
+          pip install --group fitness  # tc-fitness engine — moved out of the dev extra (PLA-286); mutation_parity's impacted-test set can include kairix-importing tests/architecture files, so the fitness dir must collect (parity with local safe-commit mutation run)
 
       - name: Resolve diff base (last release tag)
         id: base

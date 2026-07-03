@@ -1265,7 +1265,6 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-timeout" },
     { name = "ruff" },
-    { name = "three-cubes-fitness" },
     { name = "types-pyyaml" },
     { name = "types-requests" },
 ]
@@ -1298,6 +1297,11 @@ rerank = [
 ]
 xlsx = [
     { name = "openpyxl" },
+]
+
+[package.dev-dependencies]
+fitness = [
+    { name = "three-cubes-fitness" },
 ]
 
 [package.metadata]
@@ -1340,13 +1344,15 @@ requires-dist = [
     { name = "sentence-transformers", marker = "extra == 'rerank'", specifier = ">=3.0,<6" },
     { name = "spacy", marker = "extra == 'nlp'", specifier = ">=3.7,<4" },
     { name = "tenacity", specifier = ">=8,<10" },
-    { name = "three-cubes-fitness", marker = "python_full_version >= '3.12' and extra == 'dev'", git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.7.1" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "types-requests", marker = "extra == 'dev'", specifier = ">=2.33.0.20260408" },
     { name = "usearch", specifier = ">=2.8,<3" },
     { name = "watchdog", specifier = ">=3.0.0,<7" },
 ]
 provides-extras = ["agents", "neo4j", "nlp", "rerank", "bedrock", "markitdown", "pdf-fallback", "docx", "ocr", "pptx", "xlsx", "caldav", "connect", "dev"]
+
+[package.metadata.requires-dev]
+fitness = [{ name = "three-cubes-fitness", marker = "python_full_version >= '3.12'", git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.7.1" }]
 
 [[package]]
 name = "langchain-core"

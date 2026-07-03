@@ -126,7 +126,10 @@ if [[ "$PRE_PR_MODE" == "1" ]]; then
     # NOT --all-extras — an extra present locally but absent in CI would let a
     # test pass here and fail there, which is the exact parity gap this closes.
     PRE_PR_VENV=".venv-pre-pr"
-    PRE_PR_EXTRAS=(--extra dev --extra agents --extra markitdown --extra pdf_fallback --extra ocr --extra pptx --extra docx --extra xlsx)
+    # --group fitness pulls the tc-fitness engine (PLA-286: moved out of the dev
+    # extra so the published wheel stays PyPI-clean). Stage 3 collects the
+    # tests/checks + tests/architecture conftests, which import tc_fitness.
+    PRE_PR_EXTRAS=(--extra dev --extra agents --extra markitdown --extra pdf_fallback --extra ocr --extra pptx --extra docx --extra xlsx --group fitness)
 
     echo -n "  sync CI-parity env... "
     run_gate env UV_PROJECT_ENVIRONMENT="$PRE_PR_VENV" uv sync "${PRE_PR_EXTRAS[@]}"
