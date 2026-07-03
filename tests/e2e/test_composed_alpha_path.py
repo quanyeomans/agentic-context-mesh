@@ -3,10 +3,10 @@
 Per F48 sibling to ``tests/e2e/test_composed_production_path.py``.
 Exercises the full alpha shape:
 
-1. Operator writes ``kairix.config.yaml`` with a ``topology_v2:`` block
+1. Operator writes ``kairix.config.yaml`` with a ``topology:`` block
    declaring two connectors (obsidian + sharepoint), one credential, two
    cc_pairs, and two collections with cross-referenced source mappings.
-2. Worker boot calls :func:`apply_topology_v2_at_boot`. The apply-bridge
+2. Worker boot calls :func:`apply_topology_at_boot`. The apply-bridge
    materialises every block into runtime ``topology_*`` rows.
 3. CollectionRouter resolves the cc_pair for each connector by name and
    routes per-item chunk writes to the operator-declared collection.
@@ -15,8 +15,8 @@ Exercises the full alpha shape:
 
 The composed-path construction routes through:
 
-  * Real :func:`kairix.config.parse_topology_v2` on the operator YAML.
-  * Real :func:`kairix.core.connectors.topology_v2_applier.apply_topology_v2`
+  * Real :func:`kairix.config.parse_topology` on the operator YAML.
+  * Real :func:`kairix.core.connectors.topology_applier.apply_topology`
     materialising rows.
   * Real :func:`kairix.core.factory.build_connector_pipeline` per
     connector for the silver → write composition.
@@ -37,8 +37,8 @@ land in a connector-named bucket instead of ``sharepoint-public``.
 The collection-scoped assertion fails. With the cc_pair restored, the
 chunks land in ``sharepoint-public`` and the assertion passes.
 
-Flag matrix exercised: ``topology_v2_config``, ``topology_v2_runtime``,
-``topology_v2_obsidian``, ``connector_sharepoint`` all ON.
+Flag matrix exercised: ``topology_config``, ``topology_runtime``,
+``topology_obsidian``, ``connector_sharepoint`` all ON.
 
 Per F48 + F47 + F46: lives under ``tests/e2e/`` with
 ``@pytest.mark.e2e``; runs in CI Stage 4.5 under ``pytest -m e2e``;
@@ -57,10 +57,10 @@ from typing import Any
 
 import pytest
 
-from kairix.config import parse_topology_v2
+from kairix.config import parse_topology
 from kairix.connectors.obsidian import ObsidianConnector
 from kairix.core.connectors import DefaultSilverProcessor, ExtractorRegistry
-from kairix.core.connectors.topology_v2_applier import apply_topology_v2
+from kairix.core.connectors.topology_applier import apply_topology
 from kairix.core.db.schema import create_schema
 from kairix.core.factory import build_connector_pipeline
 from kairix.core.protocols import (
@@ -80,7 +80,7 @@ pytestmark = pytest.mark.e2e
 # ---------------------------------------------------------------------------
 
 _ALPHA_CONFIG = {
-    "topology_v2": {
+    "topology": {
         "connectors": [
             {"id": "obs-conn", "kind": "obsidian", "name": "obs-conn"},
             {"id": "sp-conn", "kind": "sharepoint", "name": "sp-conn"},
@@ -328,8 +328,8 @@ def test_composed_alpha_path_apply_then_dual_connector_routing(tmp_path: Path) -
     BM25 search. Both connectors' content lands scoped to its YAML-
     declared collection.
     """
-    # ---- ``topology_v2_config`` / ``topology_v2_runtime`` /
-    # ``topology_v2_obsidian`` retired post-cutover (task #132); only
+    # ---- ``topology_config`` / ``topology_runtime`` /
+    # ``topology_obsidian`` retired post-cutover (task #132); only
     # ``connector_sharepoint`` remains as a real gate.
     resolver = FakeFeatureFlagResolver().with_flag("connector_sharepoint", True)
     assert resolver.get("connector_sharepoint") is True
@@ -340,10 +340,10 @@ def test_composed_alpha_path_apply_then_dual_connector_routing(tmp_path: Path) -
     import yaml
 
     raw = yaml.safe_load(config_path.read_text())
-    parsed = parse_topology_v2(raw)
+    parsed = parse_topology(raw)
     db_path = tmp_path / "kairix.sqlite"
     db = _build_db_with_schema(db_path)
-    apply_result = apply_topology_v2(db, parsed)
+    apply_result = apply_topology(db, parsed)
     db.commit()
     # 2 connectors + 1 credential + 2 cc_pairs + 2 collections + 2 sources = 9.
     assert apply_result.created == 9
@@ -415,7 +415,7 @@ def test_composed_alpha_path_apply_then_dual_connector_routing(tmp_path: Path) -
     assert obs_matches_in_obs_all >= 1, (
         f"obsidian content must surface in the obsidian-all collection; got {obs_matches_in_obs_all} matches. "
         "Likely cause: apply-bridge failed to register the obsidian-personal cc_pair → obsidian-all mapping; "
-        "fix: confirm topology_v2.collections.obsidian-all.sources references cc_pair 'obs-cp'."
+        "fix: confirm topology.collections.obsidian-all.sources references cc_pair 'obs-cp'."
     )
     assert obs_matches_in_sp_pub == 0, (
         f"obsidian content must NOT leak into sharepoint-public; got {obs_matches_in_sp_pub}. "
@@ -440,10 +440,10 @@ def test_composed_alpha_path_apply_bridge_idempotent_under_repeat_boots(tmp_path
     produce ``ApplyResult(created=0, ..., unchanged=N)``.
     """
     db = _build_db_with_schema(tmp_path / "kairix.sqlite")
-    parsed = parse_topology_v2(_ALPHA_CONFIG)
-    first = apply_topology_v2(db, parsed)
+    parsed = parse_topology(_ALPHA_CONFIG)
+    first = apply_topology(db, parsed)
     db.commit()
-    second = apply_topology_v2(db, parsed)
+    second = apply_topology(db, parsed)
     db.commit()
     assert first.created == 9
     assert second.created == 0

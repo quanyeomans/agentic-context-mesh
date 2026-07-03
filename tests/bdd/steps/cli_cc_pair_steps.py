@@ -56,7 +56,7 @@ def _open_db(ctx: _CCPairCtx) -> sqlite3.Connection:
 # ---------------------------------------------------------------------------
 
 
-@given("a fresh kairix sqlite database with the topology v2 schema applied")
+@given("a fresh kairix sqlite database with the topology schema applied")
 def _fresh_db(cc_pair_ctx: _CCPairCtx) -> None:
     with closing(_open_db(cc_pair_ctx)) as db:
         create_schema(db, dims=4)

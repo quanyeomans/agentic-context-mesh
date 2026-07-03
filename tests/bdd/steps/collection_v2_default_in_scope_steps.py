@@ -2,7 +2,7 @@
 
 Scaffolding ahead of implementation. Every @when step xfails its
 scenario via ``pytest.xfail("impl pending — #373 / flag
-topology_v2_default_in_scope")`` so the BDD scenarios are present and
+topology_default_in_scope")`` so the BDD scenarios are present and
 authored, but they don't gate green until the production change lands.
 The implementation agent removes the xfail call inline as each path
 becomes real.
@@ -10,13 +10,13 @@ becomes real.
 F46-compliant: every step composes via the factory
 (:func:`kairix.core.factory.build_search_pipeline` /
 :func:`kairix.core.factory.build_collection_resolver`) — no direct
-``TopologyV2CollectionResolver(...)`` / ``SearchPipeline(...)``
+``TopologyCollectionResolver(...)`` / ``SearchPipeline(...)``
 construction inside step impls.
 
 F1-clean: no monkeypatch of kairix internals.
 F2-clean: no ``KAIRIX_*`` env vars.
 F13-clean: scenario language uses operator vocabulary (collections,
-scope, agents) — implementation symbols (TopologyV2CollectionResolver,
+scope, agents) — implementation symbols (TopologyCollectionResolver,
 ScopeProfileResolver) stay out of the Gherkin.
 """
 
@@ -34,7 +34,7 @@ from kairix.core.factory import build_collection_resolver, reset_search_pipeline
 
 pytestmark = pytest.mark.bdd
 
-_XFAIL_REASON = "impl pending — #373 / feature-flag topology_v2_default_in_scope"
+_XFAIL_REASON = "impl pending — #373 / feature-flag topology_default_in_scope"
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ def v2_state(tmp_path: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@given("the operator has migrated to the topology v2 collection model")
+@given("the operator has migrated to the topology collection model")
 def _operator_migrated(v2_state: dict[str, Any]) -> None:
     """No-op Background step — schema is created via the fixture; the
     Background line is here to keep the Gherkin operator-friendly.
@@ -179,12 +179,12 @@ def _materialise_profiles(v2_state: dict[str, Any]) -> None:
     """Drive the production config parser to expand the wildcard.
 
     F46-compliant: composes via the public
-    :func:`kairix.config.topology_v2.parse_topology_v2` parser surface,
+    :func:`kairix.config.topology.parse_topology` parser surface,
     not by direct construction of the internal
     ``_expand_wildcard_profiles`` helper. The materialised actor →
     collections map populated here is what the ``Then`` step asserts on.
     """
-    from kairix.config.topology_v2 import parse_topology_v2
+    from kairix.config.topology import parse_topology
 
     wildcard = v2_state.get("wildcard_profile") or {}
     entries_payload = [
@@ -198,7 +198,7 @@ def _materialise_profiles(v2_state: dict[str, Any]) -> None:
     ]
     collection_names = sorted({e["collection_name"] for e in entries_payload})
     yaml_doc = {
-        "topology_v2": {
+        "topology": {
             "collections": [{"name": name, "sources": [{"cc_pair": "cc-bdd-1"}]} for name in collection_names],
             "scope_profiles": [
                 {
@@ -212,7 +212,7 @@ def _materialise_profiles(v2_state: dict[str, Any]) -> None:
         "agents": list(v2_state.get("agents", [])),
     }
 
-    cfg = parse_topology_v2(yaml_doc)
+    cfg = parse_topology(yaml_doc)
 
     materialised: dict[str, set[str]] = {}
     for profile in cfg.scope_profiles:

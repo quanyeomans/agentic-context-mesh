@@ -152,7 +152,7 @@ def test_build_server_constructs_fastmcp_with_all_tools_registered_under_unit() 
         "embed",
         "store_crawl",
         "embed_rebuild_fts",
-        # Wave D — topology v2 cc_pair lifecycle escalation stub.
+        # Wave D — topology cc_pair lifecycle escalation stub.
         "cc_pair",
         # #376 — operator-callable ANALYZE refresh.
         "maintenance_analyze",

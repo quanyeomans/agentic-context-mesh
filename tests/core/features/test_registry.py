@@ -18,7 +18,7 @@ pytestmark = pytest.mark.unit
 
 def test_registry_carries_a_representative_connector_flag() -> None:
     """The registry must hold at least one connector_* flag with the
-    expected shape after the topology_v2_* retirement (task #132).
+    expected shape after the topology_* retirement (task #132).
 
     Sabotage: rename the connector_dex_crm registry entry's key → this
     test fails because ``"connector_dex_crm" in REGISTRY`` is False.

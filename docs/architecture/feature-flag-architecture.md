@@ -3,7 +3,7 @@
 > **Status**: Implemented. Feature flags are a first-class architectural component for every cutover that swaps production behaviour — connector swaps, ranker swaps, schema migrations, ingest-pipeline changes. Recurring need; one-off flags per cutover is the antipattern.
 >
 > **Shipped surface (this spec is the canonical reference for it):**
-> - `kairix/core/features/` — `registry.py` (the populated `REGISTRY` + `FeatureFlag` value object), `resolver.py` (env → config → default resolution), `observability.py` (first-activation logging), `cli.py` (`kairix features status`), `__init__.py` (the `flag(name)` surface). Plus `capability.py` and `topology_v2_status.py` for the diagnostics variants.
+> - `kairix/core/features/` — `registry.py` (the populated `REGISTRY` + `FeatureFlag` value object), `resolver.py` (env → config → default resolution), `observability.py` (first-activation logging), `cli.py` (`kairix features status`), `__init__.py` (the `flag(name)` surface). Plus `capability.py` and `topology_status.py` for the diagnostics variants.
 > - `tool_features_status` MCP tool in `kairix/agents/mcp/server.py`.
 > - Fitness functions **F51** (retirement deadline), **F52** (call-site reference integrity), **F53** (operator surface required), and **F54** (both-branch tested) are all live in `scripts/checks/` and enforced per-commit + in CI Stage 0; baselines at `.architecture/baseline/f51-files.txt` / `f52-files.txt` / `f54-files.txt` (F53 is a presence check with no per-file baseline).
 > - Cutover tooling: `scripts/cutover/capture_baseline.py` + `scripts/cutover/diff_baseline.py`.
@@ -117,7 +117,7 @@ REGISTRY: dict[str, FeatureFlag] = {
 }
 ```
 
-> The original running example in this spec — `obsidian_connector_primary`, plus the `topology_v2_*` family — has since completed its lifecycle and been **retired** post-cutover (the gated call sites were inlined to the post-cutover behaviour and the OFF-branch shims removed). It survives in this doc only as an illustration of the introduce → cutover → retire arc; do not expect to find it in `REGISTRY`.
+> The original running example in this spec — `obsidian_connector_primary`, plus the `topology_*` family — has since completed its lifecycle and been **retired** post-cutover (the gated call sites were inlined to the post-cutover behaviour and the OFF-branch shims removed). It survives in this doc only as an illustration of the introduce → cutover → retire arc; do not expect to find it in `REGISTRY`.
 
 ### 3.3 Consumer surface — `flag(name)`
 
@@ -357,20 +357,20 @@ Operator opt-in via `kairix.config.yaml` `features: {connector_dex_crm: true}` e
 
 `connector_sharepoint` flag. Same shape as Wave 5 entries. Sensitive because SharePoint surfaces client-confidential content (per ADR-005); the cutover protocol's `sensitivity` parity check is non-negotiable here.
 
-### Wave E — connector fleet completion + topology v2 per-source pilots
+### Wave E — connector fleet completion + topology per-source pilots
 
-Landed across `v2026.5.24a1` → `v2026.5.24a3`. Each connector ships behind its own `connector_<name>` flag and gets a matching `topology_v2_<name>` flag for the per-source-unit Container pilot (folders for Obsidian, drives for SharePoint, channels for Slack, repos for GitHub, page-trees for Notion, mailboxes / calendars / tenants for M365 / Dex). Every flag is default-off and lands with the canonical F54 both-branch coverage.
+Landed across `v2026.5.24a1` → `v2026.5.24a3`. Each connector ships behind its own `connector_<name>` flag and gets a matching `topology_<name>` flag for the per-source-unit Container pilot (folders for Obsidian, drives for SharePoint, channels for Slack, repos for GitHub, page-trees for Notion, mailboxes / calendars / tenants for M365 / Dex). Every flag is default-off and lands with the canonical F54 both-branch coverage.
 
-| Connector | `connector_<name>` flag | `topology_v2_<name>` pilot | Sensitivity default |
+| Connector | `connector_<name>` flag | `topology_<name>` pilot | Sensitivity default |
 |---|---|---|---|
-| Obsidian | n/a (always loaded) | `topology_v2_obsidian` | internal |
-| Dex CRM | `connector_dex_crm` | `topology_v2_dex_crm` | internal |
-| M365 email headers | `connector_m365_email_headers` | `topology_v2_m365_email_headers` | client-confidential |
-| M365 calendar | `connector_m365_calendar` | `topology_v2_m365_calendar` | client-confidential |
-| SharePoint | `connector_sharepoint` | `topology_v2_sharepoint` | internal |
-| Slack | `connector_slack` | `topology_v2_slack` | per-channel-kind (internal / confidential / personal) |
-| GitHub | `connector_github` | `topology_v2_github` | client-confidential |
-| Notion | `connector_notion` | `topology_v2_notion` | internal |
+| Obsidian | n/a (always loaded) | `topology_obsidian` | internal |
+| Dex CRM | `connector_dex_crm` | `topology_dex_crm` | internal |
+| M365 email headers | `connector_m365_email_headers` | `topology_m365_email_headers` | client-confidential |
+| M365 calendar | `connector_m365_calendar` | `topology_m365_calendar` | client-confidential |
+| SharePoint | `connector_sharepoint` | `topology_sharepoint` | internal |
+| Slack | `connector_slack` | `topology_slack` | per-channel-kind (internal / confidential / personal) |
+| GitHub | `connector_github` | `topology_github` | client-confidential |
+| Notion | `connector_notion` | `topology_notion` | internal |
 
 One operational flag also lands in Wave E: `maintenance_loop` enables the background orphan-vector cleanup worker (KFEAT-021 Phase 1). Default-off; see [`how-to-upgrade-kairix`](../operations/runbooks/how-to-upgrade-kairix.md) for the operator recipe.
 
@@ -385,7 +385,7 @@ The original IM-6 plan ("swap DocumentScanner → Obsidian connector on the prod
 1. **Introduce**: registry entry for `obsidian_connector_primary` at introduce stage (default off). The worker branched on the flag; the legacy DocumentScanner path stayed untouched.
 2. **Operator opt-in**: `kairix.config.yaml` overlay set `obsidian_connector_primary: true`. UAT began; the cutover protocol (§4.2) ran — baseline capture, soak, post-flip eval/perf, hard gates.
 3. **Cutover**: registry change moved the stage to `cutover` and default to `True`, escape hatch retained.
-4. **Retire**: with the production worker logging `source='config' effective=True` for the whole `obsidian_connector_primary` + `topology_v2_*` family (task #132), the flags were retired from `REGISTRY` and the gated call sites inlined to the post-cutover behaviour. The flags are gone; the connector path is the only path.
+4. **Retire**: with the production worker logging `source='config' effective=True` for the whole `obsidian_connector_primary` + `topology_*` family (task #132), the flags were retired from `REGISTRY` and the gated call sites inlined to the post-cutover behaviour. The flags are gone; the connector path is the only path.
 
 Each transition was reviewable, reversible until retirement, and mechanically gated by F51 + F54.
 

@@ -1,6 +1,6 @@
 """Connector + ingestion orchestration tree (see ``docs/architecture/connector-ingestion-architecture.md``).
 
-Wave C additions (topology v2): cc_pair lifecycle, CollectionRouter,
+Wave C additions (topology): cc_pair lifecycle, CollectionRouter,
 ChunkerRegistry, ScopeProfileResolver, ResultEnvelope. See
 ``docs/architecture/connector-scope-topology/ADR.md``.
 """

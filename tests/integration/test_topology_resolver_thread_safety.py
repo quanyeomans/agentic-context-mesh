@@ -1,4 +1,4 @@
-"""Concurrent-resolve regression test for the topology_v2 collection resolver (#399).
+"""Concurrent-resolve regression test for the topology collection resolver (#399).
 
 Production trace (logged at ``run_search`` line 378) showed a
 ``sqlite3.InterfaceError: bad parameter or other API misuse`` race
@@ -13,7 +13,7 @@ the cursor's internal state mid-fetch and raises InterfaceError.
 
 This test drives the public
 :func:`kairix.core.factory.build_collection_resolver` boundary with the
-``topology_v2_collection_resolver`` flag ON, then fans 10 threads
+``topology_collection_resolver`` flag ON, then fans 10 threads
 through ``.resolve(...)`` against the same resolver. Pre-fix this
 reliably surfaces the InterfaceError; post-fix every thread returns
 the same superset cleanly.
@@ -96,7 +96,7 @@ def test_concurrent_resolve_does_not_raise_interface_error(tmp_path: Path) -> No
 
     Sabotage proof (recorded with the commit): revert the
     ``_SerializingSqliteConnection`` wrapping in
-    ``kairix/core/factory.py:_build_topology_v2_collection_resolver``
+    ``kairix/core/factory.py:_build_topology_collection_resolver``
     so the resolver receives the raw ``sqlite3.Connection``, then rerun
     this test — at least one of the ten threads raises InterfaceError
     and the ``concurrent.futures.Executor.result()`` re-raises here.

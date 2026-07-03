@@ -128,7 +128,7 @@ def _obsidian_topology(vault: Path, *, cc_pair_name: str = "obsidian-personal") 
     routing name (the chunk-writer collection key).
     """
     return {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {
                     "id": "obsidian-conn",
@@ -319,7 +319,7 @@ def test_failing_connector_logged_and_loop_continues(
     empty_vault.mkdir()
 
     mapping: dict[str, Any] = {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {"id": "missing-conn", "kind": "does-not-exist", "name": "Missing"},
                 {
@@ -401,7 +401,7 @@ def test_zero_cc_pair_connector_is_skipped(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()
     mapping: dict[str, Any] = {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {
                     "id": "lonely-conn",
@@ -453,7 +453,7 @@ def test_connector_enabled_gates_per_entry_in_loop(
     (vault / "beta.md").write_text("# Beta\n\nSecond note.\n", encoding="utf-8")
 
     mapping: dict[str, Any] = {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {
                     "id": "sharepoint-conn",
@@ -529,7 +529,7 @@ def test_multi_cc_pair_connector_yields_one_entry_per_pair(
     assertion fails. Restored, both cc_pair names appear.
     """
     mapping: dict[str, Any] = {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {
                     "id": "shared-conn",

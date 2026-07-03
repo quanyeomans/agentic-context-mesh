@@ -233,7 +233,7 @@ def tool_warm() -> dict[str, Any]:
         }
 
 
-def _default_topology_v2_db_path() -> Path:
+def _default_topology_db_path() -> Path:
     """Production callable that returns the configured kairix SQLite path."""
     from kairix.paths import db_path
 
@@ -241,23 +241,23 @@ def _default_topology_v2_db_path() -> Path:
 
 
 def tool_features_status(
-    topology_v2: bool = False,
+    topology: bool = False,
     *,
-    read_db_path: Callable[[], Path] = _default_topology_v2_db_path,
+    read_db_path: Callable[[], Path] = _default_topology_db_path,
 ) -> dict[str, Any]:
     """Per F53 + the feature-flag-architecture spec §3.5, agents introspect
     the live flag state through this tool. Thin adapter — delegates to
     :func:`kairix.core.features.status` so CLI and MCP stay aligned and
     the returned envelope matches ``kairix features status --json``.
 
-    ``topology_v2=True`` extends the envelope with a ``topology_v2``
+    ``topology=True`` extends the envelope with a ``topology``
     key carrying the Wave D diagnostics (declared cc_pairs +
     per-actor scope-profile resolution). Default-off so existing agents
     see byte-identical pre-Wave-D output.
 
     ``read_db_path`` is the unit-test DI seam: leaving it ``None``
     routes through the production :func:`kairix.paths.db_path` resolver;
-    tests pass a callable returning a tmp_path so the topology v2 read
+    tests pass a callable returning a tmp_path so the topology read
     hits the test-built schema without env-var monkeypatching (F2-clean).
 
     On exception, surfaces a typed error string and an empty flags list
@@ -273,8 +273,8 @@ def tool_features_status(
             "flags": [asdict(entry) for entry in entries],
             "error": "",
         }
-        if topology_v2:
-            envelope["topology_v2"] = _read_topology_v2_diagnostics_for_mcp(read_db_path)
+        if topology:
+            envelope["topology"] = _read_topology_diagnostics_for_mcp(read_db_path)
         return envelope
     except Exception as exc:
         logger.warning("tool_features_status failed: %s", exc, exc_info=True)
@@ -284,14 +284,14 @@ def tool_features_status(
         }
 
 
-def _read_topology_v2_diagnostics_for_mcp(
-    read_db_path: Callable[[], Path] = _default_topology_v2_db_path,
+def _read_topology_diagnostics_for_mcp(
+    read_db_path: Callable[[], Path] = _default_topology_db_path,
 ) -> dict[str, Any]:
-    """Read the Wave D topology v2 diagnostics for the MCP envelope.
+    """Read the Wave D topology diagnostics for the MCP envelope.
 
     Isolated helper so :func:`tool_features_status` stays under the
-    F16 cognitive-complexity ceiling AND the topology v2 read can
-    degrade independently (a missing topology v2 schema returns the
+    F16 cognitive-complexity ceiling AND the topology read can
+    degrade independently (a missing topology schema returns the
     zero-snapshot rather than crashing the whole MCP envelope).
 
     ``read_db_path`` is the DI seam — production callers leave it
@@ -301,9 +301,9 @@ def _read_topology_v2_diagnostics_for_mcp(
     import sqlite3
     from contextlib import closing
 
-    from kairix.core.features.topology_v2_status import (
-        build_topology_v2_diagnostics,
-        render_topology_v2_json,
+    from kairix.core.features.topology_status import (
+        build_topology_diagnostics,
+        render_topology_json,
     )
 
     resolved = read_db_path()
@@ -311,10 +311,10 @@ def _read_topology_v2_diagnostics_for_mcp(
     try:
         conn = sqlite3.connect(str(resolved))
         with closing(conn):
-            diag = build_topology_v2_diagnostics(conn)
-        return render_topology_v2_json(diag)
+            diag = build_topology_diagnostics(conn)
+        return render_topology_json(diag)
     except sqlite3.Error as exc:
-        logger.warning("topology v2 diagnostics read failed: %s", exc, exc_info=True)
+        logger.warning("topology diagnostics read failed: %s", exc, exc_info=True)
         return {"cc_pairs": [], "actor_scopes": []}
 
 

@@ -26,7 +26,7 @@ flock, the real ``count_index_chunks`` + ``embed_lock_held`` progress
 probes, ``build_search_pipeline`` (the F47 factory), the real
 ``remember`` use case for the tour's write-then-find proof, the real
 ``WizardCallbackListener`` nonce dance, ``source_secret_leaves``,
-``topology_updates_for_source``, and ``parse_topology_v2`` reading the
+``topology_updates_for_source``, and ``parse_topology`` reading the
 emitted overlay back.
 
 The wizard is always mounted (the ``setup_wizard_web`` cutover flag
@@ -57,7 +57,7 @@ starlette = pytest.importorskip("starlette")
 from starlette.testclient import TestClient  # noqa: E402
 
 from kairix.agents.mcp.transport import build_mcp_app  # noqa: E402
-from kairix.config import parse_topology_v2  # noqa: E402
+from kairix.config import parse_topology  # noqa: E402
 from kairix.core.db import EMBED_VECTOR_DIMS, open_db  # noqa: E402
 from kairix.core.db.schema import create_schema  # noqa: E402
 from kairix.core.embed.cli import acquire_lock, release_lock  # noqa: E402
@@ -505,7 +505,7 @@ def _drive_oauth_source_leg(client: TestClient, world: _WizardWorld) -> None:
 
     # The topology config landed on the overlay — read the file back and
     # parse it with the REAL parser the worker uses.
-    parsed = parse_topology_v2(yaml.safe_load(world.overlay.read_text(encoding="utf-8")))
+    parsed = parse_topology(yaml.safe_load(world.overlay.read_text(encoding="utf-8")))
     assert [c.id for c in parsed.connectors] == [f"{_SLACK}-{_WORKSPACE}-conn"]
     assert [p.connector for p in parsed.cc_pairs] == [f"{_SLACK}-{_WORKSPACE}-conn"]
     assert [c.name for c in parsed.collections] == [f"{_SLACK}-{_WORKSPACE}"]

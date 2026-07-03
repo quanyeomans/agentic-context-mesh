@@ -8,7 +8,7 @@
 
 ## 1. Goal
 
-Collapse the connector subsystem to **one canonical topology** (remove the legacy `connectors:`/`collections:` config blocks; make `topology_v2` the single model and drop the `v2` versioning), **fix the systemic deletion-correctness bug** that affects every live connector, and **harden each connector** against upstream nuances (rate limits, pagination, auth/token expiry, deletions, partial failure, schema drift) — preferring a small set of shared framework primitives over per-connector duplication.
+Collapse the connector subsystem to **one canonical topology** (remove the legacy `connectors:`/`collections:` config blocks; make `topology` the single model and drop the `v2` versioning), **fix the systemic deletion-correctness bug** that affects every live connector, and **harden each connector** against upstream nuances (rate limits, pagination, auth/token expiry, deletions, partial failure, schema drift) — preferring a small set of shared framework primitives over per-connector duplication.
 
 **Non-goal:** re-architecting the connector framework. Both reviews concluded the core abstractions are sound (verdict: *sound-with-fixes*). The `SourceConnector`/Wave-B protocol split, the `next_cursor` don't-clobber discipline, and the resolver/registry machinery stay. This is *finish one migration + fix correctness + consolidate duplication*, not a rewrite.
 
@@ -35,9 +35,9 @@ Affected (emit a delete op): obsidian, sharepoint, m365_calendar, slack, notion,
 - **google_calendar** — eager full-window drain sets the terminal `nextSyncToken` *before* the 500-item budget applies → events 501..N **permanently dropped** on a busy first sync.
 
 ### 2.4 The stalled migration + dead gating model (PLA-189)
-The READ path + apply-at-boot already cut over to `topology_v2` unconditionally (task #132). The **write/ingest leg did not**: `_load_connector_config_entries` (`worker.py:355`) and the ranking-tier read (`factory.py:312`) still read legacy keys. Consequences:
-- Connectors + collections are defined **twice** (legacy + topology_v2), hand-synced. Split-brain edit hazard.
-- The **setup wizard writes only `topology_v2.connectors`** (`source_oauth.py:712`) but ingest reads only legacy `connectors:` → **a wizard-added source is search-routable but never ingested** on the shipped compose. (Masked on the VM because all 6 live connectors are hand-authored into the legacy block.)
+The READ path + apply-at-boot already cut over to `topology` unconditionally (task #132). The **write/ingest leg did not**: `_load_connector_config_entries` (`worker.py:355`) and the ranking-tier read (`factory.py:312`) still read legacy keys. Consequences:
+- Connectors + collections are defined **twice** (legacy + topology), hand-synced. Split-brain edit hazard.
+- The **setup wizard writes only `topology.connectors`** (`source_oauth.py:712`) but ingest reads only legacy `connectors:` → **a wizard-added source is search-routable but never ingested** on the shipped compose. (Masked on the VM because all 6 live connectors are hand-authored into the legacy block.)
 - `connector_*` flags gate **dead `dispatch_<name>_sync` trios** (~430 lines, no production caller); `connector_x: false` does **not** disable a connector — config-presence does. The F54 both-branch tests assert against this dead path (**test theatre**).
 
 ### 2.5 F51 silently inert
@@ -49,9 +49,9 @@ The READ path + apply-at-boot already cut over to `topology_v2` unconditionally 
 
 ### 3.1 One canonical topology
 - **Remove** the legacy top-level `connectors:` and `collections:` config blocks.
-- `topology` (renamed from `topology_v2`) is the single model: `connectors` / `credentials` / `cc_pairs` / `collections` / `scope_profiles`. Read **and** write resolve from it.
+- `topology` (renamed from `topology`) is the single model: `connectors` / `credentials` / `cc_pairs` / `collections` / `scope_profiles`. Read **and** write resolve from it.
 - Ingest enumerates connectors from `topology.connectors` (not the legacy list); ranking tiers read `topology.collections`.
-- **De-version the naming**: `topology_v2.py` → `topology.py`, retire the `topology_v2_*` flags (already retired from REGISTRY — only inert config residue remains), drop `_v2` suffixes. One source of truth, one set of code paths.
+- **De-version the naming**: `topology.py` → `topology.py`, retire the `topology_*` flags (already retired from REGISTRY — only inert config residue remains), drop `_v2` suffixes. One source of truth, one set of code paths.
 - This *is* the wizard-onboarding fix: wizard writes topology, ingest reads topology.
 
 ### 3.2 Connector enablement model (resolve PLA-189)
@@ -77,7 +77,7 @@ The READ path + apply-at-boot already cut over to `topology_v2` unconditionally 
 **Sequenced to optimise for the total work, not for fixing any single bug fastest** (operator steer, 2026-06-21): do the structural collapse first so every later fix lands *once* on the single canonical path; build the framework primitives (the deletion fix is one of them) on that foundation; then per-connector hardening. **The deletion bug is fixed as the Phase-2 delete-dispatch primitive, not as a rushed standalone hotfix** — accepting it persists slightly longer in exchange for not doing throwaway work on the soon-deleted legacy path. Each phase is independently shippable and green-on-merge; the production-config cutover (Phase 1) is **HITL-gated**.
 
 ### Phase 1 — Canonical topology collapse (foundation; HITL on the prod cutover)
-- Point ingest enumeration (`_load_connector_config_entries`, `_load_connector_entry`) + the ranking-tier read (`factory.py:312`) at `topology`; delete the legacy top-level `connectors:`/`collections:` blocks; rename `topology_v2`→`topology`, drop `_v2` suffixes; retire the inert `topology_v2_*` config residue.
+- Point ingest enumeration (`_load_connector_config_entries`, `_load_connector_entry`) + the ranking-tier read (`factory.py:312`) at `topology`; delete the legacy top-level `connectors:`/`collections:` blocks; rename `topology`→`topology`, drop `_v2` suffixes; retire the inert `topology_*` config residue.
 - Resolve PLA-189 *on the canonical path*: enablement = config-presence in `topology.connectors`; flagged + effective-false → skip (logged); flagless → always-on. Then **delete the dead `dispatch_<name>_sync` trios** (~430 lines) and **de-theatre the F54 connector tests** (assert `ConnectorSyncResult` counters on the real path; fix the m365_calendar invented-gate test).
 - This is also the wizard-onboarding fix (wizard writes topology, ingest now reads topology).
 - **Migration** (capture-flip-soak-gate, §5): convert the live production-instance config from dual-block to canonical, last.

@@ -347,8 +347,8 @@ def validate_schema(db: sqlite3.Connection) -> list[str]:
         "connector_deadletter",
         _TABLE_BRONZE_RECORDS,
         _TABLE_ENTITY_SIGNALS,
-        # Topology v2 Wave A — 12 net-new tables. Existence is unconditional;
-        # population is gated by the `topology_v2_schema` feature flag.
+        # Topology Wave A — 12 net-new tables. Existence is unconditional;
+        # population is gated by the `topology_schema` feature flag.
         "topology_connectors",
         "topology_credentials",
         "topology_cc_pairs",
@@ -565,11 +565,11 @@ CREATE INDEX IF NOT EXISTS idx_mcp_call_log_time
 """
 
 
-# Topology v2 (Wave A) — 12 new tables for the connector/collection/scope
+# Topology (Wave A) — 12 new tables for the connector/collection/scope
 # topology evolution. Tables exist unconditionally (CREATE IF NOT EXISTS);
-# the `topology_v2_schema` feature flag controls whether they get populated.
+# the `topology_schema` feature flag controls whether they get populated.
 # See docs/architecture/connector-scope-topology/ADR.md.
-_TOPOLOGY_V2_TABLES_DDL = """
+_TOPOLOGY_TABLES_DDL = """
 CREATE TABLE IF NOT EXISTS topology_connectors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,
@@ -722,21 +722,21 @@ CREATE TABLE IF NOT EXISTS topology_skills (
 );
 """
 
-# Topology v2 — additional columns on existing tables.
-_DOCUMENTS_TOPOLOGY_V2_COLUMNS: tuple[tuple[str, str], ...] = (
+# Topology — additional columns on existing tables.
+_DOCUMENTS_TOPOLOGY_COLUMNS: tuple[tuple[str, str], ...] = (
     ("archived", "INTEGER NOT NULL DEFAULT 0"),
     ("access_lost", "INTEGER NOT NULL DEFAULT 0"),
     ("chunker_version", "TEXT"),
 )
 
-_DOCUMENTS_MEDIA_TOPOLOGY_V2_COLUMNS: tuple[tuple[str, str], ...] = (("chunker_version", "TEXT"),)
+_DOCUMENTS_MEDIA_TOPOLOGY_COLUMNS: tuple[tuple[str, str], ...] = (("chunker_version", "TEXT"),)
 
-# GH #373 — additional columns on existing topology_v2 tables. Each tuple is
+# GH #373 — additional columns on existing topology tables. Each tuple is
 # (column_name, column_def). The default of 1 (in-scope) is the back-compat
 # invariant — pre-#373 rows continue to surface in default search after the
 # ALTER TABLE migration runs, so the cutover does not silently drop every
 # collection from default search.
-_TOPOLOGY_SCOPE_ENTRIES_TOPOLOGY_V2_COLUMNS: tuple[tuple[str, str], ...] = (
+_TOPOLOGY_SCOPE_ENTRIES_TOPOLOGY_COLUMNS: tuple[tuple[str, str], ...] = (
     ("default_in_scope", "INTEGER NOT NULL DEFAULT 1"),
 )
 
@@ -788,12 +788,12 @@ def _migrate_documents_path_canonical(db: sqlite3.Connection, tables: set[str]) 
     logger.info("db.schema: migration — added path_canonical (virtual generated) column to documents")
 
 
-def _migrate_topology_v2_columns(db: sqlite3.Connection, tables: set[str]) -> None:
-    """Add topology v2 (Wave A) columns to existing tables.
+def _migrate_topology_columns(db: sqlite3.Connection, tables: set[str]) -> None:
+    """Add topology (Wave A) columns to existing tables.
 
     Pure-additive — `archived` + `access_lost` default to 0 (false),
     `chunker_version` defaults to NULL. No behavioural change until
-    `topology_v2_schema` flag flips and write paths start populating.
+    `topology_schema` flag flips and write paths start populating.
 
     GH #373 — also adds `default_in_scope INTEGER NOT NULL DEFAULT 1` to
     `topology_scope_entries`. Existing rows get `default_in_scope=1` so
@@ -804,13 +804,13 @@ def _migrate_topology_v2_columns(db: sqlite3.Connection, tables: set[str]) -> No
     boost") so their ranking is unchanged after the migration runs.
     """
     if "documents" in tables:
-        for column, column_def in _DOCUMENTS_TOPOLOGY_V2_COLUMNS:
+        for column, column_def in _DOCUMENTS_TOPOLOGY_COLUMNS:
             _add_column_if_missing(db, "documents", column, column_def)
     if _TABLE_DOCUMENTS_MEDIA in tables:
-        for column, column_def in _DOCUMENTS_MEDIA_TOPOLOGY_V2_COLUMNS:
+        for column, column_def in _DOCUMENTS_MEDIA_TOPOLOGY_COLUMNS:
             _add_column_if_missing(db, _TABLE_DOCUMENTS_MEDIA, column, column_def)
     if _TABLE_TOPOLOGY_SCOPE_ENTRIES in tables:
-        for column, column_def in _TOPOLOGY_SCOPE_ENTRIES_TOPOLOGY_V2_COLUMNS:
+        for column, column_def in _TOPOLOGY_SCOPE_ENTRIES_TOPOLOGY_COLUMNS:
             _add_column_if_missing(db, _TABLE_TOPOLOGY_SCOPE_ENTRIES, column, column_def)
     if _TABLE_TOPOLOGY_COLLECTIONS in tables:
         for column, column_def in _TOPOLOGY_COLLECTIONS_TIER_COLUMNS:
@@ -880,10 +880,10 @@ def migrate(db: sqlite3.Connection) -> None:
         _add_column_if_missing(db, _TABLE_ENTITY_SIGNALS, "last_push_error", "TEXT")
         _add_column_if_missing(db, _TABLE_ENTITY_SIGNALS, "push_attempt_count", "INTEGER DEFAULT 0")
 
-    # Topology v2 (Wave A): additional tables + columns. Pure-additive;
-    # write paths are gated by the `topology_v2_schema` feature flag.
-    _migrate_topology_v2_columns(db, tables)
-    db.executescript(_TOPOLOGY_V2_TABLES_DDL)
+    # Topology (Wave A): additional tables + columns. Pure-additive;
+    # write paths are gated by the `topology_schema` feature flag.
+    _migrate_topology_columns(db, tables)
+    db.executescript(_TOPOLOGY_TABLES_DDL)
     db.commit()
 
     # Ensure indexes exist (idempotent) — only if the tables exist

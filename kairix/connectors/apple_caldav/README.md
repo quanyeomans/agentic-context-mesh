@@ -46,7 +46,7 @@ to `kairix.config.yaml`:
 
 ```yaml
 features:
-  topology_v2_apple_caldav: true
+  topology_apple_caldav: true
 
 connectors:
   - name: apple-caldav

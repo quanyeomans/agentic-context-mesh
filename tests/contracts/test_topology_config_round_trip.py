@@ -1,9 +1,9 @@
 """F96 contract: nested connector config round-trips losslessly (parse -> materialize).
 
-Guards the topology_v2 ``str()``-coercion bug class (kairix#621): any value in
+Guards the topology ``str()``-coercion bug class (kairix#621): any value in
 ``connector_specific_config`` / ``extractor_config`` — including deeply nested
 lists/dicts, mixed scalars, unicode, None, large ints — must survive
-``parse_topology_v2`` -> ``config_pairs_to_mapping`` unchanged. A regression here
+``parse_topology`` -> ``config_pairs_to_mapping`` unchanged. A regression here
 silently strands any connector with nested config (SharePoint's ``drives:`` list
 was the production instance: it became a Python repr-string the connector
 rejected every sync tick).
@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from kairix.config import config_pairs_to_mapping, parse_topology_v2
+from kairix.config import config_pairs_to_mapping, parse_topology
 
 pytestmark = pytest.mark.contract
 
@@ -36,9 +36,7 @@ _ADVERSARIAL_CONFIGS: list[dict[str, Any]] = [
 
 
 def _materialise(field: str, value: dict[str, Any]) -> dict[str, Any]:
-    parsed = parse_topology_v2(
-        {"topology_v2": {"connectors": [{"id": "c", "kind": "obsidian", "name": "c", field: value}]}}
-    )
+    parsed = parse_topology({"topology": {"connectors": [{"id": "c", "kind": "obsidian", "name": "c", field: value}]}})
     return config_pairs_to_mapping(getattr(parsed.connectors[0], field))
 
 

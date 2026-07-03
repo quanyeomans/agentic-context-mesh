@@ -487,7 +487,7 @@ def _topology_entry_for_cc_pair(connector: Any, cc_pair: Any) -> dict[str, Any]:
       * ``extractor`` / ``extractor_chain`` / ``extractor_config`` — the
         extractor wiring (D1) consumed by ``build_extractor_from_entry``.
     """
-    from kairix.config.topology_v2 import config_pairs_to_mapping
+    from kairix.config.topology import config_pairs_to_mapping
 
     return {
         "name": cc_pair.name,
@@ -518,10 +518,10 @@ def _parse_topology_entries(mapping: dict[str, Any]) -> list[dict[str, Any]]:
     Returns ``[]`` when the mapping carries no parseable topology
     connectors; both readers treat that as "no connector".
     """
-    from kairix.config.topology_v2 import parse_topology_v2
+    from kairix.config.topology import parse_topology
 
     try:
-        parsed = parse_topology_v2(mapping)
+        parsed = parse_topology(mapping)
     except Exception as exc:  # pragma: no cover — parse errors are rare and logged
         logger.warning("worker: failed to parse topology connectors — %s", exc)
         return []
@@ -761,7 +761,7 @@ def _load_merged_config_mapping_default() -> dict[str, Any]:
     read path the setup wizard writes through. On the shipped compose
     the wizard's saves land on the ``KAIRIX_CONFIG_OVERLAY_PATH`` file
     while the base config is mounted read-only; a single-file read of
-    the base would never see a wizard-saved ``topology_v2:`` block.
+    the base would never see a wizard-saved ``topology:`` block.
     """
     from kairix.config_layers import load_merged_mapping
 
@@ -796,7 +796,7 @@ class ConnectorSyncDeps:
       * ``config_mapping_fn`` — returns the parsed + MERGED operator
         config mapping (base + overlay, #492); default
         :func:`_load_merged_config_mapping_default`. Mirrors
-        :class:`TopologyV2ApplyDeps`'s seam so the canonical ingest
+        :class:`TopologyApplyDeps`'s seam so the canonical ingest
         redirect (Task 4) reads connectors off ``topology`` through the
         same overlay-aware path the wizard writes to.
       * ``flag_reader`` — resolves a feature-flag name to its effective
@@ -1145,7 +1145,7 @@ def resolve_collection_for_entry(entry: dict[str, Any]) -> str:
 
     The connector entry's ``name`` field is the canonical source. An
     explicit ``collection`` override is honoured (operators who pre-
-    declare a typed collection via topology v2 still get that name on
+    declare a typed collection via topology still get that name on
     the legacy writer path), but the silent ``"default"`` fallback that
     leaked ~1M SharePoint docs into the ``default`` collection in
     production (GH #371) is gone — every entry must declare ``name``
@@ -2581,12 +2581,12 @@ def probe_vec_index_at_boot(
 
 
 @dataclass
-class TopologyV2ApplyDeps:
-    """Injectable dependencies for :func:`apply_topology_v2_at_boot`.
+class TopologyApplyDeps:
+    """Injectable dependencies for :func:`apply_topology_at_boot`.
 
     F6-clean: every field has a ``default_factory`` so production callers
-    construct ``TopologyV2ApplyDeps()`` and get the real boundary calls;
-    tests construct ``TopologyV2ApplyDeps(config_mapping_fn=...,
+    construct ``TopologyApplyDeps()`` and get the real boundary calls;
+    tests construct ``TopologyApplyDeps(config_mapping_fn=...,
     db_factory=...)`` and pass it as a single argument to drive the
     apply step against a tmp_path-rooted config + DB without touching
     the dev's real vault.
@@ -2682,10 +2682,10 @@ def seed_canonical_entities_at_boot(deps: CanonicalEntitySeedDeps | None = None)
     return seeded
 
 
-def apply_topology_v2_at_boot(deps: TopologyV2ApplyDeps | None = None) -> None:
-    """Materialise the operator's ``topology_v2:`` YAML into runtime rows.
+def apply_topology_at_boot(deps: TopologyApplyDeps | None = None) -> None:
+    """Materialise the operator's ``topology:`` YAML into runtime rows.
 
-    ``topology_v2_config`` retired post-cutover (task #132); the
+    ``topology_config`` retired post-cutover (task #132); the
     apply step now runs unconditionally at boot. Returns None
     unconditionally — failures are logged but never crash the boot.
     The worker continues so the operator can fix the config without
@@ -2694,41 +2694,41 @@ def apply_topology_v2_at_boot(deps: TopologyV2ApplyDeps | None = None) -> None:
     writer when no cc_pair has been registered, so a failed apply
     degrades gracefully.
     """
-    deps = deps if deps is not None else TopologyV2ApplyDeps()
+    deps = deps if deps is not None else TopologyApplyDeps()
 
     try:
         raw = deps.config_mapping_fn()
     except Exception as exc:
-        logger.warning("worker: topology_v2 apply skipped — could not read config: %s", exc)
+        logger.warning("worker: topology apply skipped — could not read config: %s", exc)
         return
     if not raw:
-        logger.info("worker: topology_v2 apply skipped — no kairix.config.yaml on disk")
+        logger.info("worker: topology apply skipped — no kairix.config.yaml on disk")
         return
 
-    from kairix.config import parse_topology_v2
-    from kairix.core.connectors.topology_v2_applier import (
+    from kairix.config import parse_topology
+    from kairix.core.connectors.topology_applier import (
         ApplyValidationError,
-        apply_topology_v2,
+        apply_topology,
     )
     from kairix.core.db.schema import create_schema
 
     try:
-        parsed = parse_topology_v2(raw)
+        parsed = parse_topology(raw)
     except Exception as exc:
-        logger.warning("worker: topology_v2 apply skipped — parse failure: %s", exc)
+        logger.warning("worker: topology apply skipped — parse failure: %s", exc)
         return
 
     if not (parsed.connectors or parsed.credentials or parsed.cc_pairs or parsed.collections):
-        logger.info("worker: topology_v2 apply skipped — no blocks declared in config")
+        logger.info("worker: topology apply skipped — no blocks declared in config")
         return
 
     db = deps.db_factory()
     try:
         create_schema(db)
         try:
-            result = apply_topology_v2(db, parsed)
+            result = apply_topology(db, parsed)
         except ApplyValidationError as exc:
-            logger.warning("worker: topology_v2 apply rejected — %s", exc)
+            logger.warning("worker: topology apply rejected — %s", exc)
             db.rollback()
             return
         db.commit()
@@ -2736,7 +2736,7 @@ def apply_topology_v2_at_boot(deps: TopologyV2ApplyDeps | None = None) -> None:
         db.close()
 
     logger.info(
-        "worker: topology_v2 applied — created=%d updated=%d unchanged=%d",
+        "worker: topology applied — created=%d updated=%d unchanged=%d",
         result.created,
         result.updated,
         result.unchanged,
@@ -3072,13 +3072,13 @@ def main(
     # already-valid index or fixes it in place.
     probe_vec_index_at_boot()
 
-    # Wave D apply-bridge — when the topology_v2_config flag is ON, read
+    # Wave D apply-bridge — when the topology_config flag is ON, read
     # the parsed config and materialise it into runtime topology_* rows
     # before the first sync tick. Flag OFF: this is a structural no-op
     # (the function short-circuits before opening the DB). Failures
     # degrade gracefully — the legacy single-collection writer remains
     # the fallback in resolve_chunk_writer_for_entry.
-    apply_topology_v2_at_boot()
+    apply_topology_at_boot()
 
     # #431 — seed operator-declared canonical entities into Neo4j so
     # entity_suggest's find_by_name lookup returns is_new=False for

@@ -85,7 +85,7 @@ def _set_topology_override(
 ) -> None:
     """Source the override from the canonical topology producer.
 
-    Builds a ``topology_v2.collections[*].retrieval`` mapping and runs it
+    Builds a ``topology.collections[*].retrieval`` mapping and runs it
     through ``derive_collection_overrides`` — so the resolved override is
     proven to flow from the topology collection's ``retrieval:`` block, not
     from an inline dict.
@@ -94,7 +94,7 @@ def _set_topology_override(
 
     payload = _payload_from_datatable(datatable)
     topology = {
-        "topology_v2": {
+        "topology": {
             "collections": [
                 {
                     "name": collection,

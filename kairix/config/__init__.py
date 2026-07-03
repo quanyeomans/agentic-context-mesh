@@ -1,6 +1,6 @@
-"""Operator-facing config promotion surface (Wave D — topology v2).
+"""Operator-facing config promotion surface (Wave D — topology).
 
-This package owns the parsed, typed representation of the topology v2
+This package owns the parsed, typed representation of the topology
 operator-config blocks (``connectors:`` / ``credentials:`` / ``cc_pairs:`` /
 ``collections:`` / ``scope_profiles:`` / ``skills:``) plus the
 cross-reference validators that fail loud on referential-integrity
@@ -13,9 +13,9 @@ validate-before-apply pipeline.
 
 Public surface:
 
-* :class:`TopologyV2Config` — frozen aggregator over the 6 blocks.
-* :func:`parse_topology_v2` — YAML-dict → :class:`TopologyV2Config`.
-* :func:`validate_topology_v2_references` — referential-integrity gate.
+* :class:`TopologyConfig` — frozen aggregator over the 6 blocks.
+* :func:`parse_topology` — YAML-dict → :class:`TopologyConfig`.
+* :func:`validate_topology_references` — referential-integrity gate.
 
 Read-only: importing this module never reads the filesystem or env vars.
 The :mod:`kairix.core.search.config_loader` resolver is responsible for
@@ -25,7 +25,9 @@ receives.
 
 from __future__ import annotations
 
-from kairix.config.topology_v2 import (
+from kairix.config.topology import (
+    LEGACY_TOPOLOGY_CONFIG_KEY,
+    TOPOLOGY_CONFIG_KEY,
     CCPairConfig,
     CollectionConfig,
     CollectionSourceConfig,
@@ -36,16 +38,19 @@ from kairix.config.topology_v2 import (
     SkillConfig,
     SkillSourceConfig,
     SkillTaskCollectionConfig,
-    TopologyV2Config,
+    TopologyConfig,
     config_pairs_to_mapping,
-    parse_topology_v2,
+    normalize_topology_key,
+    parse_topology,
 )
-from kairix.config.topology_v2_validators import (
+from kairix.config.topology_validators import (
     ValidationFailure,
-    validate_topology_v2_references,
+    validate_topology_references,
 )
 
 __all__ = [
+    "LEGACY_TOPOLOGY_CONFIG_KEY",
+    "TOPOLOGY_CONFIG_KEY",
     "CCPairConfig",
     "CollectionConfig",
     "CollectionSourceConfig",
@@ -56,9 +61,10 @@ __all__ = [
     "SkillConfig",
     "SkillSourceConfig",
     "SkillTaskCollectionConfig",
-    "TopologyV2Config",
+    "TopologyConfig",
     "ValidationFailure",
     "config_pairs_to_mapping",
-    "parse_topology_v2",
-    "validate_topology_v2_references",
+    "normalize_topology_key",
+    "parse_topology",
+    "validate_topology_references",
 ]

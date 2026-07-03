@@ -1,6 +1,6 @@
 """Result envelope — ADR v2 §7 per-source freshness + included/excluded surface.
 
-Wraps the existing search-pipeline ``SearchOutput`` with topology v2
+Wraps the existing search-pipeline ``SearchOutput`` with topology
 diagnostic shape:
 
 * per-source ``last_synced_at`` + ``age_seconds`` + ``state``

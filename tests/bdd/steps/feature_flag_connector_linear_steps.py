@@ -60,7 +60,7 @@ def linear_flag_ctx() -> _Ctx:
 
 def _two_connector_topology(vault: Path) -> dict[str, Any]:
     return {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {"id": f"{_KIND}-conn", "kind": _KIND, "name": f"Corp {_KIND}", "connector_specific_config": {}},
                 {

@@ -60,7 +60,7 @@ def sharepoint_flag_ctx() -> _Ctx:
 
 def _two_connector_topology(kind: str, vault: Path) -> dict[str, Any]:
     return {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {"id": f"{kind}-conn", "kind": kind, "name": f"Corp {kind}", "connector_specific_config": {}},
                 {

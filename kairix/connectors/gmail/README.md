@@ -85,7 +85,7 @@ error message.
   boundary. When OFF, the Gmail plugin never runs even if listed in
   the connectors config. When ON, the standard connector pipeline
   resolves the `gmail` plugin via its entry-point factory.
-- `topology_v2_gmail` — gates the Wave E per-mailbox container surface.
+- `topology_gmail` — gates the Wave E per-mailbox container surface.
   When OFF, `list_changes_for_container` delegates to the legacy
   single-cursor `list_changes`. When ON, the connector emits one
   Container per mailbox with its own `historyId` cursor.
@@ -115,8 +115,8 @@ The Gmail client translates non-2xx responses into typed exceptions:
 - `tests/integration/test_gmail_rate_limit.py` — F64 rate-limit signals.
 - `tests/integration/test_gmail_failure_modes.py` — F68 typed errors
   for the full failure catalogue.
-- `tests/integration/test_feature_flag_topology_v2_gmail.py` — F54
+- `tests/integration/test_feature_flag_topology_gmail.py` — F54
   both-branch coverage.
 - `tests/bdd/features/connector_gmail.feature` — F45 happy path.
-- `tests/bdd/features/feature_flag_topology_v2_gmail.feature` — F54
+- `tests/bdd/features/feature_flag_topology_gmail.feature` — F54
   both-branch BDD.

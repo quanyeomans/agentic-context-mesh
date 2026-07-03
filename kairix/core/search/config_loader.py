@@ -905,7 +905,7 @@ def _topology_collection_overrides() -> dict[str, dict]:
     """Load per-collection retrieval override dicts from the canonical topology.
 
     Delegates to :func:`kairix.core.factory.derive_collection_overrides`,
-    which reads ``topology_v2.collections[*].retrieval`` from the
+    which reads ``topology.collections[*].retrieval`` from the
     overlay-aware merged config — the same canonical source the
     ranking-tier map derives from (canonical-collapse). The import is lazy
     to avoid a config_loader → factory import cycle (factory imports

@@ -171,7 +171,7 @@ curl -o ~/.kairix/kairix.config.yaml https://raw.githubusercontent.com/three-cub
 mkdir -p ~/.config/kairix/secrets
 ```
 
-Edit `~/.kairix/kairix.config.yaml` and set `provider:`, `paths.document_root:`, plus the `topology_v2:` block if you want connectors enabled (see the inline comments in the example file).
+Edit `~/.kairix/kairix.config.yaml` and set `provider:`, `paths.document_root:`, plus the `topology:` block if you want connectors enabled (see the inline comments in the example file).
 
 Put your secrets in a file kairix's resolver can read:
 
@@ -262,10 +262,10 @@ kairix deployment check
   ✓ mcp_service
   ✓ query_cache_stats
   ✓ embed_cache_stats
-  ✓ topology_v2_config_valid
-  ✓ topology_v2_cc_pairs_registered
-  ✓ topology_v2_default_in_scope_field_present
-  ✓ topology_v2_wildcard_expansion_resolved
+  ✓ topology_config_valid
+  ✓ topology_cc_pairs_registered
+  ✓ topology_default_in_scope_field_present
+  ✓ topology_wildcard_expansion_resolved
   ✓ sharepoint_credentials_loaded — skipped — connector_sharepoint flag is OFF (default-safe)
   ✓ maintenance_loop_ticking — skipped — maintenance_loop flag is OFF (default-safe)
   ✓ extractor_libraries_importable
@@ -279,9 +279,9 @@ If any check fails the output names the next command to run.
 
 ---
 
-## Topology v2
+## Topology
 
-Topology v2 is the operator-config surface (connectors / credentials / cc_pairs / collections / scope_profiles / skills). The `topology_v2:` block in your config is parsed and applied on every deployment — no flag needed (the old `topology_v2_*` flags retired after the cutover completed). Individual connectors and newer behaviours stay behind default-off feature flags so existing deployments stay bit-for-bit identical until you flip them.
+Topology is the operator-config surface (connectors / credentials / cc_pairs / collections / scope_profiles / skills). The `topology:` block in your config is parsed and applied on every deployment — no flag needed (the old `topology_*` flags retired after the cutover completed). Individual connectors and newer behaviours stay behind default-off feature flags so existing deployments stay bit-for-bit identical until you flip them.
 
 Run `kairix features status` to see the live registry. The current flags:
 

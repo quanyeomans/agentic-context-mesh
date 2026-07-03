@@ -25,7 +25,7 @@ This module owns the pieces below the :class:`SetupService` boundary:
   — F15).
 - :func:`discover_source_units_live` — production unit discovery
   (Slack channels / GitHub repos) against the just-captured tokens.
-- :func:`topology_updates_for_source` — the ``topology_v2`` config
+- :func:`topology_updates_for_source` — the ``topology`` config
   entries for the picked units, merge-ready for the overlay-aware
   ``write_config_updates`` path (#485).
 
@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+from kairix.config import normalize_topology_key
 from kairix.connect.oauth2.github_app import (
     GITHUB_INSTALLATION_ID_METADATA_KEY as GITHUB_INSTALLATION_ID_KEY,
 )
@@ -553,10 +554,10 @@ def discover_source_units_live(
 
 
 # ---------------------------------------------------------------------------
-# topology_v2 config emission
+# topology config emission
 # ---------------------------------------------------------------------------
 
-# Block names within topology_v2 keyed by "id" (collections key on "name").
+# Block names within topology keyed by "id" (collections key on "name").
 _ID_KEYED_BLOCKS = ("connectors", "credentials", "cc_pairs")
 
 
@@ -690,7 +691,7 @@ def topology_updates_for_source(
     picks: tuple[str, ...],
     existing: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """The full ``topology_v2`` block with this source's entries upserted.
+    """The full ``topology`` block with this source's entries upserted.
 
     ``existing`` is the current content of the wizard's write-target
     config file (overlay-aware — see ``write_config_updates``). Entries
@@ -698,8 +699,15 @@ def topology_updates_for_source(
     same source replaces its rows instead of duplicating them, and a
     second source (connect Slack, then GitHub) appends without
     clobbering the first.
+
+    A config file written before the rename that still carries the legacy topology key is
+    normalized to ``topology`` on read via :func:`normalize_topology_key`
+    (PLA-287) so re-running the wizard upserts onto the operator's existing
+    sources instead of orphaning them under the old key; the wizard always
+    writes the canonical ``topology`` key going forward.
     """
-    raw_topology = existing.get("topology_v2") if isinstance(existing, Mapping) else None
+    normalized = normalize_topology_key(existing) if isinstance(existing, Mapping) else {}
+    raw_topology = normalized.get("topology")
     topology: dict[str, Any] = {}
     if isinstance(raw_topology, Mapping):
         topology = {key: list(value) if isinstance(value, list) else value for key, value in raw_topology.items()}
@@ -709,7 +717,7 @@ def topology_updates_for_source(
         rows = [row for row in topology.get(block, []) if isinstance(row, dict) and row.get(key) != item[key]]
         rows.append(item)
         topology[block] = rows
-    return {"topology_v2": topology}
+    return {"topology": topology}
 
 
 __all__ = [

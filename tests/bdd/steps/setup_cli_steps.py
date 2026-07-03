@@ -60,7 +60,7 @@ def _given_config_with_connected_source(setup_cli_ctx: _SetupCliCtx, tmp_path: P
     config_path.write_text(
         yaml.dump(
             {
-                "topology_v2": {"connectors": [{"type": "slack", "instance": "agent-alpha-workspace"}]},
+                "topology": {"connectors": [{"type": "slack", "instance": "agent-alpha-workspace"}]},
                 "agents": {"agent-alpha": {"role": "research"}},
             }
         ),
@@ -233,7 +233,7 @@ def _assert_connected_source_survives(setup_cli_ctx: _SetupCliCtx) -> None:
 
     assert setup_cli_ctx.config_path is not None
     config = yaml.safe_load(setup_cli_ctx.config_path.read_text(encoding="utf-8"))
-    assert config.get("topology_v2") == {"connectors": [{"type": "slack", "instance": "agent-alpha-workspace"}]}, (
+    assert config.get("topology") == {"connectors": [{"type": "slack", "instance": "agent-alpha-workspace"}]}, (
         f"the connected source was clobbered by the re-run: {config}"
     )
     assert config.get("agents") == {"agent-alpha": {"role": "research"}}, f"agents block clobbered: {config}"

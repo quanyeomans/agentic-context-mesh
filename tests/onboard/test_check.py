@@ -1280,7 +1280,7 @@ def test_run_onboard_check_unknown_check_falls_back_to_fix() -> None:
 
 
 # ---------------------------------------------------------------------------
-# v2026.5.24a1 — topology v2 + SharePoint credential checks
+# v2026.5.24a1 — topology + SharePoint credential checks
 # ---------------------------------------------------------------------------
 # Each check is gated by a feature flag. When the flag is OFF the check
 # must return ok=True with a "skipped" detail; when ON it exercises the
@@ -1290,9 +1290,9 @@ def test_run_onboard_check_unknown_check_falls_back_to_fix() -> None:
 # reaches the operator on every failed branch.
 
 
-# ── check_topology_v2_config_valid ────────────────────────────────────────
+# ── check_topology_config_valid ────────────────────────────────────────
 
-_FLAG_TOPOLOGY_V2 = "topology_v2_config"
+_FLAG_TOPOLOGY = "topology_config"
 _FLAG_SHAREPOINT = "connector_sharepoint"
 
 
@@ -1314,12 +1314,12 @@ def _deps_for_topology(
     cc_pair_namer_raises: Exception | None = None,
     secret_raises: Exception | None = None,
 ):
-    """Build a TopologyV2CheckDeps with selectable substitutes.
+    """Build a TopologyCheckDeps with selectable substitutes.
 
     Helper so each test stays one logical assertion long and doesn't
     re-construct the same Deps boilerplate.
     """
-    from kairix.platform.onboard.check import TopologyV2CheckDeps
+    from kairix.platform.onboard.check import TopologyCheckDeps
 
     def _flag(name: str) -> bool:
         return flag_target is not None and name == flag_target
@@ -1339,7 +1339,7 @@ def _deps_for_topology(
             raise secret_raises
         return (secrets or {}).get(name)
 
-    return TopologyV2CheckDeps(
+    return TopologyCheckDeps(
         flag_reader=_flag,
         config_loader=_config_loader,
         db_cc_pair_namer=_cc_pair_namer,
@@ -1348,17 +1348,17 @@ def _deps_for_topology(
 
 
 @pytest.mark.unit
-# NOTE: test_topology_v2_config_valid_skipped_when_flag_off retired with the
-# topology_v2_config flag (#132). Post-cutover the check runs unconditionally;
+# NOTE: test_topology_config_valid_skipped_when_flag_off retired with the
+# topology_config flag (#132). Post-cutover the check runs unconditionally;
 # the flag-off skip path no longer exists.
 
 
 @pytest.mark.unit
-def test_topology_v2_config_valid_missing_config_when_flag_on() -> None:
+def test_topology_config_valid_missing_config_when_flag_on() -> None:
     """Flag ON + no config → ok=False with fix hint pointing at example."""
-    from kairix.platform.onboard.check import check_topology_v2_config_valid
+    from kairix.platform.onboard.check import check_topology_config_valid
 
-    result = check_topology_v2_config_valid(deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY_V2, config=None))
+    result = check_topology_config_valid(deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY, config=None))
     assert result.ok is False
     assert "not found" in result.detail
     assert result.fix is not None
@@ -1368,15 +1368,15 @@ def test_topology_v2_config_valid_missing_config_when_flag_on() -> None:
 
 
 @pytest.mark.unit
-def test_topology_v2_config_valid_parse_error() -> None:
+def test_topology_config_valid_parse_error() -> None:
     """Flag ON + malformed YAML → ok=False, fix points at validate command."""
-    from kairix.platform.onboard.check import check_topology_v2_config_valid
+    from kairix.platform.onboard.check import check_topology_config_valid
 
-    # topology_v2.connectors is the wrong shape (str, not list).
-    bad_data = {"topology_v2": {"connectors": "this should be a list"}}
+    # topology.connectors is the wrong shape (str, not list).
+    bad_data = {"topology": {"connectors": "this should be a list"}}
 
-    result = check_topology_v2_config_valid(
-        deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY_V2, config=bad_data),
+    result = check_topology_config_valid(
+        deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY, config=bad_data),
     )
     assert result.ok is False
     assert "parse failed" in result.detail
@@ -1385,13 +1385,13 @@ def test_topology_v2_config_valid_parse_error() -> None:
 
 
 @pytest.mark.unit
-def test_topology_v2_config_valid_cross_reference_failure() -> None:
+def test_topology_config_valid_cross_reference_failure() -> None:
     """Flag ON + dangling cc_pair → ok=False with failure summary in detail."""
-    from kairix.platform.onboard.check import check_topology_v2_config_valid
+    from kairix.platform.onboard.check import check_topology_config_valid
 
     # cc_pair references a connector that wasn't declared.
     data = {
-        "topology_v2": {
+        "topology": {
             "connectors": [],
             "credentials": [],
             "cc_pairs": [
@@ -1405,19 +1405,19 @@ def test_topology_v2_config_valid_cross_reference_failure() -> None:
         }
     }
 
-    result = check_topology_v2_config_valid(deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY_V2, config=data))
+    result = check_topology_config_valid(deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY, config=data))
     assert result.ok is False
     assert "cross-reference failure" in result.detail
     assert "nonexistent-connector" in result.detail
 
 
 @pytest.mark.unit
-def test_topology_v2_config_valid_clean_config_passes() -> None:
+def test_topology_config_valid_clean_config_passes() -> None:
     """Flag ON + valid declarative config → ok=True with counts in detail."""
-    from kairix.platform.onboard.check import check_topology_v2_config_valid
+    from kairix.platform.onboard.check import check_topology_config_valid
 
     data = {
-        "topology_v2": {
+        "topology": {
             "connectors": [{"id": "c1", "kind": "obsidian", "name": "obsidian-personal"}],
             "credentials": [],
             "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "obsidian-personal"}],
@@ -1427,19 +1427,19 @@ def test_topology_v2_config_valid_clean_config_passes() -> None:
         }
     }
 
-    result = check_topology_v2_config_valid(deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY_V2, config=data))
+    result = check_topology_config_valid(deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY, config=data))
     assert result.ok is True
     assert "connectors=1" in result.detail
     assert "cc_pairs=1" in result.detail
 
 
 @pytest.mark.unit
-def test_topology_v2_config_valid_loader_raises() -> None:
+def test_topology_config_valid_loader_raises() -> None:
     """Flag ON + loader exception → ok=False with fix hint."""
-    from kairix.platform.onboard.check import check_topology_v2_config_valid
+    from kairix.platform.onboard.check import check_topology_config_valid
 
-    result = check_topology_v2_config_valid(
-        deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY_V2, config_raises=OSError("yaml parse failed")),
+    result = check_topology_config_valid(
+        deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY, config_raises=OSError("yaml parse failed")),
     )
     assert result.ok is False
     assert "loader raised" in result.detail
@@ -1447,28 +1447,28 @@ def test_topology_v2_config_valid_loader_raises() -> None:
     assert "fix:" in result.fix
 
 
-# ── check_topology_v2_cc_pairs_registered ─────────────────────────────────
+# ── check_topology_cc_pairs_registered ─────────────────────────────────
 
 
 @pytest.mark.unit
-# NOTE: test_topology_v2_cc_pairs_registered_skipped_when_flag_off retired
-# with the topology_v2_config flag (#132).
+# NOTE: test_topology_cc_pairs_registered_skipped_when_flag_off retired
+# with the topology_config flag (#132).
 
 
 @pytest.mark.unit
-def test_topology_v2_cc_pairs_registered_missing_pair() -> None:
+def test_topology_cc_pairs_registered_missing_pair() -> None:
     """Flag ON + declared cc_pair without DB row → ok=False with apply-config fix."""
-    from kairix.platform.onboard.check import check_topology_v2_cc_pairs_registered
+    from kairix.platform.onboard.check import check_topology_cc_pairs_registered
 
     data = {
-        "topology_v2": {
+        "topology": {
             "connectors": [{"id": "c1", "kind": "obsidian", "name": "obsidian"}],
             "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "obsidian-personal"}],
         }
     }
 
-    result = check_topology_v2_cc_pairs_registered(
-        deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY_V2, config=data, cc_pairs=frozenset()),
+    result = check_topology_cc_pairs_registered(
+        deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY, config=data, cc_pairs=frozenset()),
     )
     assert result.ok is False
     assert "obsidian-personal" in result.detail
@@ -1477,20 +1477,20 @@ def test_topology_v2_cc_pairs_registered_missing_pair() -> None:
 
 
 @pytest.mark.unit
-def test_topology_v2_cc_pairs_registered_all_present() -> None:
+def test_topology_cc_pairs_registered_all_present() -> None:
     """Flag ON + every declared cc_pair has a DB row → ok=True."""
-    from kairix.platform.onboard.check import check_topology_v2_cc_pairs_registered
+    from kairix.platform.onboard.check import check_topology_cc_pairs_registered
 
     data = {
-        "topology_v2": {
+        "topology": {
             "connectors": [{"id": "c1", "kind": "obsidian", "name": "obsidian"}],
             "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "obsidian-personal"}],
         }
     }
 
-    result = check_topology_v2_cc_pairs_registered(
+    result = check_topology_cc_pairs_registered(
         deps=_deps_for_topology(
-            flag_target=_FLAG_TOPOLOGY_V2,
+            flag_target=_FLAG_TOPOLOGY,
             config=data,
             cc_pairs=frozenset({"obsidian-personal"}),
         ),
@@ -1500,46 +1500,46 @@ def test_topology_v2_cc_pairs_registered_all_present() -> None:
 
 
 @pytest.mark.unit
-def test_topology_v2_cc_pairs_registered_no_declared() -> None:
+def test_topology_cc_pairs_registered_no_declared() -> None:
     """Flag ON + no declared cc_pairs → ok=True (nothing to apply)."""
-    from kairix.platform.onboard.check import check_topology_v2_cc_pairs_registered
+    from kairix.platform.onboard.check import check_topology_cc_pairs_registered
 
-    data = {"topology_v2": {"connectors": [], "cc_pairs": []}}
+    data = {"topology": {"connectors": [], "cc_pairs": []}}
 
-    result = check_topology_v2_cc_pairs_registered(
-        deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY_V2, config=data),
+    result = check_topology_cc_pairs_registered(
+        deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY, config=data),
     )
     assert result.ok is True
     assert "nothing to register" in result.detail
 
 
 @pytest.mark.unit
-def test_topology_v2_cc_pairs_registered_no_config_file() -> None:
+def test_topology_cc_pairs_registered_no_config_file() -> None:
     """Flag ON + no kairix.config.yaml → ok=True (nothing to register)."""
-    from kairix.platform.onboard.check import check_topology_v2_cc_pairs_registered
+    from kairix.platform.onboard.check import check_topology_cc_pairs_registered
 
-    result = check_topology_v2_cc_pairs_registered(
-        deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY_V2, config=None),
+    result = check_topology_cc_pairs_registered(
+        deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY, config=None),
     )
     assert result.ok is True
     assert "no kairix.config.yaml" in result.detail
 
 
 @pytest.mark.unit
-def test_topology_v2_cc_pairs_registered_db_lookup_fails() -> None:
+def test_topology_cc_pairs_registered_db_lookup_fails() -> None:
     """Flag ON + DB error → ok=False with fix hint."""
-    from kairix.platform.onboard.check import check_topology_v2_cc_pairs_registered
+    from kairix.platform.onboard.check import check_topology_cc_pairs_registered
 
     data = {
-        "topology_v2": {
+        "topology": {
             "connectors": [{"id": "c1", "kind": "obsidian", "name": "obsidian"}],
             "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "obsidian-personal"}],
         }
     }
 
-    result = check_topology_v2_cc_pairs_registered(
+    result = check_topology_cc_pairs_registered(
         deps=_deps_for_topology(
-            flag_target=_FLAG_TOPOLOGY_V2,
+            flag_target=_FLAG_TOPOLOGY,
             config=data,
             cc_pair_namer_raises=RuntimeError("database is locked"),
         ),
@@ -1639,53 +1639,53 @@ def test_new_checks_appear_in_all_checks() -> None:
     from kairix.platform.onboard import check as check_mod
 
     names = {fn.__name__ for fn in check_mod.ALL_CHECKS}
-    assert "check_topology_v2_config_valid" in names
-    assert "check_topology_v2_cc_pairs_registered" in names
+    assert "check_topology_config_valid" in names
+    assert "check_topology_cc_pairs_registered" in names
     assert "check_sharepoint_credentials_loaded" in names
     # #373 Wave B — wildcard expansion onboard check
-    assert "check_topology_v2_wildcard_expansion_resolved" in names
+    assert "check_topology_wildcard_expansion_resolved" in names
 
 
-# NOTE: test_topology_v2_wildcard_expansion_skipped_when_flag_off retired
-# with the topology_v2_config flag (#132).
+# NOTE: test_topology_wildcard_expansion_skipped_when_flag_off retired
+# with the topology_config flag (#132).
 
 
 @pytest.mark.unit
-def test_topology_v2_wildcard_expansion_pass_when_all_resolved() -> None:
+def test_topology_wildcard_expansion_pass_when_all_resolved() -> None:
     """Flag ON + every actor_id is a concrete name (no '*') → ok=True."""
     from kairix.platform.onboard.check import (
-        TopologyV2CheckDeps,
-        check_topology_v2_wildcard_expansion_resolved,
+        TopologyCheckDeps,
+        check_topology_wildcard_expansion_resolved,
     )
 
-    deps = TopologyV2CheckDeps(
-        flag_reader=lambda n: n == _FLAG_TOPOLOGY_V2,
+    deps = TopologyCheckDeps(
+        flag_reader=lambda n: n == _FLAG_TOPOLOGY,
         config_loader=lambda: None,
         db_cc_pair_namer=lambda: frozenset(),
         secret_reader=lambda _n: None,
         db_scope_actor_id_reader=lambda: ("agent-alpha", "agent-beta"),
     )
-    result = check_topology_v2_wildcard_expansion_resolved(deps=deps)
+    result = check_topology_wildcard_expansion_resolved(deps=deps)
     assert result.ok is True
     assert "2 distinct scope actor_id" in result.detail
 
 
 @pytest.mark.unit
-def test_topology_v2_wildcard_expansion_fail_when_literal_star_present() -> None:
+def test_topology_wildcard_expansion_fail_when_literal_star_present() -> None:
     """Flag ON + a '*' actor_id in DB → ok=False with restart-worker fix."""
     from kairix.platform.onboard.check import (
-        TopologyV2CheckDeps,
-        check_topology_v2_wildcard_expansion_resolved,
+        TopologyCheckDeps,
+        check_topology_wildcard_expansion_resolved,
     )
 
-    deps = TopologyV2CheckDeps(
-        flag_reader=lambda n: n == _FLAG_TOPOLOGY_V2,
+    deps = TopologyCheckDeps(
+        flag_reader=lambda n: n == _FLAG_TOPOLOGY,
         config_loader=lambda: None,
         db_cc_pair_namer=lambda: frozenset(),
         secret_reader=lambda _n: None,
         db_scope_actor_id_reader=lambda: ("agent-alpha", "*"),
     )
-    result = check_topology_v2_wildcard_expansion_resolved(deps=deps)
+    result = check_topology_wildcard_expansion_resolved(deps=deps)
     assert result.ok is False
     assert "*" in result.detail
     assert result.fix is not None
@@ -1693,24 +1693,24 @@ def test_topology_v2_wildcard_expansion_fail_when_literal_star_present() -> None
 
 
 @pytest.mark.unit
-def test_topology_v2_wildcard_expansion_reader_raises() -> None:
+def test_topology_wildcard_expansion_reader_raises() -> None:
     """Flag ON + reader raises → ok=False with DB-reachability fix hint."""
     from kairix.platform.onboard.check import (
-        TopologyV2CheckDeps,
-        check_topology_v2_wildcard_expansion_resolved,
+        TopologyCheckDeps,
+        check_topology_wildcard_expansion_resolved,
     )
 
     def _raises() -> tuple[str, ...]:
         raise RuntimeError("database is locked")
 
-    deps = TopologyV2CheckDeps(
-        flag_reader=lambda n: n == _FLAG_TOPOLOGY_V2,
+    deps = TopologyCheckDeps(
+        flag_reader=lambda n: n == _FLAG_TOPOLOGY,
         config_loader=lambda: None,
         db_cc_pair_namer=lambda: frozenset(),
         secret_reader=lambda _n: None,
         db_scope_actor_id_reader=_raises,
     )
-    result = check_topology_v2_wildcard_expansion_resolved(deps=deps)
+    result = check_topology_wildcard_expansion_resolved(deps=deps)
     assert result.ok is False
     assert "lookup failed" in result.detail
     assert result.fix is not None

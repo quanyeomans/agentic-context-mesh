@@ -1,4 +1,4 @@
-"""Unit tests for :class:`TopologyV2CollectionResolver` (GH #372).
+"""Unit tests for :class:`TopologyCollectionResolver` (GH #372).
 
 Drives the Adapter with a :class:`FakeScopeProfileResolver` (or seeded
 in-memory SQL where the SQL branch is the unit under test) and pins:
@@ -26,7 +26,7 @@ returned green. The mutation table is recorded in the dispatch report.
 
 F1-clean: ``FakeScopeProfileResolver`` is injected via the
 ``scope_profile_resolver=`` kwarg on
-:class:`TopologyV2CollectionResolver`; no ``@patch`` / ``monkeypatch``
+:class:`TopologyCollectionResolver`; no ``@patch`` / ``monkeypatch``
 on kairix internals.
 F2-clean: no ``KAIRIX_*`` env vars.
 """
@@ -39,8 +39,8 @@ import pytest
 
 from kairix.core.db.schema import create_schema
 from kairix.core.search.scope import Scope
-from kairix.core.search.topology_v2_resolver import (
-    TopologyV2CollectionResolver,
+from kairix.core.search.topology_resolver import (
+    TopologyCollectionResolver,
 )
 from tests.fakes import FakeScopeProfileResolver
 
@@ -65,7 +65,7 @@ def test_superset_returned_when_no_collections_specified() -> None:
             ("agent-alpha-memory", "read_write", "restricted"),
         ],
     )
-    resolver = TopologyV2CollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
+    resolver = TopologyCollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
 
     result = resolver.resolve(agent="agent-alpha", scope=Scope.SHARED_AGENT)
 
@@ -84,7 +84,7 @@ def test_empty_scope_profile_returns_none() -> None:
     operationally-sane default (the alternative — empty list — has the
     same effect but loses the "actor is unknown" signal)."""
     fake = FakeScopeProfileResolver()  # no actors declared
-    resolver = TopologyV2CollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
+    resolver = TopologyCollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
 
     result = resolver.resolve(agent="agent-alpha", scope=Scope.SHARED_AGENT)
 
@@ -103,7 +103,7 @@ def test_write_only_entry_excluded_from_read_default() -> None:
             ("write-only-sink", "write", "internal"),
         ],
     )
-    resolver = TopologyV2CollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
+    resolver = TopologyCollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
 
     result = resolver.resolve(agent="agent-alpha", scope=Scope.SHARED_AGENT)
 
@@ -121,7 +121,7 @@ def test_read_write_entry_included_in_default() -> None:
             ("agent-alpha-memory", "read_write", "restricted"),
         ],
     )
-    resolver = TopologyV2CollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
+    resolver = TopologyCollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
 
     result = resolver.resolve(agent="agent-alpha", scope=Scope.SHARED_AGENT)
 
@@ -137,7 +137,7 @@ def test_explicit_collections_validated_within_scope() -> None:
         "agent-alpha",
         entries=[("foo", "read", "internal")],
     )
-    resolver = TopologyV2CollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
+    resolver = TopologyCollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
 
     filtered, error = resolver.validate_explicit(
         agent="agent-alpha",
@@ -156,7 +156,7 @@ def test_explicit_unknown_collection_rejected_with_f21_message() -> None:
         "agent-alpha",
         entries=[("in-scope-bucket", "read", "internal")],
     )
-    resolver = TopologyV2CollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
+    resolver = TopologyCollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
 
     filtered, error = resolver.validate_explicit(
         agent="agent-alpha",
@@ -186,7 +186,7 @@ def test_agent_none_all_agents_returns_public_collections() -> None:
     # No FakeScopeProfileResolver needed — public path bypasses scope
     # profiles entirely. The Adapter constructs a real
     # ScopeProfileResolver but never calls .resolve() on this branch.
-    resolver = TopologyV2CollectionResolver(db=db)
+    resolver = TopologyCollectionResolver(db=db)
 
     result = resolver.resolve(agent=None, scope=Scope.ALL_AGENTS)
 
@@ -200,7 +200,7 @@ def test_agent_none_shared_agent_scope_returns_none() -> None:
     rather than fanning out to public collections. Public fan-out is
     reserved for the explicit ``ALL_AGENTS`` / ``EVERYTHING`` scopes.
     """
-    resolver = TopologyV2CollectionResolver(db=_fresh_db())
+    resolver = TopologyCollectionResolver(db=_fresh_db())
 
     result = resolver.resolve(agent=None, scope=Scope.SHARED_AGENT)
 
@@ -215,7 +215,7 @@ def test_agent_scope_with_no_candidate_names_returns_empty() -> None:
     branch.
     """
     fake = FakeScopeProfileResolver().with_actor("agent-alpha", entries=[])
-    resolver = TopologyV2CollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
+    resolver = TopologyCollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
 
     result = resolver.resolve(agent="agent-alpha", scope=Scope.AGENT)
 
@@ -250,7 +250,7 @@ def test_unknown_tier_in_cap_check_fails_closed() -> None:
                 excluded_collections=(),
             )
 
-    resolver = TopologyV2CollectionResolver(
+    resolver = TopologyCollectionResolver(
         db=_fresh_db(),
         scope_profile_resolver=_BrokenResolver(),  # type: ignore[arg-type]  # F3-rationale: test-local stand-in for ScopeProfileResolver
         max_sensitivity_cap="internal",
@@ -274,7 +274,7 @@ def test_sensitivity_cap_drops_over_tier_entries() -> None:
             ("restricted-bucket", "read", "restricted"),
         ],
     )
-    resolver = TopologyV2CollectionResolver(
+    resolver = TopologyCollectionResolver(
         db=_fresh_db(),
         scope_profile_resolver=fake,
         max_sensitivity_cap="internal",
@@ -298,7 +298,7 @@ def _seed_public_and_private_collections(db: sqlite3.Connection) -> None:
     public-only path can be asserted distinctly from the private set.
 
     Mirrors the canonical cc_pair seed pattern from
-    :mod:`tests.integration.test_feature_flag_topology_v2_runtime`.
+    :mod:`tests.integration.test_feature_flag_topology_runtime`.
     """
     now = "2026-06-01T00:00:00Z"
     # Public connector / cc_pair / collection

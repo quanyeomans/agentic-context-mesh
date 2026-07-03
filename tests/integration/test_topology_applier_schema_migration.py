@@ -3,9 +3,9 @@
 Task 1 of the connector canonical-collapse refactor adds a ranking
 ``tier`` to the canonical collection model across three layers:
 
-* config dataclass + parser (``kairix.config.topology_v2``)
+* config dataclass + parser (``kairix.config.topology``)
 * persistence schema (``topology_collections.tier``)
-* apply-bridge (``topology_v2_applier`` INSERT + load-bearing UPDATE)
+* apply-bridge (``topology_applier`` INSERT + load-bearing UPDATE)
 
 This module proves the schema + applier limbs:
 
@@ -25,7 +25,7 @@ This module proves the schema + applier limbs:
   on the row — proving the write→read contract end to end.
 
 Per F47: the apply-bridge is a single-layer boundary proof exercised
-directly (matches ``test_topology_v2_applier.py``). The layered-read
+directly (matches ``test_topology_applier.py``). The layered-read
 round-trip injects the resolver's ``env`` mapping explicitly (F2: no
 ``KAIRIX_*`` setenv).
 """
@@ -39,9 +39,9 @@ from typing import Any
 import pytest
 import yaml
 
-from kairix.config import parse_topology_v2
+from kairix.config import parse_topology
 from kairix.config_layers import load_merged_mapping
-from kairix.core.connectors.topology_v2_applier import ApplierDeps, apply_topology_v2
+from kairix.core.connectors.topology_applier import ApplierDeps, apply_topology
 from kairix.core.db.schema import create_schema, migrate, validate_schema
 
 pytestmark = pytest.mark.integration
@@ -56,7 +56,7 @@ def _columns(db: sqlite3.Connection, table: str) -> set[str]:
 
 
 def _tier_config(tier: str | None) -> dict[str, Any]:
-    """A minimal valid topology_v2 mapping with one connector/cc_pair/collection."""
+    """A minimal valid topology mapping with one connector/cc_pair/collection."""
     collection: dict[str, Any] = {
         "name": "reflib",
         "sources": [{"cc_pair": "obs-cp", "path_filter": "*"}],
@@ -64,7 +64,7 @@ def _tier_config(tier: str | None) -> dict[str, Any]:
     if tier is not None:
         collection["tier"] = tier
     return {
-        "topology_v2": {
+        "topology": {
             "connectors": [{"id": "obs-conn", "kind": "obsidian", "name": "obs-conn"}],
             "cc_pairs": [{"id": "obs-cp", "connector": "obs-conn", "credential": None, "name": "obsidian-personal"}],
             "collections": [collection],
@@ -173,9 +173,9 @@ def test_applier_writes_tier_on_insert() -> None:
     """The applier INSERTs the operator-declared ``tier`` onto a new row."""
     db = sqlite3.connect(":memory:")
     create_schema(db, dims=4)
-    parsed = parse_topology_v2(_tier_config("reference"))
+    parsed = parse_topology(_tier_config("reference"))
 
-    result = apply_topology_v2(db, parsed, applier_deps=_deterministic_deps())
+    result = apply_topology(db, parsed, applier_deps=_deterministic_deps())
 
     assert result.created >= 1
     assert _read_tier(db, "reflib") == "reference"
@@ -185,9 +185,9 @@ def test_applier_insert_defaults_tier_null_when_absent() -> None:
     """A collection without ``tier:`` lands NULL — back-compat default."""
     db = sqlite3.connect(":memory:")
     create_schema(db, dims=4)
-    parsed = parse_topology_v2(_tier_config(None))
+    parsed = parse_topology(_tier_config(None))
 
-    apply_topology_v2(db, parsed, applier_deps=_deterministic_deps())
+    apply_topology(db, parsed, applier_deps=_deterministic_deps())
 
     assert _read_tier(db, "reflib") is None
 
@@ -198,11 +198,11 @@ def test_applier_update_branch_rewrites_tier_in_place() -> None:
     create_schema(db, dims=4)
     deps = _deterministic_deps()
 
-    apply_topology_v2(db, parse_topology_v2(_tier_config("reference")), applier_deps=deps)
+    apply_topology(db, parse_topology(_tier_config("reference")), applier_deps=deps)
     assert _read_tier(db, "reflib") == "reference"
 
     # Operator promotes the tier; the second apply must UPDATE in place.
-    second = apply_topology_v2(db, parse_topology_v2(_tier_config("primary")), applier_deps=deps)
+    second = apply_topology(db, parse_topology(_tier_config("primary")), applier_deps=deps)
 
     assert second.updated >= 1, "tier change must report an UPDATE, not 'unchanged'"
     assert _read_tier(db, "reflib") == "primary"
@@ -218,8 +218,8 @@ def test_applier_idempotent_tier_reports_unchanged() -> None:
     deps = _deterministic_deps()
     config = _tier_config("reference")
 
-    apply_topology_v2(db, parse_topology_v2(config), applier_deps=deps)
-    second = apply_topology_v2(db, parse_topology_v2(config), applier_deps=deps)
+    apply_topology(db, parse_topology(config), applier_deps=deps)
+    second = apply_topology(db, parse_topology(config), applier_deps=deps)
 
     assert second.updated == 0, "unchanged tier must not report an UPDATE"
     assert _read_tier(db, "reflib") == "reference"
@@ -240,13 +240,13 @@ def test_tier_config_write_read_apply_round_trip(tmp_path: Path) -> None:
 
     # Canonical layered reader, env-injected (legacy single-file mode).
     mapping = load_merged_mapping(env={"KAIRIX_CONFIG_PATH": str(config_path)})
-    assert "topology_v2" in mapping, "layered reader did not surface the topology_v2 block"
+    assert "topology" in mapping, "layered reader did not surface the topology block"
 
-    parsed = parse_topology_v2(mapping)
+    parsed = parse_topology(mapping)
     assert parsed.collections[0].tier == "reference"
 
     db = sqlite3.connect(str(tmp_path / "kairix.sqlite"))
     create_schema(db, dims=4)
-    apply_topology_v2(db, parsed, applier_deps=_deterministic_deps())
+    apply_topology(db, parsed, applier_deps=_deterministic_deps())
 
     assert _read_tier(db, "reflib") == "reference"

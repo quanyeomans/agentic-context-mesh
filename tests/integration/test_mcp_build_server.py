@@ -66,7 +66,7 @@ _EXPECTED_TOOLS = {
     "facts_about",
     # #472 — agent-facing memory write (pairs with `kairix remember`)
     "memory_write",
-    # Wave D (topology v2 operator config) — agent-readable cc-pair surface
+    # Wave D (topology operator config) — agent-readable cc-pair surface
     # (mutating lifecycle is operator-owned; agents see an escalation stub)
     "cc_pair",
     # #376 — operator-triggered ANALYZE for SQLite query-planner stats refresh

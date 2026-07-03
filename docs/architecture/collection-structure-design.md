@@ -1,8 +1,8 @@
-# Collection Structure Design — production rollout for topology_v2
+# Collection Structure Design — production rollout for topology
 
 **Status:** Implemented (shipped via #372 / #373; legacy reap completed via #374 — all CLOSED)
-**Shipped:** TopologyV2CollectionResolver (`kairix/core/search/topology_v2_resolver.py`), the `default_in_scope` scope-entry field + schema migration (`kairix/core/connectors/scope_profile_resolver.py`, `tests/integration/test_topology_v2_applier_schema_migration.py`), wildcard `applies_to: ["*"]` fan-out (`kairix/core/connectors/topology_v2_applier.py`), and the config loader/validators (`kairix/config/topology_v2.py`, `kairix/config/topology_v2_validators.py`).
-**Forward note:** the follow-up [`connector-architecture-refactor.md`](connector-architecture-refactor.md) collapses the subsystem to a single canonical model and renames `topology_v2` → `topology` (de-versioned: `topology_v2.py` → `topology.py`, `_v2` suffixes dropped, inert `topology_v2_*` config residue retired). Read this doc as the design-of-record for the structure that shipped; treat the `topology_v2` naming throughout as the historical name that the refactor supersedes.
+**Shipped:** TopologyCollectionResolver (`kairix/core/search/topology_resolver.py`), the `default_in_scope` scope-entry field + schema migration (`kairix/core/connectors/scope_profile_resolver.py`, `tests/integration/test_topology_applier_schema_migration.py`), wildcard `applies_to: ["*"]` fan-out (`kairix/core/connectors/topology_applier.py`), and the config loader/validators (`kairix/config/topology.py`, `kairix/config/topology_validators.py`).
+**Forward note:** the follow-up [`connector-architecture-refactor.md`](connector-architecture-refactor.md) collapses the subsystem to a single canonical model and renames `topology` → `topology` (de-versioned: `topology.py` → `topology.py`, `_v2` suffixes dropped, inert `topology_*` config residue retired). Read this doc as the design-of-record for the structure that shipped; treat the `topology` naming throughout as the historical name that the refactor supersedes.
 **Audience:** the kairix operator, the dashboard wireframer, the engineering team
 
 ## Goal
@@ -39,7 +39,7 @@ Two layers of collections + two layers of scope profiles. This is the structure 
 ### Layer 1 — Source collections (1 per connector)
 
 ```yaml
-topology_v2:
+topology:
   collections:
     # ── In default (every agent's broad search returns these) ─────────────
     - name: sharepoint
@@ -175,17 +175,17 @@ This way:
 
 All of the following shipped as part of #372 / #373:
 
-**1. Schema migration** — `default_in_scope INTEGER NOT NULL DEFAULT 1` was added to `topology_scope_entries`. Default 1 = back-compat (existing rows go to default). Migration coverage: `tests/integration/test_topology_v2_applier_schema_migration.py`.
+**1. Schema migration** — `default_in_scope INTEGER NOT NULL DEFAULT 1` was added to `topology_scope_entries`. Default 1 = back-compat (existing rows go to default). Migration coverage: `tests/integration/test_topology_applier_schema_migration.py`.
 
 **2. ScopeProfileResolver** (`kairix/core/connectors/scope_profile_resolver.py`) — when the caller passes `default_only=True`, entries are filtered by `default_in_scope=1`.
 
-**3. TopologyV2CollectionResolver** (`kairix/core/search/topology_v2_resolver.py`) — calls ScopeProfileResolver with `default_only=True` when `collections=None`, and with `default_only=False` (full scope) when validating an explicit collection name.
+**3. TopologyCollectionResolver** (`kairix/core/search/topology_resolver.py`) — calls ScopeProfileResolver with `default_only=True` when `collections=None`, and with `default_only=False` (full scope) when validating an explicit collection name.
 
-**4. Wildcard `applies_to: ["*"]` support** — the scope_profile applier (`kairix/core/connectors/topology_v2_applier.py`) expands `"*"` into the full agent list at config load, mirroring the legacy "default" agent fan-out.
+**4. Wildcard `applies_to: ["*"]` support** — the scope_profile applier (`kairix/core/connectors/topology_applier.py`) expands `"*"` into the full agent list at config load, mirroring the legacy "default" agent fan-out.
 
 **5. Per-collection `path_filter`** — supported by the connector pipeline (used for slicing obsidian sub-paths). In production use for the per-agent memory carve-out.
 
-**6. Config loader + validators** (`kairix/config/topology_v2.py`, `kairix/config/topology_v2_validators.py`) — parse the v2 shape, validate that every `collection_name` referenced in a scope_entry exists in the collections list, and validate `sensitivity_floor` literals.
+**6. Config loader + validators** (`kairix/config/topology.py`, `kairix/config/topology_validators.py`) — parse the v2 shape, validate that every `collection_name` referenced in a scope_entry exists in the collections list, and validate `sensitivity_floor` literals.
 
 **7. Dashboard surface** — still forward-looking. Once the dashboard from [`dashboard-spec.md`](dashboard-spec.md) lands, the Collections page renders this hierarchy with edit controls.
 
@@ -194,16 +194,16 @@ All of the following shipped as part of #372 / #373:
 The cutover executed the standard capture → flip → soak → diff → gate sequence:
 
 1. Capture baseline via `scripts/cutover/capture_baseline.py` (state digest + eval scores + latency)
-2. Land the schema + resolver changes on main behind the `topology_v2_default_in_scope` feature flag
+2. Land the schema + resolver changes on main behind the `topology_default_in_scope` feature flag
 3. Deploy via release tag
-4. Add the topology_v2 collections + scope_profiles block to the deployed `kairix.config.yaml` (parsed, with legacy still authoritative)
-5. Flip `topology_v2_runtime: true` + the per-connector `topology_v2_<obsidian|sharepoint|slack|m365_calendar|m365_email_headers|github>: true` flags
+4. Add the topology collections + scope_profiles block to the deployed `kairix.config.yaml` (parsed, with legacy still authoritative)
+5. Flip `topology_runtime: true` + the per-connector `topology_<obsidian|sharepoint|slack|m365_calendar|m365_email_headers|github>: true` flags
 6. Soak with both schemas live (dual-write — legacy reads still work as fallback)
 7. Diff post-cutover baseline against pre via `scripts/cutover/diff_baseline.py --strict` — gated on eval ±2pp, latency ±20%, state ±2%
 8. Extended eval soak with the eval suite running daily
 9. Promote: delete legacy `collections:` + `agents:` blocks (#374 reap, CLOSED)
 
-The `topology_v2_*` flags this protocol flipped are now inert config residue, retired in the [`connector-architecture-refactor.md`](connector-architecture-refactor.md) de-versioning.
+The `topology_*` flags this protocol flipped are now inert config residue, retired in the [`connector-architecture-refactor.md`](connector-architecture-refactor.md) de-versioning.
 
 ## Design decisions (resolved at cutover)
 
@@ -219,7 +219,7 @@ The six review questions raised in the draft were resolved as follows; the shipp
 
 5. **Calendar sensitivity** — kept `sensitivity_floor: personal`. Calendar events are visible to the team but describe an individual's day, and `personal` is the safer floor.
 
-6. **Operator-curated cross-source collections** — deferred to a future Layer 3 (operator-defined task/skill collections spanning multiple sources). Not part of this cutover; tracked under topology_v2 skill-driven retrieval (Wave D, see "What's NOT in scope" below).
+6. **Operator-curated cross-source collections** — deferred to a future Layer 3 (operator-defined task/skill collections spanning multiple sources). Not part of this cutover; tracked under topology skill-driven retrieval (Wave D, see "What's NOT in scope" below).
 
 ## Migration UX (the operator's view)
 
@@ -244,7 +244,7 @@ The work was delivered across the phases below (estimate retained for historical
 | Phase | Work | Effort |
 |---|---|---|
 | 1 | Schema migration + ScopeProfileResolver `default_only` flag | half a day |
-| 2 | TopologyV2CollectionResolver wiring + tests | half a day |
+| 2 | TopologyCollectionResolver wiring + tests | half a day |
 | 3 | Config loader + wildcard `applies_to` | 1 day |
 | 4 | Production config edit + cutover protocol | half a day |
 | 5 | 24h soak + diff | 1 day (mostly waiting) |

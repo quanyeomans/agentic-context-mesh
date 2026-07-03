@@ -2771,9 +2771,9 @@ integration: [`feature-flag-architecture.md`](feature-flag-architecture.md).
 
 ---
 
-### F55 / F57 / F58 / F61 — connector / collection / scope topology v2
+### F55 / F57 / F58 / F61 — connector / collection / scope topology
 
-Landed in Wave A of the connector / collection / scope topology v2 ADR
+Landed in Wave A of the connector / collection / scope topology ADR
 (see [`connector-scope-topology/ADR.md`](connector-scope-topology/ADR.md))
 to arm the gate **before** Wave C runtime code grows into the gap. All
 four are vacuous-green or carry a single grandfathered entry today;
@@ -2874,7 +2874,7 @@ rename a loud `KeyError` instead of a silent always-pass.
 
 Landed via [EPIC #499](https://github.com/three-cubes/kairix/issues/499)
 Phase 1. The caught class is the #492 overlay split-brain (H1): the
-setup wizard wrote `topology_v2` through the overlay writer
+setup wizard wrote `topology` through the overlay writer
 (`write_config_updates`) while the worker read its config through a
 different, non-overlay resolver — the flagship feature was silently
 inert in Docker with every suite green. A composed test that writes

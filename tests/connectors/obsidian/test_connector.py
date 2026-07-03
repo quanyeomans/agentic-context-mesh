@@ -424,7 +424,7 @@ def test_iter_containers_emits_one_per_top_level_folder(tmp_path: Path) -> None:
 
     Hidden directories (``.obsidian/``, ``.git/``) are excluded — they're
     editor state, not indexable content. The connector's ``iter_containers``
-    feeds the topology v2 per-container cc_pair lifecycle so the operator's
+    feeds the topology per-container cc_pair lifecycle so the operator's
     declared topology lines up with what the connector actually emits.
 
     Sabotage-proof: remove the ``if entry.name.startswith(".")`` skip in

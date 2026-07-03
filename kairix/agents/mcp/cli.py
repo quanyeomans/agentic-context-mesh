@@ -562,7 +562,7 @@ def _cmd_serve(args: argparse.Namespace, *, deps: McpCliDeps) -> None:
     # R1 (#387) — pin workers=1 so we never accidentally duplicate the
     # 10.86 GB vec_index mmap + per-worker pipeline cache. The MCP server
     # holds expensive process-local state (vec_index, EmbedCache,
-    # QueryResultCache, TopologyV2CollectionResolver SQLite handle); a
+    # QueryResultCache, TopologyCollectionResolver SQLite handle); a
     # second worker would re-load all of it and fragment cache hits.
     # ``loop="uvloop"`` is preferred for ~10-20% async-overhead reduction
     # under load; falls back to asyncio default if uvloop isn't installed

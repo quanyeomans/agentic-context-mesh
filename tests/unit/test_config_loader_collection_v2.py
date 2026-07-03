@@ -1,4 +1,4 @@
-"""Unit tests for the topology v2 config-loader extensions (GH #373).
+"""Unit tests for the topology config-loader extensions (GH #373).
 
 Pins the parser surface for the new ``default_in_scope`` field on scope
 entries + the wildcard ``applies_to: ["*"]`` expansion + the
@@ -9,7 +9,7 @@ Scaffolding pattern: every test xfails with strict=False until the
 parser change lands; the impl agent removes the decorator inline as
 each branch becomes real. F11-clean (reason= cites #373 + flag).
 
-The tests import :func:`kairix.config.topology_v2.parse_topology_v2`
+The tests import :func:`kairix.config.topology.parse_topology`
 (the existing parser surface). Post-#373 the parser will accept the
 ``default_in_scope`` field on every scope_entry and the ``applies_to``
 field on every scope_profile.
@@ -23,7 +23,7 @@ pytestmark = pytest.mark.unit
 
 
 def _config(scope_profile_entries: list[dict], *, agents: list[str] | None = None) -> dict:
-    """Build a minimal topology_v2 YAML-dict fixture.
+    """Build a minimal topology YAML-dict fixture.
 
     The collections block is always populated with the references the
     scope entries point at so the cross-reference validator has a
@@ -31,7 +31,7 @@ def _config(scope_profile_entries: list[dict], *, agents: list[str] | None = Non
     """
     referenced_collections = {e.get("collection_name") for e in scope_profile_entries if e.get("collection_name")}
     return {
-        "topology_v2": {
+        "topology": {
             "collections": [
                 {"name": name, "sources": [{"cc_pair": "cc-pair-1"}]}
                 for name in sorted(filter(None, referenced_collections))
@@ -53,7 +53,7 @@ def test_default_in_scope_missing_defaults_to_true() -> None:
     ``default_in_scope=True`` (back-compat — every pre-#373 entry is
     in-default).
     """
-    from kairix.config.topology_v2 import parse_topology_v2
+    from kairix.config.topology import parse_topology
 
     data = _config(
         [
@@ -61,7 +61,7 @@ def test_default_in_scope_missing_defaults_to_true() -> None:
         ]
     )
 
-    cfg = parse_topology_v2(data)
+    cfg = parse_topology(data)
 
     profile = cfg.scope_profiles[0]
     entry = profile.entries[0]
@@ -75,7 +75,7 @@ def test_default_in_scope_explicit_false_persists() -> None:
     """A scope_entry YAML with ``default_in_scope: false`` parses to
     ``default_in_scope=False``.
     """
-    from kairix.config.topology_v2 import parse_topology_v2
+    from kairix.config.topology import parse_topology
 
     data = _config(
         [
@@ -88,7 +88,7 @@ def test_default_in_scope_explicit_false_persists() -> None:
         ]
     )
 
-    cfg = parse_topology_v2(data)
+    cfg = parse_topology(data)
 
     entry = cfg.scope_profiles[0].entries[0]
     assert getattr(entry, "default_in_scope", None) is False, (
@@ -101,7 +101,7 @@ def test_default_in_scope_non_bool_raises_f21() -> None:
     """``default_in_scope: "yes"`` (or any non-bool) raises a config
     error whose message carries fix:/next:/run: action markers (F21).
     """
-    from kairix.config.topology_v2 import TopologyV2ParseError, parse_topology_v2
+    from kairix.config.topology import TopologyParseError, parse_topology
 
     data = _config(
         [
@@ -114,8 +114,8 @@ def test_default_in_scope_non_bool_raises_f21() -> None:
         ]
     )
 
-    with pytest.raises(TopologyV2ParseError) as exc_info:
-        parse_topology_v2(data)
+    with pytest.raises(TopologyParseError) as exc_info:
+        parse_topology(data)
 
     msg = str(exc_info.value)
     assert "default_in_scope" in msg, f"error must name the offending field; got {msg!r}"
@@ -134,11 +134,11 @@ def test_wildcard_applies_to_expands_to_all_registered_agents() -> None:
     are not required to repeat a placeholder ``actor_id`` per entry —
     the wildcard fan-out IS the actor_id filler.
     """
-    from kairix.config.topology_v2 import parse_topology_v2
+    from kairix.config.topology import parse_topology
 
     agents = ["agent-alpha", "agent-beta", "agent-gamma", "agent-delta", "agent-epsilon", "agent-zeta"]
     data = {
-        "topology_v2": {
+        "topology": {
             "collections": [{"name": "sharepoint", "sources": [{"cc_pair": "cc-1"}]}],
             "scope_profiles": [
                 {
@@ -159,7 +159,7 @@ def test_wildcard_applies_to_expands_to_all_registered_agents() -> None:
         "agents": agents,
     }
 
-    cfg = parse_topology_v2(data)
+    cfg = parse_topology(data)
 
     materialised_actors = {p.entries[0].actor_id for p in cfg.scope_profiles if p.entries}
     assert materialised_actors == set(agents), (
@@ -177,16 +177,16 @@ def test_wildcard_applies_to_without_per_entry_actor_id_expands_correctly() -> N
     """GH #381 — ``applies_to: ["*"]`` with entries that omit ``actor_id``
     parses successfully and materialises N agent rows.
 
-    Pre-fix this raised ``TopologyV2ParseError: 'actor_id' is required``
+    Pre-fix this raised ``TopologyParseError: 'actor_id' is required``
     because ``_parse_scope_entry`` validated ``actor_id`` before
     ``_expand_wildcard_profiles`` had a chance to fill it. Post-fix the
     parser tolerates absent ``actor_id`` when the parent profile carries
     a non-empty ``applies_to``.
     """
-    from kairix.config.topology_v2 import parse_topology_v2
+    from kairix.config.topology import parse_topology
 
     data = {
-        "topology_v2": {
+        "topology": {
             "collections": [{"name": "sharepoint", "sources": [{"cc_pair": "cc-1"}]}],
             "scope_profiles": [
                 {
@@ -203,7 +203,7 @@ def test_wildcard_applies_to_without_per_entry_actor_id_expands_correctly() -> N
         "agents": ["agent-alpha", "agent-beta", "agent-gamma"],
     }
 
-    cfg = parse_topology_v2(data)
+    cfg = parse_topology(data)
 
     materialised_actors = sorted(p.entries[0].actor_id for p in cfg.scope_profiles if p.entries)
     assert materialised_actors == ["agent-alpha", "agent-beta", "agent-gamma"], (
@@ -220,10 +220,10 @@ def test_named_list_applies_to_without_per_entry_actor_id_expands_correctly() ->
     a third agent (agent-gamma) covered by a separate profile so the
     reachability validator is satisfied.
     """
-    from kairix.config.topology_v2 import parse_topology_v2
+    from kairix.config.topology import parse_topology
 
     data = {
-        "topology_v2": {
+        "topology": {
             "collections": [{"name": "sharepoint", "sources": [{"cc_pair": "cc-1"}]}],
             "scope_profiles": [
                 {
@@ -247,7 +247,7 @@ def test_named_list_applies_to_without_per_entry_actor_id_expands_correctly() ->
         "agents": ["agent-alpha", "agent-beta", "agent-gamma"],
     }
 
-    cfg = parse_topology_v2(data)
+    cfg = parse_topology(data)
 
     # Two profiles from the duo + one from gamma = three materialised profiles.
     duo_actors = sorted(p.entries[0].actor_id for p in cfg.scope_profiles if p.name.startswith("duo-profile::"))
@@ -264,10 +264,10 @@ def test_legacy_profile_without_actor_id_still_raises_f21() -> None:
     activates when ``applies_to`` is present. Legacy single-actor
     profiles must keep declaring ``actor_id`` on each entry.
     """
-    from kairix.config.topology_v2 import TopologyV2ParseError, parse_topology_v2
+    from kairix.config.topology import TopologyParseError, parse_topology
 
     data = {
-        "topology_v2": {
+        "topology": {
             "collections": [{"name": "sharepoint", "sources": [{"cc_pair": "cc-1"}]}],
             "scope_profiles": [
                 {
@@ -282,8 +282,8 @@ def test_legacy_profile_without_actor_id_still_raises_f21() -> None:
         },
     }
 
-    with pytest.raises(TopologyV2ParseError) as exc_info:
-        parse_topology_v2(data)
+    with pytest.raises(TopologyParseError) as exc_info:
+        parse_topology(data)
 
     msg = str(exc_info.value)
     assert "actor_id" in msg, f"legacy missing-actor_id error must name 'actor_id'; got {msg!r}"
@@ -298,10 +298,10 @@ def test_wildcard_applies_to_with_zero_agents_raises_f21() -> None:
     a misconfiguration the operator wants to hear about loudly, not a
     silent empty result.
     """
-    from kairix.config.topology_v2 import TopologyV2ParseError, parse_topology_v2
+    from kairix.config.topology import TopologyParseError, parse_topology
 
     data = {
-        "topology_v2": {
+        "topology": {
             "collections": [{"name": "sharepoint", "sources": [{"cc_pair": "cc-1"}]}],
             "scope_profiles": [
                 {
@@ -321,8 +321,8 @@ def test_wildcard_applies_to_with_zero_agents_raises_f21() -> None:
         "agents": [],
     }
 
-    with pytest.raises(TopologyV2ParseError) as exc_info:
-        parse_topology_v2(data)
+    with pytest.raises(TopologyParseError) as exc_info:
+        parse_topology(data)
 
     msg = str(exc_info.value)
     assert "agents" in msg.lower(), f"wildcard + zero-agents error must name 'agents'; got {msg!r}"
@@ -336,10 +336,10 @@ def test_collection_name_referenced_but_not_defined_raises_f21() -> None:
     Pins the cross-reference validator: dangling collection references
     are the most common config typo, must surface with F21 affordance.
     """
-    from kairix.config.topology_v2 import TopologyV2ParseError, parse_topology_v2
+    from kairix.config.topology import TopologyParseError, parse_topology
 
     data = {
-        "topology_v2": {
+        "topology": {
             "collections": [
                 {"name": "sharepoint", "sources": [{"cc_pair": "cc-1"}]},
             ],
@@ -359,8 +359,8 @@ def test_collection_name_referenced_but_not_defined_raises_f21() -> None:
         },
     }
 
-    with pytest.raises(TopologyV2ParseError) as exc_info:
-        parse_topology_v2(data)
+    with pytest.raises(TopologyParseError) as exc_info:
+        parse_topology(data)
 
     msg = str(exc_info.value)
     assert "ghost-collection" in msg, f"dangling reference must name the missing collection; got {msg!r}"
@@ -375,10 +375,10 @@ def test_agent_unreachable_from_all_profiles_raises_f21() -> None:
     means default search returns zero results for them — a silent
     failure mode the validator catches up front.
     """
-    from kairix.config.topology_v2 import TopologyV2ParseError, parse_topology_v2
+    from kairix.config.topology import TopologyParseError, parse_topology
 
     data = {
-        "topology_v2": {
+        "topology": {
             "collections": [{"name": "sharepoint", "sources": [{"cc_pair": "cc-1"}]}],
             "scope_profiles": [
                 {
@@ -398,8 +398,8 @@ def test_agent_unreachable_from_all_profiles_raises_f21() -> None:
         "agents": ["shape", "orphan-agent"],
     }
 
-    with pytest.raises(TopologyV2ParseError) as exc_info:
-        parse_topology_v2(data)
+    with pytest.raises(TopologyParseError) as exc_info:
+        parse_topology(data)
 
     msg = str(exc_info.value)
     assert "orphan-agent" in msg, f"orphan agent must be named in the unreachable-agent error; got {msg!r}"
@@ -425,10 +425,10 @@ def test_applies_to_list_supports_explicit_agent_names() -> None:
     explicit-name lists fan out exactly like the wildcard but to the
     named subset.
     """
-    from kairix.config.topology_v2 import parse_topology_v2
+    from kairix.config.topology import parse_topology
 
     data = {
-        "topology_v2": {
+        "topology": {
             "collections": [{"name": "sharepoint", "sources": [{"cc_pair": "cc-1"}]}],
             "scope_profiles": [
                 {
@@ -449,7 +449,7 @@ def test_applies_to_list_supports_explicit_agent_names() -> None:
         "agents": ["shape", "builder", "consultant"],
     }
 
-    cfg = parse_topology_v2(data)
+    cfg = parse_topology(data)
 
     materialised_actors = {p.entries[0].actor_id for p in cfg.scope_profiles if p.entries}
     assert materialised_actors == {"shape", "builder"}, (

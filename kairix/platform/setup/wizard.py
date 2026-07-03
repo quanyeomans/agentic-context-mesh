@@ -58,7 +58,7 @@ def _default_write_config(updates: Mapping[str, Any], output_path: str | None) -
     With no explicit ``output_path`` the save lands on the SAME target
     the web wizard resolves (config overlay when configured, else the
     runtime config file) with the same merge semantics — re-running
-    ``kairix setup`` keeps ``topology_v2``/``agents`` blocks written by
+    ``kairix setup`` keeps ``topology``/``agents`` blocks written by
     the web wizard or the operator. An explicit ``--output`` keeps a
     direct file write, but it too reads the existing file and deep-merges
     rather than overwriting.
@@ -734,7 +734,7 @@ def run_setup(
         return True
 
     # MERGE the wizard's answers into the config target — blocks the
-    # wizard doesn't manage (topology_v2, agents, …) survive a re-run.
+    # wizard doesn't manage (topology, agents, …) survive a re-run.
     output = deps.write_config(full_config, output_path)
     print(f"  Config saved to: {output}\n")
 

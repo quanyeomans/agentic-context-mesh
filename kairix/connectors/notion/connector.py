@@ -77,8 +77,8 @@ DEFAULT_SENSITIVITY: Sensitivity = "internal"
 # Silver routes through the markitdown / passthrough extractor chain.
 NOTION_MARKDOWN_MIME = "text/markdown"
 
-# Wave E topology v2 flag name — same convention as other Wave E
-# connector pilots (topology_v2_obsidian / _dex_crm / _m365_*).
+# Wave E topology flag name — same convention as other Wave E
+# connector pilots (topology_obsidian / _dex_crm / _m365_*).
 # Module-level constant so the F52 call-site scan picks up exactly
 # one verbatim reference per call site.
 CONNECTOR_NOTION_FLAG = "connector_notion"

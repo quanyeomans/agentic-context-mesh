@@ -1023,7 +1023,7 @@ def _build_wave_e_on_connector(
         scope="https://graph.microsoft.com/.default",
         http_client=shared,
     )
-    resolver = FakeFeatureFlagResolver().with_flag("topology_v2_m365_email_headers", True)
+    resolver = FakeFeatureFlagResolver().with_flag("topology_m365_email_headers", True)
     connector = M365EmailHeadersConnector(
         user_principal_name="agent-alpha@example.com",
         credentials=M365Credentials(tenant_id="t", client_id="c", client_secret="s-value"),  # pragma: allowlist secret
@@ -1117,7 +1117,7 @@ def test_list_changes_scoped_recovers_from_folder_enumeration_failure() -> None:
     )
     from tests.fakes import FakeFeatureFlagResolver
 
-    resolver = FakeFeatureFlagResolver().with_flag("topology_v2_m365_email_headers", True)
+    resolver = FakeFeatureFlagResolver().with_flag("topology_m365_email_headers", True)
     connector = M365EmailHeadersConnector(
         user_principal_name="agent-alpha@example.com",
         credentials=M365Credentials(tenant_id="t", client_id="c", client_secret="s-value"),  # pragma: allowlist secret

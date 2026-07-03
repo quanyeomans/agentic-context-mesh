@@ -345,8 +345,8 @@ def test_build_search_pipeline_resolver_honours_extra_collections_env() -> None:
         env={"KAIRIX_EXTRA_COLLECTIONS": "alpha-collection, beta-collection"},
     )
 
-    # Post topology_v2 flag retirement, the resolver shape is
-    # ``ScopeCollectionCache(TopologyV2CollectionResolver(extra_collections=...))``
+    # Post topology flag retirement, the resolver shape is
+    # ``ScopeCollectionCache(TopologyCollectionResolver(extra_collections=...))``
     # — the extras live on the inner v2 resolver, surfaced through the
     # cache wrapper's ``_inner`` attribute. The factory reads
     # ``KAIRIX_EXTRA_COLLECTIONS`` at the boundary (F4) and passes the
@@ -502,14 +502,14 @@ def test_build_search_pipeline_uses_neo4j_graph_when_client_available() -> None:
 
 
 # NOTE: test_build_search_pipeline_loads_collections_and_agent_registry_from_yaml
-# was retired alongside the topology_v2_collection_resolver flag (#132). The
+# was retired alongside the topology_collection_resolver flag (#132). The
 # legacy ``DefaultCollectionResolver`` parsed ``agents:`` from
 # ``kairix.config.yaml`` and exposed the parsed registry on ``_registry``;
-# the post-cutover ``TopologyV2CollectionResolver`` reads agents from the
+# the post-cutover ``TopologyCollectionResolver`` reads agents from the
 # ``topology_scope_profiles`` + ``topology_scope_entries`` v2 tables instead
 # and has no ``_registry`` attribute. Agent registration is now exercised by
-# the topology_v2 integration tests in
-# ``tests/integration/test_topology_v2_*`` against the real schema, not via
+# the topology integration tests in
+# ``tests/integration/test_topology_*`` against the real schema, not via
 # this legacy YAML-parsing path.
 
 
@@ -549,13 +549,13 @@ def test_build_search_pipeline_falls_back_to_fake_graph_when_get_client_raises()
 
 # NOTE: test_build_search_pipeline_tolerates_agent_registry_parse_exception
 # and test_build_search_pipeline_tolerates_load_collections_exception were
-# retired alongside the topology_v2_collection_resolver flag (#132). Both
+# retired alongside the topology_collection_resolver flag (#132). Both
 # exercised the legacy resolver's YAML-parsing surface
 # (parse_agent_registry / load_collections), which is no longer called by
 # the factory after the cutover. The post-cutover v2 resolver reads from
 # the topology_scope_profiles + topology_scope_entries tables instead;
 # resilience against bad source data is exercised by the v2 integration
-# tests in tests/integration/test_topology_v2_*.
+# tests in tests/integration/test_topology_*.
 
 
 # ── plugin-driven embedding service wiring ────────────────────────────

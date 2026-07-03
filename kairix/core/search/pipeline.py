@@ -419,7 +419,7 @@ class SearchPipeline:
 
         GH #373 — when the operator supplies ``collections=[...]`` AND the
         resolver advertises a ``validate_explicit`` method (the canonical
-        :class:`TopologyV2CollectionResolver` does; a resolver that doesn't
+        :class:`TopologyCollectionResolver` does; a resolver that doesn't
         is treated as pass-through), validate the names
         against the actor's scope. Out-of-scope names yield empty
         results + an F21-shaped error in the result envelope so the

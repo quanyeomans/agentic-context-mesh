@@ -376,7 +376,7 @@ def test_iter_containers_emits_one_per_corpus() -> None:
 
 
 # NOTE: test_load_hierarchy_flag_off_emits_root_only retired with the
-# topology_v2_google_drive flag (#132). Post-cutover load_hierarchy always
+# topology_google_drive flag (#132). Post-cutover load_hierarchy always
 # emits root + corpus children; the OFF "root only" branch no longer exists.
 
 
@@ -395,7 +395,7 @@ def test_load_hierarchy_flag_on_emits_root_plus_corpus_children() -> None:
 
 
 # NOTE: test_list_changes_for_container_flag_off_delegates_to_legacy retired
-# with the topology_v2_google_drive flag (#132). Post-cutover
+# with the topology_google_drive flag (#132). Post-cutover
 # list_changes_for_container always uses the per-container cursor; the OFF
 # delegate-to-list_changes branch no longer exists.
 

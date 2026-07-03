@@ -1,8 +1,8 @@
 """Integration tests for v2 collection default-in-scope search (GH #373).
 
 Drives the full :func:`kairix.core.factory.build_search_pipeline` factory
-against a seeded SQLite + topology_v2 schema with the
-``topology_v2_default_in_scope`` feature flag flipped through both
+against a seeded SQLite + topology schema with the
+``topology_default_in_scope`` feature flag flipped through both
 branches.
 
 Pins (per docs/architecture/collection-v2-implementation-plan.md):
@@ -12,7 +12,7 @@ Pins (per docs/architecture/collection-v2-implementation-plan.md):
   * Explicit ``collections=['reflib']`` retrieves the reflib doc.
   * Own-memory in default search; other-agent memory excluded.
   * Cross-agent explicit request → empty + F21-shaped error.
-  * The canonical TopologyV2CollectionResolver is always wired
+  * The canonical TopologyCollectionResolver is always wired
     (the legacy default-scope resolver has been retired).
 
 Scaffolding pattern: every test xfails with strict=False until the impl
@@ -390,10 +390,10 @@ def test_search_explicit_other_agent_memory_returns_empty_with_error_logged(
     )
 
 
-def test_build_collection_resolver_returns_topology_v2_resolver(tmp_path: Path) -> None:
+def test_build_collection_resolver_returns_topology_resolver(tmp_path: Path) -> None:
     """``build_collection_resolver`` always returns the v2 resolver
-    post-cutover (task #132 — ``topology_v2_collection_resolver`` +
-    ``topology_v2_default_in_scope`` retired).
+    post-cutover (task #132 — ``topology_collection_resolver`` +
+    ``topology_default_in_scope`` retired).
 
     The (removed) legacy resolver did not carry ``validate_explicit``;
     the v2 resolver does. Asserting on type-shape is the cleanest pin
@@ -407,11 +407,11 @@ def test_build_collection_resolver_returns_topology_v2_resolver(tmp_path: Path) 
     resolver = build_collection_resolver(db_path=db_path)
 
     assert hasattr(resolver, "validate_explicit"), (
-        f"build_collection_resolver must yield TopologyV2CollectionResolver; got {type(resolver).__name__}"
+        f"build_collection_resolver must yield TopologyCollectionResolver; got {type(resolver).__name__}"
     )
 
 
-def test_topology_v2_resolver_usable_from_a_different_thread(tmp_path: Path) -> None:
+def test_topology_resolver_usable_from_a_different_thread(tmp_path: Path) -> None:
     """Resolver built on thread A must service queries from thread B.
 
     Production trace: build_search_pipeline() memoises its pipeline for
@@ -456,5 +456,5 @@ def test_topology_v2_resolver_usable_from_a_different_thread(tmp_path: Path) -> 
     assert captured["error"] is None, (
         f"cross-thread resolver call raised {type(captured['error']).__name__}: "
         f"{captured['error']}. Was check_same_thread=False removed from "
-        f"kairix/core/factory.py _build_topology_v2_collection_resolver?"
+        f"kairix/core/factory.py _build_topology_collection_resolver?"
     )

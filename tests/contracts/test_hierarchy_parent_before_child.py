@@ -56,7 +56,7 @@ def test_obsidian_hierarchy_parent_before_child(tmp_path: Path) -> None:
 def test_m365_email_headers_hierarchy_parent_before_child() -> None:
     """M365 email-headers HierarchyConnector emits root before per-mailbox FOLDER nodes.
 
-    Wave E pilot — when the ``topology_v2_m365_email_headers`` flag is ON,
+    Wave E pilot — when the ``topology_m365_email_headers`` flag is ON,
     the connector emits one synthetic root FOLDER node followed by one
     FOLDER per configured mailbox UPN. The root is emitted FIRST so
     every per-mailbox node's ``raw_parent_id`` references a

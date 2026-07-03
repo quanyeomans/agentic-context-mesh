@@ -321,7 +321,7 @@ From `docs/architecture/fitness-functions.md` F34–F44:
 | **D — operator config promotion** | YAML schema for `cc_pairs:` / `credentials:` / `collections.sources:` / `scope_profiles:` / `skills:` / `federated:`; new CLI verbs | `kairix/core/search/config_loader.py` + `config_validator.py`; `kairix/cli.py` (new subcommands: `cc-pair`, `credential`, `scope`, `skill`); F59, F60 checks |
 | **E — per-connector multi-container** | sharepoint, notion, jira, slack, github, gdrive plugins with full capability sets | `kairix/connectors/{sharepoint,notion,jira,slack,github,gdrive}/` (new); per-connector flag (F54 both-branch tests) |
 | **F — chunker plugins** | tree-sitter / per-ticket / thread-aware / slide / tabular / email-thread / event / transcript / web chunkers | `kairix/chunkers/<name>/` (new tree); F40-equivalent F55 enforcement; per-chunker BDD + contract tests |
-| **G — retirement** | Drop `connector_cursors` (post-migration to `connector_containers`); retire `topology_v2_*` flags; delete default-impl shims | `kairix/core/db/migrations/v3_to_v4.py` (drop deprecated table); F-rule baseline updates |
+| **G — retirement** | Drop `connector_cursors` (post-migration to `connector_containers`); retire `topology_*` flags; delete default-impl shims | `kairix/core/db/migrations/v3_to_v4.py` (drop deprecated table); F-rule baseline updates |
 
 Each wave includes:
 - F54 both-branch BDD tests for any new feature flag

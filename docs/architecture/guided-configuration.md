@@ -33,7 +33,7 @@ Discovery never writes to KV, the config, or the index. The only side effect is 
 
 ### `kairix <connector> configure --pick <selection>`
 
-Takes the discovery output and the operator's selection, asks any remaining choices (which sensitivity tier, which credential bundle to bind to), and emits a `topology_v2.connectors:` YAML block. Two modes:
+Takes the discovery output and the operator's selection, asks any remaining choices (which sensitivity tier, which credential bundle to bind to), and emits a `topology.connectors:` YAML block. Two modes:
 
 - Default emit-to-stdout: operator inspects, pastes into their config manually. Safe — no shared state touched.
 - `--write-to <path>` (default `kairix.config.yaml`) merges in place with a backup. See §"In-place merge with backup" below.
@@ -66,7 +66,7 @@ Discovery hits remote APIs. Re-running discovery in a back-to-back pipeline (dis
 
 **Backup before write.** Before touching `<path>`, copy it to `<path>.backup-YYYYMMDDTHHMMSS`. The backup naming uses a sortable timestamp so the most recent is the lexicographic last in `ls`. Retain the last N backups (default 5; older ones auto-prune) so a series of mis-merges can still be unwound.
 
-**Merge strategy.** Locate the `topology_v2.connectors:` block (creating it if absent). For each new connector entry in the emit:
+**Merge strategy.** Locate the `topology.connectors:` block (creating it if absent). For each new connector entry in the emit:
 
 - **Same `id`:** replace the existing entry in place (idempotent re-run).
 - **New `id`:** append.
@@ -179,7 +179,7 @@ The connector code itself stays unchanged — the new modules are siblings that 
 
 **Piece 2 — `kairix sharepoint configure --pick`** (one commit):
 - `configure.py:emit_connector_block(discovery_result, picks, sensitivity, credentials_ref)` returns the YAML block as a string.
-- `yaml_merge.py:merge_topology_v2_connectors(config_path, new_block)` does the in-place merge via `ruamel.yaml`.
+- `yaml_merge.py:merge_topology_connectors(config_path, new_block)` does the in-place merge via `ruamel.yaml`.
 - `backup.py:backup_then_write(path, new_content, max_backups=5)` writes the backup, runs the merge, validates, rolls back on failure.
 - `kairix sharepoint configure --pick 1,2,3 [--write-to <path>|--sensitivity X|--credentials Y|--json]` subcommand wires them.
 - BDD: 4 scenarios (emit-to-stdout; in-place merge happy path; in-place merge with validation failure → rollback; idempotent re-run replaces same-id entry). Integration test exercising the `kairix config validate` round-trip. F30 outcome test asserts the backup file lands at the right name + the rollback path works.
@@ -200,7 +200,7 @@ The connector code itself stays unchanged — the new modules are siblings that 
 
 ### F-rule discipline
 
-Each piece carries the canonical test set: BDD ON + OFF for the flag (F54), contract test against the canonical fake (F43), integration test exercising both flag branches (F47), E2E composed-path test (F48). The flag `guided_configuration_sharepoint` lands in the registry with the cutover plan and `target_retire_in: v2027.5.24` (12 months — matches the topology_v2_* fleet so retirement batches together when the discovery surface generalises to all connectors).
+Each piece carries the canonical test set: BDD ON + OFF for the flag (F54), contract test against the canonical fake (F43), integration test exercising both flag branches (F47), E2E composed-path test (F48). The flag `guided_configuration_sharepoint` lands in the registry with the cutover plan and `target_retire_in: v2027.5.24` (12 months — matches the topology_* fleet so retirement batches together when the discovery surface generalises to all connectors).
 
 ### Cutover protocol
 
@@ -233,7 +233,7 @@ The shared `kairix/platform/discovery/` module covers cache + backup + YAML merg
 
 - **Throughput calibration cold-start.** The first ingest on a new host has no historical data — the estimate is purely from the seeded defaults. Should the estimate carry an "uncalibrated" tag the first time, and trust the operator's tolerance until calibration has 10+ samples?
 - **Discovery cache invalidation on permission change.** If the operator removes the AAD app's access to a site between discovery runs, the cache could show entries that no longer resolve. Defaulting to 24h TTL is probably fine; worth re-checking after the pilot soaks.
-- **Configure write-to behaviour when `topology_v2_config` flag is off.** The configure step writes config that's inert until `topology_v2_config` is also on. Should configure refuse with `--accept-inert`, warn-and-proceed, or stay silent? Lean warn-and-proceed.
+- **Configure write-to behaviour when `topology_config` flag is off.** The configure step writes config that's inert until `topology_config` is also on. Should configure refuse with `--accept-inert`, warn-and-proceed, or stay silent? Lean warn-and-proceed.
 - **MCP tool authorisation.** `tool_sharepoint_configure` writes shared infra. The MCP layer has no built-in auth today; should this tool be gated by a separate `mcp_allow_config_writes` flag the operator opts into?
 
 These resolve during the pilot dogfood — none are blocking for landing.

@@ -26,26 +26,26 @@ from contextlib import closing
 from dataclasses import asdict, dataclass
 
 from kairix.core.features.resolver import FlagStatus, status
-from kairix.core.features.topology_v2_status import (
-    TopologyV2Diagnostics,
-    build_topology_v2_diagnostics,
-    render_topology_v2_human,
-    render_topology_v2_json,
+from kairix.core.features.topology_status import (
+    TopologyDiagnostics,
+    build_topology_diagnostics,
+    render_topology_human,
+    render_topology_json,
 )
 
 # F17 — flag string duplicated across the parser + arg lookup.
-_FLAG_TOPOLOGY_V2 = "--topology-v2"
+_FLAG_TOPOLOGY = "--topology"
 # F17 — argparse store-true action constant used by multiple --flag args.
 _STORE_TRUE = "store_true"
 
-DiagnosticsProvider = Callable[[], TopologyV2Diagnostics | None]
+DiagnosticsProvider = Callable[[], TopologyDiagnostics | None]
 
 # Path-aware variant — production default takes the parsed --db-path arg
-# (or None) and returns the matching topology v2 diagnostics, or None
+# (or None) and returns the matching topology diagnostics, or None
 # when the read fails. Decoupling from the args.db_path string keeps the
 # seam composable; the args.db_path is the operator's CLI surface, not
 # part of the DI surface.
-PathAwareDiagnosticsProvider = Callable[[str | None], TopologyV2Diagnostics | None]
+PathAwareDiagnosticsProvider = Callable[[str | None], TopologyDiagnostics | None]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -68,11 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit a JSON envelope on stdout instead of the human-readable table.",
     )
     status_parser.add_argument(
-        _FLAG_TOPOLOGY_V2,
+        _FLAG_TOPOLOGY,
         action=_STORE_TRUE,
-        dest="emit_topology_v2",
+        dest="emit_topology",
         help=(
-            "Include topology v2 diagnostics (declared cc_pairs + per-actor "
+            "Include topology diagnostics (declared cc_pairs + per-actor "
             "scope-profile resolution) in the output. Backward-compatible — "
             "absent the flag, output is unchanged from pre-Wave-D."
         ),
@@ -81,7 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--db-path",
         type=str,
         default=None,
-        help="SQLite path for the topology v2 read (default: platform default via kairix.paths.db_path).",
+        help="SQLite path for the topology read (default: platform default via kairix.paths.db_path).",
     )
     status_parser.add_argument(
         "--maintenance",
@@ -133,11 +133,11 @@ def _build_default_diagnostics_provider(db_path: str | None) -> DiagnosticsProvi
 
     Factored so :func:`main` and the MCP tool can both call into a
     one-liner that handles the connection lifecycle. Returns ``None``
-    on read failure (e.g. missing topology v2 tables on an old schema)
+    on read failure (e.g. missing topology tables on an old schema)
     so the surface degrades to the legacy view rather than crashing.
     """
 
-    def _provider() -> TopologyV2Diagnostics | None:
+    def _provider() -> TopologyDiagnostics | None:
         try:
             if db_path is not None:
                 # F77-allow: operator CLI subcommand (features status); read-only diagnostics.
@@ -148,39 +148,39 @@ def _build_default_diagnostics_provider(db_path: str | None) -> DiagnosticsProvi
                 # F77-allow: operator CLI subcommand (features status); read-only diagnostics.
                 conn = sqlite3.connect(str(resolve_db()))
             with closing(conn):
-                return build_topology_v2_diagnostics(conn)
+                return build_topology_diagnostics(conn)
         except sqlite3.Error:
             return None
 
     return _provider
 
 
-def _default_path_aware_diagnostics(db_path: str | None) -> TopologyV2Diagnostics | None:
+def _default_path_aware_diagnostics(db_path: str | None) -> TopologyDiagnostics | None:
     """Production path-aware diagnostics resolver — composes the provider."""
     return _build_default_diagnostics_provider(db_path)()
 
 
 def format_json_envelope_with_topology(
     entries: tuple[FlagStatus, ...],
-    diag: TopologyV2Diagnostics | None,
+    diag: TopologyDiagnostics | None,
 ) -> str:
-    """Render the JSON envelope with the topology v2 diagnostics merged in.
+    """Render the JSON envelope with the topology diagnostics merged in.
 
     Backward-compatible: when ``diag is None`` (e.g. operator omitted
-    ``--topology-v2`` or read failed), output matches
+    ``--topology`` or read failed), output matches
     :func:`format_json_envelope`.
     """
     payload: dict[str, object] = {"flags": [asdict(entry) for entry in entries]}
     if diag is not None:
-        payload["topology_v2"] = render_topology_v2_json(diag)
+        payload["topology"] = render_topology_json(diag)
     return json.dumps(payload, indent=2, sort_keys=True)
 
 
 def format_table_with_topology(
     entries: tuple[FlagStatus, ...],
-    diag: TopologyV2Diagnostics | None,
+    diag: TopologyDiagnostics | None,
 ) -> str:
-    """Render the table with the topology v2 diagnostics appended.
+    """Render the table with the topology diagnostics appended.
 
     Backward-compatible: when ``diag is None``, output matches
     :func:`format_table`.
@@ -188,7 +188,7 @@ def format_table_with_topology(
     base = format_table(entries)
     if diag is None:
         return base
-    return base + "\n\n" + render_topology_v2_human(diag)
+    return base + "\n\n" + render_topology_human(diag)
 
 
 @dataclass(frozen=True)
@@ -320,7 +320,7 @@ def main(
     argv: list[str] | None = None,
     *,
     status_provider: Callable[[], tuple[FlagStatus, ...]] = _default_status_provider,
-    read_topology_v2: PathAwareDiagnosticsProvider = _default_path_aware_diagnostics,
+    read_topology: PathAwareDiagnosticsProvider = _default_path_aware_diagnostics,
     read_maintenance: MaintenanceDiagnosticsProvider = _default_maintenance_diagnostics,
 ) -> int:
     """Entry point for ``kairix features``.
@@ -331,18 +331,18 @@ def main(
     :class:`FlagStatus` rows, avoiding the need to monkey-patch the
     resolver module.
 
-    ``read_topology_v2`` is the topology v2 DI seam: takes the
+    ``read_topology`` is the topology DI seam: takes the
     operator's ``--db-path`` arg (or None) and returns the matching
-    :class:`TopologyV2Diagnostics` (or None on read failure). The
+    :class:`TopologyDiagnostics` (or None on read failure). The
     production default delegates to :func:`_default_path_aware_diagnostics`
     so callers get the configured SQLite db without seam plumbing.
     """
     args = build_parser().parse_args(argv if argv is not None else sys.argv[2:])
     entries = status_provider()
 
-    diag: TopologyV2Diagnostics | None = None
-    if getattr(args, "emit_topology_v2", False):
-        diag = read_topology_v2(args.db_path)
+    diag: TopologyDiagnostics | None = None
+    if getattr(args, "emit_topology", False):
+        diag = read_topology(args.db_path)
 
     maint: MaintenanceDiagnostics | None = None
     if getattr(args, "emit_maintenance", False):

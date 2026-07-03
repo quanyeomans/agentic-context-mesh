@@ -1,4 +1,4 @@
-"""Unit tests for :class:`TopologyV2CollectionResolver` + default_in_scope wiring.
+"""Unit tests for :class:`TopologyCollectionResolver` + default_in_scope wiring.
 
 Scaffolding ahead of implementation (#373). Tests xfail with strict=False
 until the production wiring lands; the implementation agent removes the
@@ -12,7 +12,7 @@ Pins (per docs/architecture/collection-v2-implementation-plan.md):
   * Explicit opt-in collection (``default_in_scope=False``) reachable by name.
   * Cross-agent isolation: ``shape`` cannot see ``builder-memory``.
   * Wildcard path (``agent=None``, ``ALL_AGENTS``) bypasses scope_profile.
-  * Factory branch on the ``topology_v2_default_in_scope`` flag (off vs on).
+  * Factory branch on the ``topology_default_in_scope`` flag (off vs on).
 
 F1-clean: every test injects a :class:`FakeScopeProfileResolver` via the
 ``scope_profile_resolver=`` kwarg — no monkeypatch of internals.
@@ -28,7 +28,7 @@ import pytest
 
 from kairix.core.db.schema import create_schema
 from kairix.core.search.scope import Scope
-from kairix.core.search.topology_v2_resolver import TopologyV2CollectionResolver
+from kairix.core.search.topology_resolver import TopologyCollectionResolver
 from tests.fakes import FakeScopeProfileResolver
 
 pytestmark = pytest.mark.unit
@@ -60,7 +60,7 @@ def test_no_collections_specified_returns_default_in_scope_superset() -> None:
             ("reflib", "read", "public", False),
         ],
     )
-    resolver = TopologyV2CollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
+    resolver = TopologyCollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
 
     result = resolver.resolve(agent="shape", scope=Scope.SHARED_AGENT)
 
@@ -77,7 +77,7 @@ def test_no_collections_specified_returns_default_in_scope_superset() -> None:
     assert "reflib" not in result, f"opt-in collection leaked into default search result: {result!r}"
     # The Adapter must propagate default_only=True through to the resolver.
     assert fake.last_default_only is True, (
-        f"TopologyV2CollectionResolver must call scope resolver with default_only=True "
+        f"TopologyCollectionResolver must call scope resolver with default_only=True "
         f"on the collections=None path; saw default_only={fake.last_default_only!r}"
     )
 
@@ -97,7 +97,7 @@ def test_explicit_collection_in_scope_returns_that_collection() -> None:
             ("reflib", "read", "public", False),
         ],
     )
-    resolver = TopologyV2CollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
+    resolver = TopologyCollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
 
     filtered, error = resolver.validate_explicit(agent="shape", collections=["reflib"], scope=Scope.SHARED_AGENT)
 
@@ -117,7 +117,7 @@ def test_explicit_collection_not_in_scope_returns_none_with_f21_error() -> None:
             ("sharepoint", "read", "internal", True),
         ],
     )
-    resolver = TopologyV2CollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
+    resolver = TopologyCollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
 
     filtered, error = resolver.validate_explicit(agent="shape", collections=["foo"], scope=Scope.SHARED_AGENT)
 
@@ -144,7 +144,7 @@ def test_explicit_collection_opt_in_works_even_when_default_in_scope_false() -> 
             ("reflib", "read", "public", False),
         ],
     )
-    resolver = TopologyV2CollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
+    resolver = TopologyCollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
 
     filtered, error = resolver.validate_explicit(agent="shape", collections=["reflib"], scope=Scope.SHARED_AGENT)
 
@@ -166,7 +166,7 @@ def test_default_only_true_excludes_other_agents_memory() -> None:
             ("shape-memory", "read_write", "personal", True),
         ],
     )
-    resolver = TopologyV2CollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
+    resolver = TopologyCollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
 
     result = resolver.resolve(agent="shape", scope=Scope.SHARED_AGENT)
 
@@ -189,7 +189,7 @@ def test_explicit_other_agent_memory_returns_none() -> None:
             ("shape-memory", "read_write", "personal", True),
         ],
     )
-    resolver = TopologyV2CollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
+    resolver = TopologyCollectionResolver(db=_fresh_db(), scope_profile_resolver=fake)
 
     filtered, error = resolver.validate_explicit(
         agent="shape", collections=["builder-memory"], scope=Scope.SHARED_AGENT
@@ -240,7 +240,7 @@ def test_agent_none_all_agents_path_unaffected_by_default_only() -> None:
     db.commit()
 
     fake = FakeScopeProfileResolver()  # never consulted on ALL_AGENTS path
-    resolver = TopologyV2CollectionResolver(db=db, scope_profile_resolver=fake)
+    resolver = TopologyCollectionResolver(db=db, scope_profile_resolver=fake)
 
     result = resolver.resolve(agent=None, scope=Scope.ALL_AGENTS)
 
@@ -256,10 +256,10 @@ def test_agent_none_all_agents_path_unaffected_by_default_only() -> None:
 def test_factory_always_returns_v2_resolver_post_cutover() -> None:
     """``build_collection_resolver`` always returns the v2 Adapter.
 
-    ``topology_v2_collection_resolver`` + ``topology_v2_default_in_scope``
+    ``topology_collection_resolver`` + ``topology_default_in_scope``
     retired post-cutover (task #132); the legacy DefaultCollectionResolver
     branch is gone and every call returns
-    :class:`TopologyV2CollectionResolver` with default-only routing.
+    :class:`TopologyCollectionResolver` with default-only routing.
     """
     from kairix.core.factory import build_collection_resolver
 
@@ -267,6 +267,6 @@ def test_factory_always_returns_v2_resolver_post_cutover() -> None:
     # The v2 Adapter has a ``validate_explicit`` method; the (removed)
     # legacy resolver did not. This is the load-bearing assertion.
     assert hasattr(resolver, "validate_explicit"), (
-        f"build_collection_resolver must yield TopologyV2CollectionResolver "
+        f"build_collection_resolver must yield TopologyCollectionResolver "
         f"(with validate_explicit); got {type(resolver).__name__}"
     )

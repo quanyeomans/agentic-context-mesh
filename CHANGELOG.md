@@ -7,6 +7,10 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+### The `topology_v2` config setting is now just `topology`
+
+The block in `kairix.config.yaml` that lists your connectors, collections, and scopes has been renamed from `topology_v2` to `topology` — the `v2` was a leftover from an older naming. You don't need to change anything: if your config still uses the old name, kairix reads it as `topology` automatically (in memory, without rewriting your file), so existing setups keep working with zero effort. From now on the setup wizard writes the new name. See [the upgrade note](docs/upgrades/topology-config-key-rename.md) for details.
+
 ## [2026.7.2] - 2026-07-03
 
 ### The agent guide now shows the real tool names

@@ -1,4 +1,4 @@
-"""End-to-end integration test for the topology v2 Wave C runtime.
+"""End-to-end integration test for the topology Wave C runtime.
 
 Exercises:
 * Flag OFF (default): a single connector sync writes through the legacy
@@ -102,7 +102,7 @@ def _read_collection_for_path(db: sqlite3.Connection, path: str) -> str | None:
 
 
 def test_unmapped_entry_chunks_land_in_legacy_single_collection(tmp_path: Path) -> None:
-    """When an entry has no cc_pair (no topology v2 wiring), the writer falls
+    """When an entry has no cc_pair (no topology wiring), the writer falls
     through to the legacy single-collection adapter and chunks land under the
     entry name. Pins the legacy fallthrough — post-#132 cutover the flag is gone
     but the fallthrough remains because not every entry has a cc_pair."""

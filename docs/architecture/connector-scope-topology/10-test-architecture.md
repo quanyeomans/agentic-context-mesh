@@ -174,15 +174,15 @@ Each failure-injection test names the production behaviour it verifies (the cc_p
 
 @pytest.mark.migration
 def test_wave_a_with_flag_off_preserves_v1_shape() -> None:
-    """topology_v2_schema=off: existing connector_cursors row works exactly as v1."""
-    with flag_off("topology_v2_schema"):
+    """topology_schema=off: existing connector_cursors row works exactly as v1."""
+    with flag_off("topology_schema"):
         cursor = read_cursor("obsidian")
         assert cursor.cursor_token == "..."
 
 @pytest.mark.migration
 def test_wave_a_with_flag_on_populates_new_tables() -> None:
-    """topology_v2_schema=on: connector_containers table is populated for single-container connectors with container_id=cc_pair_name."""
-    with flag_on("topology_v2_schema"):
+    """topology_schema=on: connector_containers table is populated for single-container connectors with container_id=cc_pair_name."""
+    with flag_on("topology_schema"):
         run_one_sync_cycle("obsidian")
         containers = list(read_containers(cc_pair_name="obsidian"))
         assert len(containers) == 1
@@ -195,7 +195,7 @@ def test_wave_a_to_wave_g_progression() -> None:
     seed_dogfood_corpus()
     baseline_results = query_canonical_set(actor="agent-shape")
     for wave in ["A", "B", "C", "D", "E", "F", "G"]:
-        promote_flag(f"topology_v2_{wave.lower()}")
+        promote_flag(f"topology_{wave.lower()}")
         results = query_canonical_set(actor="agent-shape")
         assert results.match(baseline_results, tolerance=0.05)  # 5% drift acceptable
 ```

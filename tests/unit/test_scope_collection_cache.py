@@ -1,7 +1,7 @@
 """Unit tests for :class:`ScopeCollectionCache` (R2, #388).
 
 The MCP server's executor threads share one SQLite Connection on the
-topology_v2 collection resolver. The cache turns repeated identical
+topology collection resolver. The cache turns repeated identical
 ``(agent, scope)`` resolves into memory lookups so the threads don't
 serialise on SQLite's lock under load.
 
@@ -38,7 +38,7 @@ pytestmark = pytest.mark.unit
 
 
 class _RecordingResolver:
-    """Stand-in for :class:`TopologyV2CollectionResolver` that records calls."""
+    """Stand-in for :class:`TopologyCollectionResolver` that records calls."""
 
     def __init__(self, value: list[str] | None) -> None:
         self._value = value

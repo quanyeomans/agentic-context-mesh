@@ -3,7 +3,7 @@
 The setup wizard writes config saves to the operator overlay file
 (``KAIRIX_CONFIG_OVERLAY_PATH``) on the shipped compose, but three
 runtime readers historically resolved only the read-only base config:
-the worker's ``topology_v2`` boot apply, ``paths.load_top_level_config``
+the worker's ``topology`` boot apply, ``paths.load_top_level_config``
 (document root), and ``paths.feature_flag_config_overlay``. These tests
 pin the contract that wizard-written state is OBSERVED by each reader,
 in both branches: overlay mode ON (base + overlay env pair) and OFF
@@ -32,14 +32,14 @@ from kairix.platform.setup.backends import (
     write_config_updates,
 )
 from kairix.platform.setup.service import build_setup_service
-from kairix.worker import TopologyV2ApplyDeps, apply_topology_v2_at_boot
+from kairix.worker import TopologyApplyDeps, apply_topology_at_boot
 from tests.fakes import FakePaths
 
 pytestmark = pytest.mark.integration
 
 
 _TOPOLOGY_UPDATES: dict[str, Any] = {
-    "topology_v2": {
+    "topology": {
         "connectors": [{"id": "github-main", "kind": "github", "name": "github-main"}],
         "cc_pairs": [
             {"id": "p1", "connector": "github-main", "credential": None, "name": "github-main-pair"},
@@ -84,28 +84,28 @@ def test_update_config_file_preserves_nested_sibling_keys(tmp_path: Path) -> Non
 
     The wizard saves arrive one block at a time (connect GitHub, then
     connect Slack). Each save merges into the SAME overlay file — a
-    one-level merge replaces ``topology_v2.credentials`` wholesale on
+    one-level merge replaces ``topology.credentials`` wholesale on
     the second save, silently dropping the first source's credential.
     """
     target = tmp_path / "kairix.config.local.yaml"
     update_config_file(
         target,
-        {"topology_v2": {"credentials": {"github": {"token_env": "GITHUB_TOKEN"}}}},
+        {"topology": {"credentials": {"github": {"token_env": "GITHUB_TOKEN"}}}},
     )
     update_config_file(
         target,
-        {"topology_v2": {"credentials": {"slack": {"token_env": "SLACK_TOKEN"}}}},
+        {"topology": {"credentials": {"slack": {"token_env": "SLACK_TOKEN"}}}},
     )
 
     data = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert data["topology_v2"]["credentials"]["slack"] == {"token_env": "SLACK_TOKEN"}
+    assert data["topology"]["credentials"]["slack"] == {"token_env": "SLACK_TOKEN"}
     # Pre-#492 this key was dropped: the one-level merge replaced the
     # whole ``credentials`` dict instead of merging inside it.
-    assert data["topology_v2"]["credentials"]["github"] == {"token_env": "GITHUB_TOKEN"}
+    assert data["topology"]["credentials"]["github"] == {"token_env": "GITHUB_TOKEN"}
 
 
 # ---------------------------------------------------------------------------
-# Reader B — the worker's topology_v2 boot apply (the #489 drain path)
+# Reader B — the worker's topology boot apply (the #489 drain path)
 # ---------------------------------------------------------------------------
 
 
@@ -113,18 +113,18 @@ def test_wizard_saved_topology_in_overlay_is_applied_at_worker_boot(tmp_path: Pa
     """Overlay branch ON: the OAuth save's topology drains at next boot.
 
     Pre-#492 the worker resolved the single base file, so the overlay's
-    ``topology_v2:`` was never applied — no cc_pair rows, nothing
+    ``topology:`` was never applied — no cc_pair rows, nothing
     drains, behind a green wizard screen.
     """
     _base, overlay, env = _overlay_pair(tmp_path)
     write_config_updates(_TOPOLOGY_UPDATES, overlay_path=str(overlay), config_path=None)
 
     db_path = tmp_path / "kairix.sqlite"
-    deps = TopologyV2ApplyDeps(
+    deps = TopologyApplyDeps(
         config_mapping_fn=lambda: load_merged_mapping(env=env),
         db_factory=lambda: sqlite3.connect(str(db_path)),
     )
-    apply_topology_v2_at_boot(deps)
+    apply_topology_at_boot(deps)
 
     assert _applied_cc_pair_names(db_path) == [("github-main-pair",)]
 
@@ -135,11 +135,11 @@ def test_wizard_saved_topology_in_single_file_mode_is_applied_at_worker_boot(tmp
     write_config_updates(_TOPOLOGY_UPDATES, overlay_path=None, config_path=str(config))
 
     db_path = tmp_path / "kairix.sqlite"
-    deps = TopologyV2ApplyDeps(
+    deps = TopologyApplyDeps(
         config_mapping_fn=lambda: load_merged_mapping(env={"KAIRIX_CONFIG_PATH": str(config)}),
         db_factory=lambda: sqlite3.connect(str(db_path)),
     )
-    apply_topology_v2_at_boot(deps)
+    apply_topology_at_boot(deps)
 
     assert _applied_cc_pair_names(db_path) == [("github-main-pair",)]
 

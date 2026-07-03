@@ -249,7 +249,7 @@ def _read_heartbeat(db_path: Path, *, cc_pair_name: str) -> tuple[str | None, st
 
 def _obsidian_topology(vault: Path, *, cc_pair_name: str) -> dict[str, Any]:
     return {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {
                     "id": "obsidian-conn",

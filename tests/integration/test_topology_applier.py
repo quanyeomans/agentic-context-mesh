@@ -2,7 +2,7 @@
 
 Exercises:
 
-* Flag OFF: ``apply_topology_v2_at_boot`` short-circuits before opening
+* Flag OFF: ``apply_topology_at_boot`` short-circuits before opening
   the DB — no topology_* rows written, no behaviour change.
 * Flag ON + valid config: the applier materialises every block into
   rows; ``resolve_chunk_writer_for_entry(...)`` consequently picks up
@@ -18,7 +18,7 @@ Per F47: the composed-pipeline construction routes through
 ``FakePaths(...)``; the apply-bridge call itself is a single-layer
 boundary proof so it lives under ``tests/integration/`` and exercises
 the framework helper directly (matches the Wave C
-``test_topology_v2_runtime_end_to_end.py`` pattern).
+``test_topology_runtime_end_to_end.py`` pattern).
 """
 
 from __future__ import annotations
@@ -29,17 +29,17 @@ from typing import Any
 
 import pytest
 
-from kairix.config import parse_topology_v2
+from kairix.config import parse_topology
 from kairix.config_layers import load_merged_mapping
-from kairix.core.connectors.topology_v2_applier import (
+from kairix.core.connectors.topology_applier import (
     ApplyValidationError,
-    apply_topology_v2,
+    apply_topology,
 )
 from kairix.core.db.schema import create_schema
 from kairix.core.factory import build_connector_pipeline
 from kairix.worker import (
-    TopologyV2ApplyDeps,
-    apply_topology_v2_at_boot,
+    TopologyApplyDeps,
+    apply_topology_at_boot,
     resolve_chunk_writer_for_entry,
 )
 from tests.fakes import FakePaths
@@ -48,7 +48,7 @@ pytestmark = pytest.mark.integration
 
 
 _TWO_CONNECTOR_CONFIG = {
-    "topology_v2": {
+    "topology": {
         "connectors": [
             {"id": "obs-conn", "kind": "obsidian", "name": "obs-conn"},
             {"id": "sp-conn", "kind": "sharepoint", "name": "sp-conn"},
@@ -98,10 +98,10 @@ def _open_sqlite(tmp_path: Path) -> sqlite3.Connection:
 
 
 def test_apply_at_boot_with_no_config_is_noop(tmp_path: Path) -> None:
-    """Missing kairix.config.yaml → apply_topology_v2_at_boot returns
+    """Missing kairix.config.yaml → apply_topology_at_boot returns
     None without opening the DB.
 
-    ``topology_v2_config`` retired post-cutover (task #132); the applier
+    ``topology_config`` retired post-cutover (task #132); the applier
     runs unconditionally but still short-circuits cleanly when there is
     nothing to apply.
     """
@@ -112,11 +112,11 @@ def test_apply_at_boot_with_no_config_is_noop(tmp_path: Path) -> None:
         db_factory_calls.append(1)
         return sqlite3.connect(str(db_path))
 
-    deps = TopologyV2ApplyDeps(
+    deps = TopologyApplyDeps(
         config_mapping_fn=dict,  # no kairix.config.yaml on disk -> empty mapping
         db_factory=_fake_db_factory,
     )
-    result = apply_topology_v2_at_boot(deps)
+    result = apply_topology_at_boot(deps)
     assert result is None
     # The no-config branch must never open the DB.
     assert db_factory_calls == []
@@ -135,11 +135,11 @@ def test_apply_at_boot_materialises_rows(tmp_path: Path) -> None:
     config_path = _write_config_yaml(tmp_path, _TWO_CONNECTOR_CONFIG)
     db_path = tmp_path / "kairix.sqlite"
 
-    deps = TopologyV2ApplyDeps(
+    deps = TopologyApplyDeps(
         config_mapping_fn=lambda: load_merged_mapping(env={"KAIRIX_CONFIG_PATH": str(config_path)}),
         db_factory=lambda: sqlite3.connect(str(db_path)),
     )
-    result = apply_topology_v2_at_boot(deps)
+    result = apply_topology_at_boot(deps)
     assert result is None
 
     # Read back via a fresh connection — the applier committed.
@@ -163,14 +163,14 @@ _F69_CC_PAIRS = 10_000
 
 
 def _build_scale_topology_config(n_cc_pairs: int) -> dict[str, Any]:
-    """Build a topology_v2 config carrying ``n_cc_pairs`` cc_pairs.
+    """Build a topology config carrying ``n_cc_pairs`` cc_pairs.
 
     Uses a single connector + credential so the cc_pair multiplicity
     is the only thing that scales — proves the applier walks each
     cc_pair row independently of fixture-shape assumptions.
     """
     return {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {"id": "scale-conn", "kind": "obsidian", "name": "scale-conn"},
             ],
@@ -188,8 +188,8 @@ def _build_scale_topology_config(n_cc_pairs: int) -> dict[str, Any]:
 def test_apply_at_boot_materialises_rows_at_10k_cc_pairs(tmp_path: Path) -> None:
     """F69 production-scale variant: topology_cc_pairs fetchall survives 10K rows.
 
-    Builds a topology_v2 config with ``_F69_CC_PAIRS`` cc_pairs, runs
-    ``apply_topology_v2_at_boot``, then runs the same SELECT name
+    Builds a topology config with ``_F69_CC_PAIRS`` cc_pairs, runs
+    ``apply_topology_at_boot``, then runs the same SELECT name
     fetchall the fixture-scale test pins. Wall-clock budgets catch
     Bug 3-class regressions in the apply path or the readback SELECT.
 
@@ -204,17 +204,17 @@ def test_apply_at_boot_materialises_rows_at_10k_cc_pairs(tmp_path: Path) -> None
     config_path = _write_config_yaml(tmp_path, _build_scale_topology_config(_F69_CC_PAIRS))
     db_path = tmp_path / "kairix.sqlite"
 
-    deps = TopologyV2ApplyDeps(
+    deps = TopologyApplyDeps(
         config_mapping_fn=lambda: load_merged_mapping(env={"KAIRIX_CONFIG_PATH": str(config_path)}),
         db_factory=lambda: sqlite3.connect(str(db_path)),
     )
     apply_start = time.monotonic()
-    result = apply_topology_v2_at_boot(deps)
+    result = apply_topology_at_boot(deps)
     apply_elapsed = time.monotonic() - apply_start
     assert result is None
     # Apply budget: 60s for 10K cc_pairs.
     assert apply_elapsed < 60.0, (
-        f"apply_topology_v2_at_boot for {_F69_CC_PAIRS} cc_pairs took {apply_elapsed:.2f}s; "
+        f"apply_topology_at_boot for {_F69_CC_PAIRS} cc_pairs took {apply_elapsed:.2f}s; "
         f"budget 60s. fix: confirm applier walks cc_pairs linearly"
     )
 
@@ -241,10 +241,10 @@ def test_apply_is_idempotent_on_repeat_boot(tmp_path: Path) -> None:
     duplicate rows.
     """
     db = _open_sqlite(tmp_path)
-    parsed = parse_topology_v2(_TWO_CONNECTOR_CONFIG)
-    first = apply_topology_v2(db, parsed)
+    parsed = parse_topology(_TWO_CONNECTOR_CONFIG)
+    first = apply_topology(db, parsed)
     db.commit()
-    second = apply_topology_v2(db, parsed)
+    second = apply_topology(db, parsed)
     db.commit()
     # 2 connectors + 1 credential + 2 cc_pairs + 2 collections + 2 sources = 9 created on first.
     assert first.created == 9
@@ -262,8 +262,8 @@ def test_apply_then_resolve_chunk_writer_routes_through_collection_router(tmp_pa
     selected over the legacy writer.
     """
     db = _open_sqlite(tmp_path)
-    parsed = parse_topology_v2(_TWO_CONNECTOR_CONFIG)
-    apply_topology_v2(db, parsed)
+    parsed = parse_topology(_TWO_CONNECTOR_CONFIG)
+    apply_topology(db, parsed)
     db.commit()
     writer = resolve_chunk_writer_for_entry(db, "obsidian-personal")
     # CollectionRouter adapter exposes the underlying router; legacy writer
@@ -278,15 +278,15 @@ def test_apply_rejects_invalid_config_with_validation_failures(tmp_path: Path) -
     """Invalid config (dangling cc_pair → connector reference) raises ApplyValidationError."""
     db = _open_sqlite(tmp_path)
     bad = {
-        "topology_v2": {
+        "topology": {
             "cc_pairs": [
                 {"id": "stray", "connector": "no-such-connector", "credential": None, "name": "stray-cp"},
             ],
         }
     }
-    parsed = parse_topology_v2(bad)
+    parsed = parse_topology(bad)
     with pytest.raises(ApplyValidationError) as exc_info:
-        apply_topology_v2(db, parsed)
+        apply_topology(db, parsed)
     assert any(f.rule == "cc_pair_connector_missing" for f in exc_info.value.failures)
     # No rows should have landed.
     cc_rows = db.execute("SELECT COUNT(*) FROM topology_cc_pairs").fetchone()
@@ -302,8 +302,8 @@ def test_factory_pipeline_builds_against_applied_topology(tmp_path: Path) -> Non
     construction contract.
     """
     db = _open_sqlite(tmp_path)
-    parsed = parse_topology_v2(_TWO_CONNECTOR_CONFIG)
-    apply_topology_v2(db, parsed)
+    parsed = parse_topology(_TWO_CONNECTOR_CONFIG)
+    apply_topology(db, parsed)
     db.commit()
     paths = FakePaths(
         document_root=tmp_path / "vault",

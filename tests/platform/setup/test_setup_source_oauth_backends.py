@@ -334,7 +334,7 @@ def test_save_emits_topology_config_and_pre_spend_summary() -> None:
     saved = harness.service.save_oauth_source("slack", "", ("C1", "C2"))
     assert saved.ok, saved.error
     assert saved.summary.startswith("2 channels selected")
-    topology = harness.config_writes[0]["topology_v2"]
+    topology = harness.config_writes[0]["topology"]
     assert topology["connectors"][0]["kind"] == "slack"
     # The workspace instance came from the connect form, not the save form.
     assert topology["connectors"][0]["connector_specific_config"] == {"workspace": "alpha"}
@@ -376,7 +376,7 @@ def test_gmail_confirm_screen_requires_the_mailbox() -> None:
     assert "mailbox address is required" in (missing.error or "")
     saved = harness.service.save_oauth_source("gmail", "agent-alpha@example.com", ())
     assert saved.ok, saved.error
-    connector = harness.config_writes[0]["topology_v2"]["connectors"][0]
+    connector = harness.config_writes[0]["topology"]["connectors"][0]
     assert connector["connector_specific_config"] == {"user_email": "agent-alpha@example.com"}
 
 
@@ -387,9 +387,9 @@ def test_gmail_confirm_screen_requires_the_mailbox() -> None:
 
 def test_read_config_mapping_prefers_the_overlay(tmp_path: Path) -> None:
     overlay = tmp_path / "overlay.yaml"
-    overlay.write_text("topology_v2:\n  connectors: []\n", encoding="utf-8")
+    overlay.write_text("topology:\n  connectors: []\n", encoding="utf-8")
     loaded = read_config_mapping(overlay_path=str(overlay), config_path=str(tmp_path / "base.yaml"))
-    assert loaded == {"topology_v2": {"connectors": []}}
+    assert loaded == {"topology": {"connectors": []}}
 
 
 def test_read_config_mapping_missing_file_reads_empty(tmp_path: Path) -> None:

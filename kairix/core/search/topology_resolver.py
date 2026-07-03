@@ -1,4 +1,4 @@
-"""Topology v2 ``CollectionResolver`` — superset-of-scope-profile default.
+"""Topology ``CollectionResolver`` — superset-of-scope-profile default.
 
 GH #372 — when an agent calls kairix without specifying ``collections=``,
 return the superset of every collection the agent's scope_profile grants
@@ -20,7 +20,7 @@ at :mod:`kairix.core.protocols`):
   (``can_write=True``) entries; this is the agent's own memory bucket.
 * ``agent=X, scope=Scope.SHARED`` — return read-eligible entries (the
   same superset as SHARED_AGENT today, since v2 doesn't yet split
-  "shared" vs "own" — Wave G of the topology v2 migration will).
+  "shared" vs "own" — Wave G of the topology migration will).
 * ``agent=None, scope=Scope.ALL_AGENTS`` or ``Scope.EVERYTHING`` — return
   every collection_name from ``topology_collections`` whose parent
   cc_pair has ``access_type='PUBLIC'``. This is the wildcard path for
@@ -33,7 +33,7 @@ default factory wires a real :class:`ScopeProfileResolver` against the
 connection.
 
 This Adapter is wired by :func:`kairix.core.factory.build_search_pipeline`
-behind the ``topology_v2_collection_resolver`` feature flag (default
+behind the ``topology_collection_resolver`` feature flag (default
 False). The cutover is a separate deliberate action per the default-safe
 principle (docs/architecture/feature-flag-architecture.md §2.1).
 """
@@ -67,8 +67,8 @@ _F39_TIER_ORDER: tuple[F39Tier, ...] = (
 )
 
 
-class TopologyV2CollectionResolver:
-    """Production ``CollectionResolver`` backed by topology v2 scope profiles.
+class TopologyCollectionResolver:
+    """Production ``CollectionResolver`` backed by topology scope profiles.
 
     Composes :class:`ScopeProfileResolver` with the search pipeline's
     Protocol contract: ``resolve(agent, scope) -> list[str] | None``.
@@ -117,7 +117,7 @@ class TopologyV2CollectionResolver:
         ``extra_collections`` — appended verbatim to every non-None
         ``resolve()`` result. Preserves the operator-facing
         ``KAIRIX_EXTRA_COLLECTIONS`` env-var contract honoured before the
-        ``topology_v2_collection_resolver`` flag retirement. The factory
+        ``topology_collection_resolver`` flag retirement. The factory
         reads the env var at the boundary and passes the parsed list in
         here; nothing else in the v2 path knows about env vars.
         """
@@ -145,7 +145,7 @@ class TopologyV2CollectionResolver:
 
         # agent supplied — resolve via the scope profile. GH #373: the
         # no-collections-specified path returns the in-default superset
-        # (default_only=True) when the topology_v2_default_in_scope flag
+        # (default_only=True) when the topology_default_in_scope flag
         # is on, so opt-in collections like reflib are only reachable via
         # explicit collections=[...] (see validate_explicit below which
         # always passes default_only=False). When the flag is OFF the

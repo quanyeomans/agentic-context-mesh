@@ -1,6 +1,6 @@
-@cli @cc_pair @topology_v2
-Feature: kairix cc-pair — operator surface over the topology v2 cc_pair lifecycle
-  As a kairix operator promoting the topology v2 connector / collection / scope
+@cli @cc_pair @topology
+Feature: kairix cc-pair — operator surface over the topology cc_pair lifecycle
+  As a kairix operator promoting the topology connector / collection / scope
   topology migration (per docs/architecture/connector-scope-topology/ADR.md)
   I want a CLI to list, create, pause, resume, and delete cc_pairs
   So that I can operate the lifecycle from the same surface as `kairix features status`
@@ -11,7 +11,7 @@ Feature: kairix cc-pair — operator surface over the topology v2 cc_pair lifecy
   operator-friendly error messages, not Python tracebacks.
 
   Background:
-    Given a fresh kairix sqlite database with the topology v2 schema applied
+    Given a fresh kairix sqlite database with the topology schema applied
 
   @happy_path
   Scenario: cc-pair list reports the friendly empty-state line when nothing is declared

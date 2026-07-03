@@ -1,6 +1,6 @@
 # Connector design specs
 
-Per-connector implementation contracts for Wave E of the connector-scope-topology v2 migration. Each spec covers the same five operating dimensions:
+Per-connector implementation contracts for Wave E of the connector-scope-topology migration. Each spec covers the same five operating dimensions:
 
 1. **Functions / actions** — current → target method surface mapped to source-side API endpoints
 2. **Observability** — counters, gauges, structured-log events, where they surface
@@ -19,10 +19,10 @@ Plus four cross-cutting additions every spec carries:
 
 | Connector | Spec | Status | Wave E status |
 |---|---|---|---|
-| SharePoint | [`sharepoint.md`](sharepoint.md) | ✅ canonical (the bar) | shipped behind `connector_sharepoint` + `topology_v2_sharepoint` |
-| Slack | [`slack.md`](slack.md) | ✅ design spec | shipped behind `connector_slack` + `topology_v2_slack` |
-| GitHub | [`github.md`](github.md) | ✅ design spec | shipped behind `connector_github` + `topology_v2_github` |
-| Notion | [`notion.md`](notion.md) | ✅ design spec | shipped behind `connector_notion` + `topology_v2_notion` |
+| SharePoint | [`sharepoint.md`](sharepoint.md) | ✅ canonical (the bar) | shipped behind `connector_sharepoint` + `topology_sharepoint` |
+| Slack | [`slack.md`](slack.md) | ✅ design spec | shipped behind `connector_slack` + `topology_slack` |
+| GitHub | [`github.md`](github.md) | ✅ design spec | shipped behind `connector_github` + `topology_github` |
+| Notion | [`notion.md`](notion.md) | ✅ design spec | shipped behind `connector_notion` + `topology_notion` |
 | Linear | [`linear.md`](linear.md) | ✅ design spec | shipped behind `connector_linear` (MVP: incremental poll + API-key auth; Container/per-team scoping deferred) |
 | Google Drive | (next) | — | backlog — spec when the shipped connectors complete cutover soak and validate the proactive-failure-mode patterns |
 | Jira | (last — needs `01-source-analysis` profile first) | — | backlog |
@@ -40,7 +40,7 @@ Slack first because its proactive-failure-mode design carries the most novel sur
 
 ## See also
 
-- [`../ADR.md`](../ADR.md) — topology v2 architectural decision record
+- [`../ADR.md`](../ADR.md) — topology architectural decision record
 - [`../01-source-analysis.md`](../01-source-analysis.md) — per-source API research
 - [`../05-non-functionals.md`](../05-non-functionals.md) — performance envelopes (specs reference, don't restate)
 - [`../08-chunking-and-entity-strategies.md`](../08-chunking-and-entity-strategies.md) — Wave F chunker designs (downstream of these specs)

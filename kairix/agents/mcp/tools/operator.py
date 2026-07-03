@@ -182,9 +182,9 @@ _ESCALATION_SPECS: dict[str, _EscalationSpec] = {
     "cc_pair": _EscalationSpec(
         capability="cc-pair",
         reason=(
-            "cc-pair mutates the topology v2 cc_pair lifecycle (status state machine "
+            "cc-pair mutates the topology cc_pair lifecycle (status state machine "
             "+ topology_cc_pairs rows); operators run via the CLI so transitions are "
-            "audited. Agents read state via `tool_features_status(topology_v2=True)`."
+            "audited. Agents read state via `tool_features_status(topology=True)`."
         ),
         command=_cc_pair_command,
         runtime=_const(5),
@@ -283,11 +283,11 @@ def tool_embed_rebuild_fts() -> dict[str, Any]:
 def tool_cc_pair(verb: str = "list") -> dict[str, Any]:
     """Stub for the cc-pair capability — Wave D lifecycle is operator-owned.
 
-    cc_pair create / pause / resume / delete mutate the topology v2 state
+    cc_pair create / pause / resume / delete mutate the topology state
     machine (kairix.core.connectors.cc_pair F57 lifecycle); agents must
     escalate to an operator running `kairix cc-pair <verb>` so the
     transition gets logged + observable via `kairix features status
-    --topology-v2`. The read-only ``list`` verb is also returned through
+    --topology`. The read-only ``list`` verb is also returned through
     the escalation envelope so agents get one consistent shape per
     capability.
     """
@@ -338,7 +338,7 @@ _EMBED_REBUILD_FTS_DESCRIPTION = (
 )
 
 _CC_PAIR_DESCRIPTION = (
-    "cc-pair escalation — Wave D topology v2 cc_pair lifecycle (list / create / "
+    "cc-pair escalation — Wave D topology cc_pair lifecycle (list / create / "
     "pause / resume / delete) mutates the state machine; agents must escalate. "
     "Returns the OperatorOnlyCapability envelope with the exact `kairix cc-pair` command."
 )

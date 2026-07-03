@@ -162,7 +162,7 @@ class VectorIndex:
         # ``check_same_thread=False`` paired with the lock makes the
         # connection safe for the parallel-dispatch worker thread
         # (search-dispatch pool from pipeline.py) — symmetrical with the
-        # treatment ``_build_topology_v2_collection_resolver`` already
+        # treatment ``_build_topology_collection_resolver`` already
         # applies to its resolver Connection.
         self._meta_conn: sqlite3.Connection | None = None
         self._meta_conn_lock = threading.Lock()

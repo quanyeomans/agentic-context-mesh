@@ -1060,7 +1060,7 @@ def test_init_probe_swallows_transient_errors_without_failing_init(caplog: pytes
 def test_iter_containers_emits_one_per_configured_drive() -> None:
     """v2 ingest entrypoint: SharePointConnector with N drives yields N Containers.
 
-    The topology v2 cc_pair lifecycle treats each drive as its own
+    The topology cc_pair lifecycle treats each drive as its own
     Container so that scope decisions, cursor persistence, and
     per-drive disk-watermark backpressure all work per-drive rather
     than per-connector. ``iter_containers`` is the surface the framework

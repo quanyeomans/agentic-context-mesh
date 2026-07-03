@@ -71,7 +71,7 @@ DEFAULT_SENSITIVITY: Sensitivity = "internal"
 # extractor chain.
 LINEAR_MARKDOWN_MIME = "text/markdown"
 
-# Topology v2 flag name — same convention as the other connector pilots.
+# Topology flag name — same convention as the other connector pilots.
 # Module-level constant so the F52 call-site scan picks up exactly one
 # verbatim reference per call site.
 CONNECTOR_LINEAR_FLAG = "connector_linear"

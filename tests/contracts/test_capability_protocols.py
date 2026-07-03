@@ -1,4 +1,4 @@
-"""Contract tests for the topology v2 Wave B capability mix-in Protocols.
+"""Contract tests for the topology Wave B capability mix-in Protocols.
 
 Each of the 9 capability Protocols added in Wave B
 (PollConnector, CheckpointedConnector, SlimConnector,

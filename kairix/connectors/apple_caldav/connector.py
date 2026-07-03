@@ -338,12 +338,12 @@ class AppleCalDavConnector:
         )
 
     # ------------------------------------------------------------------
-    # Topology v2 Wave B / E — capability shims
+    # Topology Wave B / E — capability shims
     # ------------------------------------------------------------------
     # The shims below let the connector satisfy the new capability
     # Protocols (PollConnector, CheckpointedConnector,
     # HierarchyConnector, CredentialsConnector). Production routing
-    # through these methods is gated by ``topology_v2_apple_caldav``
+    # through these methods is gated by ``topology_apple_caldav``
     # (default-off).
 
     def load_from_checkpoint(self, _container: Container, checkpoint: str | None) -> Iterator[ChangeEvent]:
@@ -367,7 +367,7 @@ class AppleCalDavConnector:
     def iter_containers(self, cc_pair_id: int) -> Iterator[Container]:
         """Yield one :class:`Container` per discovered (or operator-pinned) calendar.
 
-        Topology v2 §4: each Container has its own cursor — the Wave E
+        Topology §4: each Container has its own cursor — the Wave E
         pilot maps each iCloud calendar to its own Container so the
         operator can add or remove individual calendars without
         affecting the cursor state of the others.
@@ -402,7 +402,7 @@ class AppleCalDavConnector:
         removing one calendar does not affect the cursor state of the
         others.
 
-        ``topology_v2_apple_caldav`` retired post-cutover (task #132);
+        ``topology_apple_caldav`` retired post-cutover (task #132);
         the per-calendar path is now the only behaviour.
         """
         return self._list_changes_scoped(container)

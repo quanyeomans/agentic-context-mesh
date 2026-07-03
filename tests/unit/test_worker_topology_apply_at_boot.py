@@ -1,9 +1,9 @@
-"""Unit tests for :func:`kairix.worker.apply_topology_v2_at_boot`.
+"""Unit tests for :func:`kairix.worker.apply_topology_at_boot`.
 
 Exercises every branch in the worker-side boot helper so it doesn't
 fall under the F7 per-file coverage floor. Integration coverage (real
 worker boot + DB) lives in
-``tests/integration/test_topology_v2_applier.py``.
+``tests/integration/test_topology_applier.py``.
 
 Branches covered:
 
@@ -35,7 +35,7 @@ from typing import Any
 import pytest
 
 from kairix.config_layers import load_merged_mapping
-from kairix.worker import TopologyV2ApplyDeps, apply_topology_v2_at_boot
+from kairix.worker import TopologyApplyDeps, apply_topology_at_boot
 
 pytestmark = pytest.mark.unit
 
@@ -51,7 +51,7 @@ def _mapping_fn_for(config_path: Path) -> Callable[[], dict[str, Any]]:
 
 
 # NOTE: test_apply_at_boot_flag_off_is_structural_noop was retired alongside
-# the topology_v2_config flag (#132). Post-cutover apply_topology_v2_at_boot
+# the topology_config flag (#132). Post-cutover apply_topology_at_boot
 # runs unconditionally; the OFF branch no longer exists. The "skip cleanly
 # when there's no config on disk" behaviour is now exercised by
 # test_apply_at_boot_skips_when_config_mapping_is_empty below.
@@ -65,11 +65,11 @@ def test_apply_at_boot_skips_when_config_mapping_is_empty(
     def _db_factory() -> sqlite3.Connection:
         raise AssertionError("db_factory must not be invoked when no config exists")
 
-    deps = TopologyV2ApplyDeps(
+    deps = TopologyApplyDeps(
         config_mapping_fn=dict,
         db_factory=_db_factory,
     )
-    assert apply_topology_v2_at_boot(deps) is None
+    assert apply_topology_at_boot(deps) is None
 
 
 def test_apply_at_boot_skips_when_config_path_does_not_exist(
@@ -81,11 +81,11 @@ def test_apply_at_boot_skips_when_config_path_does_not_exist(
         raise AssertionError("db_factory must not be invoked when config is missing")
 
     missing = tmp_path / "no-such-file.yaml"
-    deps = TopologyV2ApplyDeps(
+    deps = TopologyApplyDeps(
         config_mapping_fn=_mapping_fn_for(missing),
         db_factory=_db_factory,
     )
-    assert apply_topology_v2_at_boot(deps) is None
+    assert apply_topology_at_boot(deps) is None
 
 
 def test_apply_at_boot_skips_when_yaml_unparseable(tmp_path: Path) -> None:
@@ -95,11 +95,11 @@ def test_apply_at_boot_skips_when_yaml_unparseable(tmp_path: Path) -> None:
     def _db_factory() -> sqlite3.Connection:
         raise AssertionError("db_factory must not be invoked when YAML parse fails")
 
-    deps = TopologyV2ApplyDeps(
+    deps = TopologyApplyDeps(
         config_mapping_fn=_mapping_fn_for(config_path),
         db_factory=_db_factory,
     )
-    assert apply_topology_v2_at_boot(deps) is None
+    assert apply_topology_at_boot(deps) is None
 
 
 def test_apply_at_boot_skips_when_config_read_raises(tmp_path: Path) -> None:
@@ -111,54 +111,54 @@ def test_apply_at_boot_skips_when_config_read_raises(tmp_path: Path) -> None:
     def _db_factory() -> sqlite3.Connection:
         raise AssertionError("db_factory must not be invoked when the config read raises")
 
-    deps = TopologyV2ApplyDeps(
+    deps = TopologyApplyDeps(
         config_mapping_fn=_raising_mapping,
         db_factory=_db_factory,
     )
-    assert apply_topology_v2_at_boot(deps) is None
+    assert apply_topology_at_boot(deps) is None
 
 
 def test_apply_at_boot_skips_when_config_parse_fails(tmp_path: Path) -> None:
     """Structurally-wrong config: caught, returns None.
 
-    The parser raises TopologyV2ParseError on a `connectors:` block that
+    The parser raises TopologyParseError on a `connectors:` block that
     isn't a list — we round-trip it through YAML to hit the parser's
     error path inside the boot helper's try/except.
     """
     config_path = _write_yaml(
         tmp_path / "kairix.config.yaml",
-        "topology_v2:\n  connectors: not_a_list\n",
+        "topology:\n  connectors: not_a_list\n",
     )
 
     def _db_factory() -> sqlite3.Connection:
         raise AssertionError("db_factory must not be invoked when parse fails")
 
-    deps = TopologyV2ApplyDeps(
+    deps = TopologyApplyDeps(
         config_mapping_fn=_mapping_fn_for(config_path),
         db_factory=_db_factory,
     )
-    assert apply_topology_v2_at_boot(deps) is None
+    assert apply_topology_at_boot(deps) is None
 
 
 def test_apply_at_boot_skips_when_no_blocks_declared(tmp_path: Path) -> None:
-    """Empty topology_v2 block: short-circuits before DB open."""
-    config_path = _write_yaml(tmp_path / "kairix.config.yaml", "topology_v2: {}\n")
+    """Empty topology block: short-circuits before DB open."""
+    config_path = _write_yaml(tmp_path / "kairix.config.yaml", "topology: {}\n")
 
     def _db_factory() -> sqlite3.Connection:
         raise AssertionError("db_factory must not be invoked when no blocks are declared")
 
-    deps = TopologyV2ApplyDeps(
+    deps = TopologyApplyDeps(
         config_mapping_fn=_mapping_fn_for(config_path),
         db_factory=_db_factory,
     )
-    assert apply_topology_v2_at_boot(deps) is None
+    assert apply_topology_at_boot(deps) is None
 
 
 def test_apply_at_boot_rolls_back_on_validation_failure(tmp_path: Path) -> None:
     """Dangling cross-reference: caught, rolled back, returns None."""
     config_path = _write_yaml(
         tmp_path / "kairix.config.yaml",
-        "topology_v2:\n"
+        "topology:\n"
         "  cc_pairs:\n"
         "    - id: stray\n"
         "      connector: no-such\n"
@@ -167,11 +167,11 @@ def test_apply_at_boot_rolls_back_on_validation_failure(tmp_path: Path) -> None:
     )
     db_path = tmp_path / "kairix.sqlite"
 
-    deps = TopologyV2ApplyDeps(
+    deps = TopologyApplyDeps(
         config_mapping_fn=_mapping_fn_for(config_path),
         db_factory=lambda: sqlite3.connect(str(db_path)),
     )
-    assert apply_topology_v2_at_boot(deps) is None
+    assert apply_topology_at_boot(deps) is None
     # The DB was opened (create_schema ran) but nothing was committed.
     db = sqlite3.connect(str(db_path))
     try:
@@ -185,7 +185,7 @@ def test_apply_at_boot_happy_path_commits_rows(tmp_path: Path) -> None:
     """Valid config: rows committed; ``cc_pair`` lookup succeeds."""
     config_path = _write_yaml(
         tmp_path / "kairix.config.yaml",
-        "topology_v2:\n"
+        "topology:\n"
         "  connectors:\n"
         "    - id: c1\n"
         "      kind: obsidian\n"
@@ -197,11 +197,11 @@ def test_apply_at_boot_happy_path_commits_rows(tmp_path: Path) -> None:
         "      name: cp1\n",
     )
     db_path = tmp_path / "kairix.sqlite"
-    deps = TopologyV2ApplyDeps(
+    deps = TopologyApplyDeps(
         config_mapping_fn=_mapping_fn_for(config_path),
         db_factory=lambda: sqlite3.connect(str(db_path)),
     )
-    assert apply_topology_v2_at_boot(deps) is None
+    assert apply_topology_at_boot(deps) is None
     db = sqlite3.connect(str(db_path))
     try:
         name = db.execute("SELECT name FROM topology_cc_pairs").fetchone()
@@ -211,9 +211,9 @@ def test_apply_at_boot_happy_path_commits_rows(tmp_path: Path) -> None:
 
 
 def test_apply_at_boot_default_deps_constructs_without_raising() -> None:
-    """Default ``TopologyV2ApplyDeps()`` constructs every default_factory."""
-    deps = TopologyV2ApplyDeps()
+    """Default ``TopologyApplyDeps()`` constructs every default_factory."""
+    deps = TopologyApplyDeps()
     # Both fields resolved to callables; can be invoked at boot time.
-    # ``flag_reader`` retired with the topology_v2_config flag (#132).
+    # ``flag_reader`` retired with the topology_config flag (#132).
     assert callable(deps.config_mapping_fn)
     assert callable(deps.db_factory)

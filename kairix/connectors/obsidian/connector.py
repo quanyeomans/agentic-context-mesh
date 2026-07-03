@@ -245,11 +245,11 @@ class ObsidianConnector:
         return self._sensitivity
 
     # ------------------------------------------------------------------
-    # Topology v2 Wave E — per-connector multi-container pilot
+    # Topology Wave E — per-connector multi-container pilot
     # ------------------------------------------------------------------
     # Wave B landed shim implementations of the capability Protocols
     # (PollConnector / SlimConnector / HierarchyConnector). Wave E adds
-    # real implementations behind the ``topology_v2_obsidian`` flag:
+    # real implementations behind the ``topology_obsidian`` flag:
     #
     #   * :meth:`iter_containers` — one :class:`Container` per top-level
     #     vault folder, each with its own per-cc_pair delta cursor.
@@ -271,11 +271,11 @@ class ObsidianConnector:
     def iter_containers(self, cc_pair_id: int) -> Iterator[Container]:
         """Yield one :class:`Container` per top-level vault folder.
 
-        Topology v2 §4: each Container has its own delta cursor — the
+        Topology §4: each Container has its own delta cursor — the
         Wave E pilot maps each top-level folder of the vault to its own
         Container so the operator can sync different folders at
         different cadences and scope retrieval per-folder via the
-        topology v2 collection mapping.
+        topology collection mapping.
 
         Calling convention: the framework's lifecycle layer (see
         ``kairix/core/connectors/cc_pair.py``) passes ``cc_pair_id`` so
@@ -322,7 +322,7 @@ class ObsidianConnector:
         container's subtree are filtered out so a per-folder cc_pair
         only sees its own changes.
 
-        ``topology_v2_obsidian`` retired post-cutover (task #132); the
+        ``topology_obsidian`` retired post-cutover (task #132); the
         per-container path is now the only behaviour.
         """
         return self._list_changes_scoped(container)
@@ -358,7 +358,7 @@ class ObsidianConnector:
         affordance. ``sensitivity_hint`` is ``None`` — the operator
         overrides per-folder via the collection mapping.
 
-        ``topology_v2_obsidian`` retired post-cutover (task #132); the
+        ``topology_obsidian`` retired post-cutover (task #132); the
         per-directory walk is now the only behaviour.
         """
         yield from _walk_hierarchy(
@@ -683,7 +683,7 @@ def _walk_hierarchy(*, vault_root: Path, cc_pair_id: int) -> Iterator[HierarchyN
       directory's ``raw_node_id``.
     * ``link`` — an ``obsidian://`` deep link to the folder.
     * ``sensitivity_hint`` — ``None``; operators override per-folder
-      via the topology v2 collection mapping.
+      via the topology collection mapping.
     """
     vault_name = vault_root.name
     # Root node first — F58 parent-before-child invariant.

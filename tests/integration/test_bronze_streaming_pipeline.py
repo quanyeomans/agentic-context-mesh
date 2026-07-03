@@ -37,7 +37,7 @@ def _obsidian_topology_mapping(vault_root: Path) -> dict[str, Any]:
     canonical-collapse redirect (no legacy top-level ``connectors:``).
     """
     return {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {
                     "id": "obsidian-conn",

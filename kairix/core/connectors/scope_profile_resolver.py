@@ -204,7 +204,7 @@ class ScopeProfileResolver:
 
         ``default_only`` (GH #373): when True, drops entries flagged
         ``default_in_scope=0`` before composition runs. Used by
-        :class:`TopologyV2CollectionResolver` on the ``collections=None``
+        :class:`TopologyCollectionResolver` on the ``collections=None``
         path to return only the in-default superset; explicit
         ``collections=[...]`` paths still pass ``default_only=False`` so
         opt-in collections (e.g. reflib) remain reachable by name.
