@@ -136,7 +136,7 @@ Five classes of failures that the dogfood evidence shows kairix encounters in pr
 ### 3.4 E2E layer (current: 20 files, 16 marker-decorated)
 
 **Catching well:**
-- Happy-path composed-production-path for the alpha + each connector + topology_v2
+- Happy-path composed-production-path for the alpha + each connector + topology
 - Maintenance loop + bronze_ttl_gc
 
 **Missing:**

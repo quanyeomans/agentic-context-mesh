@@ -61,7 +61,7 @@ _KIND = "m365_calendar"
 def _two_connector_topology(vault: Path) -> dict[str, Any]:
     """Merged mapping: the gated connector kind + a flagless obsidian sibling."""
     return {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {
                     "id": f"{_KIND}-conn",

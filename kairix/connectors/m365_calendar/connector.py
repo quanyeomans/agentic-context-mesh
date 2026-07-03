@@ -104,14 +104,14 @@ class M365CalendarConfig:
     scope: str = DEFAULT_GRAPH_SCOPE
     window_days_back: int = DEFAULT_WINDOW_DAYS_BACK
     window_days_forward: int = DEFAULT_WINDOW_DAYS_FORWARD
-    # Wave E topology v2 — multi-calendar support. When the operator
+    # Wave E topology — multi-calendar support. When the operator
     # declares ``user_ids`` (list of UPNs) the connector emits one
     # :class:`Container` per UPN with that UPN as the ``container_id``.
     # When unset, the connector falls back to a singleton built from
     # ``user_id`` so existing single-mailbox deployments keep working
     # bit-for-bit. The legacy ``list_changes`` path remains the OFF-branch
     # behaviour; the per-container delta-cursor isolation is the ON-branch
-    # value-add gated by the ``topology_v2_m365_calendar`` flag.
+    # value-add gated by the ``topology_m365_calendar`` flag.
     user_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -364,14 +364,14 @@ class M365CalendarConnector:
         return self._config.sensitivity
 
     # ------------------------------------------------------------------
-    # Topology v2 Wave B — capability mix-in shims (no behavioural change)
+    # Topology Wave B — capability mix-in shims (no behavioural change)
     # ------------------------------------------------------------------
     # The shims below let the connector satisfy the new capability
     # Protocols (CheckpointedConnector, CredentialsConnector,
     # OAuthConnector) by delegating to existing methods OR raising
     # actionable NotImplementedError where the source kind does not
     # support the surface. Production routing through these methods is
-    # gated by ``topology_v2_protocol`` (default-off).
+    # gated by ``topology_protocol`` (default-off).
 
     def load_from_checkpoint(self, _container: Container, checkpoint: str | None) -> Iterator[ChangeEvent]:
         """CheckpointedConnector shim — delegate to :meth:`list_changes` using the checkpoint.
@@ -424,12 +424,12 @@ class M365CalendarConnector:
         )
 
     # ------------------------------------------------------------------
-    # Topology v2 Wave E — per-connector multi-container pilot
+    # Topology Wave E — per-connector multi-container pilot
     # ------------------------------------------------------------------
     # Wave B landed shim implementations of the capability Protocols
     # (CheckpointedConnector / CredentialsConnector / OAuthConnector).
     # Wave E adds real implementations behind the
-    # ``topology_v2_m365_calendar`` flag:
+    # ``topology_m365_calendar`` flag:
     #
     #   * :meth:`iter_containers` — one :class:`Container` per configured
     #     calendar (per UPN), each with its own Graph ``@odata.deltaLink``
@@ -452,7 +452,7 @@ class M365CalendarConnector:
     def iter_containers(self, cc_pair_id: int) -> Iterator[Container]:
         """Yield one :class:`Container` per configured calendar (per UPN).
 
-        Topology v2 §4: each Container has its own delta cursor — the
+        Topology §4: each Container has its own delta cursor — the
         Wave E pilot maps each operator-declared calendar to its own
         Container so the operator can add or remove individual user
         mailboxes without affecting the cursor state of the others.
@@ -494,7 +494,7 @@ class M365CalendarConnector:
         adding or removing one user's calendar does not affect the
         cursor state of the others.
 
-        ``topology_v2_m365_calendar`` retired post-cutover (task #132);
+        ``topology_m365_calendar`` retired post-cutover (task #132);
         the per-calendar path is now the only behaviour.
         """
         return self._list_changes_scoped(container)

@@ -1,4 +1,4 @@
-"""Unit tests for the Wave D topology v2 cross-reference validators.
+"""Unit tests for the Wave D topology cross-reference validators.
 
 Sabotage proofs (mutate → confirm fail → restore — see commit body for
 the full proof log) — one per rule:
@@ -43,8 +43,8 @@ from kairix.config import (
     SkillConfig,
     SkillSourceConfig,
     SkillTaskCollectionConfig,
-    TopologyV2Config,
-    validate_topology_v2_references,
+    TopologyConfig,
+    validate_topology_references,
 )
 
 pytestmark = pytest.mark.unit
@@ -69,13 +69,13 @@ def _cc_pair(
 
 def test_empty_config_returns_no_failures() -> None:
     """All-empty config has nothing to validate."""
-    failures = validate_topology_v2_references(TopologyV2Config())
+    failures = validate_topology_references(TopologyConfig())
     assert failures == ()
 
 
 def test_fully_consistent_config_returns_no_failures() -> None:
     """A config where every reference points at a declared entry passes."""
-    config = TopologyV2Config(
+    config = TopologyConfig(
         connectors=(_connector("c1"),),
         credentials=(_credential("cred1"),),
         cc_pairs=(_cc_pair(),),
@@ -103,7 +103,7 @@ def test_fully_consistent_config_returns_no_failures() -> None:
             ),
         ),
     )
-    assert validate_topology_v2_references(config) == ()
+    assert validate_topology_references(config) == ()
 
 
 # ---------------------------------------------------------------------------
@@ -113,11 +113,11 @@ def test_fully_consistent_config_returns_no_failures() -> None:
 
 def test_cc_pair_unknown_connector_flagged() -> None:
     """A cc_pair referencing a missing connector trips rule 1."""
-    config = TopologyV2Config(
+    config = TopologyConfig(
         connectors=(),
         cc_pairs=(_cc_pair(connector="ghost"),),
     )
-    failures = validate_topology_v2_references(config)
+    failures = validate_topology_references(config)
     assert any(f.rule == "cc_pair_connector_missing" for f in failures)
     rule_failure = next(f for f in failures if f.rule == "cc_pair_connector_missing")
     assert "ghost" in rule_failure.message
@@ -132,12 +132,12 @@ def test_cc_pair_unknown_connector_flagged() -> None:
 
 def test_cc_pair_unknown_credential_flagged() -> None:
     """A cc_pair referencing a missing credential trips rule 2."""
-    config = TopologyV2Config(
+    config = TopologyConfig(
         connectors=(_connector("c1"),),
         credentials=(),
         cc_pairs=(_cc_pair(connector="c1", credential="ghost-cred"),),
     )
-    failures = validate_topology_v2_references(config)
+    failures = validate_topology_references(config)
     assert any(f.rule == "cc_pair_credential_missing" for f in failures)
     rule_failure = next(f for f in failures if f.rule == "cc_pair_credential_missing")
     assert "ghost-cred" in rule_failure.message
@@ -146,11 +146,11 @@ def test_cc_pair_unknown_credential_flagged() -> None:
 
 def test_cc_pair_with_none_credential_does_not_trigger_rule_2() -> None:
     """``credential: null`` is valid (local-FS connectors) — not flagged."""
-    config = TopologyV2Config(
+    config = TopologyConfig(
         connectors=(_connector("c1"),),
         cc_pairs=(_cc_pair(connector="c1", credential=None),),
     )
-    failures = validate_topology_v2_references(config)
+    failures = validate_topology_references(config)
     assert all(f.rule != "cc_pair_credential_missing" for f in failures)
 
 
@@ -161,7 +161,7 @@ def test_cc_pair_with_none_credential_does_not_trigger_rule_2() -> None:
 
 def test_collection_source_unknown_cc_pair_flagged() -> None:
     """A collection source referencing a missing cc_pair trips rule 3."""
-    config = TopologyV2Config(
+    config = TopologyConfig(
         collections=(
             CollectionConfig(
                 name="vault",
@@ -169,7 +169,7 @@ def test_collection_source_unknown_cc_pair_flagged() -> None:
             ),
         ),
     )
-    failures = validate_topology_v2_references(config)
+    failures = validate_topology_references(config)
     assert any(f.rule == "collection_source_cc_pair_missing" for f in failures)
     rule_failure = next(f for f in failures if f.rule == "collection_source_cc_pair_missing")
     assert "ghost-pair" in rule_failure.message
@@ -183,7 +183,7 @@ def test_collection_source_unknown_cc_pair_flagged() -> None:
 
 def test_scope_profile_entry_unknown_collection_flagged() -> None:
     """A scope_profile entry referencing a missing collection trips rule 4."""
-    config = TopologyV2Config(
+    config = TopologyConfig(
         collections=(),
         scope_profiles=(
             ScopeProfileConfig(
@@ -192,7 +192,7 @@ def test_scope_profile_entry_unknown_collection_flagged() -> None:
             ),
         ),
     )
-    failures = validate_topology_v2_references(config)
+    failures = validate_topology_references(config)
     assert any(f.rule == "scope_profile_entry_collection_missing" for f in failures)
     rule_failure = next(f for f in failures if f.rule == "scope_profile_entry_collection_missing")
     assert "ghost-collection" in rule_failure.message
@@ -206,7 +206,7 @@ def test_scope_profile_entry_unknown_collection_flagged() -> None:
 
 def test_skill_source_unknown_cc_pair_flagged() -> None:
     """A skill source referencing a missing cc_pair trips rule 5."""
-    config = TopologyV2Config(
+    config = TopologyConfig(
         skills=(
             SkillConfig(
                 name="prepare-sow",
@@ -219,7 +219,7 @@ def test_skill_source_unknown_cc_pair_flagged() -> None:
             ),
         ),
     )
-    failures = validate_topology_v2_references(config)
+    failures = validate_topology_references(config)
     assert any(f.rule == "skill_source_cc_pair_missing" for f in failures)
     rule_failure = next(f for f in failures if f.rule == "skill_source_cc_pair_missing")
     assert "ghost-skill-pair" in rule_failure.message
@@ -233,7 +233,7 @@ def test_skill_source_unknown_cc_pair_flagged() -> None:
 
 def test_multiple_failures_returned_in_deterministic_order() -> None:
     """Sort key is (rule, location); failures are stably ordered."""
-    config = TopologyV2Config(
+    config = TopologyConfig(
         cc_pairs=(
             _cc_pair(pid="p-a", connector="ghost", credential="ghost-cred"),
             _cc_pair(pid="p-b", connector="ghost", credential=None),
@@ -245,7 +245,7 @@ def test_multiple_failures_returned_in_deterministic_order() -> None:
             ),
         ),
     )
-    failures = validate_topology_v2_references(config)
+    failures = validate_topology_references(config)
     # Multiple failures expected
     assert len(failures) >= 3
     sorted_keys = [(f.rule, f.location) for f in failures]
@@ -254,8 +254,8 @@ def test_multiple_failures_returned_in_deterministic_order() -> None:
 
 def test_failure_message_carries_f21_affordance() -> None:
     """Every failure message contains ``fix:`` AND ``next: run`` per F21 spirit."""
-    config = TopologyV2Config(cc_pairs=(_cc_pair(connector="ghost"),))
-    failures = validate_topology_v2_references(config)
+    config = TopologyConfig(cc_pairs=(_cc_pair(connector="ghost"),))
+    failures = validate_topology_references(config)
     for f in failures:
         assert "fix:" in f.message
         assert "next: run" in f.message

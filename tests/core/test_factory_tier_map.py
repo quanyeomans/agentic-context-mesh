@@ -1,7 +1,7 @@
 """Unit tests for ``kairix.core.factory.derive_tier_map`` (Task 6).
 
 The ranking-tier read is sourced from the canonical topology collections
-(``topology_v2.collections[*].tier``) via a config-parse — db-free at
+(``topology.collections[*].tier``) via a config-parse — db-free at
 pipeline-construction time. ``derive_tier_map`` parses the merged config
 mapping and returns ``{collection_name: tier}`` for every collection that
 declares a ``tier:``; collections without a tier are omitted so the
@@ -23,10 +23,10 @@ from kairix.core.factory import derive_tier_map
 
 
 def _topology_mapping(collections: list[dict[str, Any]]) -> dict[str, Any]:
-    """Build a merged-config mapping carrying a ``topology_v2.collections``
+    """Build a merged-config mapping carrying a ``topology.collections``
     block — the canonical source ``derive_tier_map`` parses from.
     """
-    return {"topology_v2": {"collections": collections}}
+    return {"topology": {"collections": collections}}
 
 
 @pytest.mark.unit
@@ -105,4 +105,4 @@ def test_derive_tier_map_returns_empty_on_malformed_topology() -> None:
     rather than raising at pipeline-construction time."""
     # ``collections`` must be a list; a string trips the parser's type
     # guard, which derive_tier_map swallows into the default-safe {}.
-    assert derive_tier_map(mapping={"topology_v2": {"collections": "nope"}}) == {}
+    assert derive_tier_map(mapping={"topology": {"collections": "nope"}}) == {}

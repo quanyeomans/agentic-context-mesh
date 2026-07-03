@@ -132,7 +132,7 @@ class GoogleDriveCorpusSpec:
 
 
 def _default_flag_reader(name: str) -> bool:
-    """Production default for the topology-v2-google-drive flag check.
+    """Production default for the topology-google-drive flag check.
 
     Delegates to :func:`kairix.core.features.flag` so the production
     path threads through the env-var → config-overlay → registry
@@ -348,7 +348,7 @@ class GoogleDriveConnector:
         )
 
     # ------------------------------------------------------------------
-    # Topology v2 Wave E — per-connector multi-container pilot
+    # Topology Wave E — per-connector multi-container pilot
     # ------------------------------------------------------------------
 
     def iter_containers(self, cc_pair_id: int) -> Iterator[Container]:
@@ -377,7 +377,7 @@ class GoogleDriveConnector:
         adding or removing one corpus does not affect the cursor state
         of the others.
 
-        ``topology_v2_google_drive`` retired post-cutover (task #132);
+        ``topology_google_drive`` retired post-cutover (task #132);
         the per-corpus path is now the only behaviour.
         """
         return self._list_changes_for_container_scoped(container)
@@ -389,7 +389,7 @@ class GoogleDriveConnector:
         ``raw_parent_id=None``) followed by one FOLDER child per
         configured corpus.
 
-        ``topology_v2_google_drive`` retired post-cutover (task #132);
+        ``topology_google_drive`` retired post-cutover (task #132);
         the root + per-corpus emission is now the only behaviour.
         """
         yield HierarchyNode(

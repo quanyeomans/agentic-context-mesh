@@ -1,13 +1,13 @@
-"""Unit tests for the Wave D topology v2 YAML parser.
+"""Unit tests for the Wave D topology YAML parser.
 
-Covers :func:`kairix.config.parse_topology_v2` — every block, every
+Covers :func:`kairix.config.parse_topology` — every block, every
 edge (empty, missing required field, wrong list/dict shape, unknown
 enum value). Sabotage-prove: see commit body for the 5 mutate→fail→
 restore proofs per validator (this file primarily covers parse shape;
 the validator file ships its own sabotage proofs).
 
 Post #305: every payload nests the six Wave D blocks under a single
-``topology_v2:`` parent key so the ``collections:`` block stops
+``topology:`` parent key so the ``collections:`` block stops
 colliding with the legacy top-level ``collections.shared`` dict shape.
 """
 
@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from kairix.config import (
+    LEGACY_TOPOLOGY_CONFIG_KEY,
     CCPairConfig,
     CollectionConfig,
     CollectionSourceConfig,
@@ -29,38 +30,39 @@ from kairix.config import (
     SkillConfig,
     SkillSourceConfig,
     SkillTaskCollectionConfig,
-    TopologyV2Config,
+    TopologyConfig,
     config_pairs_to_mapping,
-    parse_topology_v2,
+    normalize_topology_key,
+    parse_topology,
 )
-from kairix.config.topology_v2 import TopologyV2ParseError
+from kairix.config.topology import TopologyParseError
 
 pytestmark = pytest.mark.unit
 
 
 def test_empty_dict_parses_to_all_empty_config() -> None:
-    """Backward-compat: a legacy YAML without a topology_v2 block parses cleanly."""
-    config = parse_topology_v2({})
-    assert config == TopologyV2Config()
+    """Backward-compat: a legacy YAML without a topology block parses cleanly."""
+    config = parse_topology({})
+    assert config == TopologyConfig()
 
 
-def test_explicit_null_topology_v2_parses_to_all_empty_config() -> None:
-    """``topology_v2: null`` (operator declaring the key but leaving it empty) parses cleanly."""
-    config = parse_topology_v2({"topology_v2": None})
-    assert config == TopologyV2Config()
+def test_explicit_null_topology_parses_to_all_empty_config() -> None:
+    """``topology: null`` (operator declaring the key but leaving it empty) parses cleanly."""
+    config = parse_topology({"topology": None})
+    assert config == TopologyConfig()
 
 
-def test_empty_topology_v2_mapping_parses_to_all_empty_config() -> None:
-    """``topology_v2: {}`` (empty mapping) parses cleanly."""
-    config = parse_topology_v2({"topology_v2": {}})
-    assert config == TopologyV2Config()
+def test_empty_topology_mapping_parses_to_all_empty_config() -> None:
+    """``topology: {}`` (empty mapping) parses cleanly."""
+    config = parse_topology({"topology": {}})
+    assert config == TopologyConfig()
 
 
 def test_empty_lists_parse_to_empty_tuples() -> None:
     """All-six blocks present but empty parse to all-empty tuples."""
-    config = parse_topology_v2(
+    config = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "connectors": [],
                 "credentials": [],
                 "cc_pairs": [],
@@ -78,19 +80,19 @@ def test_empty_lists_parse_to_empty_tuples() -> None:
     assert config.skills == ()
 
 
-def test_topology_v2_must_be_mapping_not_list() -> None:
-    """``topology_v2:`` as a list (operator typo) raises a structural parse error."""
-    with pytest.raises(TopologyV2ParseError) as excinfo:
-        parse_topology_v2({"topology_v2": ["connectors", "credentials"]})
-    assert "topology_v2" in str(excinfo.value)
+def test_topology_must_be_mapping_not_list() -> None:
+    """``topology:`` as a list (operator typo) raises a structural parse error."""
+    with pytest.raises(TopologyParseError) as excinfo:
+        parse_topology({"topology": ["connectors", "credentials"]})
+    assert "topology" in str(excinfo.value)
     assert "fix:" in str(excinfo.value)
 
 
 def test_single_connector_parses() -> None:
     """One connector block round-trips into a frozen ConnectorConfig."""
-    config = parse_topology_v2(
+    config = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "connectors": [
                     {
                         "id": "obsidian-personal",
@@ -129,9 +131,9 @@ def test_connector_specific_config_preserves_nested_drives() -> None:
             "exclude_paths": ["/Archive", "/Personal"],
         }
     ]
-    config = parse_topology_v2(
+    config = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "connectors": [
                     {
                         "id": "sp",
@@ -153,13 +155,13 @@ def test_connector_specific_config_preserves_nested_drives() -> None:
 def test_connector_specific_config_preserves_scalar_types() -> None:
     """Scalar config values round-trip to their real Python types (not str-coerced).
 
-    Restores the pre-topology_v2 contract that connector/extractor factories
+    Restores the pre-topology contract that connector/extractor factories
     receive raw YAML types. ``str()`` coercion (the bug) turned every value into
     a string; the JSON round-trip preserves int/bool/float as themselves.
     """
-    config = parse_topology_v2(
+    config = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "connectors": [
                     {
                         "id": "c",
@@ -186,12 +188,12 @@ def test_connector_specific_config_date_values_do_not_crash() -> None:
 
     Regression: ``json.dumps`` without ``default=`` raises ``TypeError`` on
     ``datetime.date`` — which YAML 1.1 produces from bare ``2026-06-01`` scalars
-    — crashing ``parse_topology_v2`` and dropping every connector for the tick.
+    — crashing ``parse_topology`` and dropping every connector for the tick.
     ``default=str`` makes the encode total.
     """
-    config = parse_topology_v2(
+    config = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "connectors": [
                     {
                         "id": "c",
@@ -222,9 +224,9 @@ def test_connector_extractor_fields_default_when_absent() -> None:
     keys must default to the back-compat ``passthrough`` extractor with an
     empty chain and empty config so existing operator configs see no change.
     """
-    config = parse_topology_v2(
+    config = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}],
             }
         }
@@ -242,9 +244,9 @@ def test_connector_extractor_fields_parse() -> None:
     the optional ordered chain and tuple-of-pairs extractor_config the
     legacy registry path consumed.
     """
-    config = parse_topology_v2(
+    config = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "connectors": [
                     {
                         "id": "sp-conn",
@@ -269,10 +271,10 @@ def test_connector_extractor_fields_parse() -> None:
 
 def test_connector_extractor_config_must_be_mapping() -> None:
     """``connectors.*.extractor_config`` must be a mapping — string fails loud."""
-    with pytest.raises(TopologyV2ParseError):
-        parse_topology_v2(
+    with pytest.raises(TopologyParseError):
+        parse_topology(
             {
-                "topology_v2": {
+                "topology": {
                     "connectors": [
                         {
                             "id": "c1",
@@ -288,10 +290,10 @@ def test_connector_extractor_config_must_be_mapping() -> None:
 
 def test_connector_extractor_chain_must_be_list() -> None:
     """``connectors.*.extractor_chain`` must be a list — string fails loud."""
-    with pytest.raises(TopologyV2ParseError):
-        parse_topology_v2(
+    with pytest.raises(TopologyParseError):
+        parse_topology(
             {
-                "topology_v2": {
+                "topology": {
                     "connectors": [
                         {
                             "id": "c1",
@@ -307,9 +309,9 @@ def test_connector_extractor_chain_must_be_list() -> None:
 
 def test_single_credential_parses() -> None:
     """One credential block round-trips into a frozen CredentialConfig."""
-    config = parse_topology_v2(
+    config = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "credentials": [
                     {
                         "id": "ms-app-tenant",
@@ -331,9 +333,9 @@ def test_single_credential_parses() -> None:
 
 def test_cc_pair_parses_with_optional_credential_none() -> None:
     """A cc_pair without a credential parses (credential=None — local FS connectors)."""
-    config = parse_topology_v2(
+    config = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "cc_pairs": [
                     {
                         "id": "obsidian-personal-default",
@@ -355,9 +357,9 @@ def test_cc_pair_parses_with_optional_credential_none() -> None:
 def test_collection_with_sources_parses() -> None:
     """A collection block with two sources parses into a Collection with two
     CollectionSourceConfig tuples."""
-    config = parse_topology_v2(
+    config = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "collections": [
                     {
                         "name": "client-x-engagement",
@@ -385,9 +387,9 @@ def test_collection_tier_defaults_to_none() -> None:
     build time. Absent ``tier`` means "no tier boost" (None) so existing
     operator configs see no ranking change.
     """
-    config = parse_topology_v2(
+    config = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "collections": [{"name": "obsidian-all", "sources": [{"cc_pair": "obs-cp", "path_filter": "*"}]}]
             }
         }
@@ -402,9 +404,9 @@ def test_collection_tier_parses() -> None:
     ``CollectionConfig.tier`` so the (db-free) tier-map derivation can read
     it at pipeline-build time.
     """
-    config = parse_topology_v2(
+    config = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "collections": [
                     {
                         "name": "reflib",
@@ -429,9 +431,9 @@ def test_collection_retrieval_overrides_default_to_none() -> None:
     Absent ``retrieval`` means "no per-collection override" (None) so the
     resolver falls back to the global retrieval config.
     """
-    config = parse_topology_v2(
+    config = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "collections": [{"name": "obsidian-all", "sources": [{"cc_pair": "obs-cp", "path_filter": "*"}]}]
             }
         }
@@ -448,9 +450,9 @@ def test_collection_retrieval_overrides_parse() -> None:
     ``collections.shared[*].retrieval`` block produced), so the resolver
     can apply reflib-style tuning sourced from topology.
     """
-    config = parse_topology_v2(
+    config = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "collections": [
                     {
                         "name": "reflib",
@@ -476,9 +478,9 @@ def test_collection_retrieval_overrides_parse() -> None:
 
 def test_scope_profile_parses() -> None:
     """A scope_profile with two entries parses into the frozen aggregator."""
-    config = parse_topology_v2(
+    config = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "scope_profiles": [
                     {
                         "name": "team-shape-builder",
@@ -510,9 +512,9 @@ def test_scope_profile_parses() -> None:
 
 def test_skill_with_task_collections_parses() -> None:
     """A skill with nested task_collections + sources parses fully."""
-    config = parse_topology_v2(
+    config = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "skills": [
                     {
                         "name": "prepare-sow",
@@ -546,20 +548,20 @@ def test_missing_required_field_raises_parse_error() -> None:
     check with ``isinstance(value, str)`` only — the test still passed
     because an empty string was rejected by argparse downstream. Then
     I dropped the entire ``_require_str`` call → test failed (no
-    TopologyV2ParseError raised). Restored.
+    TopologyParseError raised). Restored.
     """
-    with pytest.raises(TopologyV2ParseError) as excinfo:
-        parse_topology_v2({"topology_v2": {"connectors": [{"id": "c1", "kind": "obsidian"}]}})
+    with pytest.raises(TopologyParseError) as excinfo:
+        parse_topology({"topology": {"connectors": [{"id": "c1", "kind": "obsidian"}]}})
     assert "name" in str(excinfo.value).lower()
     assert "fix:" in str(excinfo.value)
 
 
 def test_invalid_sensitivity_raises() -> None:
     """A connector with ``default_sensitivity=top-secret`` is rejected."""
-    with pytest.raises(TopologyV2ParseError) as excinfo:
-        parse_topology_v2(
+    with pytest.raises(TopologyParseError) as excinfo:
+        parse_topology(
             {
-                "topology_v2": {
+                "topology": {
                     "connectors": [{"id": "c1", "kind": "obsidian", "name": "c1", "default_sensitivity": "top-secret"}]
                 }
             }
@@ -575,9 +577,9 @@ def test_chunk_sensitivity_vocabulary_normalises_to_f39_tiers() -> None:
     same mapping the slack/m365 connectors use (client-confidential →
     confidential, personal → restricted).
     """
-    cfg = parse_topology_v2(
+    cfg = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "connectors": [
                     {"id": "c1", "kind": "github", "name": "c1", "default_sensitivity": "client-confidential"},
                     {"id": "c2", "kind": "obsidian", "name": "c2", "default_sensitivity": "personal"},
@@ -590,38 +592,38 @@ def test_chunk_sensitivity_vocabulary_normalises_to_f39_tiers() -> None:
 
 
 def test_example_config_topology_block_parses_clean() -> None:
-    """The repo's own example config must parse through topology_v2 (GH #480)."""
+    """The repo's own example config must parse through topology (GH #480)."""
     import yaml
 
     example = Path(__file__).resolve().parents[2] / "kairix.config.example.yaml"
     data = yaml.safe_load(example.read_text(encoding="utf-8"))
-    cfg = parse_topology_v2(data)
+    cfg = parse_topology(data)
     assert cfg is not None
 
 
 def test_invalid_access_type_raises() -> None:
     """A cc_pair with ``access_type=WIDE_OPEN`` is rejected."""
     payload = {
-        "topology_v2": {
+        "topology": {
             "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "p1", "access_type": "WIDE_OPEN"}]
         }
     }
-    with pytest.raises(TopologyV2ParseError):
-        parse_topology_v2(payload)
+    with pytest.raises(TopologyParseError):
+        parse_topology(payload)
 
 
 def test_invalid_actor_kind_raises() -> None:
     """A scope_profile with ``actor_kind=robot`` is rejected."""
-    with pytest.raises(TopologyV2ParseError):
-        parse_topology_v2({"topology_v2": {"scope_profiles": [{"name": "p", "actor_kind": "robot", "entries": []}]}})
+    with pytest.raises(TopologyParseError):
+        parse_topology({"topology": {"scope_profiles": [{"name": "p", "actor_kind": "robot", "entries": []}]}})
 
 
 def test_invalid_mode_raises() -> None:
     """A scope entry with ``mode=admin`` is rejected."""
-    with pytest.raises(TopologyV2ParseError):
-        parse_topology_v2(
+    with pytest.raises(TopologyParseError):
+        parse_topology(
             {
-                "topology_v2": {
+                "topology": {
                     "scope_profiles": [
                         {
                             "name": "p",
@@ -636,7 +638,7 @@ def test_invalid_mode_raises() -> None:
 def test_collection_filters_must_be_list() -> None:
     """``cc_pairs.*.collection_filters`` must be a list — string fails loud."""
     payload = {
-        "topology_v2": {
+        "topology": {
             "cc_pairs": [
                 {
                     "id": "p1",
@@ -648,14 +650,14 @@ def test_collection_filters_must_be_list() -> None:
             ]
         }
     }
-    with pytest.raises(TopologyV2ParseError):
-        parse_topology_v2(payload)
+    with pytest.raises(TopologyParseError):
+        parse_topology(payload)
 
 
 def test_connector_specific_config_must_be_mapping() -> None:
     """``connectors.*.connector_specific_config`` must be a mapping."""
     payload = {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {
                     "id": "c1",
@@ -666,24 +668,50 @@ def test_connector_specific_config_must_be_mapping() -> None:
             ]
         }
     }
-    with pytest.raises(TopologyV2ParseError):
-        parse_topology_v2(payload)
+    with pytest.raises(TopologyParseError):
+        parse_topology(payload)
 
 
 def test_block_must_be_list_not_dict() -> None:
     """If the operator wrote ``connectors:`` as a mapping, the parser rejects."""
-    with pytest.raises(TopologyV2ParseError):
-        parse_topology_v2({"topology_v2": {"connectors": {"c1": {"kind": "obsidian", "name": "c1"}}}})
+    with pytest.raises(TopologyParseError):
+        parse_topology({"topology": {"connectors": {"c1": {"kind": "obsidian", "name": "c1"}}}})
 
 
 def test_top_level_legacy_keys_are_ignored() -> None:
     """Backward-compat: a legacy config with top-level ``connectors:`` AND no
-    ``topology_v2:`` parent key parses to the empty config — the worker-side
+    ``topology:`` parent key parses to the empty config — the worker-side
     ``connectors:`` block (read by :mod:`kairix.worker`) is intentionally
-    distinct from the Wave D topology v2 surface."""
+    distinct from the Wave D topology surface."""
     legacy_payload = {
         "connectors": [{"name": "obsidian", "config": {"vault_root": "/x"}}],
         "collections": {"shared": [{"name": "vault", "path": "/x"}]},
     }
-    config = parse_topology_v2(legacy_payload)
-    assert config == TopologyV2Config()
+    config = parse_topology(legacy_payload)
+    assert config == TopologyConfig()
+
+
+def test_legacy_parent_key_normalizes_to_topology() -> None:
+    """PLA-287: a config still keyed on the pre-rename parent key parses.
+
+    The parent key was renamed (see :data:`LEGACY_TOPOLOGY_CONFIG_KEY`);
+    ``normalize_topology_key`` surfaces the old key as ``topology`` on read
+    so configs written before the rename keep resolving. The key string is
+    referenced via the public constant, never hard-coded here.
+    """
+    payload = {LEGACY_TOPOLOGY_CONFIG_KEY: {"connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}]}}
+    config = parse_topology(payload)
+    assert config.connectors == (ConnectorConfig(id="c1", kind="obsidian", name="c1"),)
+
+
+def test_normalize_prefers_canonical_key_when_both_present() -> None:
+    """A wizard-migrated config carrying BOTH keys reads the canonical block.
+
+    ``topology`` wins over the stale legacy block, so a partially-migrated
+    file never orphans the fresh sources back onto the old key.
+    """
+    canonical = {"connectors": [{"id": "new", "kind": "slack", "name": "new"}]}
+    legacy = {"connectors": [{"id": "old", "kind": "obsidian", "name": "old"}]}
+    normalized = normalize_topology_key({"topology": canonical, LEGACY_TOPOLOGY_CONFIG_KEY: legacy})
+    assert normalized["topology"] == canonical
+    assert parse_topology({"topology": canonical, LEGACY_TOPOLOGY_CONFIG_KEY: legacy}).connectors[0].kind == "slack"

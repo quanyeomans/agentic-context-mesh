@@ -17,7 +17,7 @@ This is also a prerequisite for KFEAT-022 piece 3 (volumetric discovery) — the
 Two new optional fields on `SharePointDriveSpec`:
 
 ```yaml
-topology_v2:
+topology:
   connectors:
     - id: sharepoint-example-drive-conn
       kind: sharepoint
@@ -28,7 +28,7 @@ topology_v2:
             exclude_paths: ["/Curated-Content/draft"]
 ```
 
-> Forward note: the `topology_v2` parent key is the current namespace. [`connector-architecture-refactor.md`](connector-architecture-refactor.md) renames `topology_v2` → `topology` (dropping the `_v2` suffix) once the write/ingest leg cuts over to the single canonical model; the field names (`include_paths` / `exclude_paths`) and their semantics are unaffected by that rename.
+> Forward note: the `topology` parent key is the current namespace. [`connector-architecture-refactor.md`](connector-architecture-refactor.md) renames `topology` → `topology` (dropping the `_v2` suffix) once the write/ingest leg cuts over to the single canonical model; the field names (`include_paths` / `exclude_paths`) and their semantics are unaffected by that rename.
 
 **Semantics (locked):**
 
@@ -59,9 +59,9 @@ Walked the existing SharePoint test surface and identified what shifts vs what's
 | `tests/contracts/test_sharepoint_protocol.py` | Uses `SharePointDriveSpec(drive_id=_DRIVE_ID)` — new fields have defaults, constructor calls stay valid. Protocol shape is preserved (no method signatures change). |
 | `tests/bdd/features/connector_sharepoint.feature` | All scenarios use the default (no filter) → exact same behaviour. |
 | `tests/bdd/features/feature_flag_connector_sharepoint.feature` | Flag toggle is orthogonal to filter behaviour. |
-| `tests/bdd/features/feature_flag_topology_v2_sharepoint.feature` | Per-drive containers are orthogonal to filter; both can co-exist. |
+| `tests/bdd/features/feature_flag_topology_sharepoint.feature` | Per-drive containers are orthogonal to filter; both can co-exist. |
 | `tests/e2e/test_composed_connector_sharepoint_path.py` | Uses fixture data with no filter — unchanged. |
-| `tests/e2e/test_composed_topology_v2_sharepoint_path.py` | Same. |
+| `tests/e2e/test_composed_topology_sharepoint_path.py` | Same. |
 | `tests/integration/test_feature_flag_connector_sharepoint.py` | Filter is config-driven, not flag-driven — flag tests unaffected. |
 | `tests/connectors/sharepoint/test_connector.py` | All existing tests use default (no filter); they're exercising the no-filter branch of the new code. |
 

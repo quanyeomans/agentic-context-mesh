@@ -28,7 +28,7 @@ Do NOT use this runbook for:
 
 ## 2. First diagnostic — `kairix onboard check --json`
 
-Always start here. The check runs a set of independent subsystem probes in dependency order (PATH → secrets → document root → vector search → Neo4j → agent knowledge → chunk_date → MCP service → agent memory writable, plus any optional-subsystem probes your deployment has enabled — topology_v2 config, SharePoint credentials, maintenance loop, extractor libraries) and emits a structured envelope you can act on without further parsing. Gate on `fully_passed: true`, not a fixed passed/total count — `total` grows with the optional subsystems + flags a deployment enables (≈19 checks today).
+Always start here. The check runs a set of independent subsystem probes in dependency order (PATH → secrets → document root → vector search → Neo4j → agent knowledge → chunk_date → MCP service → agent memory writable, plus any optional-subsystem probes your deployment has enabled — topology config, SharePoint credentials, maintenance loop, extractor libraries) and emits a structured envelope you can act on without further parsing. Gate on `fully_passed: true`, not a fixed passed/total count — `total` grows with the optional subsystems + flags a deployment enables (≈19 checks today).
 
 ```bash
 kairix onboard check --json

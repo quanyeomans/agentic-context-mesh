@@ -1,11 +1,11 @@
-"""Topology v2 apply-bridge — parsed YAML config → runtime topology rows.
+"""Topology apply-bridge — parsed YAML config → runtime topology rows.
 
-Wave D shipped the parser (:mod:`kairix.config.topology_v2`) + the
-cross-reference validator (:mod:`kairix.config.topology_v2_validators`)
+Wave D shipped the parser (:mod:`kairix.config.topology`) + the
+cross-reference validator (:mod:`kairix.config.topology_validators`)
 + the operator config blocks. Wave C wired :class:`CollectionRouter`
 through :func:`kairix.worker.resolve_chunk_writer_for_entry`. This
 module is the bridge between the two: it materialises parsed
-:class:`TopologyV2Config` into rows on:
+:class:`TopologyConfig` into rows on:
 
 * ``topology_connectors`` (per declared connector block)
 * ``topology_credentials`` (per declared credential block)
@@ -27,13 +27,13 @@ credential_id, access_type).
 
 Public surface:
 
-* :func:`apply_topology_v2` — F6-clean entry point taking the parsed
+* :func:`apply_topology` — F6-clean entry point taking the parsed
   config + an optional :class:`ApplierDeps` for tests.
 * :class:`ApplyResult` — frozen-dataclass return per F42.
 * :class:`ApplierDeps` — F6-clean DI seam (no test-only ``_fn=None``).
 
 The applier refuses to run on a config with cross-reference failures —
-callers should run :func:`validate_topology_v2_references` first and
+callers should run :func:`validate_topology_references` first and
 short-circuit on a non-empty failure tuple.
 """
 
@@ -46,17 +46,17 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from kairix.config.topology_v2 import (
+from kairix.config.topology import (
     CCPairConfig,
     CollectionConfig,
     ConnectorConfig,
     CredentialConfig,
-    TopologyV2Config,
+    TopologyConfig,
     config_pairs_to_mapping,
 )
-from kairix.config.topology_v2_validators import (
+from kairix.config.topology_validators import (
     ValidationFailure,
-    validate_topology_v2_references,
+    validate_topology_references,
 )
 from kairix.core.connectors.cc_pair import create_cc_pair
 
@@ -64,12 +64,12 @@ logger = logging.getLogger(__name__)
 
 
 # F17 — repeated "config_id resolved as" log fragment across three helpers.
-_RESOLVED_AS = "topology_v2_applier: %s %r resolved as id=%d"
+_RESOLVED_AS = "topology_applier: %s %r resolved as id=%d"
 
 
 @dataclass(frozen=True)
 class ApplyResult:
-    """Outcome of one :func:`apply_topology_v2` call — frozen per F42.
+    """Outcome of one :func:`apply_topology` call — frozen per F42.
 
     Counters aggregate across every row type (connectors + credentials +
     cc_pairs + collections + collection_sources). The granular breakdown
@@ -84,7 +84,7 @@ class ApplyResult:
 
 @dataclass(frozen=True)
 class ApplyValidationError(Exception):
-    """Raised when :func:`apply_topology_v2` is asked to apply an invalid config.
+    """Raised when :func:`apply_topology` is asked to apply an invalid config.
 
     Carries the validator's failure tuple so the caller can surface the
     full set of cross-reference errors at once (matching the
@@ -96,7 +96,7 @@ class ApplyValidationError(Exception):
     def __str__(self) -> str:
         joined = "; ".join(f.message for f in self.failures)
         return (
-            f"topology_v2_applier: refusing to apply config with "
+            f"topology_applier: refusing to apply config with "
             f"{len(self.failures)} cross-reference failure(s). "
             f"fix: resolve each failure or remove the dangling reference. "
             f"next: run `kairix config validate` to surface the full list. "
@@ -111,7 +111,7 @@ def _now() -> str:
 
 @dataclass
 class ApplierDeps:
-    """Injectable dependencies for :func:`apply_topology_v2`.
+    """Injectable dependencies for :func:`apply_topology`.
 
     F6-clean: every field has a ``default_factory`` so production callers
     construct ``ApplierDeps()`` and get the real boundary calls; tests
@@ -123,14 +123,14 @@ class ApplierDeps:
         INSERT / UPDATE. Default :func:`_now`. Tests override for
         deterministic assertions.
       * ``validator_fn`` — pre-apply cross-reference validator. Default
-        :func:`validate_topology_v2_references`. Tests can pass a stub
+        :func:`validate_topology_references`. Tests can pass a stub
         when they want to exercise the apply path against a config that
         would normally fail validation.
     """
 
     now_fn: Callable[[], str] = field(default_factory=lambda: _now)
-    validator_fn: Callable[[TopologyV2Config], tuple[ValidationFailure, ...]] = field(
-        default_factory=lambda: validate_topology_v2_references
+    validator_fn: Callable[[TopologyConfig], tuple[ValidationFailure, ...]] = field(
+        default_factory=lambda: validate_topology_references
     )
 
 
@@ -139,9 +139,9 @@ class ApplierDeps:
 # ---------------------------------------------------------------------------
 
 
-def apply_topology_v2(
+def apply_topology(
     db: sqlite3.Connection,
-    parsed_config: TopologyV2Config,
+    parsed_config: TopologyConfig,
     *,
     applier_deps: ApplierDeps | None = None,
 ) -> ApplyResult:
@@ -191,7 +191,7 @@ def apply_topology_v2(
     )
     result = ApplyResult(created=created, updated=updated, unchanged=unchanged)
     logger.info(
-        "topology_v2_applier: applied config — created=%d updated=%d unchanged=%d",
+        "topology_applier: applied config — created=%d updated=%d unchanged=%d",
         result.created,
         result.updated,
         result.unchanged,
@@ -289,7 +289,7 @@ def _apply_connectors(
             )
             row_id = cur.lastrowid
             if row_id is None:
-                raise RuntimeError(f"topology_v2_applier: INSERT topology_connectors name={spec.name!r} failed")
+                raise RuntimeError(f"topology_applier: INSERT topology_connectors name={spec.name!r} failed")
             id_map[spec.id] = int(row_id)
             created += 1
             logger.info(_RESOLVED_AS, "connector", spec.id, int(row_id))
@@ -354,7 +354,7 @@ def _apply_credentials(
             )
             row_id = cur.lastrowid
             if row_id is None:
-                raise RuntimeError(f"topology_v2_applier: INSERT topology_credentials name={spec.id!r} failed")
+                raise RuntimeError(f"topology_applier: INSERT topology_credentials name={spec.id!r} failed")
             id_map[spec.id] = int(row_id)
             created += 1
             logger.info(_RESOLVED_AS, "credential", spec.id, int(row_id))
@@ -410,9 +410,9 @@ def _apply_cc_pairs(
         connector_row_id = connector_ids.config_id_to_row_id.get(spec.connector)
         if connector_row_id is None:
             raise RuntimeError(
-                f"topology_v2_applier: cc_pair {spec.name!r} references undeclared "
+                f"topology_applier: cc_pair {spec.name!r} references undeclared "
                 f"connector {spec.connector!r}. "
-                f"fix: declare the connector in topology_v2.connectors. "
+                f"fix: declare the connector in topology.connectors. "
                 f"next: run `kairix config validate`."
             )
         credential_row_id: int | None = None
@@ -426,9 +426,9 @@ def _apply_cc_pairs(
             credential_row_id = credential_ids.config_id_to_row_id.get(cred_ref_id)
             if credential_row_id is None:
                 raise RuntimeError(
-                    f"topology_v2_applier: cc_pair {spec.name!r} references undeclared "
+                    f"topology_applier: cc_pair {spec.name!r} references undeclared "
                     f"credential id {cred_ref_id!r}. "
-                    f"fix: declare the credential in topology_v2.credentials. "
+                    f"fix: declare the credential in topology.credentials. "
                     f"next: run `kairix config validate`."
                 )
         outcome = _apply_one_cc_pair(
@@ -573,7 +573,7 @@ def _upsert_collection_row(
         )
         new_id = cur.lastrowid
         if new_id is None:
-            raise RuntimeError(f"topology_v2_applier: INSERT topology_collections name={spec.name!r} failed")
+            raise RuntimeError(f"topology_applier: INSERT topology_collections name={spec.name!r} failed")
         return int(new_id), "created"
     collection_id = int(existing[0])
     if existing[1] == spec.tier:
@@ -605,9 +605,9 @@ def _upsert_collection_sources(
         cc_pair_row_id = cc_pair_ids.config_id_to_row_id.get(source.cc_pair)
         if cc_pair_row_id is None:
             raise RuntimeError(
-                f"topology_v2_applier: collection {spec.name!r} source references "
+                f"topology_applier: collection {spec.name!r} source references "
                 f"undeclared cc_pair {source.cc_pair!r}. "
-                f"fix: declare the cc_pair in topology_v2.cc_pairs. "
+                f"fix: declare the cc_pair in topology.cc_pairs. "
                 f"next: run `kairix config validate`."
             )
         existing = db.execute(

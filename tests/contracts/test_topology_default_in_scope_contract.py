@@ -1,6 +1,6 @@
 """Contract tests for the default_in_scope extension (GH #373).
 
-Drives :class:`TopologyV2CollectionResolver` + :class:`ScopeProfileResolver`
+Drives :class:`TopologyCollectionResolver` + :class:`ScopeProfileResolver`
 end-to-end against SEEDED in-memory SQLite (no fakes) to prove the new
 ``default_in_scope`` field flows through every protocol seam.
 
@@ -9,7 +9,7 @@ Pins (per docs/architecture/collection-v2-implementation-plan.md):
   * Protocol compliance preserved after the API extension.
   * Load-bearing: 7 in-default + 1 opt-in seeded → ``collections=None``
     returns the 7-name superset.
-  * Composition: TopologyV2CollectionResolver.resolve(collections=None)
+  * Composition: TopologyCollectionResolver.resolve(collections=None)
     propagates ``default_only=True`` to ScopeProfileResolver.
   * F68 failure-injection: pre-migration rows treated as default_in_scope=1.
 
@@ -27,7 +27,7 @@ import pytest
 from kairix.core.db.schema import create_schema
 from kairix.core.protocols import CollectionResolver
 from kairix.core.search.scope import Scope
-from kairix.core.search.topology_v2_resolver import TopologyV2CollectionResolver
+from kairix.core.search.topology_resolver import TopologyCollectionResolver
 from tests.fakes import FakeScopeProfileResolver
 
 pytestmark = pytest.mark.contract
@@ -81,7 +81,7 @@ def _seeded_db_seven_in_default_one_opt_in() -> sqlite3.Connection:
     return db
 
 
-def test_topology_v2_resolver_satisfies_collection_resolver_protocol_with_default_only() -> None:
+def test_topology_resolver_satisfies_collection_resolver_protocol_with_default_only() -> None:
     """isinstance(resolver, CollectionResolver) still holds after the API
     extension — the new ``default_only`` kwarg lives on the underlying
     ScopeProfileResolver, not on the CollectionResolver Protocol.
@@ -90,10 +90,10 @@ def test_topology_v2_resolver_satisfies_collection_resolver_protocol_with_defaul
     extension is internal to the Adapter ↔ Resolver composition.
     """
     db = _seeded_db_seven_in_default_one_opt_in()
-    resolver = TopologyV2CollectionResolver(db=db)
+    resolver = TopologyCollectionResolver(db=db)
 
     assert isinstance(resolver, CollectionResolver), (
-        "TopologyV2CollectionResolver must still satisfy CollectionResolver after #373"
+        "TopologyCollectionResolver must still satisfy CollectionResolver after #373"
     )
 
 
@@ -108,7 +108,7 @@ def test_default_in_scope_default_search_returns_superset_load_bearing() -> None
     is end-to-end correct.
     """
     db = _seeded_db_seven_in_default_one_opt_in()
-    resolver = TopologyV2CollectionResolver(db=db)
+    resolver = TopologyCollectionResolver(db=db)
 
     result = resolver.resolve(agent="shape", scope=Scope.SHARED_AGENT)
 
@@ -134,8 +134,8 @@ def test_default_in_scope_default_search_returns_superset_load_bearing() -> None
     )
 
 
-def test_scope_profile_resolver_default_only_propagates_to_topology_v2_resolver() -> None:
-    """Composition assertion — TopologyV2CollectionResolver MUST call
+def test_scope_profile_resolver_default_only_propagates_to_topology_resolver() -> None:
+    """Composition assertion — TopologyCollectionResolver MUST call
     ScopeProfileResolver.resolve with ``default_only=True`` when the
     caller passes ``collections=None``.
 
@@ -152,7 +152,7 @@ def test_scope_profile_resolver_default_only_propagates_to_topology_v2_resolver(
     )
     db = sqlite3.connect(":memory:")
     create_schema(db, dims=4)
-    resolver = TopologyV2CollectionResolver(db=db, scope_profile_resolver=fake)
+    resolver = TopologyCollectionResolver(db=db, scope_profile_resolver=fake)
 
     resolver.resolve(agent="shape", scope=Scope.SHARED_AGENT)
 

@@ -306,7 +306,7 @@ B.1-B.6 green. ~200 lines net deletion across `scripts/checks/`.
 19 flags in `REGISTRY`. Four call-site patterns observed:
 - Pattern 1 (8 flags): named `dispatch_<name>_sync(read_flag, on_branch, off_branch)` function
 - Pattern 2 (1 flag — `maintenance_loop`): Deps-injected `flag_reader` in a Deps dataclass
-- Pattern 3 (1 flag — `topology_v2_runtime`): inline `flag()` call passing boolean argument
+- Pattern 3 (1 flag — `topology_runtime`): inline `flag()` call passing boolean argument
 - Pattern 4 (1 flag — `pipeline_status_emit`): local context-modifier (chooses db vs None)
 
 Per-flag scaffold: ~265 lines for a connector-gating flag (registry + dispatch fn + OFF noop + ON wrapper + BDD + integration test + E2E), of which ~75% is the same shape repeated.
@@ -358,8 +358,8 @@ A new flag = one ~15-line subclass. The BDD feature + integration test get auto-
 | Clean fit (8 connector-gating flags via Pattern 1) | 8 | Each `dispatch_<name>_sync` becomes a 15-line subclass |
 | Deps-injected variant (maintenance_loop) | 1 | Subclass returning `None` instead of `ConnectorSyncResult` (`FlagGatedCapability[None]`) |
 | Context-modifier variant (pipeline_status_emit) | 1 | Subclass that returns the chosen `db` value (`FlagGatedCapability[sqlite3.Connection \| None]`) |
-| Inline-call variant (topology_v2_runtime) | 1 | Pre-work: extract `resolve_chunk_writer_for_entry`'s branching into named methods, then subclass |
-| Topology Protocol-method gating (9 topology_v2_* flags) | 9 | Pre-work: each connector grows a `dispatch_topology_v2_*` entry-point; then subclass |
+| Inline-call variant (topology_runtime) | 1 | Pre-work: extract `resolve_chunk_writer_for_entry`'s branching into named methods, then subclass |
+| Topology Protocol-method gating (9 topology_* flags) | 9 | Pre-work: each connector grows a `dispatch_topology_*` entry-point; then subclass |
 
 The 9 topology flags need the most pre-work because they gate inside Protocol method bodies rather than at a dispatch boundary. Track C's first iteration handles the 11 flags that fit cleanly or with modest accommodation; the 9 topology flags wait for a follow-up wave.
 
@@ -370,11 +370,11 @@ The 9 topology flags need the most pre-work because they gate inside Protocol me
 | C.1 | `kairix/core/features/capability.py` exports `FlagGatedCapability` ABC | tests/contracts/test_capability_protocol.py |
 | C.2 | 8 connector-gating flags migrated to subclasses; behaviour preserved | tests/integration/test_feature_flag_*.py pass |
 | C.3 | `maintenance_loop` + `pipeline_status_emit` migrated with appropriate generic types | tests/integration/test_feature_flag_maintenance_loop.py + test_feature_flag_pipeline_status_emit.py |
-| C.4 | `topology_v2_runtime` pre-work + migration | tests/integration/test_feature_flag_topology_v2_runtime.py |
+| C.4 | `topology_runtime` pre-work + migration | tests/integration/test_feature_flag_topology_runtime.py |
 | C.5 | F54 replaced by F78 (structural check: every flag in REGISTRY has a corresponding `FlagGatedCapability` subclass) | scripts/checks/check_f78_flag_capability_subclass.py |
 | C.6 | `parametrize_both_branches(capability_cls)` pytest fixture added to tests/fakes.py | Used by at least 5 migrated tests |
 | C.7 | BDD feature template generation: a `tools/scaffold_flag.py` script generates `feature_flag_<name>.feature` + `test_feature_flag_<name>.py` skeletons from a `FlagGatedCapability` subclass declaration | New flag wave needs ~5 lines of code + script run |
-| C.8 | 9 topology_v2_* flags tracked as a follow-up wave under a separate ADR (cite from here) | Cross-reference added |
+| C.8 | 9 topology_* flags tracked as a follow-up wave under a separate ADR (cite from here) | Cross-reference added |
 
 ### Track C phase gate
 
@@ -394,7 +394,7 @@ Three tracks, sequenced:
 
 3. **Track C last** (depends on Track A for the `pipeline_status_emit` flag's StageRunner-aware migration).
    - Per-flag scaffold collapse + auto-generation
-   - Defers the 9 topology_v2_* flags to a follow-up wave
+   - Defers the 9 topology_* flags to a follow-up wave
 
 ## 8. Open questions
 
@@ -402,7 +402,7 @@ Three tracks, sequenced:
 
 2. **Maintenance scheduler stages and the `entity_drain` follow-up.** The 2026-05-29 audit found 2.26M `entity_signals` pending Neo4j drain. That drain is currently neither a connector pipeline stage nor a maintenance scheduler stage — it's a worker function. Track A's stage abstraction creates the natural home for it. Drain becomes a maintenance Stage with IsolatedStageRunner. Tracked separately.
 
-3. **FlagGatedCapability for the topology_v2 fleet.** 9 flags gate behaviour inside connector Protocol methods. The right pre-work is making each connector expose a `dispatch_topology_v2_*()` entry-point. That's a separate wave because it touches connector plugins (every one), not framework code. Tracked as a follow-up ADR.
+3. **FlagGatedCapability for the topology fleet.** 9 flags gate behaviour inside connector Protocol methods. The right pre-work is making each connector expose a `dispatch_topology_*()` entry-point. That's a separate wave because it touches connector plugins (every one), not framework code. Tracked as a follow-up ADR.
 
 4. **Should `FitnessRule` migrate the 5 outliers eventually?** F50 and F7/F9 have legitimate reasons to stay standalone (cross-baseline, XML input). F21 is a meta-check on the FitnessRule subclasses themselves — could be a FitnessRule but its detection is fundamentally different. F14 is single-file. Sonar parity isn't a gate at all. Recommendation: leave the 5 standalone permanently; FitnessRule isn't the only shape.
 

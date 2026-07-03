@@ -71,7 +71,7 @@ connectors:
 
 ## Flag gating
 
-The connector is gated by the `topology_v2_google_drive` feature flag.
+The connector is gated by the `topology_google_drive` feature flag.
 Default OFF — flipping ON requires the operator to:
 
 1. Confirm the KV secret from GH #356 is provisioned.

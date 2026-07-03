@@ -69,7 +69,7 @@ _FEATURE_FLAG_ARCHITECTURE_SPEC = "docs/architecture/feature-flag-architecture.m
 _SEARCH_PIPELINE_OWNER = "search-pipeline"
 
 
-# Public registry. The topology_v2_* family + ``obsidian_connector_primary``
+# Public registry. The topology_* family + ``obsidian_connector_primary``
 # retired post-cutover (task #132 — production worker logs source='config'
 # effective=True for every member of the family); their gated call sites have
 # been inlined to the post-cutover behaviour and the OFF-branch shims removed.

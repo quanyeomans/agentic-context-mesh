@@ -111,7 +111,7 @@ keep the prior cell unchanged.
 Dispatch in three waves of parallel subagents. Wave A's mechanical
 batches (F16 / F17 / F20 / F32) are done as of KFEAT-016 (2026-05-23);
 F19 is down to 5 stragglers. The composition and architectural waves
-sit on top of the new Wave-A/B/C connector-framework + topology-v2
+sit on top of the new Wave-A/B/C connector-framework + topology
 baselines that landed concurrently.
 
 **Wave A — mechanical batches (low risk, high volume):**

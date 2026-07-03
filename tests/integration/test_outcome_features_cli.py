@@ -83,5 +83,5 @@ def test_features_status_subprocess_json_mode_emits_envelope() -> None:
     assert isinstance(parsed["flags"], list), f"expected 'flags' to be a list; got {type(parsed['flags']).__name__}"
     names = [entry["name"] for entry in parsed["flags"]]
     # Representative connector_* flag still in the registry after the
-    # topology_v2_* + obsidian_connector_primary retirement (task #132).
+    # topology_* + obsidian_connector_primary retirement (task #132).
     assert "connector_dex_crm" in names, f"expected connector_dex_crm in flags list; got: {names!r}"

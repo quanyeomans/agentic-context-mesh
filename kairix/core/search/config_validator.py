@@ -71,7 +71,7 @@ def validate_config(
     Returns a list of human-readable error messages. Empty list means valid.
     Never raises — returns errors as strings.
 
-    Also runs the Wave D topology v2 referential-integrity validators
+    Also runs the Wave D topology referential-integrity validators
     when any of the 6 Wave D blocks is present — empty / absent blocks
     skip cleanly so legacy configs see byte-identical behaviour.
 
@@ -91,7 +91,7 @@ def validate_config(
     errors.extend(_validate_collections(data.get(_COLLECTIONS_KEY)))
     errors.extend(_validate_agents(data.get("agents"), data.get(_COLLECTIONS_KEY)))
     errors.extend(_validate_reference_library(data.get(_REFLIB_KEY)))
-    errors.extend(_validate_topology_v2(data))
+    errors.extend(_validate_topology(data))
     errors.extend(
         _validate_collection_paths_resolve(
             data.get(_COLLECTIONS_KEY),
@@ -133,7 +133,7 @@ def _validate_collection_paths_resolve(
 
     # Default-skip when document_root is not explicitly supplied — keeps
     # legacy callers (existing schema-only validate_config tests, plus
-    # the topology v2 unit-test fixtures) byte-identical. Operators
+    # the topology unit-test fixtures) byte-identical. Operators
     # running `kairix config validate` opt into path resolution by
     # passing the resolved KairixPaths.document_root from the CLI
     # boundary (see kairix.core.search.config_validator's CLI main).
@@ -241,33 +241,39 @@ def _validate_reference_library(block: Any) -> list[str]:
     return errors
 
 
-def _validate_topology_v2(data: dict[str, Any]) -> list[str]:
-    """Parse + cross-reference-check the Wave D topology v2 blocks.
+def _validate_topology(data: dict[str, Any]) -> list[str]:
+    """Parse + cross-reference-check the Wave D topology blocks.
 
-    Default-safe: when the ``topology_v2:`` parent key is absent (or
+    Default-safe: when the ``topology:`` parent key is absent (or
     null), returns ``[]`` without touching the parser. Parse errors and
     validation failures both render as F21-shaped operator-friendly
     strings.
 
     Post #305: the six Wave D blocks (connectors / credentials /
     cc_pairs / collections / scope_profiles / skills) live under a
-    single ``topology_v2:`` parent key so the Wave D ``collections:``
+    single ``topology:`` parent key so the Wave D ``collections:``
     block stops colliding with the legacy top-level
     ``collections.shared`` dict shape. With the namespace fix all five
     cross-reference rules — including rule 3
     (``collections.*.sources.*.cc_pair``) — now fire end-to-end against
-    the Wave D ``topology_v2.collections:`` declarations.
+    the Wave D ``topology.collections:`` declarations.
+
+    A config written before the rename (carrying the legacy topology key) is normalized to
+    ``topology`` first via :func:`normalize_topology_key` (PLA-287) so the
+    default-safe guard below sees the block under its canonical name.
     """
-    if data.get("topology_v2") is None:
+    from kairix.config import normalize_topology_key, parse_topology, validate_topology_references
+    from kairix.config.topology import TOPOLOGY_CONFIG_KEY, TopologyParseError
+
+    data = normalize_topology_key(data)
+    if data.get(TOPOLOGY_CONFIG_KEY) is None:
         return []
-    from kairix.config import parse_topology_v2, validate_topology_v2_references
-    from kairix.config.topology_v2 import TopologyV2ParseError
 
     try:
-        parsed = parse_topology_v2(data)
-    except TopologyV2ParseError as exc:
-        return [f"topology_v2: parse failed — {exc}"]
-    failures = validate_topology_v2_references(parsed)
+        parsed = parse_topology(data)
+    except TopologyParseError as exc:
+        return [f"topology: parse failed — {exc}"]
+    failures = validate_topology_references(parsed)
     return [f.message for f in failures]
 
 

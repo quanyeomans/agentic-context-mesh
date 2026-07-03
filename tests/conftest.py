@@ -250,7 +250,7 @@ pytest_plugins = [
     # Wave E GitHub — greenfield Wave-E build per
     # docs/architecture/connector-scope-topology/connector-design-specs/github.md.
     # ``connector_github`` (introduce stage) gates the connector slot.
-    # ``topology_v2_github`` retired post-cutover (task #132).
+    # ``topology_github`` retired post-cutover (task #132).
     "tests.bdd.steps.connector_github_steps",
     "tests.bdd.steps.feature_flag_connector_github_steps",
     # Wave E Slack — workspace-channels connector + flag. See
@@ -266,8 +266,8 @@ pytest_plugins = [
     # ``obsidian`` collection invisible to BM25 because the chunk-writer
     # skipped the FTS5 write).
     "tests.bdd.steps.connector_search_round_trip_steps",
-    # Topology v2 Wave D — operator config promotion (6 YAML blocks +
-    # 5 cross-reference validators + kairix cc-pair CLI + topology v2
+    # Topology Wave D — operator config promotion (6 YAML blocks +
+    # 5 cross-reference validators + kairix cc-pair CLI + topology
     # diagnostics in `kairix features status`). Wave A/B/C/D flag gates
     # retired post-cutover (task #132); CLI/MCP surfaces stay.
     "tests.bdd.steps.cli_cc_pair_steps",
@@ -278,19 +278,19 @@ pytest_plugins = [
     # Wave 5 Gmail — Google Workspace mailbox connector. Single-mailbox
     # per cc_pair (Onyx pattern); full-message body + envelope; History
     # API for change detection. ``connector_gmail`` (introduce stage)
-    # gates the connector slot; ``topology_v2_gmail`` retired post-cutover
+    # gates the connector slot; ``topology_gmail`` retired post-cutover
     # (task #132).
     "tests.bdd.steps.connector_gmail_steps",
     "tests.bdd.steps.feature_flag_connector_gmail_steps",
     # Wave E Google Drive — workspace-files connector + flag. See
     # kairix/connectors/google_drive/README.md for the connector
     # capability surface and operator-side credential provisioning
-    # (tracked under GH #356). ``topology_v2_google_drive`` retired.
+    # (tracked under GH #356). ``topology_google_drive`` retired.
     "tests.bdd.steps.connector_google_drive_steps",
-    # Apple iCloud CalDAV connector — ``topology_v2_apple_caldav``
+    # Apple iCloud CalDAV connector — ``topology_apple_caldav``
     # retired post-cutover (task #132).
     "tests.bdd.steps.connector_apple_caldav_steps",
-    # Google Calendar connector — ``topology_v2_google_calendar``
+    # Google Calendar connector — ``topology_google_calendar``
     # retired post-cutover (task #132). Ships OFF until Google Workspace
     # OAuth credentials are provisioned (GH #356).
     "tests.bdd.steps.connector_google_calendar_steps",

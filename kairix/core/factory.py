@@ -299,7 +299,7 @@ def derive_tier_map(mapping: dict[str, Any] | None = None) -> dict[str, str]:
     """Derive ``{collection_name: tier_name}`` from the canonical
     topology collections (Issue #432, canonical-collapse Task 6).
 
-    Reads ``topology_v2.collections[*].tier`` from the operator's MERGED
+    Reads ``topology.collections[*].tier`` from the operator's MERGED
     config mapping (base + overlay) via
     :func:`kairix.config_layers.load_merged_mapping` — the same
     overlay-aware read path the setup wizard writes through (#492), so a
@@ -321,9 +321,9 @@ def derive_tier_map(mapping: dict[str, Any] | None = None) -> dict[str, str]:
             from kairix.config_layers import load_merged_mapping
 
             mapping = load_merged_mapping()
-        from kairix.config.topology_v2 import parse_topology_v2
+        from kairix.config.topology import parse_topology
 
-        topology = parse_topology_v2(mapping)
+        topology = parse_topology(mapping)
     except Exception:
         return {}
     return {c.name: c.tier for c in topology.collections if c.tier}
@@ -333,7 +333,7 @@ def derive_collection_overrides(mapping: dict[str, Any] | None = None) -> dict[s
     """Derive ``{collection_name: retrieval_override_dict}`` from the
     canonical topology collections (canonical-collapse).
 
-    Reads ``topology_v2.collections[*].retrieval`` from the operator's
+    Reads ``topology.collections[*].retrieval`` from the operator's
     MERGED config mapping (base + overlay) via
     :func:`kairix.config_layers.load_merged_mapping` — the same
     overlay-aware read path the setup wizard writes through (#492), so a
@@ -357,9 +357,9 @@ def derive_collection_overrides(mapping: dict[str, Any] | None = None) -> dict[s
             from kairix.config_layers import load_merged_mapping
 
             mapping = load_merged_mapping()
-        from kairix.config.topology_v2 import parse_topology_v2
+        from kairix.config.topology import parse_topology
 
-        topology = parse_topology_v2(mapping)
+        topology = parse_topology(mapping)
     except Exception:
         return {}
     return {c.name: dict(c.retrieval_overrides) for c in topology.collections if c.retrieval_overrides}
@@ -510,7 +510,7 @@ class FactoryDeps:
       used verbatim.
     - ``logger_override``: replace the JSONL search logger (typically
       with ``FakeSearchLogger`` or a tmp-path :class:`JsonlSearchLogger`).
-    - ``resolver_override``: replace the topology-v2 collection
+    - ``resolver_override``: replace the topology collection
       resolver. When set, no SQLite Connection is opened for resolution.
     - ``query_cache_override``: replace (or disable) the
       process-shared :class:`QueryResultCache`. Use the sentinel
@@ -657,13 +657,13 @@ def build_collection_resolver(
 ) -> Any:
     """Construct the production ``CollectionResolver``.
 
-    Always returns :class:`TopologyV2CollectionResolver`, which reads
+    Always returns :class:`TopologyCollectionResolver`, which reads
     the ``topology_scope_profiles`` + ``topology_scope_entries`` v2
     tables; default search returns the superset of every collection
     the agent's scope_profile grants read access to, filtered by the
     per-scope-entry ``default_in_scope`` column.
 
-    ``topology_v2_collection_resolver`` + ``topology_v2_default_in_scope``
+    ``topology_collection_resolver`` + ``topology_default_in_scope``
     retired post-cutover (task #132).
 
     ``db_path`` is the resolved SQLite path threaded from
@@ -674,7 +674,7 @@ def build_collection_resolver(
     :func:`kairix.paths.extra_collections` so callers can drive the
     ``KAIRIX_EXTRA_COLLECTIONS`` parsing without mutating ``os.environ``.
     """
-    return _build_topology_v2_collection_resolver(
+    return _build_topology_collection_resolver(
         db_path,
         default_in_scope_filter_enabled=True,
         env=env,
@@ -684,9 +684,9 @@ def build_collection_resolver(
 class _SerializingSqliteConnection:
     """Thread-serialising proxy around a shared :class:`sqlite3.Connection`.
 
-    Production wiring for the topology_v2 collection resolver opens one
+    Production wiring for the topology collection resolver opens one
     Connection (with ``check_same_thread=False``) and reuses it for the
-    process lifetime — see :func:`_build_topology_v2_collection_resolver`.
+    process lifetime — see :func:`_build_topology_collection_resolver`.
     ``check_same_thread=False`` lets multiple threads call into the
     connection, but the Python sqlite3 driver still uses a single
     underlying cursor state per connection: if thread A's
@@ -722,8 +722,8 @@ class _SerializingSqliteConnection:
         """
         with self._lock:
             cursor = self._conn.execute(sql, params)
-            # F63-bounded: this proxy is wired only to the topology_v2 collection
-            # resolver Connection (_build_topology_v2_collection_resolver). Every
+            # F63-bounded: this proxy is wired only to the topology collection
+            # resolver Connection (_build_topology_collection_resolver). Every
             # call site there issues per-actor or operator-config-sized SELECTs
             # against topology_scope_entries / topology_collections /
             # topology_cc_pairs — bounded by the actor's profile (≤O(collections),
@@ -744,7 +744,7 @@ class _SerializingSqliteConnection:
 class _MaterialisedCursor:
     """Lightweight stand-in for a sqlite3 cursor that has already fetched.
 
-    The topology_v2 + scope-profile resolver call sites only consume
+    The topology + scope-profile resolver call sites only consume
     rows by eager batch read (or by direct iteration in a single
     comprehension). This stand-in supports both shapes without holding
     any database state, so the serialising connection above can release
@@ -761,13 +761,13 @@ class _MaterialisedCursor:
         return iter(self._rows)
 
 
-def _build_topology_v2_collection_resolver(
+def _build_topology_collection_resolver(
     db_path: Any,
     *,
     default_in_scope_filter_enabled: bool = False,
     env: Mapping[str, str] | None = None,
 ) -> Any:
-    """Construct :class:`TopologyV2CollectionResolver` against ``db_path``.
+    """Construct :class:`TopologyCollectionResolver` against ``db_path``.
 
     Opens a sqlite3 Connection so the resolver can query
     ``topology_scope_profiles`` + ``topology_scope_entries`` +
@@ -777,7 +777,7 @@ def _build_topology_v2_collection_resolver(
 
     ``default_in_scope_filter_enabled`` (GH #373) gates the new
     default-in-scope filter on the collections=None path. The factory
-    reads the ``topology_v2_default_in_scope`` feature flag and threads
+    reads the ``topology_default_in_scope`` feature flag and threads
     its value here.
 
     Reads ``KAIRIX_EXTRA_COLLECTIONS`` at the factory boundary (F4)
@@ -788,7 +788,7 @@ def _build_topology_v2_collection_resolver(
     import sqlite3
 
     from kairix.core.search.scope_collection_cache import ScopeCollectionCache
-    from kairix.core.search.topology_v2_resolver import TopologyV2CollectionResolver
+    from kairix.core.search.topology_resolver import TopologyCollectionResolver
     from kairix.paths import extra_collections as _extra_collections
 
     # ``check_same_thread=False`` is mandatory here: build_search_pipeline
@@ -815,7 +815,7 @@ def _build_topology_v2_collection_resolver(
     # resolver signature to Any would weaken the type contract for
     # every legitimate sqlite3.Connection caller, so we deliberately
     # bypass the structural-mismatch check at this one call site.
-    inner = TopologyV2CollectionResolver(
+    inner = TopologyCollectionResolver(
         db=db,  # type: ignore[arg-type]  # see rationale above
         default_in_scope_filter_enabled=default_in_scope_filter_enabled,
         extra_collections=_extra_collections(env),

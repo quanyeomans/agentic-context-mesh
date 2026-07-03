@@ -1,6 +1,6 @@
 """F54 integration coverage for the ``connector_slack`` flag.
 
-Wave E of the connector / collection / scope topology v2 migration is
+Wave E of the connector / collection / scope topology migration is
 the per-connector pilot for the Slack connector. When the
 ``connector_slack`` flag is ON, the connector emits one
 :class:`~kairix.core.protocols.Container` per member channel (each

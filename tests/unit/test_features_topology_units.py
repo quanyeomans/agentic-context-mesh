@@ -1,9 +1,9 @@
 """Unit-layer coverage lift for the Wave D ``kairix features status
---topology-v2`` surface (kairix/core/features/cli.py +
-kairix/core/features/topology_v2_status.py).
+--topology`` surface (kairix/core/features/cli.py +
+kairix/core/features/topology_status.py).
 
 F1-clean / F2-clean / F5-clean: no @patch, no env-var manipulation,
-no internal-name imports. The read_topology_v2 DI seam on ``main()``
+no internal-name imports. The read_topology DI seam on ``main()``
 keeps the SQLite read out of the unit layer.
 """
 
@@ -25,13 +25,13 @@ from kairix.core.features.cli import (
     main,
 )
 from kairix.core.features.resolver import FlagStatus
-from kairix.core.features.topology_v2_status import (
+from kairix.core.features.topology_status import (
     ActorScopeSnapshot,
     CCPairSnapshot,
-    TopologyV2Diagnostics,
-    build_topology_v2_diagnostics,
-    render_topology_v2_human,
-    render_topology_v2_json,
+    TopologyDiagnostics,
+    build_topology_diagnostics,
+    render_topology_human,
+    render_topology_json,
 )
 
 pytestmark = pytest.mark.unit
@@ -102,17 +102,17 @@ def _flag_status(name: str) -> FlagStatus:
     )
 
 
-def test_render_topology_v2_human_empty_state() -> None:
+def test_render_topology_human_empty_state() -> None:
     """Empty diagnostics render the (none declared) friendly lines."""
-    out = render_topology_v2_human(TopologyV2Diagnostics(cc_pairs=(), actor_scopes=()))
+    out = render_topology_human(TopologyDiagnostics(cc_pairs=(), actor_scopes=()))
     assert "(none declared)" in out
     assert "cc_pairs:" in out
     assert "actor_scopes:" in out
 
 
-def test_render_topology_v2_human_populated() -> None:
+def test_render_topology_human_populated() -> None:
     """Populated diagnostics render rows for each cc_pair + actor."""
-    diag = TopologyV2Diagnostics(
+    diag = TopologyDiagnostics(
         cc_pairs=(CCPairSnapshot(id=1, name="cc1", status="ACTIVE", access_type="PRIVATE"),),
         actor_scopes=(
             ActorScopeSnapshot(
@@ -123,15 +123,15 @@ def test_render_topology_v2_human_populated() -> None:
             ),
         ),
     )
-    out = render_topology_v2_human(diag)
+    out = render_topology_human(diag)
     assert "cc1" in out
     assert "agent-alpha" in out
     assert "vault" in out
 
 
-def test_render_topology_v2_human_excluded_branch() -> None:
+def test_render_topology_human_excluded_branch() -> None:
     """An actor with no readable collections renders (none)."""
-    diag = TopologyV2Diagnostics(
+    diag = TopologyDiagnostics(
         cc_pairs=(),
         actor_scopes=(
             ActorScopeSnapshot(
@@ -142,14 +142,14 @@ def test_render_topology_v2_human_excluded_branch() -> None:
             ),
         ),
     )
-    out = render_topology_v2_human(diag)
+    out = render_topology_human(diag)
     assert "ghost" in out
     assert "(none)" in out  # readable falls back
 
 
-def test_render_topology_v2_json_round_trips() -> None:
+def test_render_topology_json_round_trips() -> None:
     """The JSON renderer returns a serialisable dict."""
-    diag = TopologyV2Diagnostics(
+    diag = TopologyDiagnostics(
         cc_pairs=(CCPairSnapshot(id=1, name="cc1", status="ACTIVE", access_type="PRIVATE"),),
         actor_scopes=(
             ActorScopeSnapshot(
@@ -160,19 +160,19 @@ def test_render_topology_v2_json_round_trips() -> None:
             ),
         ),
     )
-    payload = render_topology_v2_json(diag)
+    payload = render_topology_json(diag)
     serialised = json.dumps(payload)
     parsed = json.loads(serialised)
     assert parsed["cc_pairs"][0]["name"] == "cc1"
     assert parsed["actor_scopes"][0]["readable_collections"] == ["vault"]
 
 
-def test_build_topology_v2_diagnostics_returns_populated_snapshot(tmp_path: Path) -> None:
+def test_build_topology_diagnostics_returns_populated_snapshot(tmp_path: Path) -> None:
     """End-to-end snapshot: seed → build → assert."""
     db_path = _build_db(tmp_path)
     _seed_full_topology(db_path)
     with closing(sqlite3.connect(str(db_path))) as db:
-        diag = build_topology_v2_diagnostics(db)
+        diag = build_topology_diagnostics(db)
     assert len(diag.cc_pairs) == 1
     assert diag.cc_pairs[0].name == "cc1"
     assert any(scope.actor_id == "agent-alpha" for scope in diag.actor_scopes)
@@ -183,16 +183,16 @@ def test_format_table_with_topology_omits_diag_when_none() -> None:
     entries = (_flag_status("flag1"),)
     out = format_table_with_topology(entries, None)
     assert "flag1" in out
-    assert "Topology v2" not in out
+    assert "Topology" not in out
 
 
 def test_format_table_with_topology_appends_when_present() -> None:
     """When diag is supplied, the topology block is appended after the flag table."""
     entries = (_flag_status("flag1"),)
-    diag = TopologyV2Diagnostics(cc_pairs=(), actor_scopes=())
+    diag = TopologyDiagnostics(cc_pairs=(), actor_scopes=())
     out = format_table_with_topology(entries, diag)
     assert "flag1" in out
-    assert "Topology v2 diagnostics" in out
+    assert "Topology diagnostics" in out
 
 
 def test_format_json_envelope_with_topology_diag_none_drops_key() -> None:
@@ -200,71 +200,71 @@ def test_format_json_envelope_with_topology_diag_none_drops_key() -> None:
     entries = (_flag_status("flag1"),)
     out = format_json_envelope_with_topology(entries, None)
     parsed = json.loads(out)
-    assert "topology_v2" not in parsed
+    assert "topology" not in parsed
     assert parsed["flags"][0]["name"] == "flag1"
 
 
 def test_format_json_envelope_with_topology_diag_set_includes_key() -> None:
-    """When diag is set, the JSON envelope carries both flags + topology_v2 keys."""
+    """When diag is set, the JSON envelope carries both flags + topology keys."""
     entries = (_flag_status("flag1"),)
-    diag = TopologyV2Diagnostics(cc_pairs=(), actor_scopes=())
+    diag = TopologyDiagnostics(cc_pairs=(), actor_scopes=())
     out = format_json_envelope_with_topology(entries, diag)
     parsed = json.loads(out)
-    assert "topology_v2" in parsed
-    assert parsed["topology_v2"]["cc_pairs"] == []
+    assert "topology" in parsed
+    assert parsed["topology"]["cc_pairs"] == []
 
 
-def test_main_with_topology_v2_calls_diagnostics_resolver(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """main() with --topology-v2 calls the injected resolver + renders the block."""
-    diag = TopologyV2Diagnostics(
+def test_main_with_topology_calls_diagnostics_resolver(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """main() with --topology calls the injected resolver + renders the block."""
+    diag = TopologyDiagnostics(
         cc_pairs=(CCPairSnapshot(id=1, name="cc1", status="ACTIVE", access_type="PRIVATE"),),
         actor_scopes=(),
     )
     code = main(
-        ["status", "--topology-v2"],
+        ["status", "--topology"],
         status_provider=lambda: (_flag_status("flag1"),),
-        read_topology_v2=lambda _db_path: diag,
+        read_topology=lambda _db_path: diag,
     )
     captured = capsys.readouterr()
     assert code == 0
-    assert "Topology v2" in captured.out
+    assert "Topology" in captured.out
     assert "cc1" in captured.out
 
 
 def test_main_without_topology_flag_skips_resolver(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """main() without --topology-v2 does not call the resolver."""
+    """main() without --topology does not call the resolver."""
     called = {"count": 0}
 
-    def _resolver(_db_path: str | None) -> TopologyV2Diagnostics:
+    def _resolver(_db_path: str | None) -> TopologyDiagnostics:
         called["count"] += 1
-        return TopologyV2Diagnostics(cc_pairs=(), actor_scopes=())
+        return TopologyDiagnostics(cc_pairs=(), actor_scopes=())
 
     code = main(
         ["status"],
         status_provider=lambda: (_flag_status("flag1"),),
-        read_topology_v2=_resolver,
+        read_topology=_resolver,
     )
     captured = capsys.readouterr()
     assert code == 0
-    assert "Topology v2" not in captured.out
+    assert "Topology" not in captured.out
     assert called["count"] == 0
 
 
-def test_main_json_with_topology_v2_renders_envelope(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """main() with --json + --topology-v2 emits the merged envelope."""
-    diag = TopologyV2Diagnostics(cc_pairs=(), actor_scopes=())
+def test_main_json_with_topology_renders_envelope(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """main() with --json + --topology emits the merged envelope."""
+    diag = TopologyDiagnostics(cc_pairs=(), actor_scopes=())
     code = main(
-        ["status", "--json", "--topology-v2"],
+        ["status", "--json", "--topology"],
         status_provider=lambda: (_flag_status("flag1"),),
-        read_topology_v2=lambda _db_path: diag,
+        read_topology=lambda _db_path: diag,
     )
     captured = capsys.readouterr()
     parsed = json.loads(captured.out)
     assert code == 0
-    assert "topology_v2" in parsed
+    assert "topology" in parsed
 
 
-def test_main_topology_v2_default_resolver_handles_missing_schema(
+def test_main_topology_default_resolver_handles_missing_schema(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The production resolver path: pointing at a tmp_path without schema
@@ -273,27 +273,27 @@ def test_main_topology_v2_default_resolver_handles_missing_schema(
     bad_path = tmp_path / "no_schema.sqlite"
     sqlite3.connect(str(bad_path)).close()
     code = main(
-        ["status", "--topology-v2", "--db-path", str(bad_path)],
+        ["status", "--topology", "--db-path", str(bad_path)],
         status_provider=lambda: (_flag_status("flag1"),),
     )
     captured = capsys.readouterr()
     assert code == 0
     # The diag is None — the human-mode topology block is absent.
-    assert "Topology v2" not in captured.out
+    assert "Topology" not in captured.out
 
 
-def test_main_topology_v2_default_resolver_renders_zero_snapshot(
+def test_main_topology_default_resolver_renders_zero_snapshot(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Production resolver against a schema-applied tmp DB returns the zero-snapshot."""
     db_path = _build_db(tmp_path)
     code = main(
-        ["status", "--topology-v2", "--db-path", str(db_path)],
+        ["status", "--topology", "--db-path", str(db_path)],
         status_provider=lambda: (_flag_status("flag1"),),
     )
     captured = capsys.readouterr()
     assert code == 0
-    assert "Topology v2 diagnostics" in captured.out
+    assert "Topology diagnostics" in captured.out
     assert "(none declared)" in captured.out
 
 

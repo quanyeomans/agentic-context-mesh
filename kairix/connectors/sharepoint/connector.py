@@ -712,14 +712,14 @@ class SharePointConnector:
         return self._default_sensitivity
 
     # ------------------------------------------------------------------
-    # Topology v2 Wave B — capability mix-in shims (no behavioural change)
+    # Topology Wave B — capability mix-in shims (no behavioural change)
     # ------------------------------------------------------------------
     # The shims below let the connector satisfy the new capability
     # Protocols (CheckpointedConnector, CredentialsConnector,
     # OAuthConnector) by delegating to existing methods OR raising
     # actionable NotImplementedError where the source kind does not
     # support the surface. Production routing through these methods is
-    # gated by ``topology_v2_protocol`` (default-off).
+    # gated by ``topology_protocol`` (default-off).
 
     def load_from_checkpoint(self, _container: Container, checkpoint: str | None) -> Iterator[ChangeEvent]:
         """CheckpointedConnector shim — forward to :meth:`list_changes`.
@@ -773,12 +773,12 @@ class SharePointConnector:
         )
 
     # ------------------------------------------------------------------
-    # Topology v2 Wave E — per-connector multi-container pilot
+    # Topology Wave E — per-connector multi-container pilot
     # ------------------------------------------------------------------
     # Wave B landed shim implementations of the capability Protocols
     # (CheckpointedConnector / CredentialsConnector / OAuthConnector).
     # Wave E adds real implementations behind the
-    # ``topology_v2_sharepoint`` flag:
+    # ``topology_sharepoint`` flag:
     #
     #   * :meth:`iter_containers` — one :class:`Container` per configured
     #     Graph drive, each with its own ``@odata.deltaLink`` persisted
@@ -808,7 +808,7 @@ class SharePointConnector:
     def iter_containers(self, cc_pair_id: int) -> Iterator[Container]:
         """Yield one :class:`Container` per configured Graph drive.
 
-        Topology v2 §4: each Container has its own delta cursor — the
+        Topology §4: each Container has its own delta cursor — the
         Wave E pilot maps each operator-declared drive to its own
         Container so the operator can add or remove individual drives
         without disturbing the cursor state of the others.
@@ -854,7 +854,7 @@ class SharePointConnector:
         bypasses the legacy packed JSON cursor map entirely so a
         single-drive 403 cannot poison the shared cursor.
 
-        ``topology_v2_sharepoint`` retired post-cutover (task #132);
+        ``topology_sharepoint`` retired post-cutover (task #132);
         the per-drive path is now the only behaviour.
         """
         return self._list_changes_for_container_scoped(container)
@@ -872,7 +872,7 @@ class SharePointConnector:
         custom libraries) is a later-wave enhancement — this slice keeps
         the hierarchy at drive-as-folder granularity.
 
-        ``topology_v2_sharepoint`` retired post-cutover (task #132);
+        ``topology_sharepoint`` retired post-cutover (task #132);
         the SITE + DRIVE per-drive emission is now the only behaviour.
 
         Site-discovery drives appear as DRIVE nodes too — the drive set

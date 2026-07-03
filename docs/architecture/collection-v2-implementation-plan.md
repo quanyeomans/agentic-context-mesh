@@ -1,6 +1,6 @@
 # Topology_v2 Collection Model — Implementation Plan + Test Coverage
 
-**Status:** ✅ Implemented — spent plan (2026-06-02). The topology_v2 collection model shipped (#372/#373 CLOSED; `kairix/core/search/topology_v2_resolver.py`, `default_in_scope`). Retained as design provenance — the topology_v2 / collection-v2 test suite cites it. Design of record: `docs/architecture/collection-structure-design.md`. Not active work.
+**Status:** ✅ Implemented — spent plan (2026-06-02). The topology collection model shipped (#372/#373 CLOSED; `kairix/core/search/topology_resolver.py`, `default_in_scope`). Retained as design provenance — the topology / collection-v2 test suite cites it. Design of record: `docs/architecture/collection-structure-design.md`. Not active work.
 **Drives:** #373 (cutover), #372 (resolver — already on main, needs `default_in_scope` extension)
 **Design doc:** `docs/architecture/collection-structure-design.md`
 **Audience:** subagents implementing the changes; reviewer cherry-picking
@@ -21,7 +21,7 @@ Per the design doc (decided 2026-06-02 with operator):
 
 1. **`kairix/core/db/schema.py`** — add `default_in_scope INTEGER NOT NULL DEFAULT 1` to `topology_scope_entries` definition (additive migration; default 1 = back-compat).
 2. **`kairix/core/connectors/scope_profile_resolver.py`** — add `default_only: bool = False` kwarg to `ScopeProfileResolver.resolve()`. When True, filter loaded entries by `default_in_scope=1`. Drops to existing behavior when False.
-3. **`kairix/core/search/topology_v2_resolver.py`** — wire the `default_only` flag:
+3. **`kairix/core/search/topology_resolver.py`** — wire the `default_only` flag:
    - `collections=None` path → call ScopeProfileResolver with `default_only=True` → return only `default_in_scope` entries
    - `collections=[...]` explicit path → call with `default_only=False` (full scope), validate each provided name is in scope
 4. **`kairix/core/db/schema.py`** migration runner — handle existing DBs by `ALTER TABLE … ADD COLUMN … DEFAULT 1`.
@@ -54,7 +54,7 @@ Per the design doc (decided 2026-06-02 with operator):
 | `test_intersection_composition_with_default_only` | When multiple actors have overlapping scope, default_only intersects across actors |
 | `test_union_composition_with_default_only` | scope_composition=union still filters by default_in_scope when passed |
 
-`tests/unit/test_topology_v2_resolver_default_in_scope.py` — new file:
+`tests/unit/test_topology_resolver_default_in_scope.py` — new file:
 
 | Test | What it pins |
 |---|---|
@@ -65,17 +65,17 @@ Per the design doc (decided 2026-06-02 with operator):
 | `test_default_only_true_excludes_other_agents_memory` | agent="shape" + collections=None → does not include builder-memory |
 | `test_explicit_other_agent_memory_returns_none` | agent="shape" + collections=["builder-memory"] → None + F21 (cross-agent isolation) |
 | `test_agent_none_all_agents_path_unaffected_by_default_only` | agent=None, scope=ALL_AGENTS → still returns public cc_pair collections (no scope_profile lookup) |
-| `test_factory_branch_on_topology_v2_collection_resolver_flag` | Feature flag OFF → DefaultCollectionResolver; ON → TopologyV2CollectionResolver |
+| `test_factory_branch_on_topology_collection_resolver_flag` | Feature flag OFF → DefaultCollectionResolver; ON → TopologyCollectionResolver |
 
 ### Contract tests (Wave 1) — Protocol-shape proofs
 
-`tests/contracts/test_topology_v2_default_in_scope_contract.py`:
+`tests/contracts/test_topology_default_in_scope_contract.py`:
 
 | Test | What it pins |
 |---|---|
-| `test_topology_v2_resolver_satisfies_collection_resolver_protocol_with_default_only` | isinstance check still passes after the API extension |
+| `test_topology_resolver_satisfies_collection_resolver_protocol_with_default_only` | isinstance check still passes after the API extension |
 | `test_default_in_scope_default_search_returns_superset_load_bearing` | **The load-bearing test from #372 — extended for default_in_scope**: seeded scope_profile with 7 default + 1 opt-in → collections=None returns 7. Sabotage-prove. |
-| `test_scope_profile_resolver_default_only_propagates_to_topology_v2_resolver` | The composition: TopologyV2CollectionResolver.resolve(collections=None) → ScopeProfileResolver.resolve(default_only=True) (one assertion mock the call) |
+| `test_scope_profile_resolver_default_only_propagates_to_topology_resolver` | The composition: TopologyCollectionResolver.resolve(collections=None) → ScopeProfileResolver.resolve(default_only=True) (one assertion mock the call) |
 | `test_f68_db_row_missing_default_in_scope_treats_as_default_true` | Failure-injection: a row pre-dating the migration → resolver treats it as default_in_scope=True (back-compat) |
 
 ### Integration tests (Wave 2)
@@ -91,17 +91,17 @@ Per the design doc (decided 2026-06-02 with operator):
 | `test_search_does_not_return_other_agent_memory_in_default` | agent=shape default search → no builder-memory docs even if keyword matches |
 | `test_search_explicit_other_agent_memory_returns_empty_with_error_logged` | agent=shape + collections=["builder-memory"] → empty results + F21 error logged |
 | `test_flag_off_uses_legacy_default_collection_resolver` | Feature flag OFF → SearchPipeline routes through DefaultCollectionResolver (back-compat) |
-| `test_flag_on_uses_topology_v2_collection_resolver` | Feature flag ON → uses v2 resolver |
+| `test_flag_on_uses_topology_collection_resolver` | Feature flag ON → uses v2 resolver |
 
 ### BDD scenarios (Wave 2) — F45 + F54
 
 `tests/bdd/features/collection_v2_default_in_scope.feature`:
 
 ```gherkin
-Feature: topology_v2 collection model — default in-scope and opt-in retrieval
+Feature: topology collection model — default in-scope and opt-in retrieval
 
   Scenario: Agent's default search returns the broad superset
-    Given the topology_v2_default_in_scope flag is ON
+    Given the topology_default_in_scope flag is ON
     And the operator has configured 7 in-default collections and 1 opt-in collection
     And agent "shape" has a scope_profile covering all 8 collections
     When agent "shape" issues a search with no collections specified
@@ -109,20 +109,20 @@ Feature: topology_v2 collection model — default in-scope and opt-in retrieval
     And the search does not return hits from the opt-in collection
 
   Scenario: Agent can opt-in to a non-default collection explicitly
-    Given the topology_v2_default_in_scope flag is ON
+    Given the topology_default_in_scope flag is ON
     And agent "shape" has reflib in scope with default_in_scope=false
     When agent "shape" issues a search with collections=["reflib"]
     Then the search returns hits from reflib only
 
   Scenario: Agent cannot retrieve another agent's memory
-    Given the topology_v2_default_in_scope flag is ON
+    Given the topology_default_in_scope flag is ON
     And agent "shape" does not have builder-memory in scope
     When agent "shape" issues a search with collections=["builder-memory"]
     Then the search returns no results
     And the operator-facing error message contains "fix:" and "next:" markers
 
   Scenario: Feature flag OFF preserves legacy resolver behaviour
-    Given the topology_v2_default_in_scope flag is OFF
+    Given the topology_default_in_scope flag is OFF
     And the legacy collections.shared block declares 5 in-default collections
     When agent "shape" issues a search with no collections specified
     Then the search routes via DefaultCollectionResolver
@@ -174,7 +174,7 @@ Feature: topology_v2 collection model — default in-scope and opt-in retrieval
 - **F46**: BDD steps compose via CLI / MCP / factory — never construct resolvers/pipelines directly inside step impls.
 - **F47**: Integration tests construct via `kairix.core.factory.build_*`.
 - **F48**: E2E composed-path test exists, carries `@pytest.mark.e2e`, exercises the real factory.
-- **F54**: Every feature flag (`topology_v2_default_in_scope`) has BOTH OFF and ON BDD scenarios.
+- **F54**: Every feature flag (`topology_default_in_scope`) has BOTH OFF and ON BDD scenarios.
 - **F68**: Failure-injection contract test for the new field's failure modes (missing column, NULL value, type mismatch).
 - **F69**: Resolver tests with `.fetchall()` have a 10K-row scale variant in soak.
 - **Sabotage-prove every new test** — mutate prod → confirm fail → restore → confirm pass. Verbatim failure messages in the agent's final report.
@@ -187,8 +187,8 @@ Two parallel worktrees:
 
 - Schema migration (`kairix/core/db/schema.py`)
 - ScopeProfileResolver `default_only` flag
-- TopologyV2CollectionResolver wiring (collections=None → default_only=True)
-- Feature flag `topology_v2_default_in_scope` declared
+- TopologyCollectionResolver wiring (collections=None → default_only=True)
+- Feature flag `topology_default_in_scope` declared
 - Unit + contract tests above
 - Sabotage proofs
 
@@ -217,8 +217,8 @@ Both worktrees commit to their own branch. Orchestrator cherry-picks A first (fo
 1. Cut a release picking up #371, #372, #377, #378, #380, github-allowlist, Wave 1+2 (~9 commits)
 2. Pull new image on the production VM
 3. Capture pre-cutover baseline via the now-fixed `scripts/cutover/capture_baseline.py`
-4. Add topology_v2 collections + scope_profiles block to deployed `kairix.config.yaml`
-5. Flip flags: `topology_v2_runtime: true`, `topology_v2_collection_resolver: true`, `topology_v2_default_in_scope: true`, per-connector `topology_v2_<obsidian|sharepoint|slack|m365_calendar|m365_email_headers|github>: true`
+4. Add topology collections + scope_profiles block to deployed `kairix.config.yaml`
+5. Flip flags: `topology_runtime: true`, `topology_collection_resolver: true`, `topology_default_in_scope: true`, per-connector `topology_<obsidian|sharepoint|slack|m365_calendar|m365_email_headers|github>: true`
 6. Restart kairix-1 + worker
 7. Run post-flip baseline; diff against pre via `scripts/cutover/diff_baseline.py --strict`
 8. Soak 24h, run eval daily; week-long soak for the eval-decision gate
@@ -229,7 +229,7 @@ Both worktrees commit to their own branch. Orchestrator cherry-picks A first (fo
 - Coverage on new files ≥ 95%
 - All sabotage proofs executed with verbatim failure messages in agent reports
 - Schema migration runs idempotently on the production DB without data loss
-- `kairix onboard check` introduces a new check `topology_v2_default_in_scope_field_present` that asserts the schema migration applied
+- `kairix onboard check` introduces a new check `topology_default_in_scope_field_present` that asserts the schema migration applied
 - Feature flag declared with `target_retire_in: v2027.6.30`
 
 ## Effort estimate

@@ -4,7 +4,7 @@ Surfaces per-cache observability for the TTL LRUs added by Workstream B
 of the MCP performance sprint:
 
 * ``query_result_cache`` — search-pipeline ``(query, scope, agent, collections)`` LRU
-* ``scope_collection_cache`` — topology_v2 collection resolver cache
+* ``scope_collection_cache`` — topology collection resolver cache
 * ``prep_summary_cache`` — LLM ``chat()`` synthesis cache for ``run_prep``
 * ``brief_output_cache`` — assembled ``BriefOutput`` cache for ``run_brief``
 * ``brief_source_cache`` — per-source TTL cache for the slow-moving brief fetchers

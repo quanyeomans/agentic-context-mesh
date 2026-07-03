@@ -235,7 +235,7 @@ def load_merged_mapping(
     """Resolve + read + deep-merge the operator config into one mapping.
 
     This is the read path every runtime consumer of wizard-written
-    config flows through (#492): the worker's ``topology_v2`` boot
+    config flows through (#492): the worker's ``topology`` boot
     apply, ``paths.load_top_level_config`` (document root and friends),
     and the feature-flag config overlay. Returns ``{}`` when no config
     file resolves — the truthful fresh-install answer.

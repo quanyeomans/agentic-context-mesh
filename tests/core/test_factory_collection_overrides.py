@@ -2,7 +2,7 @@
 (canonical-collapse).
 
 The per-collection retrieval override read is sourced from the canonical
-topology collections (``topology_v2.collections[*].retrieval``) via a
+topology collections (``topology.collections[*].retrieval``) via a
 config-parse — db-free at pipeline-construction time.
 ``derive_collection_overrides`` parses the merged config mapping and
 returns ``{collection_name: override_dict}`` for every collection that
@@ -26,10 +26,10 @@ from kairix.core.factory import derive_collection_overrides
 
 
 def _topology_mapping(collections: list[dict[str, Any]]) -> dict[str, Any]:
-    """Build a merged-config mapping carrying a ``topology_v2.collections``
+    """Build a merged-config mapping carrying a ``topology.collections``
     block — the canonical source ``derive_collection_overrides`` parses from.
     """
-    return {"topology_v2": {"collections": collections}}
+    return {"topology": {"collections": collections}}
 
 
 @pytest.mark.unit
@@ -132,4 +132,4 @@ def test_derive_collection_overrides_returns_empty_on_malformed_topology() -> No
     # ``collections`` must be a list; a string trips the parser's type
     # guard, which derive_collection_overrides swallows into the
     # default-safe {}.
-    assert derive_collection_overrides(mapping={"topology_v2": {"collections": "nope"}}) == {}
+    assert derive_collection_overrides(mapping={"topology": {"collections": "nope"}}) == {}

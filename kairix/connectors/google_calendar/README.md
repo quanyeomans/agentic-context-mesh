@@ -9,7 +9,7 @@ returned `nextSyncToken` as the incremental-sync cursor.
 
 Ships flag-gated **OFF** — Google Workspace OAuth credentials are not
 yet provisioned in the operator's Key Vault. Tracked GH #356. Until that lands,
-flipping `topology_v2_google_calendar` ON is a no-op because
+flipping `topology_google_calendar` ON is a no-op because
 `make_connector` raises with a fix pointer when `access_token` is
 empty.
 
@@ -41,7 +41,7 @@ sits with the secret-rotation pipeline in the operator's Key Vault.
 ## Enablement
 
 The Google Calendar connector is flagless — its
-`topology_v2_google_calendar` introduce-stage flag retired post-cutover
+`topology_google_calendar` introduce-stage flag retired post-cutover
 (task #132), so the connector runs whenever it is configured in the
 canonical `topology.connectors` block.
 
@@ -80,9 +80,9 @@ a fresh initial sync from `now - window_days_back`.
   - `tests/integration/test_google_calendar_metadata_propagation.py` (F65)
   - `tests/integration/test_google_calendar_rate_limit.py` (F64)
   - `tests/integration/test_google_calendar_failure_modes.py` (F68)
-  - `tests/integration/test_feature_flag_topology_v2_google_calendar.py` (F54)
+  - `tests/integration/test_feature_flag_topology_google_calendar.py` (F54)
 - BDD: `tests/bdd/features/connector_google_calendar.feature` (F45 happy path)
-  - `tests/bdd/features/feature_flag_topology_v2_google_calendar.feature` (F54 both-branch)
+  - `tests/bdd/features/feature_flag_topology_google_calendar.feature` (F54 both-branch)
 
 All tests run against a scripted `GoogleCalendarClient` injected via
 the `client_factory` DI seam — no live Google API calls fire during
@@ -96,7 +96,7 @@ the operator's Key Vault:
 1. Confirm the secret exists at the expected key.
 2. Add a `google_calendar:` block to `kairix.config.yaml` with the
    secret reference + `calendar_id`.
-3. Run `kairix features set topology_v2_google_calendar=true`.
+3. Run `kairix features set topology_google_calendar=true`.
 4. Capture a pre-flip baseline via
    `scripts/cutover/capture_baseline.py`.
 5. Soak 24 hours.

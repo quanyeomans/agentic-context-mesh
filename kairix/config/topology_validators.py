@@ -1,4 +1,4 @@
-"""Topology v2 cross-reference validators (Wave D §2).
+"""Topology cross-reference validators (Wave D §2).
 
 Five referential-integrity rules per ADR v2 §"Wave D":
 
@@ -18,7 +18,7 @@ so the operator (or an agent reading the diagnostic) gets the correction
 action, not just the diagnosis.
 
 The validator is a pure function — it takes a parsed
-:class:`~kairix.config.topology_v2.TopologyV2Config` and returns a
+:class:`~kairix.config.topology.TopologyConfig` and returns a
 tuple of :class:`ValidationFailure` records. Callers decide whether to
 log, render, or exit non-zero. The CLI surface in
 :mod:`kairix.core.search.config_validator` chains this validator after
@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from kairix.config.topology_v2 import TopologyV2Config
+from kairix.config.topology import TopologyConfig
 
 # F17 — fix-instruction prefix duplicated across all 5 validators.
 _FIX_OR_REMOVE_PREFIX = "fix: declare the missing entry or remove the reference. next: run kairix config validate"
@@ -69,7 +69,7 @@ def _render_failure(rule: RuleKey, location: str, missing: str, target: str) -> 
     )
 
 
-def _validate_cc_pair_refs(config: TopologyV2Config) -> list[ValidationFailure]:
+def _validate_cc_pair_refs(config: TopologyConfig) -> list[ValidationFailure]:
     """Rules 1 + 2 — cc_pair.connector + cc_pair.credential references."""
     failures: list[ValidationFailure] = []
     connector_ids = {c.id for c in config.connectors}
@@ -96,7 +96,7 @@ def _validate_cc_pair_refs(config: TopologyV2Config) -> list[ValidationFailure]:
     return failures
 
 
-def _validate_collection_source_refs(config: TopologyV2Config) -> list[ValidationFailure]:
+def _validate_collection_source_refs(config: TopologyConfig) -> list[ValidationFailure]:
     """Rule 3 — collections.*.sources.*.cc_pair references a declared cc_pair id."""
     failures: list[ValidationFailure] = []
     cc_pair_ids = {p.id for p in config.cc_pairs}
@@ -114,7 +114,7 @@ def _validate_collection_source_refs(config: TopologyV2Config) -> list[Validatio
     return failures
 
 
-def _validate_scope_profile_collection_refs(config: TopologyV2Config) -> list[ValidationFailure]:
+def _validate_scope_profile_collection_refs(config: TopologyConfig) -> list[ValidationFailure]:
     """Rule 4 — scope_profiles.*.entries.*.collection_name references a declared collection name."""
     failures: list[ValidationFailure] = []
     collection_names = {c.name for c in config.collections}
@@ -132,7 +132,7 @@ def _validate_scope_profile_collection_refs(config: TopologyV2Config) -> list[Va
     return failures
 
 
-def _validate_skill_source_refs(config: TopologyV2Config) -> list[ValidationFailure]:
+def _validate_skill_source_refs(config: TopologyConfig) -> list[ValidationFailure]:
     """Rule 5 — skills.*.task_collections.*.sources.*.cc_pair references a declared cc_pair id."""
     failures: list[ValidationFailure] = []
     cc_pair_ids = {p.id for p in config.cc_pairs}
@@ -151,7 +151,7 @@ def _validate_skill_source_refs(config: TopologyV2Config) -> list[ValidationFail
     return failures
 
 
-def validate_topology_v2_references(config: TopologyV2Config) -> tuple[ValidationFailure, ...]:
+def validate_topology_references(config: TopologyConfig) -> tuple[ValidationFailure, ...]:
     """Run all 5 cross-reference checks and return the (possibly empty) failure tuple.
 
     Empty config → empty tuple (zero failures). The tuple is sorted

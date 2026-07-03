@@ -400,7 +400,7 @@ def _make_container(*, cursor_token: str | None = None) -> Container:
 
 
 # NOTE: test_list_changes_for_container_flag_off_delegates_to_list_changes
-# was retired alongside the topology_v2_gmail flag (#132). Post-cutover the
+# was retired alongside the topology_gmail flag (#132). Post-cutover the
 # v2 per-mailbox cursor path is the only path; delegate-to-list_changes
 # behaviour no longer exists. Parity tests covering the v2 path live below
 # (test_list_changes_for_container_flag_on_* renamed in the same commit).

@@ -1,9 +1,9 @@
-"""E2E composed path for the topology v2 collection-v2 default-in-scope feature.
+"""E2E composed path for the topology collection-v2 default-in-scope feature.
 
-F48 sibling test for the ``topology_v2_default_in_scope`` flag (GH #373).
+F48 sibling test for the ``topology_default_in_scope`` flag (GH #373).
 Exercises the full composed production path:
 
-  topology_v2 schema (with default_in_scope column)
+  topology schema (with default_in_scope column)
     → seed 7 in-default + 1 opt-in scope entries for agent 'shape'
     → seed 7 documents (one per source) + 1 reflib document
     → build_search_pipeline(paths=FakePaths(...))
@@ -142,7 +142,7 @@ def test_composed_v2_path_search_returns_default_superset(tmp_path: Path) -> Non
     the composed production code path with no mocks.
 
     Sabotage anchor (post-impl): set the
-    ``topology_v2_default_in_scope`` flag to False at factory time and
+    ``topology_default_in_scope`` flag to False at factory time and
     this test fails (reflib surfaces because the resolver falls back to
     full read-scope behaviour).
     """

@@ -106,8 +106,8 @@ These keys are safe to add to your overlay — they default to image-bundled val
 
 - `paths.agent_knowledge_dir` (default `"04-Agent-Knowledge"`) — directory name under `document_root` for the agent-memory tree. From v2026.5.24a3.
 - `paths.agent_memory_glob` (default `"**/*.md"`) — recursive glob (relative to the agent-knowledge dir) for memory log files. From v2026.5.24a3.
-- `topology_v2.connectors:` entries for `kind: slack`, `kind: github`, `kind: notion`. From v2026.5.24a2. Each entry is inert unless the matching `connector_<name>` flag is on, so adding entries ahead of enabling is safe.
-- `topology_v2.credentials:` entries naming the slack / github / notion logical secrets (see [`docs/getting-started/agent-driven-setup.md`](../../getting-started/agent-driven-setup.md) for the secret-name → env-var-name map). From v2026.5.24a2.
-- `features.connector_slack`, `connector_github`, `connector_notion`, plus `topology_v2_<connector>` flags for each, plus `maintenance_loop`. All default-off.
+- `topology.connectors:` entries for `kind: slack`, `kind: github`, `kind: notion`. From v2026.5.24a2. Each entry is inert unless the matching `connector_<name>` flag is on, so adding entries ahead of enabling is safe.
+- `topology.credentials:` entries naming the slack / github / notion logical secrets (see [`docs/getting-started/agent-driven-setup.md`](../../getting-started/agent-driven-setup.md) for the secret-name → env-var-name map). From v2026.5.24a2.
+- `features.connector_slack`, `connector_github`, `connector_notion`, plus `topology_<connector>` flags for each, plus `maintenance_loop`. All default-off.
 
 The image-bundled `kairix.config.yaml` carries each of these as commented examples — you can copy a block out, edit it for your deployment, and paste it into your overlay.

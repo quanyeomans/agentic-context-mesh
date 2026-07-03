@@ -299,7 +299,7 @@ class GitHubConnector:
         JSON map ``repo_full_name -> {code_sha, issues_since}``; when
         ``None`` it triggers a full enumeration. The Wave E
         :meth:`list_changes_for_container` is the preferred surface
-        once the ``topology_v2_github`` flag is ON.
+        once the ``topology_github`` flag is ON.
         """
         deserialised = deserialise_cursor(cursor)
         for repo_full_name, state in deserialised.items():
@@ -424,7 +424,7 @@ class GitHubConnector:
 
         Scoped to ``container.container_id`` (the repo full_name) and
         uses ``container.cursor_token`` as the per-repo cursor.
-        ``topology_v2_github`` retired post-cutover (task #132); the
+        ``topology_github`` retired post-cutover (task #132); the
         per-repo path is now the only behaviour.
         """
         return self._drain_one_container(container)
@@ -507,7 +507,7 @@ class GitHubConnector:
         F58 — every emitted node's ``raw_parent_id`` is None (root org)
         or references a previously-emitted node's ``raw_node_id``.
 
-        ``topology_v2_github`` retired post-cutover (task #132); the
+        ``topology_github`` retired post-cutover (task #132); the
         full Org → repo → dir walk is now the only behaviour.
         """
         repos = self._apply_repos_allowlist(self._client.list_installation_repositories())

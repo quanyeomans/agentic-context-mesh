@@ -57,7 +57,7 @@ def _topology_mapping(vault_root: Path, extractor_name: str) -> dict[str, Any]:
     the legacy top-level ``connectors:`` list.
     """
     return {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {
                     "id": "obsidian-conn",

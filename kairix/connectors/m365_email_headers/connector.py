@@ -161,7 +161,7 @@ class M365Credentials:
 
 
 def _default_flag_reader(name: str) -> bool:
-    """Production default for the topology-v2-m365_email_headers flag check.
+    """Production default for the topology-m365_email_headers flag check.
 
     Delegates to :func:`kairix.core.features.flag` so the production
     path threads through the env-var → config-overlay → registry
@@ -250,7 +250,7 @@ class M365EmailHeadersConnector:
             )
         self._upn = user_principal_name
 
-        # Wave E topology v2 — each configured mailbox is a Container with
+        # Wave E topology — each configured mailbox is a Container with
         # its own delta cursor. The primary ``user_principal_name`` is
         # always included so the legacy single-mailbox config keeps
         # working without an explicit ``mailboxes`` block. Sorted for
@@ -493,14 +493,14 @@ class M365EmailHeadersConnector:
         return LOCKED_SENSITIVITY
 
     # ------------------------------------------------------------------
-    # Topology v2 Wave B — capability mix-in shims (no behavioural change)
+    # Topology Wave B — capability mix-in shims (no behavioural change)
     # ------------------------------------------------------------------
     # The shims below let the connector satisfy the new capability
     # Protocols (CheckpointedConnector, CredentialsConnector,
     # OAuthConnector) by delegating to existing methods OR raising
     # actionable NotImplementedError where the source kind does not
     # support the surface. Production routing through these methods is
-    # gated by ``topology_v2_protocol`` (default-off).
+    # gated by ``topology_protocol`` (default-off).
 
     def load_from_checkpoint(self, _container: Container, checkpoint: str | None) -> Iterator[ChangeEvent]:
         """CheckpointedConnector shim — delegate to :meth:`list_changes` using the checkpoint.
@@ -515,12 +515,12 @@ class M365EmailHeadersConnector:
         return self.list_changes(checkpoint)
 
     # ------------------------------------------------------------------
-    # Topology v2 Wave E — per-mailbox multi-container pilot
+    # Topology Wave E — per-mailbox multi-container pilot
     # ------------------------------------------------------------------
     # Wave B landed shim implementations of the capability Protocols
     # (PollConnector / CheckpointedConnector / HierarchyConnector). Wave E
     # adds real implementations behind the
-    # ``topology_v2_m365_email_headers`` flag:
+    # ``topology_m365_email_headers`` flag:
     #
     #   * :meth:`iter_containers` — one :class:`Container` per configured
     #     mailbox UPN, each with its own per-mailbox Graph delta cursor.
@@ -542,11 +542,11 @@ class M365EmailHeadersConnector:
     def iter_containers(self, cc_pair_id: int) -> Iterator[Container]:
         """Yield one :class:`Container` per configured mailbox.
 
-        Topology v2 §4: each Container has its own delta cursor — the
+        Topology §4: each Container has its own delta cursor — the
         Wave E pilot maps each configured mailbox UPN to its own
         Container so the operator can sync different mailboxes at
         different cadences and scope retrieval per-mailbox via the
-        topology v2 collection mapping.
+        topology collection mapping.
 
         Calling convention: the framework's lifecycle layer (see
         ``kairix/core/connectors/cc_pair.py``) passes ``cc_pair_id`` so
@@ -559,7 +559,7 @@ class M365EmailHeadersConnector:
         checks happen downstream at the request layer (a permission-
         denied response surfaces as a typed error to the framework,
         which flips the Container's state to ``REVOKED`` via the
-        topology v2 access lifecycle). ``cursor_token`` and
+        topology access lifecycle). ``cursor_token`` and
         ``last_synced_at`` start ``None``; the framework persists
         subsequent values to the ``topology_containers`` table.
         """
@@ -582,7 +582,7 @@ class M365EmailHeadersConnector:
         via :meth:`next_cursor_for_container` so the framework can
         persist it independently from sibling containers.
 
-        ``topology_v2_m365_email_headers`` retired post-cutover
+        ``topology_m365_email_headers`` retired post-cutover
         (task #132); the per-mailbox path is now the only behaviour.
         """
         return self._list_changes_scoped(container)
@@ -630,7 +630,7 @@ class M365EmailHeadersConnector:
         trivially in a single pass.
 
         ``raw_node_id`` for the per-mailbox FOLDER is the mailbox UPN
-        itself (e.g. ``alice@contoso.com``) so the topology v2 hierarchy
+        itself (e.g. ``alice@contoso.com``) so the topology hierarchy
         store can round-trip without further mapping. ``link`` is an
         Outlook on the Web inbox URL for that mailbox so the search
         layer can surface a clickable affordance. ``sensitivity_hint``
@@ -643,7 +643,7 @@ class M365EmailHeadersConnector:
         hierarchy emits one synthetic FOLDER per mailbox (not per Graph
         mail folder).
 
-        ``topology_v2_m365_email_headers`` retired post-cutover
+        ``topology_m365_email_headers`` retired post-cutover
         (task #132); the root + per-mailbox emission is now the only
         behaviour.
         """

@@ -70,7 +70,7 @@ def _obsidian_topology_mapping(
     ``extractor`` flows through to the re-extract extractor.
     """
     return {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {
                     "id": "obsidian-conn",

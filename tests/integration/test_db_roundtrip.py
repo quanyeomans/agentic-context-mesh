@@ -100,7 +100,7 @@ def create_kairix_schema(db: sqlite3.Connection) -> None:
             pruned_at TEXT NOT NULL,
             UNIQUE(hash, seq)
         );
-        -- Topology v2 Wave A tables — minimal shapes so validate_schema accepts the DB.
+        -- Topology Wave A tables — minimal shapes so validate_schema accepts the DB.
         CREATE TABLE IF NOT EXISTS topology_connectors (id INTEGER PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS topology_credentials (id INTEGER PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS topology_cc_pairs (id INTEGER PRIMARY KEY);

@@ -82,7 +82,7 @@ _ERROR_CASES: tuple[tuple[str, Callable[[], dict[str, Any]], str, Any], ...] = (
     ),
     (
         "features_status",
-        lambda: tool_features_status(topology_v2=True, read_db_path=_raise_dep),
+        lambda: tool_features_status(topology=True, read_db_path=_raise_dep),
         "flags",
         [],
     ),

@@ -652,13 +652,13 @@ def test_wizard_config_includes_provider_and_validates_clean(tmp_path: Path) -> 
 @pytest.mark.unit
 def test_rerun_setup_preserves_existing_connector_config(tmp_path: Path) -> None:
     """#review-H3 clobber regression: a config that already carries
-    ``topology_v2`` + ``agents`` blocks (written by the web wizard or an
+    ``topology`` + ``agents`` blocks (written by the web wizard or an
     operator) survives a terminal setup save against the same file —
     merge, not overwrite.
 
     Sabotage proof (executed): against the pre-fix whole-file-overwrite
     ``_write_config_yaml`` path this failed with
-    ``AssertionError: topology_v2 clobbered: {...}`` /
+    ``AssertionError: topology clobbered: {...}`` /
     ``assert None == {'connectors': [...]}``; it passes after the save
     routes through the backend's merge write.
     """
@@ -669,7 +669,7 @@ def test_rerun_setup_preserves_existing_connector_config(tmp_path: Path) -> None
     output.write_text(
         yaml.dump(
             {
-                "topology_v2": {"connectors": [{"type": "slack", "instance": "agent-alpha-workspace"}]},
+                "topology": {"connectors": [{"type": "slack", "instance": "agent-alpha-workspace"}]},
                 "agents": {"agent-alpha": {"role": "research"}},
             }
         ),
@@ -687,8 +687,8 @@ def test_rerun_setup_preserves_existing_connector_config(tmp_path: Path) -> None
     )
     assert result is True
     config = yaml.safe_load(output.read_text(encoding="utf-8"))
-    assert config.get("topology_v2") == {"connectors": [{"type": "slack", "instance": "agent-alpha-workspace"}]}, (
-        f"topology_v2 clobbered: {config}"
+    assert config.get("topology") == {"connectors": [{"type": "slack", "instance": "agent-alpha-workspace"}]}, (
+        f"topology clobbered: {config}"
     )
     assert config.get("agents") == {"agent-alpha": {"role": "research"}}, f"agents clobbered: {config}"
     # And the wizard's own answers still landed.

@@ -18,7 +18,7 @@ This module is the F50-style drift guard:
   equivalent). Adding a tier to either Literal can't silently drift the validator.
 
 Drives the production CLI surface via subprocess (the canonical F30 outcome
-shape) and the public ``parse_topology_v2`` surface — no private-fn behaviour
+shape) and the public ``parse_topology`` surface — no private-fn behaviour
 test, no monkeypatch (F1/F2).
 """
 
@@ -31,8 +31,8 @@ from typing import get_args
 
 import pytest
 
-from kairix.config import parse_topology_v2
-from kairix.config.topology_v2 import TopologyV2ParseError
+from kairix.config import parse_topology
+from kairix.config.topology import TopologyParseError
 from kairix.core.protocols import F39Tier, Sensitivity
 
 pytestmark = pytest.mark.contract
@@ -75,14 +75,14 @@ def test_example_config_uses_the_chunk_tag_vocabulary() -> None:
 
 @pytest.mark.parametrize("tier", get_args(Sensitivity))
 def test_every_sensitivity_literal_value_is_accepted(tier: str) -> None:
-    """Every value in the ``Sensitivity`` Literal parses through topology_v2.
+    """Every value in the ``Sensitivity`` Literal parses through topology.
 
     Single-source-of-truth: the validator's chunk-tag map is derived from
     ``get_args(Sensitivity)``, so any value the type system permits is accepted.
     A hardcoded map that omitted a future-added value would fail here.
     """
-    cfg = parse_topology_v2(
-        {"topology_v2": {"connectors": [{"id": "c1", "kind": "obsidian", "name": "c1", "default_sensitivity": tier}]}}
+    cfg = parse_topology(
+        {"topology": {"connectors": [{"id": "c1", "kind": "obsidian", "name": "c1", "default_sensitivity": tier}]}}
     )
     accepted = cfg.connectors[0].default_sensitivity
     assert accepted in get_args(F39Tier), f"{tier!r} normalised to {accepted!r}, not an F39 tier"
@@ -96,18 +96,18 @@ def test_every_f39_tier_literal_value_passes_through(tier: str) -> None:
     hardcoded tuple. Adding a tier to the Literal extends what the validator
     accepts automatically.
     """
-    cfg = parse_topology_v2(
-        {"topology_v2": {"connectors": [{"id": "c1", "kind": "obsidian", "name": "c1", "default_sensitivity": tier}]}}
+    cfg = parse_topology(
+        {"topology": {"connectors": [{"id": "c1", "kind": "obsidian", "name": "c1", "default_sensitivity": tier}]}}
     )
     assert cfg.connectors[0].default_sensitivity == tier
 
 
 def test_value_outside_both_vocabularies_is_rejected() -> None:
     """A genuinely-invalid tier is still rejected (the validator isn't a no-op)."""
-    with pytest.raises(TopologyV2ParseError) as excinfo:
-        parse_topology_v2(
+    with pytest.raises(TopologyParseError) as excinfo:
+        parse_topology(
             {
-                "topology_v2": {
+                "topology": {
                     "connectors": [{"id": "c1", "kind": "obsidian", "name": "c1", "default_sensitivity": "bogus-tier"}]
                 }
             }

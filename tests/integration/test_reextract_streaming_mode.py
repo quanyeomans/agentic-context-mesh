@@ -33,7 +33,7 @@ def _streaming_obsidian_mapping(vault: Path) -> dict[str, Any]:
     top-level ``connectors:`` list.
     """
     return {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {
                     "id": "obsidian-conn",

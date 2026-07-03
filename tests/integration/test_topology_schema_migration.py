@@ -1,4 +1,4 @@
-"""Integration test for the topology v2 Wave A schema migration.
+"""Integration test for the topology Wave A schema migration.
 
 Verifies:
 - ``SCHEMA_VERSION`` bumps to ``"3"``
@@ -6,7 +6,7 @@ Verifies:
 - Legacy DB (synthesised v2-shape): migrate() lands cleanly without data loss
 - Migration is idempotent (running twice is a no-op)
 - ``validate_schema`` reports clean post-migration
-- ``topology_v2_schema`` feature flag exists and defaults False
+- ``topology_schema`` feature flag exists and defaults False
 - New dataclasses + typed exceptions import without error
 
 Per F48: this lives in tests/integration/ and runs in CI Stage 3.
@@ -22,7 +22,7 @@ import pytest
 
 from kairix.core.db.schema import SCHEMA_VERSION, create_schema, migrate, validate_schema
 
-_TOPOLOGY_V2_TABLES = (
+_TOPOLOGY_TABLES = (
     "topology_connectors",
     "topology_credentials",
     "topology_cc_pairs",
@@ -48,13 +48,13 @@ def test_schema_version_bumps_to_4() -> None:
 
 
 @pytest.mark.integration
-def test_fresh_db_has_all_topology_v2_tables() -> None:
+def test_fresh_db_has_all_topology_tables() -> None:
     """create_schema on a fresh in-memory DB creates all 12 new tables."""
     db = sqlite3.connect(":memory:")
     create_schema(db, dims=4)
     actual = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    for table in _TOPOLOGY_V2_TABLES:
-        assert table in actual, f"missing topology v2 table: {table}"
+    for table in _TOPOLOGY_TABLES:
+        assert table in actual, f"missing topology table: {table}"
 
 
 @pytest.mark.integration
@@ -116,7 +116,7 @@ def test_legacy_v2_db_migrates_cleanly() -> None:
     # topology_* tables to simulate the v2 starting state. Insert a probe
     # row into the legacy `documents` table so we can verify it survives.
     create_schema(db, dims=4)
-    for table in _TOPOLOGY_V2_TABLES:
+    for table in _TOPOLOGY_TABLES:
         # safe: table name from a closed allow-list above
         db.execute(f"DROP TABLE {table}")
     db.execute("UPDATE kairix_meta SET value = '2' WHERE key = 'schema_version'")
@@ -139,7 +139,7 @@ def test_legacy_v2_db_migrates_cleanly() -> None:
 
     # All topology tables back
     actual = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    for table in _TOPOLOGY_V2_TABLES:
+    for table in _TOPOLOGY_TABLES:
         assert table in actual, f"topology table {table} missing after legacy migration"
     # Legacy data preserved
     legacy_count = db.execute("SELECT COUNT(*) FROM documents WHERE path = 'legacy/probe.md'").fetchone()[0]
@@ -150,8 +150,8 @@ def test_legacy_v2_db_migrates_cleanly() -> None:
 
 
 @pytest.mark.integration
-def test_new_topology_v2_dataclasses_import() -> None:
-    """All new topology v2 dataclasses + enums + exceptions import cleanly."""
+def test_new_topology_dataclasses_import() -> None:
+    """All new topology dataclasses + enums + exceptions import cleanly."""
     from kairix.core.protocols import (
         # enums
         CCPairAccessType,

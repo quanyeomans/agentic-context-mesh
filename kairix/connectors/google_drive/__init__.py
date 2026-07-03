@@ -18,7 +18,7 @@ cc_pair to a credential-renewal state.
 Registered via ``[project.entry-points."kairix.connectors"]`` in
 kairix's ``pyproject.toml`` — operators select it by listing
 ``google_drive`` in their ``connectors[]`` config, behind the
-``topology_v2_google_drive`` feature flag (introduce stage, default
+``topology_google_drive`` feature flag (introduce stage, default
 off; see ``docs/architecture/feature-flag-architecture.md`` §3).
 
 Default sensitivity tier is ``internal``. Operators routing

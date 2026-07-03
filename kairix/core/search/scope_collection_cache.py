@@ -1,7 +1,7 @@
-"""In-process TTL cache wrapping :class:`TopologyV2CollectionResolver` (#388).
+"""In-process TTL cache wrapping :class:`TopologyCollectionResolver` (#388).
 
 The MCP server's executor threads all share one SQLite Connection on the
-topology_v2 collection resolver (post-#386: ``check_same_thread=False``).
+topology collection resolver (post-#386: ``check_same_thread=False``).
 SQLite serialises access via its internal lock, so under concurrent load
 N threads issuing the same SELECT serialise on the lock and the resolve
 stage tail latency blows out.
@@ -18,7 +18,7 @@ Design mirrors :class:`QueryResultCache`:
   outside the lock so an in-flight SELECT doesn't block other readers).
 * Explicit ``clear()`` so operator config-reload paths can invalidate.
 
-The wrapper preserves the full :class:`TopologyV2CollectionResolver`
+The wrapper preserves the full :class:`TopologyCollectionResolver`
 public surface: ``validate_explicit`` and any future methods passthrough
 unchanged (only ``resolve`` is cached because it's the search hot path).
 """
@@ -31,14 +31,14 @@ from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
-from kairix.core.search.topology_v2_resolver import TopologyV2CollectionResolver
+from kairix.core.search.topology_resolver import TopologyCollectionResolver
 
 DEFAULT_MAX_ENTRIES = 256
 DEFAULT_MAX_AGE_S = 600.0  # 10 minutes — scope-profile changes are minute-scale
 
 
 class ScopeCollectionCache:
-    """Wraps a :class:`TopologyV2CollectionResolver` with a TTL-bounded LRU.
+    """Wraps a :class:`TopologyCollectionResolver` with a TTL-bounded LRU.
 
     Cache key is ``(agent_or_None, scope_string)``. Value is the
     resolver's ``list[str] | None`` output reused as-is.
@@ -53,7 +53,7 @@ class ScopeCollectionCache:
 
     def __init__(
         self,
-        inner: TopologyV2CollectionResolver,
+        inner: TopologyCollectionResolver,
         *,
         max_entries: int = DEFAULT_MAX_ENTRIES,
         max_age_s: float = DEFAULT_MAX_AGE_S,
@@ -70,7 +70,7 @@ class ScopeCollectionCache:
         self._clock = clock
 
     def resolve(self, agent: str | None, scope: object) -> list[str] | None:
-        """Cached delegate of :meth:`TopologyV2CollectionResolver.resolve`."""
+        """Cached delegate of :meth:`TopologyCollectionResolver.resolve`."""
         key = (agent, str(scope))
         now = self._clock()
         with self._lock:

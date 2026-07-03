@@ -51,12 +51,12 @@ _CHECK_NEO4J_REACHABLE = "neo4j_reachable"
 _CHECK_AGENT_KNOWLEDGE_POPULATED = "agent_knowledge_populated"
 _CHECK_CHUNK_DATE_POPULATED = "chunk_date_populated"
 _CHECK_MCP_SERVICE = "mcp_service"
-_CHECK_TOPOLOGY_V2_CONFIG_VALID = "topology_v2_config_valid"
-_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED = "topology_v2_cc_pairs_registered"
+_CHECK_TOPOLOGY_CONFIG_VALID = "topology_config_valid"
+_CHECK_TOPOLOGY_CC_PAIRS_REGISTERED = "topology_cc_pairs_registered"
 # GH #373 — schema-migration check for the per-entry default_in_scope column.
-_CHECK_TOPOLOGY_V2_DEFAULT_IN_SCOPE_FIELD_PRESENT = "topology_v2_default_in_scope_field_present"
+_CHECK_TOPOLOGY_DEFAULT_IN_SCOPE_FIELD_PRESENT = "topology_default_in_scope_field_present"
 # GH #373 Wave B — config-loader check that wildcard applies_to was expanded.
-_CHECK_TOPOLOGY_V2_WILDCARD_EXPANSION_RESOLVED = "topology_v2_wildcard_expansion_resolved"
+_CHECK_TOPOLOGY_WILDCARD_EXPANSION_RESOLVED = "topology_wildcard_expansion_resolved"
 _CHECK_SHAREPOINT_CREDENTIALS_LOADED = (
     "sharepoint_credentials_loaded"  # pragma: allowlist secret — check-name string, not a credential
 )
@@ -231,31 +231,31 @@ CANONICAL_REMEDIATIONS: dict[str, str] = {
         "add to ~/Library/Application Support/Claude/claude_desktop_config.json, or run "
         "`sudo systemctl enable --now kairix-mcp.service`."
     ),
-    _CHECK_TOPOLOGY_V2_CONFIG_VALID: (
-        "fix: open kairix.config.yaml and resolve the topology_v2 cross-reference "
+    _CHECK_TOPOLOGY_CONFIG_VALID: (
+        "fix: open kairix.config.yaml and resolve the topology cross-reference "
         "failures (every cc_pair must reference a declared connector + credential; "
         "every collection source / scope_profile entry / skill source must reference "
         "a declared cc_pair / collection). next: run `kairix config validate` to "
         "re-run the validator."
     ),
-    _CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED: (
+    _CHECK_TOPOLOGY_CC_PAIRS_REGISTERED: (
         "fix: restart the worker (e.g. `docker compose restart kairix-worker` or "
         "`systemctl restart kairix-worker`) — the apply-bridge runs at boot when "
-        "`topology_v2_config` is on and materialises declared cc_pairs idempotently. "
+        "`topology_config` is on and materialises declared cc_pairs idempotently. "
         "next: re-run `kairix onboard check` to confirm every declared cc_pair has a row."
     ),
-    _CHECK_TOPOLOGY_V2_DEFAULT_IN_SCOPE_FIELD_PRESENT: (
+    _CHECK_TOPOLOGY_DEFAULT_IN_SCOPE_FIELD_PRESENT: (
         "fix: restart the kairix worker / API process — the GH #373 schema migration "
         "adds the `default_in_scope` column to `topology_scope_entries` at boot via "
         "kairix.core.db.schema.migrate. Existing rows back-fill to default_in_scope=1 "
         "(back-compat — every row surfaces in default search). "
-        "next: re-run `kairix onboard check topology_v2_default_in_scope_field_present` "
+        "next: re-run `kairix onboard check topology_default_in_scope_field_present` "
         "to confirm the column is present. "
         "run: docker compose restart kairix-worker kairix-1 (Docker) "
         "OR systemctl restart kairix-worker kairix-mcp (systemd)."
     ),
-    _CHECK_TOPOLOGY_V2_WILDCARD_EXPANSION_RESOLVED: (
-        "fix: re-run the topology v2 config loader (restart the worker) so any "
+    _CHECK_TOPOLOGY_WILDCARD_EXPANSION_RESOLVED: (
+        "fix: re-run the topology config loader (restart the worker) so any "
         '`applies_to: ["*"]` wildcards in kairix.config.yaml expand to concrete '
         "actor_id rows in topology_scope_entries. A literal `*` actor_id in the DB "
         "means the loader did not run (or the YAML edit post-dates the last apply). "
@@ -1257,7 +1257,7 @@ def check_embed_cache_stats(embed_cache: Any | None = None) -> CheckResult:
 
 
 # ---------------------------------------------------------------------------
-# v2026.5.24a1 — topology v2 + SharePoint credential checks
+# v2026.5.24a1 — topology + SharePoint credential checks
 # ---------------------------------------------------------------------------
 # Each check below is gated by a feature flag — when the flag is OFF the
 # check returns ok=True with a "skipped (flag off)" detail so a fresh
@@ -1298,8 +1298,8 @@ def _default_flag_reader(name: str) -> bool:
 
 
 @dataclass
-class TopologyV2CheckDeps:
-    """Injectable dependencies for the topology v2 + SharePoint checks.
+class TopologyCheckDeps:
+    """Injectable dependencies for the topology + SharePoint checks.
 
     Bundles the three DI seams the three v2026.5.24a1 checks need
     (feature-flag reader, config loader, DB cc_pair namer, secret
@@ -1307,7 +1307,7 @@ class TopologyV2CheckDeps:
     of test-only ``*_loader=None`` kwargs (F6).
 
     Production callers leave the dataclass at its default values; tests
-    construct ``TopologyV2CheckDeps(flag_reader=..., config_loader=...,
+    construct ``TopologyCheckDeps(flag_reader=..., config_loader=...,
     db_cc_pair_namer=..., secret_reader=...)`` to drive each check's
     branches without monkey-patching the live registry / config /
     secrets paths. Mirrors the existing :class:`OnboardChecksDeps`
@@ -1328,19 +1328,19 @@ class TopologyV2CheckDeps:
 
 
 def _default_overlay_path_loader() -> dict[str, Any] | None:
-    """Production seam — loads the topology v2 section from kairix.config.yaml.
+    """Production seam — loads the topology section from kairix.config.yaml.
 
     Returns the parsed YAML dict (or None when no config file is found
-    or the parse fails). The actual topology_v2 sub-section is read by
+    or the parse fails). The actual topology sub-section is read by
     the caller; this loader returns the full document so the caller
-    sees the same shape ``kairix.config.topology_v2.parse_topology_v2``
+    sees the same shape ``kairix.config.topology.parse_topology``
     expects.
 
     Env-var read for the config path goes through
     ``kairix.paths.config_path_override`` so the F4 boundary holds
     (env reads live in paths.py / secrets.py only).
 
-    Lazy yaml import so the module stays light when topology v2 is off.
+    Lazy yaml import so the module stays light when topology is off.
     """
     import yaml as _yaml
 
@@ -1360,32 +1360,32 @@ def _default_overlay_path_loader() -> dict[str, Any] | None:
     return data
 
 
-def check_topology_v2_config_valid(deps: TopologyV2CheckDeps | None = None) -> CheckResult:
-    """topology_v2: block in kairix.config.yaml parses + passes cross-reference validation.
+def check_topology_config_valid(deps: TopologyCheckDeps | None = None) -> CheckResult:
+    """topology: block in kairix.config.yaml parses + passes cross-reference validation.
 
-    Parses the ``topology_v2:`` block out of the active
+    Parses the ``topology:`` block out of the active
     ``kairix.config.yaml`` (resolved via the standard ``KAIRIX_CONFIG_PATH``
     env-var or the ``kairix.config.yaml`` default), runs the 5
     cross-reference rules from
-    ``kairix.config.topology_v2_validators.validate_topology_v2_references``,
+    ``kairix.config.topology_validators.validate_topology_references``,
     and reports either ok=True (zero failures) or ok=False with the
     failure messages compacted into the ``detail`` string.
 
-    ``deps`` is the public DI seam (default :class:`TopologyV2CheckDeps`
+    ``deps`` is the public DI seam (default :class:`TopologyCheckDeps`
     binds the production flag/config readers). Tests construct a Deps
     with substitute callables to drive the parse-error / validation-
     failure / clean branches without touching the live config file.
 
-    ``topology_v2_config`` retired post-cutover (task #132); this check
+    ``topology_config`` retired post-cutover (task #132); this check
     no longer short-circuits on the flag.
     """
-    d = deps if deps is not None else TopologyV2CheckDeps()
+    d = deps if deps is not None else TopologyCheckDeps()
 
     try:
         data = d.config_loader()
     except Exception as exc:
         return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_CONFIG_VALID,
+            name=_CHECK_TOPOLOGY_CONFIG_VALID,
             ok=False,
             detail=f"config loader raised: {exc}",
             fix="fix: ensure kairix.config.yaml exists and is readable. next: run `kairix config validate`.",
@@ -1393,37 +1393,37 @@ def check_topology_v2_config_valid(deps: TopologyV2CheckDeps | None = None) -> C
 
     if data is None:
         return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_CONFIG_VALID,
+            name=_CHECK_TOPOLOGY_CONFIG_VALID,
             ok=False,
             detail="kairix.config.yaml not found — no config to validate",
             fix=(
                 "fix: create kairix.config.yaml at the repo root (or set KAIRIX_CONFIG_PATH) "
-                "with a topology_v2: block per kairix.config.example.yaml. "
+                "with a topology: block per kairix.config.example.yaml. "
                 "next: run `kairix config validate`."
             ),
         )
 
-    from kairix.config.topology_v2 import TopologyV2ParseError, parse_topology_v2
-    from kairix.config.topology_v2_validators import validate_topology_v2_references
+    from kairix.config.topology import TopologyParseError, parse_topology
+    from kairix.config.topology_validators import validate_topology_references
 
     try:
-        parsed = parse_topology_v2(data)
-    except TopologyV2ParseError as exc:
+        parsed = parse_topology(data)
+    except TopologyParseError as exc:
         return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_CONFIG_VALID,
+            name=_CHECK_TOPOLOGY_CONFIG_VALID,
             ok=False,
-            detail=f"topology_v2 parse failed: {exc}",
+            detail=f"topology parse failed: {exc}",
             fix="fix: correct the YAML shape in kairix.config.yaml. next: run `kairix config validate`.",
         )
 
-    failures = validate_topology_v2_references(parsed)
+    failures = validate_topology_references(parsed)
     if failures:
         summary = "; ".join(f.message for f in failures[:3])
         suffix = f" (+{len(failures) - 3} more)" if len(failures) > 3 else ""
         return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_CONFIG_VALID,
+            name=_CHECK_TOPOLOGY_CONFIG_VALID,
             ok=False,
-            detail=f"{len(failures)} topology_v2 cross-reference failure(s): {summary}{suffix}",
+            detail=f"{len(failures)} topology cross-reference failure(s): {summary}{suffix}",
             fix=(
                 "fix: declare the missing entries or remove the dangling references. "
                 "next: run `kairix config validate`."
@@ -1436,13 +1436,13 @@ def check_topology_v2_config_valid(deps: TopologyV2CheckDeps | None = None) -> C
         f"scope_profiles={len(parsed.scope_profiles)}, skills={len(parsed.skills)}"
     )
     return CheckResult(
-        name=_CHECK_TOPOLOGY_V2_CONFIG_VALID,
+        name=_CHECK_TOPOLOGY_CONFIG_VALID,
         ok=True,
-        detail=f"topology_v2 config valid ({counts})",
+        detail=f"topology config valid ({counts})",
     )
 
 
-def check_topology_v2_cc_pairs_registered(deps: TopologyV2CheckDeps | None = None) -> CheckResult:
+def check_topology_cc_pairs_registered(deps: TopologyCheckDeps | None = None) -> CheckResult:
     """Every declared cc_pair in kairix.config.yaml has a row in topology_cc_pairs.
 
     Parses the declared cc_pair names from ``kairix.config.yaml`` and
@@ -1452,19 +1452,19 @@ def check_topology_v2_cc_pairs_registered(deps: TopologyV2CheckDeps | None = Non
     typically the worker hasn't been restarted since the YAML edit (the
     apply-bridge runs at boot).
 
-    ``topology_v2_config`` retired post-cutover (task #132); this check
+    ``topology_config`` retired post-cutover (task #132); this check
     no longer short-circuits on the flag.
 
-    ``deps`` is the public DI seam (default :class:`TopologyV2CheckDeps`
+    ``deps`` is the public DI seam (default :class:`TopologyCheckDeps`
     binds the production flag / config / DB readers).
     """
-    d = deps if deps is not None else TopologyV2CheckDeps()
+    d = deps if deps is not None else TopologyCheckDeps()
 
     try:
         data = d.config_loader()
     except Exception as exc:
         return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
+            name=_CHECK_TOPOLOGY_CC_PAIRS_REGISTERED,
             ok=False,
             detail=f"config loader raised: {exc}",
             fix=(
@@ -1474,36 +1474,36 @@ def check_topology_v2_cc_pairs_registered(deps: TopologyV2CheckDeps | None = Non
         )
     if data is None:
         return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
+            name=_CHECK_TOPOLOGY_CC_PAIRS_REGISTERED,
             ok=True,
             detail="no kairix.config.yaml — nothing to register",
         )
 
-    from kairix.config.topology_v2 import TopologyV2ParseError, parse_topology_v2
+    from kairix.config.topology import TopologyParseError, parse_topology
 
     try:
-        parsed = parse_topology_v2(data)
-    except TopologyV2ParseError as exc:
+        parsed = parse_topology(data)
+    except TopologyParseError as exc:
         return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
+            name=_CHECK_TOPOLOGY_CC_PAIRS_REGISTERED,
             ok=False,
-            detail=f"topology_v2 parse failed: {exc}",
+            detail=f"topology parse failed: {exc}",
             fix="fix: correct the YAML shape in kairix.config.yaml. next: run `kairix config validate`.",
         )
 
     declared_names = frozenset(p.name for p in parsed.cc_pairs)
     if not declared_names:
         return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
+            name=_CHECK_TOPOLOGY_CC_PAIRS_REGISTERED,
             ok=True,
-            detail="no cc_pairs declared in topology_v2 — nothing to register",
+            detail="no cc_pairs declared in topology — nothing to register",
         )
 
     try:
         registered = d.db_cc_pair_namer()
     except Exception as exc:
         return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
+            name=_CHECK_TOPOLOGY_CC_PAIRS_REGISTERED,
             ok=False,
             detail=f"topology_cc_pairs lookup failed: {exc}",
             fix=("fix: ensure the SQLite database is reachable. next: restart the worker so the apply-bridge re-runs."),
@@ -1512,7 +1512,7 @@ def check_topology_v2_cc_pairs_registered(deps: TopologyV2CheckDeps | None = Non
     missing = sorted(declared_names - registered)
     if missing:
         return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
+            name=_CHECK_TOPOLOGY_CC_PAIRS_REGISTERED,
             ok=False,
             detail=(f"{len(missing)} declared cc_pair(s) not registered in topology_cc_pairs: {', '.join(missing)}"),
             fix=(
@@ -1522,7 +1522,7 @@ def check_topology_v2_cc_pairs_registered(deps: TopologyV2CheckDeps | None = Non
         )
 
     return CheckResult(
-        name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
+        name=_CHECK_TOPOLOGY_CC_PAIRS_REGISTERED,
         ok=True,
         detail=f"{len(declared_names)} declared cc_pair(s) registered",
     )
@@ -1565,9 +1565,9 @@ def _default_scope_entries_columns() -> frozenset[str]:
 class DefaultInScopeCheckDeps:
     """Injectable dependencies for the GH #373 default_in_scope migration check.
 
-    Mirrors :class:`TopologyV2CheckDeps` but scoped to the schema-only check
+    Mirrors :class:`TopologyCheckDeps` but scoped to the schema-only check
     — the migration is independent of the operator-facing
-    ``topology_v2_config`` block, so the check uses its own Deps class with
+    ``topology_config`` block, so the check uses its own Deps class with
     a single ``columns_reader`` seam. Tests pass a substitute callable
     returning ``frozenset({"default_in_scope", ...})`` or ``frozenset()``
     to drive the present / absent branches without touching the live DB.
@@ -1576,7 +1576,7 @@ class DefaultInScopeCheckDeps:
     columns_reader: Callable[[], frozenset[str]] = field(default_factory=lambda: _default_scope_entries_columns)
 
 
-def check_topology_v2_default_in_scope_field_present(
+def check_topology_default_in_scope_field_present(
     deps: DefaultInScopeCheckDeps | None = None,
 ) -> CheckResult:
     """GH #373 schema migration — ``topology_scope_entries.default_in_scope`` exists.
@@ -1600,7 +1600,7 @@ def check_topology_v2_default_in_scope_field_present(
         cols = d.columns_reader()
     except Exception as exc:
         return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_DEFAULT_IN_SCOPE_FIELD_PRESENT,
+            name=_CHECK_TOPOLOGY_DEFAULT_IN_SCOPE_FIELD_PRESENT,
             ok=False,
             detail=f"columns reader raised: {exc}",
             fix=(
@@ -1612,7 +1612,7 @@ def check_topology_v2_default_in_scope_field_present(
 
     if not cols:
         return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_DEFAULT_IN_SCOPE_FIELD_PRESENT,
+            name=_CHECK_TOPOLOGY_DEFAULT_IN_SCOPE_FIELD_PRESENT,
             ok=False,
             detail=(
                 "topology_scope_entries table not present — schema migration has not run. "
@@ -1621,14 +1621,14 @@ def check_topology_v2_default_in_scope_field_present(
             fix=(
                 "fix: restart the kairix worker / API process to trigger "
                 "kairix.core.db.schema.create_schema. "
-                "next: re-run `kairix onboard check topology_v2_default_in_scope_field_present`. "
+                "next: re-run `kairix onboard check topology_default_in_scope_field_present`. "
                 "run: docker compose restart kairix-worker kairix-1."
             ),
         )
 
     if "default_in_scope" not in cols:
         return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_DEFAULT_IN_SCOPE_FIELD_PRESENT,
+            name=_CHECK_TOPOLOGY_DEFAULT_IN_SCOPE_FIELD_PRESENT,
             ok=False,
             detail=(
                 "topology_scope_entries missing default_in_scope column — GH #373 "
@@ -1638,13 +1638,13 @@ def check_topology_v2_default_in_scope_field_present(
             fix=(
                 "fix: restart the kairix worker / API process to trigger the "
                 "ALTER TABLE migration in kairix.core.db.schema.migrate. "
-                "next: re-run `kairix onboard check topology_v2_default_in_scope_field_present`. "
+                "next: re-run `kairix onboard check topology_default_in_scope_field_present`. "
                 "run: docker compose restart kairix-worker kairix-1."
             ),
         )
 
     return CheckResult(
-        name=_CHECK_TOPOLOGY_V2_DEFAULT_IN_SCOPE_FIELD_PRESENT,
+        name=_CHECK_TOPOLOGY_DEFAULT_IN_SCOPE_FIELD_PRESENT,
         ok=True,
         detail="topology_scope_entries.default_in_scope column present (GH #373 schema migration applied)",
     )
@@ -1680,7 +1680,7 @@ def _default_db_scope_actor_ids() -> tuple[str, ...]:
     return tuple(row[0] for row in rows)
 
 
-def check_topology_v2_wildcard_expansion_resolved(deps: TopologyV2CheckDeps | None = None) -> CheckResult:
+def check_topology_wildcard_expansion_resolved(deps: TopologyCheckDeps | None = None) -> CheckResult:
     """GH #373 — every wildcard ``applies_to: ["*"]`` is expanded in the DB.
 
     The config loader materialises every wildcard into concrete per-actor
@@ -1690,7 +1690,7 @@ def check_topology_v2_wildcard_expansion_resolved(deps: TopologyV2CheckDeps | No
     misconfiguration that silently breaks default-scope resolution for
     every agent the wildcard was meant to cover.
 
-    ``topology_v2_config`` retired post-cutover (task #132); this check
+    ``topology_config`` retired post-cutover (task #132); this check
     no longer short-circuits on the flag.
 
     ``deps`` is the public DI seam. Production callers leave ``deps=None``;
@@ -1698,17 +1698,17 @@ def check_topology_v2_wildcard_expansion_resolved(deps: TopologyV2CheckDeps | No
     that mirrors the actor_id-reading shape used here (so the test
     doesn't need to seed the v2 SQL tables to drive the check's branches).
     """
-    d = deps if deps is not None else TopologyV2CheckDeps()
+    d = deps if deps is not None else TopologyCheckDeps()
 
     try:
         actor_ids = d.db_scope_actor_id_reader()
     except Exception as exc:
         return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_WILDCARD_EXPANSION_RESOLVED,
+            name=_CHECK_TOPOLOGY_WILDCARD_EXPANSION_RESOLVED,
             ok=False,
             detail=f"topology_scope_profiles lookup failed: {exc}",
             fix=(
-                "fix: ensure the SQLite database is reachable and the topology_v2 "
+                "fix: ensure the SQLite database is reachable and the topology "
                 "schema migration has run. next: restart the worker."
             ),
         )
@@ -1717,7 +1717,7 @@ def check_topology_v2_wildcard_expansion_resolved(deps: TopologyV2CheckDeps | No
     if unresolved:
         names = ", ".join(unresolved)
         return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_WILDCARD_EXPANSION_RESOLVED,
+            name=_CHECK_TOPOLOGY_WILDCARD_EXPANSION_RESOLVED,
             ok=False,
             detail=(
                 f"{len(unresolved)} unexpanded wildcard actor_id(s) in topology_scope_profiles: {names}. "
@@ -1731,13 +1731,13 @@ def check_topology_v2_wildcard_expansion_resolved(deps: TopologyV2CheckDeps | No
         )
 
     return CheckResult(
-        name=_CHECK_TOPOLOGY_V2_WILDCARD_EXPANSION_RESOLVED,
+        name=_CHECK_TOPOLOGY_WILDCARD_EXPANSION_RESOLVED,
         ok=True,
         detail=f"{len(actor_ids)} distinct scope actor_id(s) — no unexpanded wildcards",
     )
 
 
-def check_sharepoint_credentials_loaded(deps: TopologyV2CheckDeps | None = None) -> CheckResult:
+def check_sharepoint_credentials_loaded(deps: TopologyCheckDeps | None = None) -> CheckResult:
     """SharePoint connector secrets resolve via kairix.secrets.get_secret.
 
     When the ``connector_sharepoint`` flag is OFF, returns ok=True with
@@ -1756,13 +1756,13 @@ def check_sharepoint_credentials_loaded(deps: TopologyV2CheckDeps | None = None)
     per-file secret → bundle file → Azure Key Vault), so the same fix
     applies whether the operator is on Docker / pip / VM.
 
-    ``deps`` is the public DI seam (default :class:`TopologyV2CheckDeps`
+    ``deps`` is the public DI seam (default :class:`TopologyCheckDeps`
     binds the production flag + secret readers). Tests construct a
     Deps with substitute callables to drive the present / partial /
     missing branches without touching the live environment or Key
     Vault.
     """
-    d = deps if deps is not None else TopologyV2CheckDeps()
+    d = deps if deps is not None else TopologyCheckDeps()
     if not d.flag_reader(_CONNECTOR_SHAREPOINT_FLAG):
         return CheckResult(
             name=_CHECK_SHAREPOINT_CREDENTIALS_LOADED,
@@ -2294,10 +2294,10 @@ ALL_CHECKS: list[Callable[..., CheckResult]] = [
     check_mcp_service,
     check_query_cache_stats,
     check_embed_cache_stats,
-    check_topology_v2_config_valid,
-    check_topology_v2_cc_pairs_registered,
-    check_topology_v2_default_in_scope_field_present,
-    check_topology_v2_wildcard_expansion_resolved,
+    check_topology_config_valid,
+    check_topology_cc_pairs_registered,
+    check_topology_default_in_scope_field_present,
+    check_topology_wildcard_expansion_resolved,
     check_sharepoint_credentials_loaded,
     check_maintenance_loop_ticking,
     check_extractor_libraries_importable,

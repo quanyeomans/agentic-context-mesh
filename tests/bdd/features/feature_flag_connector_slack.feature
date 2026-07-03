@@ -4,7 +4,7 @@ Feature: connector_slack feature flag gates Wave E per-channel behaviour
   I want each member channel to optionally become its own Container
   with its own per-channel ts cursor and its own hierarchy emission
   So that I can sync different channels at different cadences and isolate
-  cursor state per channel via the topology v2 collection mapping
+  cursor state per channel via the topology collection mapping
   while still being able to roll back to the legacy single-root shape.
 
   Wave E is the per-connector pilot for multi-container behaviour. The

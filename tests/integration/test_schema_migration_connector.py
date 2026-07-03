@@ -131,7 +131,7 @@ def test_fresh_create_schema_bumps_schema_version_meta_row() -> None:
     row = db.execute("SELECT value FROM kairix_meta WHERE key='schema_version'").fetchone()
     assert row is not None
     assert row[0] == SCHEMA_VERSION
-    # Explicit: the bump landed. Wave A (topology v2) bumped to "3";
+    # Explicit: the bump landed. Wave A (topology) bumped to "3";
     # GH #409 bumps again to "4" (path_canonical column + index for the
     # search enrich phase). This assertion tracks the live schema.
     assert SCHEMA_VERSION == "4"

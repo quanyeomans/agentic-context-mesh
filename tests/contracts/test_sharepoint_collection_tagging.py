@@ -16,7 +16,7 @@ now share so the invariant has one edit site.
 Contract:
   1. ``resolve_collection_for_entry({"name": "sharepoint"})`` returns
      ``"sharepoint"`` — never the legacy ``"default"`` fallback.
-  2. An explicit ``collection`` override is honoured (topology-v2 path).
+  2. An explicit ``collection`` override is honoured (topology path).
   3. A missing/empty ``name`` raises a typed ValueError with a fix
      hint — silent ``"default"`` cannot reappear.
   4. The production wiring (``kairix.core.factory.build_connector_pipeline``)
@@ -68,9 +68,9 @@ def test_resolve_collection_for_entry_uses_connector_name() -> None:
 
 
 def test_resolve_collection_for_entry_honours_explicit_override() -> None:
-    """Operators who pre-declare a typed collection (topology-v2) get
+    """Operators who pre-declare a typed collection (topology) get
     that name on the legacy writer path. Override wins over the
-    fallback to ``name`` — same shape the topology-v2 applier expects."""
+    fallback to ``name`` — same shape the topology applier expects."""
     entry = {"name": _SHAREPOINT, "collection": "sharepoint-public-docs"}
     assert resolve_collection_for_entry(entry) == "sharepoint-public-docs"
 

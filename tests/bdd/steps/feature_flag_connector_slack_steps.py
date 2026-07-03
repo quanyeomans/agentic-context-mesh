@@ -1,6 +1,6 @@
 """Step definitions for feature_flag_connector_slack.feature.
 
-Wave E of the connector / collection / scope topology v2 migration is
+Wave E of the connector / collection / scope topology migration is
 the per-connector pilot for the Slack connector — when the
 ``connector_slack`` flag is ON, the connector emits one
 :class:`~kairix.core.protocols.Container` per member channel (each

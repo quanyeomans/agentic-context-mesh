@@ -486,13 +486,13 @@ class AccessType(Enum):
 - Extend `ChangeEvent.op` enum (back-compat).
 - New typed exceptions (additive).
 
-Feature flag: `topology_v2_schema` (introduce stage default-off; controls whether new tables are populated alongside existing).
+Feature flag: `topology_schema` (introduce stage default-off; controls whether new tables are populated alongside existing).
 
 ### Wave B — Protocol capability split
 
 Extend `kairix.core.protocols` with the capability Protocols (`PollConnector`, `CheckpointedConnector`, `SlimConnector`, `SlimConnectorWithPermSync`, `EventConnector`, `Resolver`, `HierarchyConnector`, `OAuthConnector`). Existing 4 shipped connectors (obsidian, dex_crm, m365_email_headers, m365_calendar) get default-impl shims so they continue to satisfy the new shapes without behavioural change. F-rule **F56** lands (per-connector capability declaration check).
 
-Feature flag: `topology_v2_protocol` (introduce stage default-off).
+Feature flag: `topology_protocol` (introduce stage default-off).
 
 ### Wave C — runtime: cc_pair + CollectionRouter + Chunker registry
 
@@ -502,18 +502,18 @@ Feature flag: `topology_v2_protocol` (introduce stage default-off).
 - `ResultEnvelope` extended with per-source freshness + included / excluded collections.
 - `ScopeProfileResolver` reading `scope_profiles` YAML.
 
-Feature flag: `topology_v2_runtime` (introduce stage default-off). When OFF: behaviour identical to current (collection = cc_pair name, no scope enforcement at search, uniform chunker). When ON: new behaviour kicks in. Both branches tested per F54.
+Feature flag: `topology_runtime` (introduce stage default-off). When OFF: behaviour identical to current (collection = cc_pair name, no scope enforcement at search, uniform chunker). When ON: new behaviour kicks in. Both branches tested per F54.
 
 ### Wave D — operator config promotion
 
-Add a single `topology_v2:` parent key (#305) with six nested blocks — `connectors:` / `credentials:` / `cc_pairs:` / `collections:` / `scope_profiles:` / `skills:` — to the operator config schema. The parent namespace prevents the Wave D `collections:` block from colliding with the legacy top-level `collections.shared` dict shape and aligns the YAML surface with the `topology_v2_config` feature flag name. Validation rules:
+Add a single `topology:` parent key (#305) with six nested blocks — `connectors:` / `credentials:` / `cc_pairs:` / `collections:` / `scope_profiles:` / `skills:` — to the operator config schema. The parent namespace prevents the Wave D `collections:` block from colliding with the legacy top-level `collections.shared` dict shape and aligns the YAML surface with the `topology_config` feature flag name. Validation rules:
 - `cc_pairs.*.connector` references declared connector.
 - `cc_pairs.*.credential` references declared credential.
 - `collections.*.sources.*.cc_pair` references declared cc_pair.
 - `scope_profiles.*.entries.*.collection_name` references declared collection.
 - `skills.*.task_collections.*.sources.*.cc_pair` references declared cc_pair.
 
-`kairix features status` extended to show topology v2 diagnostics per actor. `kairix cc-pair list` / `kairix cc-pair pause <id>` etc. new operator CLI verbs.
+`kairix features status` extended to show topology diagnostics per actor. `kairix cc-pair list` / `kairix cc-pair pause <id>` etc. new operator CLI verbs.
 
 ### Wave E — per-connector opt-in to multi-container
 
@@ -525,24 +525,24 @@ For each connector kind that benefits, implement per-container path:
 - Default sensitivity hint emission per kind
 - Typed-exception emission per failure mode
 
-Per-connector flag (`topology_v2_<connector>`) so each plugin's adoption is independent. F54 both-branch tests per flag.
+Per-connector flag (`topology_<connector>`) so each plugin's adoption is independent. F54 both-branch tests per flag.
 
 #### Wave E adoption status
 
 | Connector | Flag | Status | Landed |
 |---|---|---|---|
-| `obsidian` | `topology_v2_obsidian` | ✅ Pilot | v2026.5.24a1 |
-| `dex_crm` | `topology_v2_dex_crm` | 🟡 In flight | v2026.5.24a2 |
-| `m365_email_headers` | `topology_v2_m365_email_headers` | 🟡 In flight | v2026.5.24a2 |
-| `m365_calendar` | `topology_v2_m365_calendar` | 🟡 In flight | v2026.5.24a2 |
-| `sharepoint` | `topology_v2_sharepoint` | 🔴 Scoped | next slice (uses Wave B shims via SharePoint connector ship at v2026.5.24a1) |
-| `notion` | `topology_v2_notion` | 🔴 Backlog | future Wave 5 connector wave |
-| `slack` | `topology_v2_slack` | 🔴 Backlog | future Wave 5 connector wave |
-| `github` | `topology_v2_github` | 🔴 Backlog | future Wave 5 connector wave |
-| `google_drive` | `topology_v2_google_drive` | 🔴 Backlog | future Wave 5 connector wave |
-| `teams` | `topology_v2_teams` | 🔴 Backlog | future Wave 5 connector wave |
-| `jira` | `topology_v2_jira` | 🔴 Backlog | future Wave 5 connector wave |
-| `confluence` | `topology_v2_confluence` | 🔴 Backlog | future Wave 5 connector wave |
+| `obsidian` | `topology_obsidian` | ✅ Pilot | v2026.5.24a1 |
+| `dex_crm` | `topology_dex_crm` | 🟡 In flight | v2026.5.24a2 |
+| `m365_email_headers` | `topology_m365_email_headers` | 🟡 In flight | v2026.5.24a2 |
+| `m365_calendar` | `topology_m365_calendar` | 🟡 In flight | v2026.5.24a2 |
+| `sharepoint` | `topology_sharepoint` | 🔴 Scoped | next slice (uses Wave B shims via SharePoint connector ship at v2026.5.24a1) |
+| `notion` | `topology_notion` | 🔴 Backlog | future Wave 5 connector wave |
+| `slack` | `topology_slack` | 🔴 Backlog | future Wave 5 connector wave |
+| `github` | `topology_github` | 🔴 Backlog | future Wave 5 connector wave |
+| `google_drive` | `topology_google_drive` | 🔴 Backlog | future Wave 5 connector wave |
+| `teams` | `topology_teams` | 🔴 Backlog | future Wave 5 connector wave |
+| `jira` | `topology_jira` | 🔴 Backlog | future Wave 5 connector wave |
+| `confluence` | `topology_confluence` | 🔴 Backlog | future Wave 5 connector wave |
 
 ### Wave E.5 — tick safety + metadata propagation (2026-05-28)
 
@@ -585,7 +585,7 @@ Each ships with `version: str` (F55), a contract test (F43-equivalent for chunke
 
 ### Wave G — retirement
 
-After all topology_v2_* flags promote to default-ON for 4 weeks of cutover-stage soak:
+After all topology_* flags promote to default-ON for 4 weeks of cutover-stage soak:
 - Retire flags + delete default-impl shims.
 - Drop deprecated `connector_cursors` table.
 - Drop the v1 `name = entry-point key = collection = cursor scope` overload entirely.
@@ -596,13 +596,13 @@ After all topology_v2_* flags promote to default-ON for 4 weeks of cutover-stage
 
 ## Operator-visible config example (post-migration)
 
-The six Wave D blocks nest under a single `topology_v2:` parent key
+The six Wave D blocks nest under a single `topology:` parent key
 (#305) so the Wave D `collections:` block doesn't collide with the
 legacy top-level `collections.shared` dict shape, and the YAML
-namespace aligns with the `topology_v2_config` feature flag name.
+namespace aligns with the `topology_config` feature flag name.
 
 ```yaml
-topology_v2:
+topology:
   connectors:
     - kind: obsidian
       name: obsidian-personal
@@ -689,10 +689,10 @@ The ADR v2 is considered landed when:
    - HierarchyNode emission (folder tree queryable via `kairix worker hierarchy show`)
 3. **Wave E**: at least one tenant-credential connector (sharepoint OR notion OR jira) lands in multi-container mode with both-branch tests, proving per-container cursor + sensitivity-hint + perm-sync paths.
 4. **Wave F**: at least 3 chunker plugins land (markdown structural, code via tree-sitter, per-ticket) with contract tests AND BDD coverage AND F55 version-string compliance.
-5. **`kairix features status`** shows topology v2 surface. Operator config reference doc at `docs/operations/configuration/connectors-and-collections.md`.
+5. **`kairix features status`** shows topology surface. Operator config reference doc at `docs/operations/configuration/connectors-and-collections.md`.
 6. **IM-6 obsidian** promotes to cutover-stage under the new topology, not the legacy single-collection shape.
 
-After all six: the topology_v2_* flags retire over Wave G.
+After all six: the topology_* flags retire over Wave G.
 
 ---
 

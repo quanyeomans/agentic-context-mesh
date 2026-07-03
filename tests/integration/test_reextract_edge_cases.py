@@ -39,7 +39,7 @@ def _obsidian_mapping(vault: Path, extractor_name: str = "passthrough") -> dict[
     top-level ``connectors:`` list.
     """
     return {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {
                     "id": "obsidian-conn",

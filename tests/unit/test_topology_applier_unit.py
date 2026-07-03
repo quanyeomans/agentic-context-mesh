@@ -1,10 +1,10 @@
-"""Unit tests for the Wave D topology v2 apply-bridge.
+"""Unit tests for the Wave D topology apply-bridge.
 
 Lift the per-file coverage on
-:mod:`kairix.core.connectors.topology_v2_applier` above the F7 90%
+:mod:`kairix.core.connectors.topology_applier` above the F7 90%
 floor by exercising every branch in isolation against a fresh in-memory
 DB. Integration coverage (apply-bridge + worker boot wiring) lives in
-``tests/integration/test_topology_v2_applier.py``; E2E coverage lives
+``tests/integration/test_topology_applier.py``; E2E coverage lives
 in ``tests/e2e/test_composed_alpha_path.py``.
 
 The branches not exercised by the happy-path BDD scenario:
@@ -26,12 +26,12 @@ import sqlite3
 
 import pytest
 
-from kairix.config import parse_topology_v2
-from kairix.core.connectors.topology_v2_applier import (
+from kairix.config import parse_topology
+from kairix.core.connectors.topology_applier import (
     ApplierDeps,
     ApplyResult,
     ApplyValidationError,
-    apply_topology_v2,
+    apply_topology,
 )
 from kairix.core.db.schema import create_schema
 
@@ -50,19 +50,19 @@ def _build_db() -> sqlite3.Connection:
 
 
 def test_apply_empty_config_returns_zero_result() -> None:
-    """Empty TopologyV2Config returns ApplyResult(0, 0, 0)."""
+    """Empty TopologyConfig returns ApplyResult(0, 0, 0)."""
     db = _build_db()
-    parsed = parse_topology_v2({})
-    result = apply_topology_v2(db, parsed)
+    parsed = parse_topology({})
+    result = apply_topology(db, parsed)
     assert result == ApplyResult(created=0, updated=0, unchanged=0)
 
 
 def test_apply_one_block_per_surface_returns_five_created() -> None:
     """Minimum non-empty config: one entry per surface = five created rows."""
     db = _build_db()
-    parsed = parse_topology_v2(
+    parsed = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}],
                 "credentials": [
                     {"id": "cr1", "kind": "oauth", "secret_name": "s1"},  # pragma: allowlist secret
@@ -77,22 +77,22 @@ def test_apply_one_block_per_surface_returns_five_created() -> None:
             }
         }
     )
-    result = apply_topology_v2(db, parsed)
+    result = apply_topology(db, parsed)
     assert result == ApplyResult(created=5, updated=0, unchanged=0)
 
 
 def test_apply_twice_is_unchanged() -> None:
     """Second apply against unchanged config reports every row as unchanged."""
     db = _build_db()
-    parsed = parse_topology_v2(
+    parsed = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}],
             }
         }
     )
-    apply_topology_v2(db, parsed)
-    second = apply_topology_v2(db, parsed)
+    apply_topology(db, parsed)
+    second = apply_topology(db, parsed)
     assert second == ApplyResult(created=0, updated=0, unchanged=1)
 
 
@@ -104,13 +104,13 @@ def test_apply_twice_is_unchanged() -> None:
 def test_apply_updates_connector_when_kind_changes() -> None:
     """Re-applying with a changed connector kind triggers UPDATE."""
     db = _build_db()
-    apply_topology_v2(
+    apply_topology(
         db,
-        parse_topology_v2({"topology_v2": {"connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}]}}),
+        parse_topology({"topology": {"connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}]}}),
     )
-    second = apply_topology_v2(
+    second = apply_topology(
         db,
-        parse_topology_v2({"topology_v2": {"connectors": [{"id": "c1", "kind": "sharepoint", "name": "c1"}]}}),
+        parse_topology({"topology": {"connectors": [{"id": "c1", "kind": "sharepoint", "name": "c1"}]}}),
     )
     assert second.updated == 1
     assert second.created == 0
@@ -121,11 +121,11 @@ def test_apply_updates_connector_when_kind_changes() -> None:
 def test_apply_updates_credential_when_secret_name_changes() -> None:
     """Re-applying with a changed credential secret_name triggers UPDATE."""
     db = _build_db()
-    apply_topology_v2(
+    apply_topology(
         db,
-        parse_topology_v2(
+        parse_topology(
             {
-                "topology_v2": {
+                "topology": {
                     "credentials": [
                         {"id": "cr1", "kind": "oauth", "secret_name": "s1"},  # pragma: allowlist secret
                     ]
@@ -133,11 +133,11 @@ def test_apply_updates_credential_when_secret_name_changes() -> None:
             }
         ),
     )
-    second = apply_topology_v2(
+    second = apply_topology(
         db,
-        parse_topology_v2(
+        parse_topology(
             {
-                "topology_v2": {
+                "topology": {
                     "credentials": [
                         {"id": "cr1", "kind": "oauth", "secret_name": "s2"},  # pragma: allowlist secret
                     ]
@@ -159,14 +159,14 @@ def test_apply_updates_cc_pair_when_access_type_changes() -> None:
     """
     db = _build_db()
     base_config = {
-        "topology_v2": {
+        "topology": {
             "connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}],
             "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "cp1"}],
         }
     }
-    apply_topology_v2(db, parse_topology_v2(base_config))
+    apply_topology(db, parse_topology(base_config))
     bumped = {
-        "topology_v2": {
+        "topology": {
             "connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}],
             "cc_pairs": [
                 {
@@ -179,7 +179,7 @@ def test_apply_updates_cc_pair_when_access_type_changes() -> None:
             ],
         }
     }
-    second = apply_topology_v2(db, parse_topology_v2(bumped))
+    second = apply_topology(db, parse_topology(bumped))
     assert second.updated == 1
     row = db.execute("SELECT access_type, status FROM topology_cc_pairs WHERE name = 'cp1'").fetchone()
     assert row[0] == "PUBLIC"
@@ -191,7 +191,7 @@ def test_apply_updates_collection_source_when_sensitivity_min_changes() -> None:
     """Changing sensitivity_min on a source mapping triggers UPDATE, not duplicate INSERT."""
     db = _build_db()
     base = {
-        "topology_v2": {
+        "topology": {
             "connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}],
             "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "cp1"}],
             "collections": [
@@ -204,9 +204,9 @@ def test_apply_updates_collection_source_when_sensitivity_min_changes() -> None:
             ],
         }
     }
-    apply_topology_v2(db, parse_topology_v2(base))
+    apply_topology(db, parse_topology(base))
     bumped = {
-        "topology_v2": {
+        "topology": {
             "connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}],
             "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "cp1"}],
             "collections": [
@@ -219,7 +219,7 @@ def test_apply_updates_collection_source_when_sensitivity_min_changes() -> None:
             ],
         }
     }
-    second = apply_topology_v2(db, parse_topology_v2(bumped))
+    second = apply_topology(db, parse_topology(bumped))
     # Connector + cc_pair + collection are unchanged; only the source bumps.
     assert second.updated == 1
     sources = db.execute("SELECT COUNT(*) FROM topology_collection_sources").fetchone()
@@ -232,7 +232,7 @@ def _tier_config(tier: str | None) -> dict[str, object]:
     if tier is not None:
         collection["tier"] = tier
     return {
-        "topology_v2": {
+        "topology": {
             "connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}],
             "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "cp1"}],
             "collections": [collection],
@@ -247,14 +247,14 @@ def _collection_tier(db: sqlite3.Connection, name: str) -> str | None:
 def test_apply_writes_collection_tier_on_insert() -> None:
     """The applier INSERTs the operator-declared collection ``tier`` onto the row."""
     db = _build_db()
-    apply_topology_v2(db, parse_topology_v2(_tier_config("reference")))
+    apply_topology(db, parse_topology(_tier_config("reference")))
     assert _collection_tier(db, "col1") == "reference"
 
 
 def test_apply_collection_tier_absent_lands_null() -> None:
     """A collection without ``tier:`` INSERTs NULL — back-compat default."""
     db = _build_db()
-    apply_topology_v2(db, parse_topology_v2(_tier_config(None)))
+    apply_topology(db, parse_topology(_tier_config(None)))
     assert _collection_tier(db, "col1") is None
 
 
@@ -265,8 +265,8 @@ def test_apply_updates_collection_when_tier_changes() -> None:
     report ``updated`` and overwrite the stored value, with no duplicate row.
     """
     db = _build_db()
-    apply_topology_v2(db, parse_topology_v2(_tier_config("reference")))
-    second = apply_topology_v2(db, parse_topology_v2(_tier_config("primary")))
+    apply_topology(db, parse_topology(_tier_config("reference")))
+    second = apply_topology(db, parse_topology(_tier_config("primary")))
     assert second.updated == 1
     assert _collection_tier(db, "col1") == "primary"
     count = db.execute("SELECT COUNT(*) FROM topology_collections WHERE name = 'col1'").fetchone()[0]
@@ -277,8 +277,8 @@ def test_apply_collection_unchanged_when_tier_identical() -> None:
     """Re-applying the same tier reports ``unchanged`` — the diff guard holds."""
     db = _build_db()
     config = _tier_config("reference")
-    apply_topology_v2(db, parse_topology_v2(config))
-    second = apply_topology_v2(db, parse_topology_v2(config))
+    apply_topology(db, parse_topology(config))
+    second = apply_topology(db, parse_topology(config))
     assert second.updated == 0
     assert _collection_tier(db, "col1") == "reference"
 
@@ -291,15 +291,15 @@ def test_apply_collection_unchanged_when_tier_identical() -> None:
 def test_apply_rejects_invalid_config_with_validation_failures() -> None:
     """ApplyValidationError carries the full failure tuple from the validator."""
     db = _build_db()
-    bad = parse_topology_v2(
+    bad = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "cc_pairs": [{"id": "x", "connector": "missing", "credential": None, "name": "x"}],
             }
         }
     )
     with pytest.raises(ApplyValidationError) as exc_info:
-        apply_topology_v2(db, bad)
+        apply_topology(db, bad)
     assert exc_info.value.failures
     # __str__ rendering covers the dataclass message format.
     rendered = str(exc_info.value)
@@ -316,23 +316,23 @@ def test_apply_validator_override_via_applier_deps() -> None:
     validator cost twice.
     """
     db = _build_db()
-    parsed = parse_topology_v2({"topology_v2": {"connectors": [{"id": "c1", "kind": "x", "name": "c1"}]}})
+    parsed = parse_topology({"topology": {"connectors": [{"id": "c1", "kind": "x", "name": "c1"}]}})
 
     def _always_clean(_config: object) -> tuple:
         return ()
 
     deps = ApplierDeps(validator_fn=_always_clean)
-    result = apply_topology_v2(db, parsed, applier_deps=deps)
+    result = apply_topology(db, parsed, applier_deps=deps)
     assert result.created == 1
 
 
 def test_apply_now_fn_override_via_applier_deps() -> None:
     """ApplierDeps.now_fn override — every row stamps the deterministic time."""
     db = _build_db()
-    parsed = parse_topology_v2({"topology_v2": {"connectors": [{"id": "c1", "kind": "x", "name": "c1"}]}})
+    parsed = parse_topology({"topology": {"connectors": [{"id": "c1", "kind": "x", "name": "c1"}]}})
 
     deps = ApplierDeps(now_fn=lambda: "1999-01-01T00:00:00Z")
-    apply_topology_v2(db, parsed, applier_deps=deps)
+    apply_topology(db, parsed, applier_deps=deps)
     row = db.execute("SELECT created_at, updated_at FROM topology_connectors WHERE name = 'c1'").fetchone()
     assert row[0] == "1999-01-01T00:00:00Z"
     assert row[1] == "1999-01-01T00:00:00Z"
@@ -346,9 +346,9 @@ def test_apply_now_fn_override_via_applier_deps() -> None:
 def test_apply_cc_pair_with_credential_binding_resolved() -> None:
     """A cc_pair with a credential reference resolves the credential row id."""
     db = _build_db()
-    parsed = parse_topology_v2(
+    parsed = parse_topology(
         {
-            "topology_v2": {
+            "topology": {
                 "connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}],
                 "credentials": [
                     {"id": "cr1", "kind": "oauth", "secret_name": "s1"},  # pragma: allowlist secret
@@ -359,7 +359,7 @@ def test_apply_cc_pair_with_credential_binding_resolved() -> None:
             }
         }
     )
-    apply_topology_v2(db, parsed)
+    apply_topology(db, parsed)
     row = db.execute("SELECT credential_id FROM topology_cc_pairs WHERE name = 'cp1'").fetchone()
     assert row[0] is not None
 
@@ -368,7 +368,7 @@ def test_apply_collection_unchanged_when_only_source_added() -> None:
     """Re-applying with a new source mapping: collection row unchanged, source row created."""
     db = _build_db()
     base = {
-        "topology_v2": {
+        "topology": {
             "connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}],
             "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "cp1"}],
             "collections": [
@@ -376,9 +376,9 @@ def test_apply_collection_unchanged_when_only_source_added() -> None:
             ],
         }
     }
-    apply_topology_v2(db, parse_topology_v2(base))
+    apply_topology(db, parse_topology(base))
     extended = {
-        "topology_v2": {
+        "topology": {
             "connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}],
             "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "cp1"}],
             "collections": [
@@ -392,7 +392,7 @@ def test_apply_collection_unchanged_when_only_source_added() -> None:
             ],
         }
     }
-    second = apply_topology_v2(db, parse_topology_v2(extended))
+    second = apply_topology(db, parse_topology(extended))
     # Only the new source row counts as created.
     assert second.created == 1
     sources = db.execute("SELECT COUNT(*) FROM topology_collection_sources").fetchone()

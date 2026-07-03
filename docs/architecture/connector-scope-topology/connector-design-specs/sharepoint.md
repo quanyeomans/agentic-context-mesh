@@ -281,7 +281,7 @@ Wave E ships the *plumbing* — `iter_containers` / `load_hierarchy` / per-drive
 
 Order matters — each method's complexity composes with what's already landed. Recommended order, lowest-novelty-risk first:
 
-1. **`iter_containers()` + per-drive cursor migration** (the cursor blast-radius fix). Replaces flat `drives` list with one Container per drive; cursor moves from packed JSON to per-Container `cursor_token`. Bit-for-bit OFF-branch behaviour preserved behind `topology_v2_sharepoint` flag. Pre-existing tests must still pass.
+1. **`iter_containers()` + per-drive cursor migration** (the cursor blast-radius fix). Replaces flat `drives` list with one Container per drive; cursor moves from packed JSON to per-Container `cursor_token`. Bit-for-bit OFF-branch behaviour preserved behind `topology_sharepoint` flag. Pre-existing tests must still pass.
 2. **`load_hierarchy()` Site→Drive→Folder** (independent of cursor work). Read-only enumeration; F58 parent-before-child contract. Adds a `tests/contracts/test_sharepoint_hierarchy_parent_before_child.py` sibling.
 3. **`SlimConnector.retrieve_all_slim_docs(container)`** (cheap id-only enumeration for prune cycles). Independent of (2). Uses the existing delta endpoint with `$select=id,lastModifiedDateTime`.
 4. **`SlimConnectorWithPermSync.retrieve_all_slim_docs_with_perms(container)`** (depends on (3)). Adds the per-doc `GET /drives/{id}/items/{id}/permissions` call. Operator opt-in via cc_pair `access_type: SYNC` declaration.
@@ -289,7 +289,7 @@ Order matters — each method's complexity composes with what's already landed. 
 6. **Purview-label → F39 tier routing** in `sensitivity_for(item_id)` (independent of containers; depends on operator config schema decision §9.1). Reads `sensitivityLabel` facet, looks up `{label_guid: tier}` map.
 7. **`EventConnector` subscribe / renew / handle_event** (highest novelty risk, land last). Includes the subscription-renewal state machine from §5. Notification-only webhook wakes the existing delta loop — no content in webhook payload.
 
-Each step lands behind the same `topology_v2_sharepoint` flag with F54 both-branch coverage. Steps (1) through (5) can be parallelised in three subagents if cherry-pick discipline holds; (6) and (7) sequential because they depend on §9.1 and §5 respectively.
+Each step lands behind the same `topology_sharepoint` flag with F54 both-branch coverage. Steps (1) through (5) can be parallelised in three subagents if cherry-pick discipline holds; (6) and (7) sequential because they depend on §9.1 and §5 respectively.
 
 **Cutover within each step**: per `docs/architecture/feature-flag-architecture.md` — capture baseline eval on the gold suite from §6.5 → flip flag for that step → 24h soak → diff → promote stage or rollback. Don't bundle steps for the cutover protocol; each one gets its own measured window.
 
@@ -319,7 +319,7 @@ Landing Wave E SharePoint per §6.6 WILL move baselines. Cherry-pick review must
 | Baseline | Expected delta | Why |
 |---|---|---|
 | `f30-operator-outcome-tests-files.txt` | +5 entries net-new tests, then -5 within same commit | Each new MCP tool (`tool_connector_status` / `_deadletters` / `_capabilities` / `_resync` / `_reindex`) adds an outcome test; F30 baseline tracks files, not tests — net zero |
-| `f45-files.txt` | -2 entries | Two new `.feature` files (`feature_flag_topology_v2_sharepoint_*.feature`) land per F54; baseline shrinks by their absence-tolerance |
+| `f45-files.txt` | -2 entries | Two new `.feature` files (`feature_flag_topology_sharepoint_*.feature`) land per F54; baseline shrinks by their absence-tolerance |
 | `f46-files.txt` | unchanged | New BDD steps use the `build_connector_pipeline` factory per F46; net zero |
 | `f47-integration-factory-files.txt` | unchanged | Same — new integration tests use factory composition |
 | `f54-files.txt` | -7 entries | Seven new behaviour swaps land each with both-branch coverage (per §6.6 step list) |

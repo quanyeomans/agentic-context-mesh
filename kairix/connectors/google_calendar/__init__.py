@@ -7,7 +7,7 @@ for one Google Calendar (one ``calendar_id``, defaulting to
 and persists the returned ``nextSyncToken`` as the incremental-sync
 cursor.
 
-Flag-gated by the ``topology_v2_google_calendar`` feature flag
+Flag-gated by the ``topology_google_calendar`` feature flag
 (introduce stage, default off — see
 :mod:`kairix.core.features.registry`). The flag ships OFF because
 Google Workspace OAuth credentials are not yet provisioned in
@@ -26,7 +26,7 @@ real network I/O fires.
 Registered via ``[project.entry-points."kairix.connectors"]`` in
 kairix's ``pyproject.toml`` — operators select it by listing
 ``google_calendar`` in their ``connectors[]`` config, behind the
-``topology_v2_google_calendar`` flag.
+``topology_google_calendar`` flag.
 
 The plugin is mypy-strict-clean and carries ``py.typed`` per F41.
 

@@ -631,7 +631,7 @@ class TestSourceTierBoostYaml:
 
 class TestTopologyBackedCollectionOverrides:
     """Per-collection retrieval overrides now flow from the canonical
-    topology (``topology_v2.collections[*].retrieval``) rather than the
+    topology (``topology.collections[*].retrieval``) rather than the
     legacy ``collections.shared[*].retrieval`` block (canonical-collapse
     T3). These probes drive ``resolve_retrieval_config`` with its
     ``overrides_fn`` bound to the topology producer so the override is
@@ -646,7 +646,7 @@ class TestTopologyBackedCollectionOverrides:
         from kairix.core.search.config_loader import ResolveConfigDeps, resolve_retrieval_config
 
         topology = {
-            "topology_v2": {
+            "topology": {
                 "collections": [
                     {
                         "name": "reflib",
@@ -678,7 +678,7 @@ class TestTopologyBackedCollectionOverrides:
         from kairix.core.search.config_loader import ResolveConfigDeps, resolve_retrieval_config
 
         topology = {
-            "topology_v2": {
+            "topology": {
                 "collections": [
                     {
                         "name": "reflib",

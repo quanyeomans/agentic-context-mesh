@@ -179,10 +179,10 @@ raw Markdown bytes.
 
 ## 7. Config / topology / scope
 
-`topology_v2` block (manual for the MVP; guided config is Phase 2):
+`topology` block (manual for the MVP; guided config is Phase 2):
 
 ```yaml
-topology_v2:
+topology:
   connectors:
     - id: linear-prod
       kind: linear

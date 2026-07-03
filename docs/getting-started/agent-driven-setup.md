@@ -90,7 +90,7 @@ The shape that parses cleanly through `kairix config validate` lives at the repo
 
 ### Minimal-viable template
 
-For a fresh user who wants the basic setup (one provider, one corpus, no topology v2 connectors yet):
+For a fresh user who wants the basic setup (one provider, one corpus, no topology connectors yet):
 
 ```yaml
 # kairix.config.yaml — minimal viable
@@ -115,21 +115,21 @@ retrieval:
 
 Write that file to `~/.kairix/kairix.config.yaml` (or whatever path you set as `KAIRIX_CONFIG_PATH`).
 
-### Topology v2 add-on (only if the user asked for connectors)
+### Topology add-on (only if the user asked for connectors)
 
-When the user has asked you to wire up a connector (SharePoint, Slack, GitHub, or Notion) OR multi-folder Obsidian routing, append the `topology_v2:` block from `kairix.config.example.yaml`. Each connector flag flips independently — turn on only the ones the user has asked for and has secrets for.
+When the user has asked you to wire up a connector (SharePoint, Slack, GitHub, or Notion) OR multi-folder Obsidian routing, append the `topology:` block from `kairix.config.example.yaml`. Each connector flag flips independently — turn on only the ones the user has asked for and has secrets for.
 
 ```yaml
 features:
-  topology_v2_config: true                  # required when any connector_* flag is on
-  topology_v2_obsidian: true                # only if user wants per-folder Obsidian containers
+  topology_config: true                  # required when any connector_* flag is on
+  topology_obsidian: true                # only if user wants per-folder Obsidian containers
   connector_sharepoint: true                # only if user provided the M365 triple + drive id
   connector_slack: true                     # only if user provided slack bot + (optional) app token
   connector_github: true                    # only if user provided PAT or app triple
   connector_notion: true                    # only if user provided the integration token
 ```
 
-Leave `topology_v2_runtime` OFF on a brand-new install. Flip it only when the user has explicitly asked AND `topology_v2_config` has been on for at least one full sync cycle — `topology_v2_runtime` changes chunk write routing, and the user should validate the parsed config first (`kairix config validate` reports zero failures). The cutover protocol in `docs/architecture/feature-flag-architecture.md` §"Cutover protocol" walks through the snapshot → flip → soak → diff sequence.
+Leave `topology_runtime` OFF on a brand-new install. Flip it only when the user has explicitly asked AND `topology_config` has been on for at least one full sync cycle — `topology_runtime` changes chunk write routing, and the user should validate the parsed config first (`kairix config validate` reports zero failures). The cutover protocol in `docs/architecture/feature-flag-architecture.md` §"Cutover protocol" walks through the snapshot → flip → soak → diff sequence.
 
 ---
 
@@ -254,8 +254,8 @@ This emits a structured envelope: `{passed, total, fully_passed, failures: [{che
 
 Checks worth knowing about for connector setups:
 
-- `topology_v2_config_valid` — parses + cross-references the `topology_v2:` block
-- `topology_v2_cc_pairs_registered` — confirms each declared cc_pair has a row in `topology_cc_pairs` (declared cc_pairs register on worker startup — restart the worker after editing the YAML)
+- `topology_config_valid` — parses + cross-references the `topology:` block
+- `topology_cc_pairs_registered` — confirms each declared cc_pair has a row in `topology_cc_pairs` (declared cc_pairs register on worker startup — restart the worker after editing the YAML)
 - `sharepoint_credentials_loaded` — when `connector_sharepoint` is on, confirms the three M365 secrets resolve
 
 Checks gated by a feature flag (`sharepoint_credentials_loaded`, `maintenance_loop_ticking`) report `ok=true` with a `"skipped — <flag> flag is OFF"` detail when the flag is off — so a fresh install sees the check exists but doesn't block.
@@ -268,13 +268,13 @@ kairix worker preflight --json
 
 Runs the integrity audit — confirms the SQLite index is on the expected schema version, the embed pipeline can resolve its provider plugin, and the document root contains at least one indexable file.
 
-### 4.3 `kairix features status --topology-v2`
+### 4.3 `kairix features status --topology`
 
 ```bash
-kairix features status --topology-v2
+kairix features status --topology
 ```
 
-Reports which flags are on, where the value came from (env / config / default), and — when topology_v2 is on — which cc_pairs are registered in `topology_cc_pairs` plus the per-actor scope resolution.
+Reports which flags are on, where the value came from (env / config / default), and — when topology is on — which cc_pairs are registered in `topology_cc_pairs` plus the per-actor scope resolution.
 
 ### 4.4 `kairix benchmark run --suite reflib`
 
@@ -295,8 +295,8 @@ Every failure path you might hit, with the exact next command. Mirrors the F21 a
 | `secrets_loaded` fails: "LLM credentials missing" | The LLM key + endpoint are not in env / secrets file | fix: write both keys (see §3) to the secrets file at the path reported in `detail`. next: run `kairix secrets verify`, then re-run `kairix onboard check`. |
 | `document_root_configured` fails: "directory does not exist" | The path you wrote into `paths.document_root` (or `KAIRIX_DOCUMENT_ROOT`) does not exist on disk | fix: `mkdir -p <path>` OR correct the path in `kairix.config.yaml`. next: re-run `kairix onboard check`. |
 | `vector_search_working` fails: "vec_failed=True" | The provider plugin can't reach its endpoint (auth, network, or quota) | fix: `kairix probe-config` reports the specific reason; usually a stale API key. next: rotate the key, re-write the secrets file, re-run. |
-| `topology_v2_config_valid` fails: "<N> cross-reference failure(s)" | A `cc_pair` references a connector / credential that wasn't declared; or a `collection.source` / `scope_profile.entry` references a missing cc_pair / collection | fix: open `kairix.config.yaml` and add the missing entries OR remove the dangling reference. next: run `kairix config validate`. |
-| `topology_v2_cc_pairs_registered` fails: "<N> declared cc_pair(s) not registered" | You wrote new cc_pairs to the YAML but the worker hasn't re-applied them | fix: restart the worker (`docker compose restart kairix` or restart your `kairix worker run` process) — declared cc_pairs register on startup. next: re-run `kairix onboard check`. |
+| `topology_config_valid` fails: "<N> cross-reference failure(s)" | A `cc_pair` references a connector / credential that wasn't declared; or a `collection.source` / `scope_profile.entry` references a missing cc_pair / collection | fix: open `kairix.config.yaml` and add the missing entries OR remove the dangling reference. next: run `kairix config validate`. |
+| `topology_cc_pairs_registered` fails: "<N> declared cc_pair(s) not registered" | You wrote new cc_pairs to the YAML but the worker hasn't re-applied them | fix: restart the worker (`docker compose restart kairix` or restart your `kairix worker run` process) — declared cc_pairs register on startup. next: re-run `kairix onboard check`. |
 | `sharepoint_credentials_loaded` fails: "<N> SharePoint secret(s) unresolved" | The three M365 secrets are not in env / secrets file / Key Vault | fix: write `CONNECTOR_M365_TENANT_ID` / `CONNECTOR_M365_CLIENT_ID` / `CONNECTOR_M365_CLIENT_SECRET` to the secrets file. next: re-run `kairix onboard check sharepoint_credentials_loaded`. |
 | `neo4j_reachable` fails: "client unavailable" | Neo4j is not installed OR `KAIRIX_NEO4J_URI` is wrong | fix: install via `bash scripts/install-neo4j.sh` OR run the bundled compose (Neo4j is a sidecar in `docker-compose.yml`); set `KAIRIX_NEO4J_URI=bolt://localhost:7687` (pip) or `bolt://neo4j:7687` (compose). next: re-run `kairix onboard check`. Neo4j is required for production — entity boost, multi-hop, and briefing all rely on it. |
 | `mcp_service` fails: "not configured" | No MCP consumer harness has kairix registered | fix: add kairix to the user's `claude_desktop_config.json` OR `~/.openclaw/openclaw.json` (the failure detail names the exact paths). next: re-run `kairix onboard check`. |
@@ -312,7 +312,7 @@ Do NOT auto-decide these. Stop, surface the question, and wait for the user's an
 - **Any secret value.** Tenant ids, client ids, secrets, API keys, Neo4j passwords. Even if the user has previously typed them — never persist a guess.
 - **Permission grants.** AAD app registration consent (Sites.Read.All, Files.Read.All) is a high-trust action; the user — not you — should click through the consent screen.
 - **Any spend.** `kairix embed` against a large corpus costs real money (~$0.50-1.00 per 1000 documents on text-embedding-3-large). Confirm before kicking off a full backfill.
-- **Cutover flag flips on a soaked deployment.** If kairix has been running with `topology_v2_config: false` and the user asks you to flip it to true on a corpus the team is already using, capture a pre-flip baseline (`scripts/cutover/capture_baseline.py`) and tell the user to read `docs/architecture/feature-flag-architecture.md` §"Cutover protocol" before the flip.
+- **Cutover flag flips on a soaked deployment.** If kairix has been running with `topology_config: false` and the user asks you to flip it to true on a corpus the team is already using, capture a pre-flip baseline (`scripts/cutover/capture_baseline.py`) and tell the user to read `docs/architecture/feature-flag-architecture.md` §"Cutover protocol" before the flip.
 - **Destructive verbs.** `kairix entity purge`, `kairix cc-pair delete`, `kairix uninstall --no-keep-data`, anything that drops data. Always confirm.
 - **Production deployments.** Setup on a shared VM / production host: confirm with the user that the host is the intended target before running.
 
@@ -323,6 +323,6 @@ Do NOT auto-decide these. Stop, surface the question, and wait for the user's an
 - [`quick-start.md`](quick-start.md) — the human-facing version with Docker + pip parallel steps
 - [`kairix.config.example.yaml`](../../kairix.config.example.yaml) — the canonical operator-facing YAML shape, with inline comments per block
 - [`docs/architecture/feature-flag-architecture.md`](../architecture/feature-flag-architecture.md) — the cutover protocol for any flag flip on a soaked corpus
-- [`docs/architecture/connector-scope-topology/ADR.md`](../architecture/connector-scope-topology/ADR.md) — full spec for topology v2 (connectors / collections / scope profiles / skills)
+- [`docs/architecture/connector-scope-topology/ADR.md`](../architecture/connector-scope-topology/ADR.md) — full spec for topology (connectors / collections / scope profiles / skills)
 - [`docs/operations/MCP-DEPLOYMENT.md`](../operations/MCP-DEPLOYMENT.md) — cold-start behaviour the MCP server reports during warm-up
 - [`docs/user-guide/agent-usage-guide.md`](../user-guide/agent-usage-guide.md) — what `kairix onboard guide` installs into the operator's knowledge store

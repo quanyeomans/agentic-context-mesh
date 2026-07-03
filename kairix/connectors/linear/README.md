@@ -55,7 +55,7 @@ Then flip the feature flag and add the connector to your
 features:
   connector_linear: true
 
-topology_v2:
+topology:
   connectors:
     - id: linear-prod
       kind: linear

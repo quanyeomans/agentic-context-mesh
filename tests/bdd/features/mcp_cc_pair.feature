@@ -1,4 +1,4 @@
-@mcp @cc_pair @topology_v2
+@mcp @cc_pair @topology
 Feature: tool_cc_pair MCP tool — escalation envelope for Wave D cc_pair lifecycle
   As an agent connected over MCP
   I want a tool_cc_pair call to return the OperatorOnlyCapability envelope
@@ -12,7 +12,7 @@ Feature: tool_cc_pair MCP tool — escalation envelope for Wave D cc_pair lifecy
     When the agent calls tool_cc_pair with verb "list"
     Then the MCP cc_pair envelope contains capability "cc-pair"
     And the MCP cc_pair envelope contains operator_command "kairix cc-pair list"
-    And the MCP cc_pair envelope contains reason "topology v2"
+    And the MCP cc_pair envelope contains reason "topology"
 
   Scenario: tool_cc_pair pause returns the friendly pause command in the envelope
     Given the MCP server is constructed

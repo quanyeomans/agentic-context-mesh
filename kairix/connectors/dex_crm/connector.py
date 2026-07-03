@@ -381,7 +381,7 @@ class DexCrmConnector:
     # The shims below let the connector satisfy the new capability
     # Protocols (PollConnector, CredentialsConnector) by delegating to
     # existing methods. Production routing through these methods is
-    # gated by the ``topology_v2_protocol`` feature flag (default-off);
+    # gated by the ``topology_protocol`` feature flag (default-off);
     # Wave C activates the runtime path.
 
     def load_credentials(self, credentials: dict[str, Any]) -> dict[str, Any] | None:
@@ -406,7 +406,7 @@ class DexCrmConnector:
     # connector-wide cursor path, which the obsidian pilot already
     # validates.
     #
-    # When the ``topology_v2_dex_crm`` flag is ON:
+    # When the ``topology_dex_crm`` flag is ON:
     #   * :meth:`iter_containers` yields one Container (the tenant).
     #   * :meth:`list_changes_for_container` reads
     #     ``container.cursor_token`` as the per-container cursor and
@@ -460,7 +460,7 @@ class DexCrmConnector:
         uses ONLY the supplied Container's cursor — no shared / cached /
         connector-level cursor leaks across containers.
 
-        ``topology_v2_dex_crm`` retired post-cutover (task #132); the
+        ``topology_dex_crm`` retired post-cutover (task #132); the
         per-container path is now the only behaviour.
         """
         return self._list_changes_scoped(container)
@@ -482,7 +482,7 @@ class DexCrmConnector:
         ``None`` because Dex sensitivity is connector-configured, not
         per-folder (per ADR-005).
 
-        ``topology_v2_dex_crm`` retired post-cutover (task #132); the
+        ``topology_dex_crm`` retired post-cutover (task #132); the
         per-entity-type walk is now the only behaviour.
         """
         yield from _walk_hierarchy(cc_pair_id=cc_pair_id)

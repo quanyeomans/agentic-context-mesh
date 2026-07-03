@@ -4,7 +4,7 @@ Covers ``kairix.platform.setup.source_oauth`` through its public
 surface: the wizard-origin callback listener, the state-carrying
 authorize-URL builders, the flow factory, canonical secret-name
 derivation, unit discovery (with injected fake clients — no HTTP), and
-the ``topology_v2`` config emission.
+the ``topology`` config emission.
 """
 
 from __future__ import annotations
@@ -373,7 +373,7 @@ def test_google_areas_have_no_pickable_units() -> None:
 
 def test_slack_topology_emits_per_channel_path_filters() -> None:
     updates = topology_updates_for_source("slack", "alpha", ("C1", "C2"), {})
-    topology = updates["topology_v2"]
+    topology = updates["topology"]
     assert topology["connectors"][0]["kind"] == "slack"
     assert topology["connectors"][0]["connector_specific_config"] == {"workspace": "alpha"}
     # pragma: allowlist nextline secret — logical secret NAME, not a value
@@ -385,7 +385,7 @@ def test_slack_topology_emits_per_channel_path_filters() -> None:
 
 def test_github_topology_emits_repos_allowlist() -> None:
     updates = topology_updates_for_source("github", "", ("org/alpha", "org/beta"), {})
-    topology = updates["topology_v2"]
+    topology = updates["topology"]
     connector = topology["connectors"][0]
     assert connector["kind"] == "github"
     assert connector["connector_specific_config"]["repos_allowlist"] == ["org/alpha", "org/beta"]
@@ -394,46 +394,46 @@ def test_github_topology_emits_repos_allowlist() -> None:
 
 def test_gmail_topology_carries_the_mailbox() -> None:
     updates = topology_updates_for_source("gmail", "agent-alpha@example.com", (), {})
-    connector = updates["topology_v2"]["connectors"][0]
+    connector = updates["topology"]["connectors"][0]
     assert connector["kind"] == "gmail"
     assert connector["connector_specific_config"] == {"user_email": "agent-alpha@example.com"}
 
 
 def test_google_drive_topology_defaults_the_corpus_label() -> None:
     updates = topology_updates_for_source("google-drive", "", (), {})
-    connector = updates["topology_v2"]["connectors"][0]
+    connector = updates["topology"]["connectors"][0]
     assert connector["kind"] == "google_drive"
     assert connector["connector_specific_config"] == {"corpora": ["my-drive"]}
 
 
 def test_calendar_topology_defaults_to_primary() -> None:
     updates = topology_updates_for_source("google-calendar", "", (), {})
-    connector = updates["topology_v2"]["connectors"][0]
+    connector = updates["topology"]["connectors"][0]
     assert connector["connector_specific_config"] == {"calendar_id": "primary"}
 
 
 def test_topology_upsert_preserves_other_sources_and_replaces_same_id() -> None:
     first = topology_updates_for_source("slack", "alpha", ("C1",), {})
     second = topology_updates_for_source("github", "", ("org/alpha",), first)
-    topology = second["topology_v2"]
+    topology = second["topology"]
     kinds = {connector["kind"] for connector in topology["connectors"]}
     assert kinds == {"slack", "github"}
     # Re-saving slack with new picks replaces its rows, no duplicates.
     third = topology_updates_for_source("slack", "alpha", ("C9",), second)
-    slack_connectors = [c for c in third["topology_v2"]["connectors"] if c["kind"] == "slack"]
+    slack_connectors = [c for c in third["topology"]["connectors"] if c["kind"] == "slack"]
     assert len(slack_connectors) == 1
-    slack_collections = [c for c in third["topology_v2"]["collections"] if c["name"] == "slack-alpha"]
+    slack_collections = [c for c in third["topology"]["collections"] if c["name"] == "slack-alpha"]
     assert slack_collections[0]["sources"][0]["path_filter"] == "slack://channel/C9/*"
 
 
 def test_emitted_topology_parses_under_the_canonical_parser() -> None:
     """The wizard's emission must round-trip through the same parser the
     worker boots with — proves the shapes are real, not wishful."""
-    from kairix.config.topology_v2 import parse_topology_v2
+    from kairix.config.topology import parse_topology
 
     updates = topology_updates_for_source("slack", "alpha", ("C1",), {})
     updates = topology_updates_for_source("github", "", ("org/alpha",), updates)
-    parsed = parse_topology_v2(updates)
+    parsed = parse_topology(updates)
     assert {c.kind for c in parsed.connectors} == {"slack", "github"}
     assert {p.name for p in parsed.cc_pairs} == {"slack-alpha", "github-app"}
     assert {c.name for c in parsed.collections} == {"slack-alpha", "github-repos"}

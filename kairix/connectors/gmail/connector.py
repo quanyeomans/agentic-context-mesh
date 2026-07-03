@@ -131,7 +131,7 @@ class GmailCredentials:
 
 
 def _default_flag_reader(name: str) -> bool:
-    """Production default for the topology-v2-gmail flag check.
+    """Production default for the topology-gmail flag check.
 
     Delegates to :func:`kairix.core.features.flag` so the production
     path threads through the env-var → config-overlay → registry
@@ -406,7 +406,7 @@ class GmailConnector:
         )
 
     # ------------------------------------------------------------------
-    # Topology v2 Wave B capability shims
+    # Topology Wave B capability shims
     # ------------------------------------------------------------------
 
     def load_from_checkpoint(self, _container: Container, checkpoint: str | None) -> Iterator[ChangeEvent]:
@@ -420,7 +420,7 @@ class GmailConnector:
         return self.list_changes(checkpoint)
 
     # ------------------------------------------------------------------
-    # Topology v2 Wave E per-mailbox container surface
+    # Topology Wave E per-mailbox container surface
     # ------------------------------------------------------------------
 
     def iter_containers(self, cc_pair_id: int) -> Iterator[Container]:
@@ -446,7 +446,7 @@ class GmailConnector:
         this mailbox). Per-container next-cursor is recorded via
         :meth:`next_cursor_for_container`.
 
-        ``topology_v2_gmail`` retired post-cutover (task #132); the
+        ``topology_gmail`` retired post-cutover (task #132); the
         per-mailbox path is now the only behaviour.
         """
         return self._list_changes_scoped(container)

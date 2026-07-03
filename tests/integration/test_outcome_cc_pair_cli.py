@@ -11,7 +11,7 @@ Per F30 + the test-discipline spec: every CLI subcommand in
 This file covers all 5 verbs (list / create / pause / resume / delete)
 + the JSON envelope mode + the illegal-transition error path.
 
-Sabotage-proof: see ``tests/unit/test_topology_v2_validators.py`` for
+Sabotage-proof: see ``tests/unit/test_topology_validators.py`` for
 the 5 cross-reference validator proofs. For these CLI outcome tests, I
 verified each verb fails when the verb's rendering line is removed
 (commented out the ``return 0, "created cc_pair ..."`` body → the
@@ -34,7 +34,7 @@ pytestmark = pytest.mark.integration
 
 
 def _bootstrap_db(tmp_path: Path) -> Path:
-    """Create a fresh kairix.sqlite with the topology v2 schema applied."""
+    """Create a fresh kairix.sqlite with the topology schema applied."""
     db_path = tmp_path / "kairix.sqlite"
     db = sqlite3.connect(str(db_path))
     create_schema(db, dims=4)
@@ -231,7 +231,7 @@ def test_mcp_tool_cc_pair_returns_operator_only_envelope() -> None:
     envelope = tool_cc_pair(verb="list")
     assert envelope["capability"] == "cc-pair"
     assert "kairix cc-pair list" in envelope["operator_command"]
-    assert "topology v2" in envelope["reason"]
+    assert "topology" in envelope["reason"]
     assert envelope["expected_runtime_seconds"] == 5
 
     pause_envelope = tool_cc_pair(verb="pause")

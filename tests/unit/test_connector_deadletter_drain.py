@@ -545,7 +545,7 @@ def test_sync_loop_drains_seeded_deadletter_end_to_end(tmp_path: Path) -> None:
         seed_db.close()
 
     mapping = {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {
                     "id": "obsidian-conn",
@@ -628,7 +628,7 @@ def test_sync_loop_absorbs_catastrophic_drain_failure(tmp_path: Path) -> None:
         seed_db.close()
 
     mapping = {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {
                     "id": "obsidian-conn",

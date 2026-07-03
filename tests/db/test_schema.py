@@ -33,7 +33,7 @@ def test_validate_schema_passes_on_valid_db() -> None:
     (SC-4): documents_media, document_pages, connector_cursors,
     connector_deadletter, bronze_records, entity_signals.
 
-    Plus the topology v2 Wave A tables added in SCHEMA_VERSION 3:
+    Plus the topology Wave A tables added in SCHEMA_VERSION 3:
     12 topology_* tables.
     """
     db = sqlite3.connect(":memory:")
@@ -67,7 +67,7 @@ def test_validate_schema_passes_on_valid_db() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL, seq INTEGER NOT NULL,
             pos INTEGER NOT NULL, pruned_at TEXT NOT NULL, UNIQUE(hash, seq)
         );
-        -- Topology v2 Wave A tables (minimal shapes for schema-validation purposes).
+        -- Topology Wave A tables (minimal shapes for schema-validation purposes).
         CREATE TABLE topology_connectors (id INTEGER PRIMARY KEY, name TEXT);
         CREATE TABLE topology_credentials (id INTEGER PRIMARY KEY, name TEXT);
         CREATE TABLE topology_cc_pairs (id INTEGER PRIMARY KEY, name TEXT);
@@ -159,7 +159,7 @@ def test_validate_schema_detects_missing_column() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL, seq INTEGER NOT NULL,
             pos INTEGER NOT NULL, pruned_at TEXT NOT NULL, UNIQUE(hash, seq)
         );
-        -- Topology v2 Wave A tables — minimal shapes so the validator
+        -- Topology Wave A tables — minimal shapes so the validator
         -- reaches the column check on `documents` (the table under test).
         CREATE TABLE topology_connectors (id INTEGER PRIMARY KEY);
         CREATE TABLE topology_credentials (id INTEGER PRIMARY KEY);
@@ -218,7 +218,7 @@ def test_validate_schema_empty_db_reports_all_missing() -> None:
     required set: documents_media, document_pages, connector_cursors,
     connector_deadletter, bronze_records, entity_signals.
 
-    SCHEMA_VERSION 3 (topology v2 Wave A) added twelve topology_* tables
+    SCHEMA_VERSION 3 (topology Wave A) added twelve topology_* tables
     to the required set.
 
     KFEAT-021 Phase 1 added the ``content_vectors_pruned`` soft-delete
@@ -232,7 +232,7 @@ def test_validate_schema_empty_db_reports_all_missing() -> None:
     """
     db = sqlite3.connect(":memory:")
     errors = validate_schema(db)
-    # 3 legacy core + 1 KFEAT-021 + 6 connector-framework + 12 topology v2
+    # 3 legacy core + 1 KFEAT-021 + 6 connector-framework + 12 topology
     # + 1 ADR-029 + 1 #398 W-D = 24
     assert len(errors) == 24
     assert any("documents" in e for e in errors)
@@ -245,7 +245,7 @@ def test_validate_schema_empty_db_reports_all_missing() -> None:
     assert any("connector_deadletter" in e for e in errors)
     assert any("bronze_records" in e for e in errors)
     assert any("entity_signals" in e for e in errors)
-    # Topology v2 (Wave A)
+    # Topology (Wave A)
     assert any("topology_connectors" in e for e in errors)
     assert any("topology_collections" in e for e in errors)
     assert any("topology_scope_profiles" in e for e in errors)
@@ -286,7 +286,7 @@ def test_validate_schema_missing_content_vectors_only() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL, seq INTEGER NOT NULL,
             pos INTEGER NOT NULL, pruned_at TEXT NOT NULL, UNIQUE(hash, seq)
         );
-        -- Topology v2 Wave A tables — minimal shapes so this test
+        -- Topology Wave A tables — minimal shapes so this test
         -- isolates `content_vectors` as the only missing table.
         CREATE TABLE topology_connectors (id INTEGER PRIMARY KEY);
         CREATE TABLE topology_credentials (id INTEGER PRIMARY KEY);

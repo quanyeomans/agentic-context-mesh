@@ -988,7 +988,7 @@ class ChangeEvent:
     :class:`Chunk.source_modified_at` so search can boost recency.
     """
 
-    # Topology v2 Wave A: extended enum with `archived` (recoverable soft-delete,
+    # Topology Wave A: extended enum with `archived` (recoverable soft-delete,
     # chunks remain but marked) and `access_lost` (credential revoked, chunks
     # frozen but not re-fetchable). Old emitters keep using the original three;
     # only flag-gated Wave C+ paths emit the new values.
@@ -1009,7 +1009,7 @@ class RawArtefact:
     wall-clock at fetch time, distinct from ``ChangeEvent.modified_at``
     (the source's own modify time).
 
-    Topology v2 Wave A: ``sensitivity_hint`` carries per-item sensitivity
+    Topology Wave A: ``sensitivity_hint`` carries per-item sensitivity
     when the source surfaces it (SharePoint Purview labels, Slack channel
     privacy, GitHub repo visibility, Drive sharing tier). Silver applies
     a 5-step fallback chain — hint > collection-source override >
@@ -1139,7 +1139,7 @@ class Chunk:
     PPTX / XLSX content; it lets retrieval cite a specific page back
     to the operator.
 
-    Topology v2 Wave C: ``chunker_version`` is the version-string of the
+    Topology Wave C: ``chunker_version`` is the version-string of the
     Chunker plugin that emitted this chunk (mirrors
     ``documents_media.extractor_version``). ``None`` for legacy paths
     that pre-date the chunker registry; new emitters fill it via
@@ -1476,12 +1476,12 @@ class FeatureFlagResolver(Protocol):
 
 
 # =============================================================================
-# Topology v2 (Wave A) — connector / collection / scope topology
+# Topology (Wave A) — connector / collection / scope topology
 # =============================================================================
 #
 # These dataclasses + enums + exceptions are the v2 vocabulary. They land
 # in Wave A as pure definitions — no behaviour wired yet. The
-# ``topology_v2_schema`` feature flag gates whether any code path
+# ``topology_schema`` feature flag gates whether any code path
 # WRITES to the schema tables that these dataclasses represent.
 #
 # See docs/architecture/connector-scope-topology/ADR.md for the
@@ -1559,7 +1559,7 @@ CollectionVisibility = Literal["public", "engagement", "team", "private"]
 
 @dataclass(frozen=True)
 class ConnectorInstance:
-    """Topology v2 §1 — Connector (kind + config).
+    """Topology §1 — Connector (kind + config).
 
     The configured target. Decoupled from credentials (see ``Credential``)
     and from operational state (see ``ConnectorCredentialPair``).
@@ -1579,7 +1579,7 @@ class ConnectorInstance:
 
 @dataclass(frozen=True)
 class Credential:
-    """Topology v2 §2 — Credential (auth shape).
+    """Topology §2 — Credential (auth shape).
 
     Encrypted at rest. Decoupled from connector so the same auth blob
     can drive multiple scoped connectors AND a connector's credential
@@ -1598,7 +1598,7 @@ class Credential:
 
 @dataclass(frozen=True)
 class ConnectorCredentialPair:
-    """Topology v2 §3 — the operational unit.
+    """Topology §3 — the operational unit.
 
     Binding of one Connector + one Credential with its own cursor scope,
     status, audit timestamps, and access mode. The cc_pair_id is the
@@ -1625,7 +1625,7 @@ class ConnectorCredentialPair:
 
 @dataclass(frozen=True)
 class Container:
-    """Topology v2 §4 — per-cc_pair internal scope unit.
+    """Topology §4 — per-cc_pair internal scope unit.
 
     Each Container has its own delta cursor (replacing the v1 single-
     cursor-per-connector). Per-drive (SharePoint), per-mailbox (Graph),
@@ -1642,7 +1642,7 @@ class Container:
 
 @dataclass(frozen=True)
 class HierarchyNode:
-    """Topology v2 §4 — source-side folder / space / site / channel tree.
+    """Topology §4 — source-side folder / space / site / channel tree.
 
     Emitted by ``HierarchyConnector`` capability parent-before-child.
     Lets the search layer answer "files in this folder", "siblings of
@@ -1662,7 +1662,7 @@ class HierarchyNode:
 
 @dataclass(frozen=True)
 class CollectionSource:
-    """Topology v2 §5 — one (cc_pair, filter) mapping into a Collection."""
+    """Topology §5 — one (cc_pair, filter) mapping into a Collection."""
 
     cc_pair_id: int
     source_path_filter: str
@@ -1671,7 +1671,7 @@ class CollectionSource:
 
 @dataclass(frozen=True)
 class FederatedConnector:
-    """Topology v2 §5 — external search-index member of a Collection.
+    """Topology §5 — external search-index member of a Collection.
 
     Lets a Collection compose external search endpoints (Vespa, Elastic,
     MCP) alongside ingested cc_pair sources without re-ingesting.
@@ -1686,7 +1686,7 @@ class FederatedConnector:
 
 @dataclass(frozen=True)
 class GroupGrant:
-    """Topology v2 §5 — per-group access to a Collection.
+    """Topology §5 — per-group access to a Collection.
 
     Per-group is operationally cheaper than per-actor at team scale —
     add Alice to ``team-engagement`` and she inherits the group's
@@ -1703,7 +1703,7 @@ class GroupGrant:
 
 @dataclass(frozen=True)
 class Collection:
-    """Topology v2 §5 — retrieval bucket, decoupled from connectors.
+    """Topology §5 — retrieval bucket, decoupled from connectors.
 
     Aggregates one or more cc_pairs via filters, plus optional
     federated members. Search ranks within / over the Collection's
@@ -1725,7 +1725,7 @@ class Collection:
 
 @dataclass(frozen=True)
 class ScopeEntry:
-    """Topology v2 §6 — one (collection, rights) entry in a ScopeProfile."""
+    """Topology §6 — one (collection, rights) entry in a ScopeProfile."""
 
     collection_name: str
     can_read: bool
@@ -1735,7 +1735,7 @@ class ScopeEntry:
 
 @dataclass(frozen=True)
 class ScopeProfile:
-    """Topology v2 §6 — per-actor (or per-group) access bundle.
+    """Topology §6 — per-actor (or per-group) access bundle.
 
     Composition rules: collections by intersection across requesting
     principals; ``max_sensitivity`` by F39-min (least permissive); write
@@ -1754,7 +1754,7 @@ class ScopeProfile:
 
 @dataclass(frozen=True)
 class TaskCollection:
-    """Topology v2 §6 — one named member of a Skill's task_collections.
+    """Topology §6 — one named member of a Skill's task_collections.
 
     May match a real Collection or be a virtual aggregator scoped to
     the skill invocation.
@@ -1767,7 +1767,7 @@ class TaskCollection:
 
 @dataclass(frozen=True)
 class Skill:
-    """Topology v2 §6 — composable search strategy.
+    """Topology §6 — composable search strategy.
 
     Defines an ordered set of task_collections + ranking + iteration
     shape. Invoked via ``kairix skill <name>`` or via the MCP
@@ -1849,7 +1849,7 @@ class CCPairTransitionError(Exception):
 
 
 # =============================================================================
-# Topology v2 (Wave B) — capability mix-in Protocols (Onyx-derived)
+# Topology (Wave B) — capability mix-in Protocols (Onyx-derived)
 # =============================================================================
 #
 # Wave B splits the single flat :class:`SourceConnector` Protocol into
@@ -1861,7 +1861,7 @@ class CCPairTransitionError(Exception):
 # These Protocols land as additive shapes — Wave B itself is pure-
 # additive (the 4 shipped connectors get default-impl shims so they
 # continue to satisfy the new surfaces without behavioural change). The
-# ``topology_v2_protocol`` feature flag gates whether the worker's
+# ``topology_protocol`` feature flag gates whether the worker's
 # connector-sync dispatch routes through the new capability path; Wave
 # C activates it at runtime.
 #
@@ -2040,7 +2040,7 @@ class CredentialsConnector(Protocol):
 
 
 # =============================================================================
-# Topology v2 (Wave C) — Chunker Protocol (per-(kind, mime) dispatch)
+# Topology (Wave C) — Chunker Protocol (per-(kind, mime) dispatch)
 # =============================================================================
 #
 # ADR v2 §6 introduces a chunker registry behind the SilverProcessor so

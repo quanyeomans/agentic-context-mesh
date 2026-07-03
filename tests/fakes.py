@@ -4463,7 +4463,7 @@ class FakeFeatureFlagResolver:
 
 
 # =============================================================================
-# Topology v2 Wave B — canonical capability-mix-in Protocol fakes
+# Topology Wave B — canonical capability-mix-in Protocol fakes
 # =============================================================================
 # Minimal stubs satisfying each new capability Protocol from
 # ``kairix.core.protocols``. Used by ``tests/contracts/test_capability_protocols.py``
@@ -4954,8 +4954,8 @@ class FakeScopeProfileResolver:
     """In-memory :class:`ScopeProfileResolver` for #372 / #373 test discipline.
 
     Returns a pre-seeded ``ResolvedScope`` keyed on the actor tuple. Used
-    by :class:`TopologyV2CollectionResolver` unit / contract tests so they
-    don't have to seed the topology_v2 SQL tables to exercise the resolver
+    by :class:`TopologyCollectionResolver` unit / contract tests so they
+    don't have to seed the topology SQL tables to exercise the resolver
     logic itself (the contract test covers the SQL → ResolvedScope path
     separately).
 
@@ -5004,9 +5004,9 @@ class FakeScopeProfileResolver:
     F1-clean substitute: production code constructs the real
     :class:`ScopeProfileResolver`; tests pass this fake via the
     ``scope_profile_resolver=`` kwarg on
-    :class:`TopologyV2CollectionResolver`.
+    :class:`TopologyCollectionResolver`.
 
-    Planned production extension (GH #373, ``topology_v2_default_in_scope``
+    Planned production extension (GH #373, ``topology_default_in_scope``
     feature flag): the real ``ScopeProfileResolver.resolve`` will accept a
     new ``default_only: bool = False`` kwarg. When True, entries with
     ``default_in_scope=0`` are filtered out of ``ResolvedScope.collections``

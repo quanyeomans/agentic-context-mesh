@@ -63,7 +63,7 @@ def _two_connector_topology(vault: Path) -> dict[str, Any]:
     files so the flagless connector has observable work.
     """
     return {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {
                     "id": f"{_KIND}-conn",

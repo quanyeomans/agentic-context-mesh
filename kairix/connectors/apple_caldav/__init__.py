@@ -12,7 +12,7 @@ password is the documented Apple surface for CalDAV — see
 ``kairix/connectors/apple_caldav/README.md`` for the operator
 instructions.
 
-Flag-gated by the ``topology_v2_apple_caldav`` feature flag (default
+Flag-gated by the ``topology_apple_caldav`` feature flag (default
 OFF — see :mod:`kairix.core.features.registry`). Until the flag flips
 ON the connector retains the legacy single-cursor shape; when ON,
 each iCloud calendar becomes its own :class:`Container` with its own

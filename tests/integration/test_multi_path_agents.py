@@ -7,7 +7,7 @@ parsing + registry resolution code path is exercised end to end.
 
 Canonical-collapse: the legacy ``DefaultCollectionResolver`` that wrapped
 these registry methods has been retired (the canonical resolver is
-``TopologyV2CollectionResolver``); these tests now assert directly against
+``TopologyCollectionResolver``); these tests now assert directly against
 the live ``ConfigDrivenAgentRegistry`` surface (``collections_for`` /
 ``all_collections``) that the resolver consumed.
 """

@@ -69,7 +69,7 @@ Open your `kairix.config.yaml` and add the block below. It turns the flag on, de
 features:
   connector_linear: true
 
-topology_v2:
+topology:
   connectors:
     - id: linear-prod
       kind: linear
@@ -101,7 +101,7 @@ Notes:
 - `name:` is **required** on the cc_pair. Leave it out and the worker fails to read the config on startup.
 - `refresh_freq_seconds: 900` polls every 15 minutes. Roadmap and docs change on a human cadence, so that is plenty fresh; raise or lower it to suit.
 
-If your `kairix.config.yaml` already has a `features:` or `topology_v2:` section, merge these keys into the existing ones rather than adding a second copy. Then check it parses:
+If your `kairix.config.yaml` already has a `features:` or `topology:` section, merge these keys into the existing ones rather than adding a second copy. Then check it parses:
 
 ```bash
 # Docker
@@ -140,7 +140,7 @@ docker compose exec kairix kairix onboard check
 kairix onboard check
 ```
 
-Look for a passing `topology_v2_cc_pairs_registered` row — it confirms your Linear cc_pair is live. You can also list every flag and its state:
+Look for a passing `topology_cc_pairs_registered` row — it confirms your Linear cc_pair is live. You can also list every flag and its state:
 
 ```bash
 kairix features status
@@ -165,10 +165,10 @@ That's it — the Linear connector is live. New edits in Linear show up on the n
 | Symptom | Cause | Fix |
 |---|---|---|
 | `connector_linear` still shows `false` in `kairix features status` after editing the config | The worker hasn't re-read the config, or `connector_linear: true` sits under the wrong key | Confirm `connector_linear: true` is under the top-level `features:` block, then restart the worker (`docker compose restart kairix`, or restart your `kairix worker run` process). Flags apply on startup. |
-| `topology_v2_cc_pairs_registered` fails in `onboard check`, or `kairix config validate` errors | The config didn't parse, or the worker hasn't applied the cc_pair yet | Run `kairix config validate`: a missing `name:` on the cc_pair, `cc_pair_id` instead of `cc_pair` in a collection source, or `credential_ref` instead of `secret_name` will each stop the config from loading. Fix, then restart the worker. |
+| `topology_cc_pairs_registered` fails in `onboard check`, or `kairix config validate` errors | The config didn't parse, or the worker hasn't applied the cc_pair yet | Run `kairix config validate`: a missing `name:` on the cc_pair, `cc_pair_id` instead of `cc_pair` in a collection source, or `credential_ref` instead of `secret_name` will each stop the config from loading. Fix, then restart the worker. |
 | Auth failure — the worker logs show HTTP 401 on every Linear call | The API key is wrong, revoked, or stored under the wrong name | Generate a fresh key (Step 1), store it again under `kairix-connector-linear-api-key` (Step 2), run `kairix secrets verify`, then restart the worker. |
 | Sync pauses, logs mention rate-limit or HTTP 429 | Linear is asking the connector to slow down | No action needed. The connector reads Linear's `Retry-After` hint, waits, and retries on its own. It catches up on the next ticks. |
-| Nothing ingested — search finds no Linear items | The first pull hasn't finished, the key is missing, or the config didn't apply | Check, in order: `kairix secrets verify` shows the Linear key present; `kairix config validate` passes; `kairix onboard check` shows `topology_v2_cc_pairs_registered` passing; the worker has run at least one tick since the restart. Then search again. |
+| Nothing ingested — search finds no Linear items | The first pull hasn't finished, the key is missing, or the config didn't apply | Check, in order: `kairix secrets verify` shows the Linear key present; `kairix config validate` passes; `kairix onboard check` shows `topology_cc_pairs_registered` passing; the worker has run at least one tick since the restart. Then search again. |
 | One item is missing but the rest are present | A single malformed item was skipped | This is expected per-item isolation — the bad item is logged and skipped so the rest of the sync still lands. No action needed. |
 
 ---

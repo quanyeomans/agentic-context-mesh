@@ -1,7 +1,7 @@
 """Unit-layer coverage lift for the Wave D MCP surfaces in
 ``kairix/agents/mcp/server.py``:
 
-* ``tool_features_status(topology_v2=True)`` topology-v2 branch.
+* ``tool_features_status(topology=True)`` topology branch.
 * ``tool_cc_pair`` escalation stub for every verb.
 
 F1-clean / F2-clean / F5-clean: no @patch, no env-var manipulation,
@@ -52,28 +52,28 @@ def test_tool_cc_pair_resume_envelope_carries_runtime_estimate() -> None:
     assert "kairix cc-pair resume" in env["operator_command"]
 
 
-def test_tool_features_status_without_topology_v2_omits_key() -> None:
-    """Default invocation (no topology_v2 kwarg) → no topology_v2 key in envelope."""
+def test_tool_features_status_without_topology_omits_key() -> None:
+    """Default invocation (no topology kwarg) → no topology key in envelope."""
     env = tool_features_status()
     assert "flags" in env
-    assert "topology_v2" not in env
+    assert "topology" not in env
     assert env["error"] == ""
 
 
-def test_tool_features_status_with_topology_v2_adds_key(tmp_path: Path) -> None:
-    """topology_v2=True merges the topology v2 diagnostics into the envelope.
+def test_tool_features_status_with_topology_adds_key(tmp_path: Path) -> None:
+    """topology=True merges the topology diagnostics into the envelope.
 
     Uses the read_db_path seam so no env vars are mutated (F2 clean).
     """
     db_path = _bootstrap_db(tmp_path)
-    env = tool_features_status(topology_v2=True, read_db_path=lambda: db_path)
-    assert "topology_v2" in env
-    assert env["topology_v2"]["cc_pairs"] == []
+    env = tool_features_status(topology=True, read_db_path=lambda: db_path)
+    assert "topology" in env
+    assert env["topology"]["cc_pairs"] == []
 
 
-def test_tool_features_status_topology_v2_degrades_on_missing_schema(tmp_path: Path) -> None:
+def test_tool_features_status_topology_degrades_on_missing_schema(tmp_path: Path) -> None:
     """A path without schema → zero-snapshot rather than crash."""
     bad_db = tmp_path / "no_schema.sqlite"
     sqlite3.connect(str(bad_db)).close()
-    env = tool_features_status(topology_v2=True, read_db_path=lambda: bad_db)
-    assert env["topology_v2"] == {"cc_pairs": [], "actor_scopes": []}
+    env = tool_features_status(topology=True, read_db_path=lambda: bad_db)
+    assert env["topology"] == {"cc_pairs": [], "actor_scopes": []}

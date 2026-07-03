@@ -1,11 +1,11 @@
-"""Topology v2 operator-config dataclasses + YAML-dict parser (Wave D).
+"""Topology operator-config dataclasses + YAML-dict parser (Wave D).
 
-Six nested blocks under a single ``topology_v2:`` parent key in
+Six nested blocks under a single ``topology:`` parent key in
 ``kairix.config.yaml`` per ADR v2 §"Wave D":
 
 .. code-block:: yaml
 
-    topology_v2:
+    topology:
       connectors:      []   # connector instances (kind + name + config)
       credentials:     []   # credential references (secret_name etc.)
       cc_pairs:        []   # ConnectorCredentialPair triads
@@ -15,20 +15,20 @@ Six nested blocks under a single ``topology_v2:`` parent key in
 
 The parent-key namespace (#305) keeps the Wave D ``collections:`` block
 from colliding with the legacy top-level ``collections.shared`` dict
-shape and aligns the YAML surface with the ``topology_v2_config``
+shape and aligns the YAML surface with the ``topology_config``
 feature flag name.
 
 All six nested blocks are optional + permit empty lists, so existing
 operators see zero behaviour change when they upgrade. The default-safe
 principle (per the feature-flag architecture §2.1) is structurally
-enforced — a new operator deployment without a ``topology_v2:`` block
-parses to an all-empty :class:`TopologyV2Config`, and the validator
+enforced — a new operator deployment without a ``topology:`` block
+parses to an all-empty :class:`TopologyConfig`, and the validator
 returns no failures.
 
 Parsing is permissive at the boundary (missing optional fields default
 to None / empty tuple) but strict in shape: a dict where a list is
-expected raises :exc:`TopologyV2ParseError`. The validator surface
-(:mod:`kairix.config.topology_v2_validators`) handles cross-reference
+expected raises :exc:`TopologyParseError`. The validator surface
+(:mod:`kairix.config.topology_validators`) handles cross-reference
 checks separately so callers can stage parse → render → validate as
 distinct steps in a CI pipeline.
 
@@ -57,8 +57,40 @@ _DEFAULT_PATH_FILTER = "*"
 # dangling collection reference). One constant, three reuse sites.
 _SCOPE_PROFILE_NAME_PREFIX = "scope_profiles[name="
 
+# The canonical operator-config parent key every reader resolves to.
+TOPOLOGY_CONFIG_KEY = "topology"
 
-class TopologyV2ParseError(ValueError):
+# legacy-key compat: operator configs written before the PLA-287 rename declared the topology
+# block under a ``topology_v2:`` key (renamed to ``topology`` in PLA-287).
+# This is the ONE place that legacy string survives in the codebase —
+# every config reader normalizes it to the canonical ``topology`` key on
+# read, in memory only. The operator's file is never rewritten, so existing
+# configs keep working with zero operator action and the normalization
+# stays safe on read-only-root deploys (F94). PLA-287.
+LEGACY_TOPOLOGY_CONFIG_KEY = "topology_v2"
+
+
+def normalize_topology_key(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Surface a legacy topology key as the canonical ``topology`` key.
+
+    Accepts a config mapping that may carry the topology block under either
+    the canonical :data:`TOPOLOGY_CONFIG_KEY` (current) OR the legacy
+    :data:`LEGACY_TOPOLOGY_CONFIG_KEY` (the pre-rename key). When only the legacy
+    key is present, it is moved to the canonical key in a shallow copy so
+    existing operator configs keep resolving with zero operator action; the
+    input mapping is never mutated and the operator's file is never
+    rewritten (F94 — safe on read-only-root deploys). When the canonical
+    key is already present it wins — a wizard-migrated config that still
+    carries a stale legacy block reads the fresh block, never the orphan.
+    """
+    if TOPOLOGY_CONFIG_KEY in data or LEGACY_TOPOLOGY_CONFIG_KEY not in data:
+        return dict(data)
+    normalized = dict(data)
+    normalized[TOPOLOGY_CONFIG_KEY] = normalized.pop(LEGACY_TOPOLOGY_CONFIG_KEY)
+    return normalized
+
+
+class TopologyParseError(ValueError):
     """Raised when a Wave D config block has the wrong structural shape.
 
     Distinct from cross-reference validation failures (which are returned
@@ -226,11 +258,11 @@ class SkillConfig:
 
 
 @dataclass(frozen=True)
-class TopologyV2Config:
+class TopologyConfig:
     """Aggregator over the 6 Wave D blocks — frozen, all-empty is valid.
 
-    Empty-default tuples mean an operator config without any topology v2
-    blocks parses successfully to ``TopologyV2Config()`` with no
+    Empty-default tuples mean an operator config without any topology
+    blocks parses successfully to ``TopologyConfig()`` with no
     behaviour change (default-safe).
     """
 
@@ -251,12 +283,12 @@ def _require_list(prefix: str, value: Any) -> list[Any]:
     """Validate that ``value`` is a list (or None → []) and return it.
 
     Centralises the "block must be a list" type guard so every block
-    parser raises the same shape of :exc:`TopologyV2ParseError`.
+    parser raises the same shape of :exc:`TopologyParseError`.
     """
     if value is None:
         return []
     if not isinstance(value, list):
-        raise TopologyV2ParseError(
+        raise TopologyParseError(
             f"{prefix}: must be a list. fix: change the value to a YAML list. next: run kairix config validate"
         )
     return value
@@ -265,7 +297,7 @@ def _require_list(prefix: str, value: Any) -> list[Any]:
 def _require_dict(prefix: str, value: Any) -> dict[str, Any]:
     """Validate that ``value`` is a dict and return it."""
     if not isinstance(value, dict):
-        raise TopologyV2ParseError(
+        raise TopologyParseError(
             f"{prefix}: must be a mapping. fix: change the entry to a YAML mapping. next: run kairix config validate"
         )
     return value
@@ -274,7 +306,7 @@ def _require_dict(prefix: str, value: Any) -> dict[str, Any]:
 def _require_str(prefix: str, value: Any, *, field: str) -> str:
     """Validate that ``value`` is a non-empty string for ``field``."""
     if not isinstance(value, str) or not value.strip():
-        raise TopologyV2ParseError(
+        raise TopologyParseError(
             f"{prefix}: {field!r} is required and must be a non-empty string. "
             f"fix: add `{field}: <value>` to the entry. next: run kairix config validate"
         )
@@ -305,7 +337,7 @@ def _parse_connector_specific_config(value: Any) -> tuple[tuple[str, str], ...]:
     if value is None:
         return ()
     if not isinstance(value, dict):
-        raise TopologyV2ParseError(
+        raise TopologyParseError(
             "connectors[*].connector_specific_config: must be a mapping. "
             "fix: use `key: value` pairs. next: run kairix config validate"
         )
@@ -323,7 +355,7 @@ def _parse_extractor_config(value: Any) -> tuple[tuple[str, str], ...]:
     if value is None:
         return ()
     if not isinstance(value, dict):
-        raise TopologyV2ParseError(
+        raise TopologyParseError(
             "connectors[*].extractor_config: must be a mapping. "
             "fix: use `key: value` pairs. next: run kairix config validate"
         )
@@ -353,7 +385,7 @@ def config_pairs_to_mapping(pairs: tuple[tuple[str, str], ...]) -> dict[str, Any
         except json.JSONDecodeError as exc:
             raise ValueError(
                 f"config_pairs_to_mapping: value for {key!r} is not JSON-encoded. "
-                "fix: connector config pairs must come from parse_topology_v2, which "
+                "fix: connector config pairs must come from parse_topology, which "
                 f"JSON-encodes every value. got: {value!r}"
             ) from exc
     return mapping
@@ -364,7 +396,7 @@ def _parse_extractor_chain(value: Any) -> tuple[str, ...]:
     if value is None:
         return ()
     if not isinstance(value, list):
-        raise TopologyV2ParseError(
+        raise TopologyParseError(
             "connectors[*].extractor_chain: must be a list of extractor names. "
             "fix: render as a YAML list. next: run kairix config validate"
         )
@@ -427,7 +459,7 @@ def _parse_sensitivity(value: Any, *, default: F39Tier) -> F39Tier:
         return mapped
     if value not in _VALID_F39_TIERS:
         valid = "/".join(_VALID_F39_TIERS)
-        raise TopologyV2ParseError(
+        raise TopologyParseError(
             f"sensitivity={value!r} is not a valid F39 tier. "
             f"fix: use one of {valid} "
             "(client-confidential and personal are accepted and map to "
@@ -454,7 +486,7 @@ def _parse_access_type(value: Any) -> CCPairAccessType:
     if value is None:
         return "PRIVATE"
     if value not in ("PUBLIC", "PRIVATE", "SYNC"):
-        raise TopologyV2ParseError(
+        raise TopologyParseError(
             f"cc_pairs[*].access_type={value!r} is not valid. "
             "fix: use one of PUBLIC/PRIVATE/SYNC. next: run kairix config validate"
         )
@@ -470,7 +502,7 @@ def _parse_one_cc_pair(prefix: str, raw: Any) -> CCPairConfig:
     elif isinstance(raw_filters, list):
         filters = tuple(str(f) for f in raw_filters)
     else:
-        raise TopologyV2ParseError(
+        raise TopologyParseError(
             f"{prefix}.collection_filters: must be a list of glob strings. "
             "fix: render as a YAML list. next: run kairix config validate"
         )
@@ -535,7 +567,7 @@ def _parse_default_in_scope(prefix: str, value: Any) -> bool:
     """
     if value is None or not isinstance(value, bool):
         observed_type = type(value).__name__
-        raise TopologyV2ParseError(
+        raise TopologyParseError(
             f"{prefix}.default_in_scope is not a bool (got {observed_type!r}). "
             f"fix: use `default_in_scope: true` or `default_in_scope: false` (lowercase YAML bool). "
             f"next: run kairix config validate. "
@@ -560,14 +592,14 @@ def _parse_scope_entry(prefix: str, raw: Any, *, allow_unfilled_actor_id: bool =
         ``applies_to: ["*"]`` must not have to repeat per-agent
         ``actor_id`` on every entry; the parser fills it.
 
-    The post-expansion validator in :func:`parse_topology_v2` enforces
+    The post-expansion validator in :func:`parse_topology` enforces
     that no entry ships with the empty-string sentinel; defence in depth
     against a future caller forgetting to wire ``allow_unfilled_actor_id``.
     """
     item = _require_dict(prefix, raw)
     mode = item.get("mode", "read")
     if mode not in ("read", "write", "read_write"):
-        raise TopologyV2ParseError(
+        raise TopologyParseError(
             f"{prefix}.mode={mode!r} is not valid. "
             "fix: use one of read/write/read_write. next: run kairix config validate"
         )
@@ -593,7 +625,7 @@ def _parse_actor_kind(value: Any) -> ScopeProfileActorKind:
     if value is None:
         return "agent"
     if value not in ("agent", "human", "team", "group", "skill"):
-        raise TopologyV2ParseError(
+        raise TopologyParseError(
             f"scope_profiles[*].actor_kind={value!r} is not valid. "
             "fix: use one of agent/human/team/group/skill. next: run kairix config validate"
         )
@@ -611,13 +643,13 @@ def _parse_applies_to(prefix: str, raw: Any) -> tuple[str, ...]:
     if raw is None:
         return ()
     if not isinstance(raw, list):
-        raise TopologyV2ParseError(
+        raise TopologyParseError(
             f"{prefix}.applies_to: must be a list of agent names or ['*'] for wildcard. "
             f"fix: render as a YAML list (e.g. `applies_to: [agent-alpha, agent-beta]` "
             f'or `applies_to: ["*"]`). next: run kairix config validate.'
         )
     if not raw:
-        raise TopologyV2ParseError(
+        raise TopologyParseError(
             f"{prefix}.applies_to: must not be an empty list. "
             f'fix: list at least one agent name or use `["*"]` for wildcard fan-out. '
             f"next: run kairix config validate."
@@ -631,7 +663,7 @@ def _parse_one_scope_profile_raw(
     """Internal — parse the raw scope_profile shape including ``applies_to``.
 
     Returns ``(name, actor_kind, applies_to, entries)``. Wildcard
-    expansion happens in :func:`parse_topology_v2` so the expansion has
+    expansion happens in :func:`parse_topology` so the expansion has
     the registered-agents list in scope.
 
     GH #381 — when ``applies_to`` is non-empty (wildcard ``["*"]`` or an
@@ -665,7 +697,7 @@ def _parse_agents_block(raw: Any) -> tuple[str, ...]:
     list-of-dicts shape (``agents: [{name: shape, paths: [...]}, ...]``)
     from the pre-v2 registry. Both surface as a flat name tuple here so
     the wildcard expansion + agent-reachability validators in
-    :func:`parse_topology_v2` have a uniform input.
+    :func:`parse_topology` have a uniform input.
 
     Empty / missing → empty tuple (the wildcard validator then catches
     "wildcard with no agents" as a separate error).
@@ -673,7 +705,7 @@ def _parse_agents_block(raw: Any) -> tuple[str, ...]:
     if raw is None:
         return ()
     if not isinstance(raw, list):
-        raise TopologyV2ParseError(
+        raise TopologyParseError(
             "agents: must be a list of agent names or list of {name: ...} mappings. "
             "fix: render the agents block as a YAML list. next: run kairix config validate."
         )
@@ -721,7 +753,7 @@ def _expand_wildcard_profiles(
             continue
         if applies_to == ("*",):
             if not agents:
-                raise TopologyV2ParseError(
+                raise TopologyParseError(
                     f"{_SCOPE_PROFILE_NAME_PREFIX}{name!r}].applies_to=['*'] but the agents block "
                     f"is empty. The wildcard expands to zero profiles — a misconfiguration. "
                     f"fix: declare at least one agent in the top-level `agents:` block, OR "
@@ -768,7 +800,7 @@ def _validate_actor_ids_filled(profiles: tuple[ScopeProfileConfig, ...]) -> None
     for profile in profiles:
         for entry in profile.entries:
             if not entry.actor_id:
-                raise TopologyV2ParseError(
+                raise TopologyParseError(
                     f"{_SCOPE_PROFILE_NAME_PREFIX}{profile.name!r}] has an entry with empty actor_id "
                     f"after wildcard expansion. This is an internal-consistency failure: a "
                     f"profile with applies_to=['*'] or applies_to=[name, ...] should have had "
@@ -794,7 +826,7 @@ def _validate_collection_references(
     Skipped when the collections block is empty (back-compat with
     legacy configs that declare scope_profiles without a paired
     collections block; the standalone
-    :func:`kairix.config.topology_v2_validators.validate_topology_v2_references`
+    :func:`kairix.config.topology_validators.validate_topology_references`
     surface remains the canonical cross-reference path for those cases).
     """
     if not collections:
@@ -803,10 +835,10 @@ def _validate_collection_references(
     for profile in profiles:
         for entry in profile.entries:
             if entry.collection_name not in declared:
-                raise TopologyV2ParseError(
+                raise TopologyParseError(
                     f"{_SCOPE_PROFILE_NAME_PREFIX}{profile.name!r}].entries references "
                     f"collection_name={entry.collection_name!r} which is not declared in "
-                    f"topology_v2.collections. "
+                    f"topology.collections. "
                     f"fix: add `{entry.collection_name}` to the collections list OR remove "
                     f"the entry from the scope profile. "
                     f"next: run kairix config validate. "
@@ -841,7 +873,7 @@ def _validate_agent_reachability(
     unreachable = sorted(set(agents) - covered)
     if unreachable:
         names = ", ".join(unreachable)
-        raise TopologyV2ParseError(
+        raise TopologyParseError(
             f"agents not covered by any scope_profile: {names}. Default search for these "
             f"agents would return zero results. "
             f"fix: add a scope_profile entry for each unreachable agent, OR set "
@@ -881,45 +913,44 @@ def _parse_one_skill(prefix: str, raw: Any) -> SkillConfig:
     )
 
 
-def parse_topology_v2(data: dict[str, Any]) -> TopologyV2Config:
-    """Parse a YAML-loaded dict into a :class:`TopologyV2Config`.
+def parse_topology(data: dict[str, Any]) -> TopologyConfig:
+    """Parse a YAML-loaded dict into a :class:`TopologyConfig`.
 
-    Reads the six Wave D blocks from ``data["topology_v2"]`` (the
+    Reads the six Wave D blocks from ``data["topology"]`` (the
     namespaced parent key landed in #305). Empty data, missing
-    ``topology_v2`` key, or an explicit ``topology_v2: null`` all parse
-    to ``TopologyV2Config()``. Structural type errors raise
-    :exc:`TopologyV2ParseError`; cross-reference checks are deferred to
-    :func:`validate_topology_v2_references`.
+    ``topology`` key, or an explicit ``topology: null`` all parse
+    to ``TopologyConfig()``. Structural type errors raise
+    :exc:`TopologyParseError`; cross-reference checks are deferred to
+    :func:`validate_topology_references`.
 
     Per the F42 boundary discipline: returns a frozen dataclass tree;
     callers never touch ``dict[str, Any]`` again after parsing.
     """
-    raw_section = data.get("topology_v2")
+    data = normalize_topology_key(data)
+    raw_section = data.get(TOPOLOGY_CONFIG_KEY)
     if raw_section is None:
-        return TopologyV2Config()
-    section = _require_dict("topology_v2", raw_section)
+        return TopologyConfig()
+    section = _require_dict("topology", raw_section)
 
-    connectors_raw = _require_list("topology_v2.connectors", section.get("connectors"))
-    credentials_raw = _require_list("topology_v2.credentials", section.get("credentials"))
-    cc_pairs_raw = _require_list("topology_v2.cc_pairs", section.get("cc_pairs"))
-    collections_raw = _require_list("topology_v2.collections", section.get("collections"))
-    scope_profiles_raw = _require_list("topology_v2.scope_profiles", section.get("scope_profiles"))
-    skills_raw = _require_list("topology_v2.skills", section.get("skills"))
+    connectors_raw = _require_list("topology.connectors", section.get("connectors"))
+    credentials_raw = _require_list("topology.credentials", section.get("credentials"))
+    cc_pairs_raw = _require_list("topology.cc_pairs", section.get("cc_pairs"))
+    collections_raw = _require_list("topology.collections", section.get("collections"))
+    scope_profiles_raw = _require_list("topology.scope_profiles", section.get("scope_profiles"))
+    skills_raw = _require_list("topology.skills", section.get("skills"))
 
-    collections = tuple(
-        _parse_one_collection(f"topology_v2.collections[{i}]", c) for i, c in enumerate(collections_raw)
-    )
+    collections = tuple(_parse_one_collection(f"topology.collections[{i}]", c) for i, c in enumerate(collections_raw))
 
     # GH #373 — parse the top-level agents block once so wildcard
     # expansion + agent-reachability validation share the same agent
-    # set. Outside the topology_v2 namespace because it pre-dates Wave D.
+    # set. Outside the topology namespace because it pre-dates Wave D.
     agents = _parse_agents_block(data.get("agents"))
 
     # Two-phase scope_profile parse: first the raw shape (carries
     # applies_to as ()/('*',)/explicit list), then expand wildcards
     # against the registered agents tuple.
     raw_profiles = [
-        _parse_one_scope_profile_raw(f"topology_v2.scope_profiles[{i}]", s) for i, s in enumerate(scope_profiles_raw)
+        _parse_one_scope_profile_raw(f"topology.scope_profiles[{i}]", s) for i, s in enumerate(scope_profiles_raw)
     ]
     scope_profiles = _expand_wildcard_profiles(raw_profiles, agents)
 
@@ -933,13 +964,13 @@ def parse_topology_v2(data: dict[str, Any]) -> TopologyV2Config:
     _validate_collection_references(scope_profiles, collections)
     _validate_agent_reachability(scope_profiles, agents)
 
-    return TopologyV2Config(
-        connectors=tuple(_parse_one_connector(f"topology_v2.connectors[{i}]", c) for i, c in enumerate(connectors_raw)),
+    return TopologyConfig(
+        connectors=tuple(_parse_one_connector(f"topology.connectors[{i}]", c) for i, c in enumerate(connectors_raw)),
         credentials=tuple(
-            _parse_one_credential(f"topology_v2.credentials[{i}]", c) for i, c in enumerate(credentials_raw)
+            _parse_one_credential(f"topology.credentials[{i}]", c) for i, c in enumerate(credentials_raw)
         ),
-        cc_pairs=tuple(_parse_one_cc_pair(f"topology_v2.cc_pairs[{i}]", p) for i, p in enumerate(cc_pairs_raw)),
+        cc_pairs=tuple(_parse_one_cc_pair(f"topology.cc_pairs[{i}]", p) for i, p in enumerate(cc_pairs_raw)),
         collections=collections,
         scope_profiles=scope_profiles,
-        skills=tuple(_parse_one_skill(f"topology_v2.skills[{i}]", s) for i, s in enumerate(skills_raw)),
+        skills=tuple(_parse_one_skill(f"topology.skills[{i}]", s) for i, s in enumerate(skills_raw)),
     )

@@ -321,8 +321,8 @@ def update_config_file(target: Path, updates: Mapping[str, Any]) -> Path:
     Merging is fully recursive (#492 — :func:`kairix.config_layers.deep_merge`,
     the SAME semantics the layered read side applies): nested dict values
     merge key-by-key at every depth, so writing
-    ``topology_v2.credentials.slack`` preserves an existing
-    ``topology_v2.credentials.github`` sibling; lists and scalars are
+    ``topology.credentials.slack`` preserves an existing
+    ``topology.credentials.github`` sibling; lists and scalars are
     replaced. The write itself goes through the terminal wizard's
     :func:`write_config_yaml` so both setup surfaces emit one file shape.
     """
@@ -1508,7 +1508,7 @@ class KairixSetupService:
     def save_oauth_source(self, provider: str, instance: str, picks: tuple[str, ...]) -> SavedSource:
         """Emit the connector + collection config for the picked units.
 
-        Writes ``topology_v2`` entries through the overlay-aware config
+        Writes ``topology`` entries through the overlay-aware config
         path (#485). The returned summary states what will be fetched
         BEFORE any spend; deep volumetrics (message counts, byte sizes)
         are deferred to the KFEAT-022 counters. ``OSError`` from a

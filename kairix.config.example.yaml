@@ -10,7 +10,7 @@
 # environment so the example resolves.
 #
 # This file is the source-of-truth shape for ``kairix config validate``,
-# the ``kairix onboard check`` topology_v2 checks, and the
+# the ``kairix onboard check`` topology checks, and the
 # ``kairix-agent-driven-setup`` doc (docs/getting-started/agent-driven-setup.md).
 # If you change the YAML shape here, update both surfaces in the same
 # commit.
@@ -117,8 +117,8 @@ retrieval:
 # ──────────────────────────────────────────────────────────────────────────
 # These two blocks are the v1 operator surface — they still parse and
 # still work. New deployments should declare connectors / collections
-# under ``topology_v2:`` instead (see below); existing deployments are
-# free to keep using these two blocks until the topology v2 migration
+# under ``topology:`` instead (see below); existing deployments are
+# free to keep using these two blocks until the topology migration
 # completes.
 #
 # collections:
@@ -170,24 +170,24 @@ retrieval:
 #   agent_query_queue: true               # queue slow searches, carry results forward
 
 # ──────────────────────────────────────────────────────────────────────────
-# topology_v2 — connectors / collections / scope profiles / skills
+# topology — connectors / collections / scope profiles / skills
 # ──────────────────────────────────────────────────────────────────────────
 # The Wave D operator surface for the connector / collection / scope
-# topology v2 migration. Six nested blocks under a single
-# ``topology_v2:`` parent key (the parent-key namespace landed in #305
+# topology migration. Six nested blocks under a single
+# ``topology:`` parent key (the parent-key namespace landed in #305
 # to keep the v2 ``collections:`` block from colliding with the legacy
 # top-level ``collections.shared`` dict above).
 #
-# Gated by the ``topology_v2_config`` feature flag. When the flag is OFF
+# Gated by the ``topology_config`` feature flag. When the flag is OFF
 # the parser still reads the YAML but the surface is inert — rows aren't
 # written to topology_cc_pairs, scope profiles aren't enforced at search
 # time, skills aren't dispatched. When ON, the worker startup +
 # ``kairix config validate`` + ``kairix features status`` + the new
-# ``kairix onboard check topology_v2_*`` checks all read from the
+# ``kairix onboard check topology_*`` checks all read from the
 # parsed surface.
 #
 # Full spec: docs/architecture/connector-scope-topology/ADR.md.
-topology_v2:
+topology:
 
   # ── connectors ──────────────────────────────────────────────────────────
   # Each entry declares one connector instance. ``kind`` picks the
@@ -334,7 +334,7 @@ topology_v2:
     # protocol (RFC 4791 + RFC 6578). Requires an Apple-issued
     # app-specific password (NOT the operator's primary iCloud
     # password); see https://support.apple.com/en-us/HT204397 for the
-    # operator instructions. Gated by ``topology_v2_apple_caldav`` —
+    # operator instructions. Gated by ``topology_apple_caldav`` —
     # set the flag ON in ``features:`` below to enable the connector.
     # KV stores the credentials under apple-caldav-username +
     # apple-caldav-access; env-var fallbacks are CONNECTOR_APPLE_CALDAV_USERNAME +

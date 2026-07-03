@@ -1,11 +1,11 @@
-Feature: topology_v2 collection model — default in-scope and opt-in retrieval
+Feature: topology collection model — default in-scope and opt-in retrieval
   As a kairix operator
   I want default search to return a broad, useful superset of in-default collections
   And opt-in collections (like the reference library) to be reachable by explicit name
   So that agents get useful results without leaking specialised or other-agents' content
 
   Background:
-    Given the operator has migrated to the topology v2 collection model
+    Given the operator has migrated to the topology collection model
 
   Scenario: Agent's default search returns the broad superset
     Given the operator has configured 7 in-default collections and 1 opt-in collection

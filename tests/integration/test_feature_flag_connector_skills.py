@@ -67,7 +67,7 @@ def _two_connector_topology(vault: Path, claude_root: Path) -> dict[str, Any]:
     the sibling is the only contributor to ``synced``).
     """
     return {
-        "topology_v2": {
+        "topology": {
             "connectors": [
                 {
                     "id": "skills-conn",

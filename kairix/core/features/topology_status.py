@@ -1,15 +1,15 @@
-"""Topology v2 diagnostics surface — read-only operator-facing snapshot.
+"""Topology diagnostics surface — read-only operator-facing snapshot.
 
-Backs the ``kairix features status --topology-v2`` CLI flag AND the
-``tool_features_status(topology_v2=True)`` MCP variant. Returns a
-frozen :class:`TopologyV2Diagnostics` snapshot showing:
+Backs the ``kairix features status --topology`` CLI flag AND the
+``tool_features_status(topology=True)`` MCP variant. Returns a
+frozen :class:`TopologyDiagnostics` snapshot showing:
 
 * The declared cc_pairs (id + name + status).
 * Per-actor scope-profile resolution — which collections each
   registered actor can read through their scope profile (using Wave
   C's :class:`ScopeProfileResolver`).
 
-Default-safe: when the DB has no topology v2 rows, returns a zero
+Default-safe: when the DB has no topology rows, returns a zero
 snapshot — the operator sees "no cc_pairs declared / no scope profiles
 declared" so the surface degrades cleanly on a fresh deployment.
 
@@ -35,7 +35,7 @@ _ACTOR_ID_COL = "actor_id"
 
 @dataclass(frozen=True)
 class CCPairSnapshot:
-    """One row in the topology v2 diagnostics — minimal cc_pair view."""
+    """One row in the topology diagnostics — minimal cc_pair view."""
 
     id: int
     name: str
@@ -54,7 +54,7 @@ class ActorScopeSnapshot:
 
 
 @dataclass(frozen=True)
-class TopologyV2Diagnostics:
+class TopologyDiagnostics:
     """Aggregator snapshot — frozen, JSON-serialisable.
 
     Empty values are valid: a fresh DB returns an instance with both
@@ -97,8 +97,8 @@ def _resolve_one_actor(
     )
 
 
-def build_topology_v2_diagnostics(db: sqlite3.Connection) -> TopologyV2Diagnostics:
-    """Build a :class:`TopologyV2Diagnostics` from a live SQLite connection.
+def build_topology_diagnostics(db: sqlite3.Connection) -> TopologyDiagnostics:
+    """Build a :class:`TopologyDiagnostics` from a live SQLite connection.
 
     Pure read; the caller still owns the connection lifecycle. Wraps
     the cc_pair lifecycle reader + the Wave C ScopeProfileResolver so
@@ -109,12 +109,12 @@ def build_topology_v2_diagnostics(db: sqlite3.Connection) -> TopologyV2Diagnosti
     actor_pairs = _read_actor_ids(db)
     resolver = ScopeProfileResolver(db)
     actor_scopes = tuple(_resolve_one_actor(resolver, actor_id, actor_kind) for actor_id, actor_kind in actor_pairs)
-    return TopologyV2Diagnostics(cc_pairs=cc_pairs, actor_scopes=actor_scopes)
+    return TopologyDiagnostics(cc_pairs=cc_pairs, actor_scopes=actor_scopes)
 
 
-def render_topology_v2_human(diag: TopologyV2Diagnostics) -> str:
+def render_topology_human(diag: TopologyDiagnostics) -> str:
     """Render the diagnostics as a text block for the CLI human mode."""
-    lines: list[str] = ["Topology v2 diagnostics:"]
+    lines: list[str] = ["Topology diagnostics:"]
     if not diag.cc_pairs:
         lines.append("  cc_pairs:        (none declared)")
     else:
@@ -134,7 +134,7 @@ def render_topology_v2_human(diag: TopologyV2Diagnostics) -> str:
     return "\n".join(lines)
 
 
-def render_topology_v2_json(diag: TopologyV2Diagnostics) -> dict[str, Any]:
+def render_topology_json(diag: TopologyDiagnostics) -> dict[str, Any]:
     """Render the diagnostics as a JSON-friendly dict (sorted-keys safe)."""
     return {
         "cc_pairs": [
