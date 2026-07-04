@@ -290,6 +290,7 @@ _Generated from `scripts/checks/_rule_catalogue.py` — do not edit by hand._
 | F14 | agent-affordance | cross-cutting | shipped | every sonar.issue.ignore.multicriteria entry has a preceding rationale comment |
 | F16 | agent-affordance | per-method | shipped | cognitive complexity ≤ 15 per function (Sonar S3776) |
 | F17 | agent-affordance | per-file | shipped | no string literal ≥10 chars duplicated ≥3 times in a module (Sonar S1192) |
+| new_code_coverage | coverage | per-file | shipped | new-code coverage ≥ 80% on changed lines (Sonar new-code, local) |
 | F18 | agent-affordance | per-file | shipped | no commented-out code (Sonar S125) |
 | F19 | agent-affordance | per-method | shipped | unused function parameters must be _-prefixed (Sonar S1172) |
 | F20 | agent-affordance | per-method | shipped | empty function bodies require docstring or # Intentionally empty — comment (Sonar S1186) |
