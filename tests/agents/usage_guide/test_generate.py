@@ -174,6 +174,39 @@ def test_main_check_fires_when_guide_is_absent(tmp_path: Path) -> None:
     assert rc == 1
 
 
+def test_main_accepts_a_write_target_inside_the_allowed_roots(tmp_path: Path) -> None:
+    """A ``guide_path`` under an allowed root (pytest's tmp dir) is written.
+
+    Complements the reject case below — proves the S2083 confinement does not
+    regress the legitimate keyword-only test seam.
+    """
+    template = _seed_template(tmp_path)
+    out = tmp_path / "accepted-guide.md"
+
+    rc = generate.main([], template_path=template, guide_path=out)
+
+    assert rc == 0
+    assert out.read_text(encoding="utf-8") == generate.render_guide(_real_template())
+
+
+def test_main_rejects_a_write_target_outside_the_allowed_roots(tmp_path: Path) -> None:
+    """A ``guide_path`` that escapes every allowed root raises before writing.
+
+    Sabotage: drop the ``confine_to_roots`` guard in ``main`` and this write
+    escapes to ``/etc`` (pythonsecurity:S2083). The escape target is not under
+    the package dir, cwd, home, or the temp dir, so confinement rejects it.
+    """
+    from kairix.paths import PathTraversalError
+
+    template = _seed_template(tmp_path)
+    escape = Path("/etc") / "kairix-usage-guide-escape" / "guide.md"
+
+    with pytest.raises(PathTraversalError):
+        generate.main([], template_path=template, guide_path=escape)
+
+    assert not escape.exists()
+
+
 def test_committed_bundled_guide_is_current() -> None:
     """The shipped guide equals a fresh render from the catalogue + template.
 

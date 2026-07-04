@@ -706,3 +706,77 @@ def test_verify_invokes_subprocess_when_script_present(monkeypatch, tmp_path) ->
     assert "--agent" in captured_cmd
     assert "builder" in captured_cmd
     assert "--json" in captured_cmd
+
+
+# ---------------------------------------------------------------------------
+# verify --agent argument-injection guard — driven through the public main()
+# surface (F5-clean: no private-symbol import).
+# ---------------------------------------------------------------------------
+
+
+def _materialise_verify_script(tmp_path) -> None:
+    """Create the ``scripts/verify-search.py`` probe target under ``tmp_path``.
+
+    ``cmd_verify`` returns early with an error when the script is absent, so
+    the guard is only reached once the probe target exists.
+    """
+    fake_script = tmp_path / "scripts" / "verify-search.py"
+    fake_script.parent.mkdir(parents=True)
+    fake_script.write_text("#!/usr/bin/env python3\n")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", ["builder", "consultant", "agent-alpha"])
+def test_verify_accepts_legitimate_agent_name_into_the_argv(monkeypatch, tmp_path, name) -> None:
+    """A short lowercase identifier passes the guard and reaches the argv."""
+    import subprocess
+
+    _materialise_verify_script(tmp_path)
+    captured_cmd: list = []
+
+    class _FakeCompleted:
+        returncode = 0
+
+    def _fake_run(cmd, **kwargs):
+        captured_cmd.extend(cmd)
+        return _FakeCompleted()
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    rc = main(["verify", "--agent", name], script_root=tmp_path)
+
+    assert rc == 0
+    assert "--agent" in captured_cmd
+    assert name in captured_cmd
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "name",
+    [
+        "builder --json",  # flag smuggling via an embedded space
+        "builder;rm -rf /",  # shell metacharacters
+        "a b",  # whitespace
+        "Builder",  # uppercase
+        "../evil",  # path traversal
+        "builder\n--json",  # trailing-newline flag smuggling
+    ],
+)
+def test_verify_rejects_injecting_agent_before_subprocess(monkeypatch, tmp_path, name) -> None:
+    """An ``--agent`` payload outside ``^[a-z][a-z0-9-]{0,40}$`` raises before argv.
+
+    Sabotage: drop the agent-name validation in ``cmd_verify`` and the payload
+    flows into the subprocess argv (pythonsecurity:S8705). The stub raises if
+    it is ever reached, so a green test proves validation fired first.
+    """
+    import subprocess
+
+    _materialise_verify_script(tmp_path)
+
+    def _must_not_run(cmd, **kwargs):  # pragma: no cover - asserted unreachable
+        raise AssertionError(f"subprocess.run should not be reached with a bad agent: {cmd!r}")
+
+    monkeypatch.setattr(subprocess, "run", _must_not_run)
+
+    with pytest.raises(ValueError, match="invalid agent name"):
+        main(["verify", "--agent", name], script_root=tmp_path)

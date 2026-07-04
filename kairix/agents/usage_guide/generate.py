@@ -46,6 +46,7 @@ from kairix.agents.mcp.server import (
     Capability,
     by_loop_group,
 )
+from kairix.paths import agent_cli_roots, confine_to_roots
 
 _GUIDE_PACKAGE = "kairix.agents.usage_guide"
 _TEMPLATE_RESOURCE = "data/agent-usage-guide.md.tmpl"
@@ -205,8 +206,15 @@ def main(
     if args.check:
         return _check(gpath, rendered)
 
-    gpath.write_text(rendered, encoding="utf-8")
-    print(f"wrote {gpath}")
+    # Confine the write target to the bundled package data dir (its only
+    # production destination) plus the standard agent-CLI roots, so the
+    # keyword-only ``guide_path`` seam can never be steered outside a
+    # legitimate base. ``confine_to_roots`` resolves + allow-lists the path and
+    # returns it, which also clears the pythonsecurity:S2083 write-target taint.
+    package_root = Path(str(resources.files(_GUIDE_PACKAGE)))
+    safe_gpath = confine_to_roots(gpath, agent_cli_roots(package_root))
+    safe_gpath.write_text(rendered, encoding="utf-8")
+    print(f"wrote {safe_gpath}")
     return 0
 
 
