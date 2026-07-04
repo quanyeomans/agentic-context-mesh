@@ -325,9 +325,23 @@ def update_config_file(target: Path, updates: Mapping[str, Any]) -> Path:
     ``topology.credentials.github`` sibling; lists and scalars are
     replaced. The write itself goes through the terminal wizard's
     :func:`write_config_yaml` so both setup surfaces emit one file shape.
+
+    Legacy-key cleanup (#725): when the merged mapping declares the
+    canonical :data:`~kairix.config.TOPOLOGY_CONFIG_KEY`, the pre-rename
+    :data:`~kairix.config.LEGACY_TOPOLOGY_CONFIG_KEY` sibling is dropped.
+    An operator's single-file config written before the PLA-287 rename
+    carries the block under ``topology_v2:``; the wizard now emits the
+    canonical ``topology:`` block (with the legacy sources already folded
+    in by :func:`~kairix.platform.setup.source_oauth.topology_updates_for_source`),
+    and a raw deep-merge would leave BOTH keys in the file — a dead
+    duplicate block plus a foot-gun where hand-edits to the still-visible
+    legacy block are silently ignored on read. Dropping the legacy key
+    once the canonical key is present keeps the operator's file clean;
+    the sources survive because they are carried in the canonical block.
     """
     import yaml
 
+    from kairix.config import LEGACY_TOPOLOGY_CONFIG_KEY, TOPOLOGY_CONFIG_KEY
     from kairix.config_layers import deep_merge
 
     existing: dict[str, Any] = {}
@@ -336,6 +350,8 @@ def update_config_file(target: Path, updates: Mapping[str, Any]) -> Path:
         if isinstance(loaded, dict):
             existing = loaded
     merged = deep_merge(existing, _deep_coerce_mapping(updates))
+    if TOPOLOGY_CONFIG_KEY in merged:
+        merged.pop(LEGACY_TOPOLOGY_CONFIG_KEY, None)
     return write_config_yaml(target, "setup-wizard", merged)
 
 
