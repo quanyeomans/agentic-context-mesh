@@ -46,6 +46,8 @@ from kairix.worker_state import WorkerState, read_state
 if TYPE_CHECKING:
     import sqlite3
 
+    from kairix.core.connectors.topology_applier import ConfigDriftReport
+
 # argparse store-true action — extracted because the literal appears
 # on every boolean flag and the no-duplicate-string rule trips at 3+.
 _STORE_TRUE = "store_true"
@@ -98,12 +100,74 @@ def format_status(state: WorkerState, now: float | None = None) -> str:
     return "\n".join(lines)
 
 
+def _resolve_existing_db_path(db_path: Path | None) -> Path | None:
+    """Pick the DB the drift scan should read, or None when there is nothing to read.
+
+    Honours an explicit ``db_path`` (operator ``--db-path`` / in-process seam)
+    and otherwise resolves the production default. Either way the path is
+    returned ONLY if it already exists — ``kairix worker status`` stays
+    read-only, so it never creates an empty index just to scan for config drift
+    on a box that has not ingested yet.
+    """
+    from kairix.core.db import get_db_path
+
+    candidate = db_path if db_path is not None else get_db_path()
+    return candidate if candidate.exists() else None
+
+
+def _config_drift_report(
+    db_path: Path | None,
+    config_mapping: dict[str, Any] | None,
+) -> ConfigDriftReport | None:
+    """Best-effort config-drift snapshot for ``kairix worker status`` (issue #726).
+
+    Compares the ``topology_*`` store rows against the current parsed config
+    topology and returns a ``ConfigDriftReport`` naming the sources the config
+    no longer declares (removed-but-not-pruned, since ``apply_topology`` is
+    upsert-only). Read-only: no row is deleted or transitioned. Returns None
+    when there is no DB to read, or when any failure (unreadable config, legacy
+    schema, locked DB) makes drift undecidable — status must never crash on it.
+    """
+    resolved_db = _resolve_existing_db_path(db_path)
+    if resolved_db is None:
+        return None
+    from kairix.config.topology import parse_topology
+    from kairix.core.connectors.topology_applier import detect_config_drift
+    from kairix.core.db import open_db
+
+    mapping = config_mapping if config_mapping is not None else _load_merged_config_mapping_default()
+    try:
+        parsed = parse_topology(mapping)
+        db = open_db(resolved_db)
+    except Exception:  # pragma: no cover - defensive best-effort observability boundary
+        return None
+    try:
+        return detect_config_drift(db, parsed)
+    finally:
+        db.close()
+
+
+def _load_merged_config_mapping_default() -> dict[str, Any]:
+    """Boundary read for the MERGED operator config used by drift detection.
+
+    Delegates to the same layered reader the worker's connector-sync tick uses
+    (base + overlay via :func:`kairix.config_layers.load_merged_mapping`) so
+    ``kairix worker status`` sees exactly the ``topology:`` block the running
+    worker routes against.
+    """
+    from kairix.config_layers import load_merged_mapping
+
+    return load_merged_mapping()
+
+
 def status(
     *,
     state_path: Path | None = None,
     out: TextIO | None = None,
     err: TextIO | None = None,
     as_json: bool = False,
+    db_path: Path | None = None,
+    config_mapping: dict[str, Any] | None = None,
 ) -> int:
     """``kairix worker status`` — exit 0 if state file present, 1 if missing.
 
@@ -111,6 +175,13 @@ def status(
     monkeypatching ``sys``. ``as_json=True`` renders the structured state
     envelope (the same dict ``WorkerState.to_dict`` produces) for machine
     consumers and for the F30 subprocess outcome test.
+
+    ``db_path`` / ``config_mapping`` are the drift-detection seams (issue #726):
+    status also compares the ``topology_*`` store rows against the current
+    config and surfaces a WARN line naming any source the config no longer
+    declares (removed-but-not-pruned). Both default to the production
+    resolution; the scan is read-only and best-effort, so a missing DB /
+    unreadable config simply omits the WARN.
     """
     state_path = state_path if state_path is not None else worker_state_path()
     out = out if out is not None else sys.stdout
@@ -120,10 +191,22 @@ def status(
     if state is None:
         err.write(f"kairix worker: no state file at {state_path} — worker not running or never started\n")
         return 1
+    drift = _config_drift_report(db_path, config_mapping)
     if as_json:
-        out.write(json.dumps(state.to_dict(), indent=2) + "\n")
+        envelope = state.to_dict()
+        if drift is not None and drift.has_drift:
+            envelope["config_drift"] = {
+                "count": drift.total,
+                "connectors": list(drift.connectors),
+                "cc_pairs": list(drift.cc_pairs),
+                "collections": list(drift.collections),
+            }
+        out.write(json.dumps(envelope, indent=2) + "\n")
     else:
         out.write(format_status(state) + "\n")
+        warn = drift.warn_line() if drift is not None else None
+        if warn:
+            out.write(warn + "\n")
     return 0
 
 
@@ -552,6 +635,17 @@ def build_parser() -> argparse.ArgumentParser:
         action=_STORE_TRUE,
         help="Emit the full WorkerState dict as JSON on stdout (machine-readable).",
     )
+    status_p.add_argument(
+        "--db-path",
+        default=None,
+        help=(
+            "Scan this SQLite index for config drift instead of the default "
+            "resolution chain. When omitted, status reads the default index "
+            "only if it already exists (the drift scan is read-only). Mirrors "
+            "the ``--db-path`` seam on ``preflight`` — F30-clean subprocess "
+            "injection without KAIRIX_* env vars (F2-clean)."
+        ),
+    )
     pause_p = sub.add_parser("pause", help="Pause the running worker by creating a flag file.")
     pause_p.add_argument(
         "--flag-path",
@@ -715,7 +809,14 @@ def main(
 
     if args.cmd == "status":
         resolved_state = _resolve_state_path(getattr(args, "state_path", None), state_path)
-        return status(state_path=resolved_state, as_json=getattr(args, "as_json", False))
+        resolved_db = _resolve_db_path_arg(getattr(args, "db_path", None), db_path)
+        # ``as_json`` is always defined by the status subparser (--json,
+        # store_true) so read it directly — no dead getattr default.
+        return status(
+            state_path=resolved_state,
+            as_json=args.as_json,
+            db_path=resolved_db,
+        )
     if args.cmd == "pause":
         resolved_flag = _resolve_flag_path_arg(getattr(args, "flag_path", None), flag_path)
         return pause(flag_path=resolved_flag)

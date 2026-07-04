@@ -11,6 +11,7 @@ prints it in operator-readable form. Tests cover:
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 import pytest
@@ -325,3 +326,229 @@ def test_resume_cli_prints_latency_warning(tmp_path: Path, capsys: pytest.Captur
     main(["resume"], flag_path=flag)
     out = capsys.readouterr().out
     assert "5s" in out, f"resume output must mention the 5s latency; got: {out!r}"
+
+
+# ---------------------------------------------------------------------------
+# Config-drift WARN in ``kairix worker status`` (issue #726 observability half)
+# ---------------------------------------------------------------------------
+
+_TWO_SOURCE_CONFIG = {
+    "topology": {
+        "connectors": [
+            {"id": "obs-conn", "kind": "obsidian", "name": "obs-conn"},
+            {"id": "sp-conn", "kind": "sharepoint", "name": "sp-conn"},
+        ],
+        "credentials": [
+            {"id": "m365-oauth", "kind": "oauth", "secret_name": "s-m365"},  # pragma: allowlist secret
+        ],
+        "cc_pairs": [
+            {"id": "obs-cp", "connector": "obs-conn", "credential": None, "name": "obsidian-personal"},
+            {"id": "sp-cp", "connector": "sp-conn", "credential": "m365-oauth", "name": "sharepoint-corp"},
+        ],
+        "collections": [
+            {"name": "obsidian-all", "sources": [{"cc_pair": "obs-cp", "path_filter": "*"}]},
+            {"name": "sharepoint-public", "sources": [{"cc_pair": "sp-cp", "path_filter": "*"}]},
+        ],
+    }
+}
+
+_ONE_SOURCE_CONFIG = {
+    "topology": {
+        "connectors": [{"id": "obs-conn", "kind": "obsidian", "name": "obs-conn"}],
+        "cc_pairs": [{"id": "obs-cp", "connector": "obs-conn", "credential": None, "name": "obsidian-personal"}],
+        "collections": [{"name": "obsidian-all", "sources": [{"cc_pair": "obs-cp", "path_filter": "*"}]}],
+    }
+}
+
+
+def _seed_topology_db(tmp_path: Path, config: dict[str, object]) -> Path:
+    """Materialise ``config`` into a file-backed topology store and return its path.
+
+    Uses the production applier so the seeded rows match exactly what a live
+    worker boot would write — the drift scan then reads them back.
+    """
+    import sqlite3
+
+    from kairix.config import parse_topology
+    from kairix.core.connectors.topology_applier import apply_topology
+    from kairix.core.db.schema import create_schema
+
+    db_path = tmp_path / "kairix.sqlite"
+    db = sqlite3.connect(str(db_path))
+    create_schema(db, dims=4)
+    apply_topology(db, parse_topology(config))
+    db.commit()
+    db.close()
+    return db_path
+
+
+def _write_idle_state(tmp_path: Path) -> Path:
+    state_path = tmp_path / "worker-state.json"
+    write_state(WorkerState(current_phase=WorkerPhase.IDLE, embedded_total=5), state_path)
+    return state_path
+
+
+def test_status_warns_when_store_holds_source_removed_from_config(tmp_path: Path) -> None:
+    """A store with a source the config dropped surfaces the drift WARN.
+
+    Sabotage proof: delete the ``if warn: out.write(warn ...)`` branch in
+    ``status`` (or the ``stored - config`` subtraction in
+    ``detect_config_drift``) — the ``config drift: 3`` assertion fails.
+    """
+    db_path = _seed_topology_db(tmp_path, _TWO_SOURCE_CONFIG)
+    state_path = _write_idle_state(tmp_path)
+
+    out = io.StringIO()
+    rc = status(
+        state_path=state_path,
+        out=out,
+        err=io.StringIO(),
+        db_path=db_path,
+        config_mapping=_ONE_SOURCE_CONFIG,
+    )
+
+    printed = out.getvalue()
+    assert rc == 0
+    assert "WARN config drift: 3 topology source(s)" in printed, printed
+    assert "still routed/synced until pruned" in printed, printed
+    for stranded in ("sp-conn", "sharepoint-corp", "sharepoint-public"):
+        assert stranded in printed, f"{stranded} missing from drift WARN: {printed!r}"
+
+
+def test_status_no_drift_warn_when_config_matches_store(tmp_path: Path) -> None:
+    """Store and config agree → status renders no drift WARN.
+
+    Sabotage proof: hard-code ``ConfigDriftReport.has_drift`` to True — this
+    assertion that ``config drift`` is absent fails.
+    """
+    db_path = _seed_topology_db(tmp_path, _TWO_SOURCE_CONFIG)
+    state_path = _write_idle_state(tmp_path)
+
+    out = io.StringIO()
+    rc = status(
+        state_path=state_path,
+        out=out,
+        err=io.StringIO(),
+        db_path=db_path,
+        config_mapping=_TWO_SOURCE_CONFIG,
+    )
+
+    printed = out.getvalue()
+    assert rc == 0
+    assert "config drift" not in printed, printed
+    assert "Phase: IDLE" in printed
+
+
+def test_status_json_envelope_carries_config_drift_block(tmp_path: Path) -> None:
+    """``--json`` mode embeds a machine-readable ``config_drift`` block on drift.
+
+    Sabotage proof: drop the ``envelope['config_drift'] = ...`` assignment in
+    ``status`` — the ``config_drift`` key assertion raises KeyError.
+    """
+    db_path = _seed_topology_db(tmp_path, _TWO_SOURCE_CONFIG)
+    state_path = _write_idle_state(tmp_path)
+
+    out = io.StringIO()
+    rc = status(
+        state_path=state_path,
+        out=out,
+        err=io.StringIO(),
+        as_json=True,
+        db_path=db_path,
+        config_mapping=_ONE_SOURCE_CONFIG,
+    )
+
+    envelope = json.loads(out.getvalue())
+    assert rc == 0
+    assert envelope["config_drift"]["count"] == 3
+    assert envelope["config_drift"]["connectors"] == ["sp-conn"]
+    assert envelope["config_drift"]["cc_pairs"] == ["sharepoint-corp"]
+    assert envelope["config_drift"]["collections"] == ["sharepoint-public"]
+
+
+def test_status_json_envelope_omits_config_drift_when_clean(tmp_path: Path) -> None:
+    """No drift → ``config_drift`` key is absent (backward-compatible envelope)."""
+    db_path = _seed_topology_db(tmp_path, _TWO_SOURCE_CONFIG)
+    state_path = _write_idle_state(tmp_path)
+
+    out = io.StringIO()
+    rc = status(
+        state_path=state_path,
+        out=out,
+        err=io.StringIO(),
+        as_json=True,
+        db_path=db_path,
+        config_mapping=_TWO_SOURCE_CONFIG,
+    )
+
+    envelope = json.loads(out.getvalue())
+    assert rc == 0
+    assert "config_drift" not in envelope
+
+
+def test_status_drift_scan_is_readonly_noop_when_db_absent(tmp_path: Path) -> None:
+    """A ``--db-path`` that does not exist is skipped — status never creates it.
+
+    Sabotage proof: change ``_resolve_existing_db_path`` to return the path
+    without the ``.exists()`` guard — ``open_db`` then creates an empty index
+    and this ``not db_path.exists()`` assertion fails.
+    """
+    missing_db = tmp_path / "never-ingested.sqlite"
+    state_path = _write_idle_state(tmp_path)
+
+    out = io.StringIO()
+    rc = status(
+        state_path=state_path,
+        out=out,
+        err=io.StringIO(),
+        db_path=missing_db,
+        config_mapping=_ONE_SOURCE_CONFIG,
+    )
+
+    assert rc == 0
+    assert "config drift" not in out.getvalue()
+    assert not missing_db.exists(), "status must not create a DB just to scan for drift"
+
+
+def test_main_status_threads_db_path_and_json_flags(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """``main(["status", "--db-path", ..., "--json"])`` dispatches through to a
+    valid JSON envelope — pins the argparse ``--db-path`` + ``--json`` threading.
+
+    Sabotage proof: drop ``db_path=resolved_db`` from the status dispatch in
+    ``main`` — status then scans the default index instead of ``--db-path``;
+    with the seeded store here the envelope still parses, so this test pins the
+    envelope shape / exit code rather than the drift contents (which the
+    in-process ``status`` tests above assert deterministically).
+    """
+    db_path = _seed_topology_db(tmp_path, _TWO_SOURCE_CONFIG)
+    state_path = _write_idle_state(tmp_path)
+
+    rc = main(["status", "--state-path", str(state_path), "--db-path", str(db_path), "--json"])
+
+    assert rc == 0
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["current_phase"] == WorkerPhase.IDLE.value
+
+
+def test_status_default_config_resolution_does_not_crash(tmp_path: Path) -> None:
+    """``config_mapping=None`` exercises the layered-config default loader safely.
+
+    Drives the production ``load_merged_mapping`` resolution branch. The drift
+    outcome depends on the ambient config, so we only assert the command stays
+    green and still renders the state — the best-effort scan must never break
+    ``kairix worker status``.
+    """
+    db_path = _seed_topology_db(tmp_path, _TWO_SOURCE_CONFIG)
+    state_path = _write_idle_state(tmp_path)
+
+    out = io.StringIO()
+    rc = status(
+        state_path=state_path,
+        out=out,
+        err=io.StringIO(),
+        db_path=db_path,
+        config_mapping=None,
+    )
+
+    assert rc == 0
+    assert "Phase: IDLE" in out.getvalue()
