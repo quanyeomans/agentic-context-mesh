@@ -139,36 +139,46 @@ def test_run_neo4j_drain_tick_skips_relationship_kind_and_bumps_counter() -> Non
         db.close()
 
 
-def test_run_default_drain_tick_returns_unavailable_when_client_unreachable() -> None:
-    """The orchestration short-circuits to ``neo4j_available=False`` when
-    the client factory returns an unreachable client. No DB is opened,
-    no rows are touched.
+def test_run_default_drain_tick_returns_unavailable_when_client_unreachable(tmp_path) -> None:
+    """With rows pending but an unreachable client, the tick short-circuits to
+    ``neo4j_available=False`` and touches no row.
 
-    Sabotage proof: remove the ``if not client.available:`` early-return
-    in ``run_default_drain_tick`` and the assertion below trips because
-    ``db_factory`` would then be called (we'd hit the AssertionError in
-    the stand-in factory).
+    The idle-skip opens the SQLite connection first to see whether there is
+    anything to drain; a pending row means we DO build the client, which then
+    reports unreachable. (The empty-queue case is covered by
+    ``test_run_default_drain_tick_skips_client_build_when_no_pending_rows``.)
+
+    Sabotage proof: remove the ``if not client.available:`` early-return in
+    ``run_default_drain_tick`` and the drain would attempt to push against an
+    unreachable repo instead of reporting ``neo4j_available=False``.
     """
     from kairix.core.curator.drain import Neo4jDrainTickDeps, run_default_drain_tick
 
     class _UnreachableClient:
         available = False
 
-    db_factory_called = {"n": 0}
+    db_path_local = tmp_path / "drain_unreachable.sqlite"
 
-    def _db_factory_should_not_run() -> sqlite3.Connection:
-        db_factory_called["n"] += 1
-        raise AssertionError("db_factory must not run when client is unreachable")
+    def _open_with_pending_row() -> sqlite3.Connection:
+        conn = sqlite3.connect(str(db_path_local))
+        create_schema(conn)
+        conn.execute(
+            "INSERT INTO entity_signals (kind, value, source_uri, modified_at, confidence, "
+            "sensitivity, pushed_to_neo4j, push_attempt_count) "
+            "VALUES ('person', 'agent-alpha', 'vault://x', '2026-05-25T10:00:00Z', 0.9, "
+            "'internal', 0, 0)"
+        )
+        conn.commit()
+        return conn
 
     deps = Neo4jDrainTickDeps(
         client_factory=_UnreachableClient,
-        db_factory=_db_factory_should_not_run,
+        db_factory=_open_with_pending_row,
     )
     result = run_default_drain_tick(deps=deps)
     assert result.neo4j_available is False
     assert result.pushed == 0
     assert result.failed == 0
-    assert db_factory_called["n"] == 0
 
 
 def test_run_default_drain_tick_threads_components_through_drain_tick(tmp_path) -> None:
@@ -218,3 +228,43 @@ def test_run_default_drain_tick_threads_components_through_drain_tick(tmp_path) 
     assert result.neo4j_available is True
     assert result.pushed == 1
     assert isinstance(result.elapsed_ms, int)
+
+
+def test_run_default_drain_tick_skips_client_build_when_no_pending_rows(tmp_path) -> None:
+    """Idle-skip (PLA-331 / GH #334 idle burn): with no pending entity_signals
+    rows, the tick must NOT build a Neo4j client.
+
+    The drain tick is exempt from the worker's idle no-op gate (it must always
+    make progress on a backlog), so it fired every ``NEO4J_DRAIN_INTERVAL``
+    (600s) and rebuilt a driver — ``_connect`` + ``verify_connectivity`` +
+    constraint init — even on a completely idle vault with an empty queue. The
+    cheap SQLite existence probe short-circuits that: nothing pending ⇒ no
+    client, no neo4j work at all. It reports ``neo4j_available=True`` (there is
+    demonstrably nothing to drain; the separate health tick + the ENTITY-intent
+    query gate still surface a real neo4j outage when it matters).
+
+    Sabotage proof: remove the ``_has_unpushed_rows`` early-return in
+    ``run_default_drain_tick`` and ``client_factory`` runs — the AssertionError
+    below trips, which is precisely the idle driver spin-up this fix removes.
+    """
+    from kairix.core.curator.drain import Neo4jDrainTickDeps, run_default_drain_tick
+
+    db_path_local = tmp_path / "drain_idle.sqlite"
+
+    def _open_empty_db() -> sqlite3.Connection:
+        conn = sqlite3.connect(str(db_path_local))
+        create_schema(conn)  # schema present, ZERO entity_signals rows
+        return conn
+
+    def _client_factory_must_not_run() -> object:
+        raise AssertionError("client_factory must not run when nothing is pending")
+
+    deps = Neo4jDrainTickDeps(
+        client_factory=_client_factory_must_not_run,
+        db_factory=_open_empty_db,
+    )
+    result = run_default_drain_tick(deps=deps)
+    assert result.neo4j_available is True, "idle skip reports available (nothing to drain)"
+    assert result.pushed == 0
+    assert result.failed == 0
+    assert result.skipped_relationships == 0

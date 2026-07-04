@@ -193,6 +193,23 @@ def _select_unpushed_rows(
     return [(int(r[0]), str(r[1]), str(r[2]), str(r[3]), float(r[4]), str(r[5])) for r in rows]
 
 
+def _has_unpushed_rows(db: sqlite3.Connection) -> bool:
+    """Whether any ``entity_signals`` row still needs pushing to Neo4j.
+
+    A cheap, indexed existence probe (``LIMIT 1``, F63-bounded) run BEFORE the
+    drain builds a Neo4j client, so an idle vault's 10-minute tick doesn't spin
+    up a driver (``_connect`` + ``verify_connectivity`` + constraint init) when
+    there is demonstrably nothing to drain (PLA-331 idle CPU burn). Uses the
+    same pending-row predicate as :func:`_select_unpushed_rows` so the skip
+    decision and the batch it would drain never disagree.
+    """
+    row = db.execute(
+        "SELECT 1 FROM entity_signals WHERE pushed_to_neo4j IN (0, -1) AND push_attempt_count < ? LIMIT 1",
+        (MAX_PUSH_ATTEMPTS,),
+    ).fetchone()
+    return row is not None
+
+
 def _mark_pushed(db: sqlite3.Connection, signal_id: int) -> None:
     """Flip a signal's ``pushed_to_neo4j`` flag to 1 on success."""
     db.execute(
@@ -482,14 +499,18 @@ def run_default_drain_tick(deps: Neo4jDrainTickDeps | None = None) -> NeoDrainRe
     """Production-default drain tick — open Neo4j client + SQLite + run.
 
     Composition shape:
-      1. Build the live Neo4j client via ``deps.client_factory()``
-      2. Early-return ``NeoDrainResult(neo4j_available=False, ...)`` if
+      1. Open the SQLite connection via ``deps.db_factory()``
+      2. Idle-skip: if no rows are pending, return
+         ``NeoDrainResult(neo4j_available=True, pushed=0, ...)`` WITHOUT
+         building a Neo4j client — an idle vault must not spin up a driver
+         (connect + verify_connectivity + constraint init) every tick
+      3. Build the live Neo4j client via ``deps.client_factory()``
+      4. Early-return ``NeoDrainResult(neo4j_available=False, ...)`` if
          the backend is unreachable (the worker logs a single warning;
          the next tick retries)
-      3. Wrap the client into a DrainGraphRepository via
-         ``deps.repo_factory(client)``
-      4. Open the SQLite connection via ``deps.db_factory()``
-      5. Delegate to :func:`run_neo4j_drain_tick` for the row-level work
+      5. Wrap the client into a DrainGraphRepository via
+         ``deps.repo_factory(client)`` and delegate to
+         :func:`run_neo4j_drain_tick` for the row-level work
       6. Close the SQLite connection in ``finally`` regardless of outcome
 
     Extracted from :func:`kairix.worker._default_neo4j_drain` so the
@@ -501,19 +522,37 @@ def run_default_drain_tick(deps: Neo4jDrainTickDeps | None = None) -> NeoDrainRe
     site keeps the loop alive.
     """
     deps = deps or Neo4jDrainTickDeps()
-    client = deps.client_factory()
-    if not client.available:
-        return NeoDrainResult(
-            pushed=0,
-            failed=0,
-            skipped_relationships=0,
-            neo4j_available=False,
-            elapsed_ms=0,
-        )
-
-    repo = deps.repo_factory(client)
     db = deps.db_factory()
     try:
+        # Idle-skip: open the (cheap) SQLite connection first and short-circuit
+        # when nothing is queued, BEFORE building the Neo4j client. The drain
+        # tick is exempt from the worker's idle no-op gate so it always makes
+        # progress on a backlog — but on an idle vault that meant rebuilding a
+        # driver (connect + verify_connectivity + constraint init) every tick
+        # for zero rows (PLA-331 idle CPU burn). Report neo4j_available=True:
+        # there is demonstrably nothing to drain, and the separate health tick
+        # + the ENTITY-intent query gate still surface a real outage when it
+        # actually matters.
+        if not _has_unpushed_rows(db):
+            return NeoDrainResult(
+                pushed=0,
+                failed=0,
+                skipped_relationships=0,
+                neo4j_available=True,
+                elapsed_ms=0,
+            )
+
+        client = deps.client_factory()
+        if not client.available:
+            return NeoDrainResult(
+                pushed=0,
+                failed=0,
+                skipped_relationships=0,
+                neo4j_available=False,
+                elapsed_ms=0,
+            )
+
+        repo = deps.repo_factory(client)
         return run_neo4j_drain_tick(db, repo)
     finally:
         db.close()
