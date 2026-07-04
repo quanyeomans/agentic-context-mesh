@@ -611,6 +611,9 @@ All credentials are fetched from Azure Key Vault at runtime. You can override an
 | `KAIRIX_NEO4J_USER` | Neo4j username | `neo4j` |
 | `KAIRIX_LOG_QUERIES` | Set to `1` to log all search queries | Off |
 | `KAIRIX_USEARCH_PATH` | Override usearch index file path | `~/.cache/kairix/vectors.usearch` |
+| `KAIRIX_MAX_CONCURRENCY` | Expected number of searches running at once. Sizes the shared backend-dispatch thread pool (each search runs its BM25 + vector legs in parallel, so the pool holds `2 × concurrency` workers). | CPU-aware: `2 × cores`, bounded to `4`–`32` (pool `8`–`64`). Unknowable core count falls back to `8`. |
+
+**Dispatch concurrency.** Each search fans its BM25 and vector legs out to a shared, process-wide thread pool so the two run in parallel instead of back to back. The pool is sized from the expected concurrent-search load: leave `KAIRIX_MAX_CONCURRENCY` unset and it auto-scales with the host core count (a bigger box uses more parallelism; a 1–2 core box stays small), or set it explicitly to pin the load to your teaming size (the number of agents firing searches at once) — an explicit value is authoritative and overrides the CPU-aware default. On an 8-core box the CPU-aware default resolves to `16` (pool of `32`), so no override is needed; set `KAIRIX_MAX_CONCURRENCY=16` only if you want to pin it. The code in `kairix/core/search/pipeline.py` (`cpu_aware_default_concurrency` / `dispatch_workers_for`) is the source of truth for the exact math.
 
 ---
 

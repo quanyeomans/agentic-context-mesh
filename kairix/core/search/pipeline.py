@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -69,6 +70,38 @@ logger = logging.getLogger(__name__)
 # per-worker thread-init cost (~0.5-1ms) is still paid once and amortised
 # across every subsequent search because the singleton is reused.
 _FUTURES_PER_SEARCH = 2
+
+# CPU-aware default concurrency (PLA-272 follow-up). When
+# ``KAIRIX_MAX_CONCURRENCY`` is UNSET, the expected concurrent-search load —
+# and therefore the dispatch pool size — is derived from the host core count
+# so a bigger box (e.g. an 8-core D8as_v5) auto-uses more dispatch
+# parallelism without an operator env tweak, while a 1-2 core CI box stays
+# bounded. Each concurrent search still submits ``_FUTURES_PER_SEARCH``
+# futures, so the resolved concurrency multiplies into the pool size via
+# :func:`dispatch_workers_for`.
+#
+# Derivation: ``clamp(_CONCURRENCY_PER_CPU * cpu_count, floor, ceiling)``.
+# Both legs are I/O-bound (SQLite FTS5 + Azure embed HTTP), so a modest 2x
+# over-subscription of cores keeps several concurrent searches' two legs in
+# flight without pinning the box. The floor keeps a single-core box able to
+# overlap a few searches (pool never below ``2 * _MIN_DISPATCH_CONCURRENCY``);
+# the ceiling stops a 32/64-core host allocating an unbounded pool that just
+# adds thread-switch overhead the I/O-bound legs never cash in (pool never
+# above ``2 * _MAX_DISPATCH_CONCURRENCY``).
+#
+# The clamp applies ONLY to the auto-derived default. An explicit
+# ``KAIRIX_MAX_CONCURRENCY`` stays authoritative and un-clamped — an operator
+# who names a value owns its pool-size consequence (behaviour preserved from
+# PLA-272, where the env value fed ``dispatch_workers_for`` verbatim).
+_CONCURRENCY_PER_CPU = 2
+_MIN_DISPATCH_CONCURRENCY = 4
+_MAX_DISPATCH_CONCURRENCY = 32
+
+# Fallback used only when ``os.cpu_count()`` can't determine the core count
+# (it returns ``None`` on some constrained / containerised hosts). Equals a
+# 4-core box under the 2x rule — the historical fixed default (PLA-272) — so
+# an unknowable host keeps the prior behaviour rather than collapsing to the
+# floor.
 DEFAULT_DISPATCH_CONCURRENCY = 8
 
 _DISPATCH_POOL: ThreadPoolExecutor | None = None
@@ -102,16 +135,45 @@ def build_dispatch_pool(concurrency: int) -> ThreadPoolExecutor:
     )
 
 
-def _resolve_dispatch_concurrency() -> int:
+def cpu_aware_default_concurrency(cpu_count: int | None) -> int:
+    """Derive the default concurrent-search load from the host core count.
+
+    Public sizing seam (sibling of :func:`dispatch_workers_for`): ``cpu_count``
+    is passed in (``os.cpu_count()`` at the one production call site) so tests
+    exercise the scaling by value — a small core count yields a small load, an
+    8-core box a larger one — without patching the process. The result is
+    always clamped to ``[_MIN_DISPATCH_CONCURRENCY, _MAX_DISPATCH_CONCURRENCY]``
+    so a 1-2 core box can't over-allocate and a 32/64-core box can't
+    unbounded-explode the pool.
+
+    Returns :data:`DEFAULT_DISPATCH_CONCURRENCY` when ``cpu_count`` is
+    ``None`` (``os.cpu_count()`` can't determine the count) so an unknowable
+    host keeps the historical fixed default.
+    """
+    if cpu_count is None:
+        return DEFAULT_DISPATCH_CONCURRENCY
+    scaled = _CONCURRENCY_PER_CPU * max(1, cpu_count)
+    return min(_MAX_DISPATCH_CONCURRENCY, max(_MIN_DISPATCH_CONCURRENCY, scaled))
+
+
+def resolve_dispatch_concurrency() -> int:
     """Resolve the expected concurrent-search load, with env override (F4-clean).
 
-    Routes the env read through :mod:`kairix.paths` so no ``os.environ`` read
-    leaks into the search tier. Operators tune ``KAIRIX_MAX_CONCURRENCY`` to
-    match their teaming load (the number of agents firing searches at once).
+    Public seam so the resolution (env-override precedence + CPU-aware default)
+    is testable by value. The env read is routed through :mod:`kairix.paths`
+    (no direct process-env read leaks into the search tier). When the operator
+    knob is UNSET the default is CPU-aware (:func:`cpu_aware_default_concurrency`
+    over ``os.cpu_count()``) so a bigger box auto-scales dispatch parallelism;
+    when ``KAIRIX_MAX_CONCURRENCY`` is SET, ``read_int_env`` returns that value
+    verbatim and it stays authoritative (operators tune it to their teaming
+    load — the number of agents firing searches at once).
     """
     from kairix.paths import read_int_env
 
-    return read_int_env("KAIRIX_MAX_CONCURRENCY", default=DEFAULT_DISPATCH_CONCURRENCY)
+    return read_int_env(
+        "KAIRIX_MAX_CONCURRENCY",
+        default=cpu_aware_default_concurrency(os.cpu_count()),
+    )
 
 
 def _default_dispatch_pool() -> ThreadPoolExecutor:
@@ -119,14 +181,90 @@ def _default_dispatch_pool() -> ThreadPoolExecutor:
 
     Built on the first search and reused for every subsequent dispatch so the
     per-worker thread-init cost is paid once and amortised. Sized from
-    :func:`_resolve_dispatch_concurrency` so the pool matches the expected
+    :func:`resolve_dispatch_concurrency` so the pool matches the expected
     concurrent load instead of the legacy fixed two workers (PLA-272).
     """
     global _DISPATCH_POOL
     with _DISPATCH_POOL_LOCK:
         if _DISPATCH_POOL is None:
-            _DISPATCH_POOL = build_dispatch_pool(_resolve_dispatch_concurrency())
+            _DISPATCH_POOL = build_dispatch_pool(resolve_dispatch_concurrency())
         return _DISPATCH_POOL
+
+
+# Process-shared thread pool for the CPU-bound cross-encoder rerank stage
+# (PLA-272). Rerank is the single largest search stage (~331ms on the
+# production probe) and — unlike bm25+vector, which the dispatch pool already
+# overlaps — it ran INLINE on the request thread. Under concurrent teaming load
+# that inline call was the serialisation point: a concurrency soak (N=1→20
+# distinct queries) saw latency scale linearly with N and throughput stay flat
+# (~2.5 req/s, effective concurrency ≈ 1).
+#
+# sentence-transformers/torch releases the GIL during the C/torch forward pass,
+# so concurrent rerank forward passes CAN run in parallel across cores — but
+# only when they go through a bounded, shared executor instead of contending
+# uncontrolled on the (up-to-32) transport worker threads. Routing rerank onto
+# a dedicated pool sized for the expected concurrent-search load caps the number
+# of simultaneous forward passes at the configured concurrency (rather than the
+# transport's worker ceiling), so concurrent requests' rerank overlaps on a
+# controlled set of cores instead of oversubscribing them.
+#
+# Sized from the SAME ``KAIRIX_MAX_CONCURRENCY`` signal as the dispatch pool
+# (:func:`resolve_dispatch_concurrency`) — one rerank task per search, so the
+# worker count is the concurrency itself (the dispatch pool submits two futures
+# per search and so doubles it). Built LAZILY so the size resolves from
+# config/env at first use, and injectable via the ``rerank_pool`` seam on
+# SearchPipeline so tests exercise routing + sizing without touching process env
+# (F2-clean). Threads carry the ``search-rerank`` prefix so the pool stays
+# identifiable in py-spy / stack dumps, distinct from the ``search-dispatch``
+# pool. The single-request ranking is byte-for-byte unchanged — the reranker
+# runs the same input on a pool thread instead of the request thread; only the
+# concurrent overlap changes.
+_RERANK_POOL: ThreadPoolExecutor | None = None
+_RERANK_POOL_LOCK = threading.Lock()
+
+
+def rerank_workers_for(concurrency: int) -> int:
+    """Pool workers needed to rerank ``concurrency`` concurrent searches.
+
+    Each search runs exactly one rerank task (unlike dispatch, which submits
+    one BM25 + one vector future), so the worker count is the concurrency
+    itself — the shared pool then caps the number of simultaneous CPU-bound
+    cross-encoder forward passes at the configured concurrent-search load
+    rather than the transport's worker ceiling. Floored at 1 so a
+    misconfigured ``concurrency <= 1`` still yields a usable single-worker
+    pool.
+    """
+    return max(1, concurrency)
+
+
+def build_rerank_pool(concurrency: int) -> ThreadPoolExecutor:
+    """Build a rerank pool sized for ``concurrency`` concurrent searches.
+
+    ``max_workers`` comes from :func:`rerank_workers_for` so the size always
+    tracks the configured concurrency — never a hardcoded literal. The caller
+    owns the returned pool's lifecycle; :func:`_default_rerank_pool` reuses a
+    single process-wide instance.
+    """
+    return ThreadPoolExecutor(
+        max_workers=rerank_workers_for(concurrency),
+        thread_name_prefix="search-rerank",
+    )
+
+
+def _default_rerank_pool() -> ThreadPoolExecutor:
+    """Return the process-lifetime rerank pool, building it lazily.
+
+    Built on the first reranked search and reused for every subsequent rerank
+    so the per-worker thread-init cost is paid once and amortised. Sized from
+    :func:`resolve_dispatch_concurrency` — the same ``KAIRIX_MAX_CONCURRENCY``
+    signal the dispatch pool uses — so the two pools scale together with the
+    operator's teaming load (PLA-272).
+    """
+    global _RERANK_POOL
+    with _RERANK_POOL_LOCK:
+        if _RERANK_POOL is None:
+            _RERANK_POOL = build_rerank_pool(resolve_dispatch_concurrency())
+        return _RERANK_POOL
 
 
 @dataclass
@@ -211,6 +349,17 @@ class SearchPipeline:
     # the legacy fixed 2-worker ceiling (PLA-272). Tests inject a known-size
     # pool here to exercise sizing without touching process env (F2-clean).
     dispatch_pool: ThreadPoolExecutor | None = None
+    # Bounded executor for the CPU-bound cross-encoder rerank stage (PLA-272).
+    # When ``None`` (the default — what the factory and every existing test
+    # construct), the process-shared pool from :func:`_default_rerank_pool` is
+    # used, sized from the same ``KAIRIX_MAX_CONCURRENCY`` signal as the dispatch
+    # pool so concurrent teaming searches' rerank overlaps on a controlled set of
+    # cores instead of serialising on the request thread. The single-request
+    # ranking is byte-for-byte identical — the reranker runs the same input on a
+    # pool thread rather than inline; only the concurrent overlap changes. Tests
+    # inject a known-size pool here to exercise routing + sizing without touching
+    # process env (F2-clean).
+    rerank_pool: ThreadPoolExecutor | None = None
     # PLA-270 — optional tiered-context summary source (a ``SummaryLoader``).
     # When ``None`` (the default the factory and every direct test construct)
     # the budget stage serves the full ``L2`` snippet for every row —
@@ -686,6 +835,19 @@ class SearchPipeline:
         Failure-isolated: any rerank exception logs at WARNING and returns
         ``fused`` unchanged. The pipeline never raises because of rerank.
 
+        Concurrency (PLA-272): the CPU-bound cross-encoder forward pass is the
+        single largest search stage and used to run INLINE on the request
+        thread — under concurrent teaming load it was the serialisation point
+        (soak: effective concurrency ≈ 1). The reranker call is now routed
+        through a bounded, shared executor (:func:`_default_rerank_pool`, or the
+        injected ``rerank_pool`` seam) so concurrent requests' rerank overlaps
+        on a controlled set of cores. The cheap gating above stays inline; only
+        the forward pass is offloaded. Correctness is unchanged: the SAME
+        reranker runs the SAME ``fused`` input, so a single request's output
+        ranking is byte-for-byte identical — ``Future.result()`` returns the
+        reranker's value and re-raises its exceptions into the failure-isolation
+        handler exactly as the inline call did.
+
         Closes Issue 2 (Phase A) — dead-code-shaped lift. The rerank module
         + config + tests have all shipped; only the wiring into the pipeline
         was missing. The expected lift on the 2026-06-08 reflib eval is
@@ -698,8 +860,9 @@ class SearchPipeline:
         intent_matches = intent.value in self.config.rerank_intents
         if not force_enabled and not intent_matches:
             return fused
+        pool = self.rerank_pool if self.rerank_pool is not None else _default_rerank_pool()
         try:
-            return self.reranker(query, fused)
+            return pool.submit(self.reranker, query, fused).result()
         except Exception as e:
             _logger.warning("pipeline: rerank failed — %s — returning boosted order unchanged", e)
             return fused

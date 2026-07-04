@@ -31,21 +31,29 @@ test names the exact mutation):
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
 from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
+from kairix.core.search.config import RetrievalConfig
 from kairix.core.search.fusion import RRFFusion
 from kairix.core.search.pipeline import (
     DEFAULT_DISPATCH_CONCURRENCY,
     SearchPipeline,
     build_dispatch_pool,
+    build_rerank_pool,
+    cpu_aware_default_concurrency,
     dispatch_workers_for,
+    rerank_workers_for,
+    resolve_dispatch_concurrency,
 )
+from kairix.paths import read_int_env
 from kairix.transport.embed_service import ProviderEmbeddingService
 from tests.fakes import (
     FakeClassifier,
@@ -304,6 +312,128 @@ def test_dispatch_pool_sized_from_configured_concurrency() -> None:
         assert pool._max_workers > 2
     finally:
         pool.shutdown(wait=False)
+
+
+# ---------------------------------------------------------------------------
+# Concurrency bump — CPU-aware default concurrency (PLA-272 follow-up)
+#
+# When KAIRIX_MAX_CONCURRENCY is UNSET, the expected concurrent-search load
+# (and therefore the dispatch pool size) is derived from the host core count
+# so a bigger box (an incoming 8-core D8as_v5) auto-uses more dispatch
+# parallelism without an operator env tweak, while a 1-2 core CI box stays
+# bounded. cpu_aware_default_concurrency is the public sizing seam: the core
+# count is injected as a plain int (no process patching, F2-clean), so the
+# scaling / clamp behaviour is asserted by value. An explicit
+# KAIRIX_MAX_CONCURRENCY stays authoritative — it feeds read_int_env and wins
+# over the CPU-aware default (behaviour preserved from PLA-272).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_default_concurrency_scales_with_cpu_count() -> None:
+    """The CPU-aware default scales with cores and clears the legacy fixed 8.
+
+    A small core count yields a small load; an 8-core box yields a larger one
+    that exceeds the old fixed default, so the bigger box isn't capped at a
+    small fixed number. The core count is a plain-int argument (injection, not
+    ``setenv``), so the scaling is asserted directly.
+
+    Sabotage-proof (executed): in ``kairix/core/search/pipeline.py`` replace the
+    body of ``cpu_aware_default_concurrency`` with
+    ``return DEFAULT_DISPATCH_CONCURRENCY`` (drop the CPU-aware derivation) —
+    ``small < eight`` fails because both collapse to 8. Restore to pass.
+    """
+    small = cpu_aware_default_concurrency(1)  # 1-core CI box
+    eight = cpu_aware_default_concurrency(8)  # incoming 8-core D8as_v5
+
+    # A bigger box auto-uses more dispatch concurrency.
+    assert small < eight, f"8-core must out-scale a 1-core box; got {small} vs {eight}"
+    # The 8-core default clears the legacy fixed default so the bigger box
+    # isn't capped at the small fixed number (the reason for this change).
+    assert eight > DEFAULT_DISPATCH_CONCURRENCY, (
+        f"8-core default {eight} must exceed the legacy fixed {DEFAULT_DISPATCH_CONCURRENCY}"
+    )
+    # Non-decreasing across the realistic core range (small boxes floor, big
+    # boxes ceiling — never inverts).
+    seq = [cpu_aware_default_concurrency(c) for c in (1, 2, 4, 8, 16)]
+    assert seq == sorted(seq), f"concurrency must be non-decreasing in cores; got {seq}"
+
+
+@pytest.mark.unit
+def test_default_concurrency_and_pool_stay_within_floor_and_ceiling() -> None:
+    """The CPU-aware default (and the pool from it) can't over- or under-allocate.
+
+    A 1-2 core box must not get a huge pool; a 32/64-core box must not
+    unbounded-explode it. ``cpu_aware_default_concurrency`` clamps the load to a
+    fixed envelope, so ``dispatch_workers_for(default)`` stays within
+    ``[2*floor, 2*ceiling]`` for ANY core count — including absurd ones — while
+    clearing the legacy 2-worker pool on every host.
+
+    Sabotage-proof (executed): in ``kairix/core/search/pipeline.py`` drop the
+    ``min()/max()`` clamp (``return scaled``) — the saturation assert
+    (``cpu_aware_default_concurrency(64) == cpu_aware_default_concurrency(1000)``)
+    fails because the value grows without bound. Restore to pass.
+    """
+    floor_conc = cpu_aware_default_concurrency(1)
+    # Clamp saturates — a 64-core and a 1000-core host resolve to the SAME
+    # bounded load, so a huge box can't unbounded-explode the pool.
+    assert cpu_aware_default_concurrency(64) == cpu_aware_default_concurrency(1000), (
+        "clamp must saturate so a huge box can't unbounded-explode the pool"
+    )
+    ceiling_conc = cpu_aware_default_concurrency(1000)
+    assert floor_conc < ceiling_conc, f"floor {floor_conc} must sit below ceiling {ceiling_conc}"
+
+    floor_pool = dispatch_workers_for(floor_conc)
+    ceiling_pool = dispatch_workers_for(ceiling_conc)
+    for cpu in (1, 2, 3, 4, 8, 16, 32, 64, 256, 4096):
+        conc = cpu_aware_default_concurrency(cpu)
+        assert floor_conc <= conc <= ceiling_conc, f"cpu={cpu} -> {conc} escaped [{floor_conc}, {ceiling_conc}]"
+        workers = dispatch_workers_for(conc)
+        assert floor_pool <= workers <= ceiling_pool, f"cpu={cpu} pool {workers} escaped [{floor_pool}, {ceiling_pool}]"
+        # Clears the legacy fixed 2-worker pool on every host (PLA-272).
+        assert workers > 2
+
+    # None (os.cpu_count() undeterminable) falls back to the fixed default,
+    # which itself sits inside the envelope.
+    assert floor_conc <= cpu_aware_default_concurrency(None) <= ceiling_conc
+
+
+@pytest.mark.unit
+def test_explicit_env_override_is_authoritative_over_cpu_aware_default() -> None:
+    """An explicit KAIRIX_MAX_CONCURRENCY wins over the CPU-aware default.
+
+    ``resolve_dispatch_concurrency`` is the public resolver: when an operator
+    sets the env it returns that value verbatim (authoritative, un-clamped) and
+    the CPU-aware default is NOT used; when unset, the CPU-aware default flows
+    through. ``read_int_env``'s env-over-default precedence is independently
+    pinned in ``tests/test_paths.py::TestReadIntEnv``; this pins that the
+    resolver actually wires the env in front of the derived default.
+
+    F2/F1-clean: the env is set via ``patch.dict(os.environ, ...)`` (a scoped,
+    auto-restored stdlib-boundary edit — not ``monkeypatch.setenv`` and not an
+    ``@patch`` on a kairix target).
+
+    Sabotage-proof (executed): in ``kairix/core/search/pipeline.py`` make
+    ``resolve_dispatch_concurrency`` return
+    ``cpu_aware_default_concurrency(os.cpu_count())`` directly (dropping
+    ``read_int_env``) — the operator's out-of-band value is ignored and the
+    env-set assertion (``== 3``) fails. Restore to pass.
+    """
+    env_var = "KAIRIX_MAX_CONCURRENCY"
+    default_for_host = cpu_aware_default_concurrency(os.cpu_count())
+    # 3 is below the CPU-aware floor, so on ANY host it can only come from the
+    # env override — proving the operator value wins over the derived default.
+    assert default_for_host > 3
+
+    with patch.dict(os.environ, {env_var: "3"}):
+        assert resolve_dispatch_concurrency() == 3, "explicit override must win over the CPU-aware default"
+        # read_int_env is the sanctioned seam that delivers that precedence.
+        assert read_int_env(env_var, default=default_for_host) == 3
+
+    # Env unset -> the resolver falls back to the CPU-aware default for the host.
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop(env_var, None)
+        assert resolve_dispatch_concurrency() == default_for_host
 
 
 @pytest.mark.unit
@@ -741,3 +871,236 @@ def test_parallel_dispatch_preserves_embed_http_and_vector_ann_split_keys() -> N
     assert "vector" in result.stage_latency_ms
     assert "bm25" in result.stage_latency_ms
     assert "dispatch" in result.stage_latency_ms
+
+
+# ---------------------------------------------------------------------------
+# Fix 4 — rerank routed through a bounded, shared executor (PLA-272)
+#
+# Rerank is the single largest search stage (~331ms cross-encoder forward pass)
+# and — unlike bm25+vector, which the dispatch pool already overlaps — it ran
+# INLINE on the request thread. Under concurrent teaming load a concurrency soak
+# (N=1→20 distinct queries) saw latency scale linearly with N and throughput stay
+# flat (~2.5 req/s, effective concurrency ≈ 1). torch releases the GIL during the
+# forward pass, so routing rerank onto a dedicated pool sized for the expected
+# concurrent load lets concurrent requests' rerank overlap on a controlled set of
+# cores instead of serialising / oversubscribing. The size seam is the
+# ``concurrency`` argument to ``rerank_workers_for`` / ``build_rerank_pool``
+# (injected as a value, never read from process env — F2-clean), and the
+# SearchPipeline.rerank_pool field lets a caller inject its own pool. Quality is
+# unchanged: a single request's output ranking is byte-for-byte identical (the
+# same reranker runs the same input on a pool thread instead of inline).
+# ---------------------------------------------------------------------------
+
+
+def _rerank_pipeline(
+    *,
+    reranker: Any,
+    rerank_pool: ThreadPoolExecutor | None = None,
+    documents: list[dict[str, Any]] | None = None,
+) -> SearchPipeline:
+    """Build a SearchPipeline whose rerank stage fires on SEMANTIC intent.
+
+    Direct construction is sanctioned here — these are perf unit tests pinning
+    leaf behaviour against the protocol shape, not BDD step impls. ``skip_vector``
+    keeps the fused set to the bm25 docs so the reranked ordering is
+    deterministic; ``rerank_intents=("semantic",)`` matches the FakeClassifier
+    default intent so ``_maybe_rerank`` actually invokes the injected reranker.
+    """
+    docs = (
+        documents
+        if documents is not None
+        else [{"path": "p1.md", "collection": "c", "title": "T1", "content": "alpha"}]
+    )
+    return SearchPipeline(
+        classifier=FakeClassifier(),  # defaults to SEMANTIC
+        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
+        vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository()),
+        graph=FakeGraphRepository(available=True),
+        fusion=RRFFusion(k=60),
+        boosts=[],
+        logger=None,
+        config=RetrievalConfig(skip_vector=True, rerank_intents=("semantic",)),
+        reranker=reranker,
+        rerank_pool=rerank_pool,
+    )
+
+
+@pytest.mark.unit
+def test_rerank_pool_sized_from_configured_concurrency() -> None:
+    """The rerank pool scales with the injected concurrency value.
+
+    ``rerank_workers_for`` is the sizing seam: one rerank task per search, so
+    the worker count IS the configured concurrency (the dispatch pool submits
+    two futures per search and so doubles it). It grows monotonically with
+    concurrency and is floored at 1 so a misconfigured ``concurrency <= 1``
+    still yields a usable single-worker pool. ``build_rerank_pool`` then
+    constructs a real pool whose ``max_workers`` equals the computed size, so a
+    hardcoded ceiling is caught at the executor, not just in the helper.
+
+    Sabotage-proof (executed): in ``kairix/core/search/pipeline.py`` change
+    ``build_rerank_pool`` to ``ThreadPoolExecutor(max_workers=1, ...)`` (a
+    hardcode) and re-run — the ``pool._max_workers == rerank_workers_for(...)``
+    assert fails. Equivalently make ``rerank_workers_for`` ``return 1`` and the
+    monotonic-growth asserts fail. Restore to pass.
+    """
+    # Scales with the configured concurrency value (strict monotonic growth).
+    small = rerank_workers_for(2)
+    medium = rerank_workers_for(4)
+    large = rerank_workers_for(8)
+    assert small < medium < large, f"sizing must grow with concurrency; got {small}, {medium}, {large}"
+
+    # Floored at 1 for a misconfigured concurrency.
+    assert rerank_workers_for(0) == 1
+    assert rerank_workers_for(-5) == 1
+
+    # The built pool honours the computed size — guards against a hardcoded
+    # max_workers literal slipping into the executor construction.
+    pool = build_rerank_pool(concurrency=5)
+    try:
+        assert pool._max_workers == rerank_workers_for(5)
+        assert pool._max_workers == 5
+    finally:
+        pool.shutdown(wait=False)
+
+
+@pytest.mark.unit
+def test_rerank_single_request_ranking_is_deterministic_through_pool() -> None:
+    """Quality invariant: routing rerank through the pool does not change the
+    single-request output ranking.
+
+    A deterministic reranker assigns a fixed score per path and re-sorts. The
+    pipeline routes it through the (default, process-shared) rerank pool; the
+    resulting order must equal the reranker's intended order AND be identical
+    across repeated runs (no thread-relocation nondeterminism). This is the
+    "byte-for-byte ranking on a fixed input" guarantee — the concurrency fix is
+    purely a wall-clock/overlap optimisation and must not perturb quality.
+
+    Sabotage-proof: in ``SearchPipeline._maybe_rerank`` drop the ``.result()``
+    (``return pool.submit(self.reranker, query, fused)``) — a Future object is
+    returned instead of the reranked list, ``apply_budget`` finds no rows, and
+    the ordering assert below fails on an empty result.
+    """
+    # p3 scores highest, then p1, then p2 — a fixed, path-keyed order.
+    fixed_scores = {"p1.md": 2.0, "p2.md": 1.0, "p3.md": 3.0}
+    expected_order = ["p3.md", "p1.md", "p2.md"]
+
+    def _deterministic_reranker(query: str, fused: list[Any]) -> list[Any]:
+        for r in fused:
+            score = fixed_scores.get(r.path, 0.0)
+            r.rerank_score = score
+            r.boosted_score = score  # apply_budget sorts by boosted_score
+        return sorted(fused, key=lambda r: r.rerank_score, reverse=True)
+
+    docs = [
+        {"path": "p1.md", "collection": "c", "title": "T1", "content": "alpha shared"},
+        {"path": "p2.md", "collection": "c", "title": "T2", "content": "alpha shared"},
+        {"path": "p3.md", "collection": "c", "title": "T3", "content": "alpha shared"},
+    ]
+    pipeline = _rerank_pipeline(reranker=_deterministic_reranker, documents=docs)
+
+    orders: list[list[str]] = []
+    for _ in range(3):
+        result = pipeline.search("alpha")
+        orders.append([b.result.path for b in result.results])
+
+    # The reranked order is exactly the deterministic reranker's intended order.
+    assert orders[0] == expected_order, f"pool-routed rerank changed the ranking: {orders[0]} != {expected_order}"
+    # Identical across repeated runs — no thread-relocation nondeterminism.
+    assert orders[0] == orders[1] == orders[2], f"ranking not stable across runs: {orders}"
+
+
+class _ConcurrencyRecordingReranker:
+    """Reranker that records the peak number of overlapping invocations.
+
+    Increments an active counter on entry, holds a short window open (so
+    overlap is observable), decrements on exit — and records the worker-thread
+    name each call ran on. Returns the input unchanged: this test measures
+    concurrency, not ranking (the determinism test above owns quality).
+    """
+
+    def __init__(self, hold_s: float) -> None:
+        self._hold_s = hold_s
+        self._lock = threading.Lock()
+        self._active = 0
+        self.peak = 0
+        self.calls = 0
+        self.thread_names: list[str] = []
+
+    def __call__(self, query: str, fused: list[Any]) -> list[Any]:
+        with self._lock:
+            self._active += 1
+            self.peak = max(self.peak, self._active)
+            self.calls += 1
+            self.thread_names.append(threading.current_thread().name)
+        try:
+            time.sleep(self._hold_s)  # hold the window open so overlap is observable
+        finally:
+            with self._lock:
+                self._active -= 1
+        return fused
+
+
+@pytest.mark.unit
+def test_rerank_concurrent_calls_overlap_on_bounded_pool() -> None:
+    """Concurrent rerank calls overlap on the dedicated pool instead of
+    serialising on the request thread — bounded by the pool size.
+
+    Six searches fire concurrently through ONE pipeline that routes rerank
+    through an injected 2-worker pool. The instrumented reranker records the
+    peak overlap: with the pool, exactly two forward passes run at once (the
+    pool caps it), and every call runs on a pool thread. This is the durable
+    concurrency win — the CPU-bound rerank no longer serialises on the request
+    thread; it overlaps on a controlled set of cores.
+
+    Sabotage-proof (executed): in ``SearchPipeline._maybe_rerank`` revert the
+    routing — replace ``pool = self.rerank_pool if self.rerank_pool is not None
+    else _default_rerank_pool()`` + ``pool.submit(self.reranker, query,
+    fused).result()`` with the inline ``self.reranker(query, fused)``. The six
+    reranks then run inline on the six caller threads: ``peak`` jumps to 6 (the
+    ``peak <= 2`` bound fails) AND the calls run on the caller threads (the
+    ``search-rerank`` thread-name assert fails). Restore to pass.
+
+    Second sabotage (bounds the overlap limb): shrink the injected pool to
+    ``max_workers=1`` — the reranks serialise on the single worker, ``peak``
+    drops to 1, and the ``peak >= 2`` assert fails.
+    """
+    n_searches = 6
+    pool_size = 2
+    reranker = _ConcurrencyRecordingReranker(hold_s=0.1)
+    injected = ThreadPoolExecutor(max_workers=pool_size, thread_name_prefix="injected-rerank")
+    try:
+        pipeline = _rerank_pipeline(reranker=reranker, rerank_pool=injected)
+
+        errors: list[BaseException] = []
+
+        def _fire(i: int) -> None:
+            try:
+                pipeline.search(f"alpha query {i}")
+            except BaseException as exc:  # pragma: no cover — defensive: any search error fails the test
+                errors.append(exc)
+
+        threads = [threading.Thread(target=_fire, args=(i,)) for i in range(n_searches)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    finally:
+        injected.shutdown(wait=False)
+
+    assert not errors, f"a concurrent search raised: {errors}"
+    # Every search reached the rerank stage exactly once.
+    assert reranker.calls == n_searches, f"expected {n_searches} rerank calls; got {reranker.calls}"
+    # Overlap: more than one rerank ran at once (not serialised on the request thread).
+    assert reranker.peak >= 2, f"rerank did not overlap — peak concurrency was {reranker.peak} (serialised)"
+    # Bounded: the shared pool caps overlap at its worker count, so the inline
+    # revert (peak == n_searches) is caught here.
+    assert reranker.peak <= pool_size, (
+        f"rerank overlap {reranker.peak} exceeded the pool bound {pool_size} — routing was bypassed (ran inline)"
+    )
+    # Routing: every rerank ran on the injected pool's worker threads, not the
+    # caller threads — proves the rerank_pool seam is load-bearing.
+    assert reranker.thread_names, "reranker never ran"
+    assert all(name.startswith("injected-rerank") for name in reranker.thread_names), (
+        f"rerank ran off the injected pool — thread names {reranker.thread_names!r} lack the 'injected-rerank' "
+        f"prefix, so the rerank_pool routing was bypassed"
+    )
