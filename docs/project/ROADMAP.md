@@ -18,7 +18,11 @@ Kairix is the alternative: a private, on-infrastructure retrieval layer that bot
 
 ---
 
-## Current state — v2026.7.1 (released 2026-07-01)
+## Current state — v2026.7.4 (released 2026-07-04)
+
+**v2026.7.4 headline — faster concurrent search:** kairix now overlaps the independent parts of a search and routes reranking (the slowest stage) through a bounded shared pool, so concurrent searches no longer serialise behind one another; search concurrency auto-sizes to the host's CPU cores (tunable via `KAIRIX_MAX_CONCURRENCY`). Also this line: the `topology_v2` config key is now `topology` (auto-migrated on read, with an overlay-upgrade fix), complete-list research enumeration (#437), and cleaner install / health-probe / config-drift output.
+
+**v2026.7.2:** the agent usage guide shows the real wire tool names (`search`, `expand`, `memory_write`, …), `facts_about("Kairix"/"Three Cubes")` resolve out of the box, contradiction checks distinguish conflict / no-evidence / not-found, and every capability runs through one shared CLI + MCP path.
 
 **v2026.6.24 highlights:** the Linear connector ships (behind the `connector_linear` flag, default-off — pulls a Linear workspace's roadmap and docs into the knowledge store), and kairix now requires **Python 3.12 or newer** (recreate any host-venv / systemd environment on 3.12+ before upgrading; Docker images already ship 3.12).
 

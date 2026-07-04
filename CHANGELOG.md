@@ -7,9 +7,26 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.7.4] - 2026-07-04
+
+### Search keeps up when your whole team is querying at once
+
+Kairix now overlaps the independent parts of a search, and concurrent searches no longer wait behind each other's reranking step — the slowest stage. It also sizes its own search concurrency to the number of CPU cores on the machine. The result: when several people or agents search at the same time, they stop queueing up behind one another — latency stays low and throughput scales with your cores, with identical results for any single search. Operators can tune the ceiling with `KAIRIX_MAX_CONCURRENCY`.
+
 ### The `topology_v2` config setting is now just `topology`
 
-The block in `kairix.config.yaml` that lists your connectors, collections, and scopes has been renamed from `topology_v2` to `topology` — the `v2` was a leftover from an older naming. You don't need to change anything: if your config still uses the old name, kairix reads it as `topology` automatically (in memory, without rewriting your file), so existing setups keep working with zero effort. From now on the setup wizard writes the new name. See [the upgrade note](docs/upgrades/topology-config-key-rename.md) for details.
+The block in `kairix.config.yaml` that lists your connectors, collections, and scopes has been renamed from `topology_v2` to `topology` — the `v2` was a leftover from an older naming. You don't need to change anything: if your config still uses the old name, kairix reads it as `topology` automatically (in memory, without rewriting your file), so existing setups keep working with zero effort. From now on the setup wizard writes the new name. This release also fixes an upgrade edge case where a config could briefly keep both the old and new names side by side, and a related overlay issue where a persisted source could be dropped on upgrade. See [the upgrade note](docs/upgrades/topology-config-key-rename.md) for details.
+
+### Research answers list everything, not just the top few
+
+When you ask kairix to enumerate a complete list from a source, it now returns the full set rather than stopping at the first few items.
+
+### Fixes and reliability
+
+- **Cleaner install output.** `kairix init` now prints its progress to the status stream, so `onboard check --json` gives you clean, parseable JSON.
+- **Config-drift warning.** `kairix worker status` now warns when your stored sources have drifted from your config, so a stale source doesn't sit unnoticed.
+- **More trustworthy health probes.** The service-level check (`kairix slo`) uses a valid built-in agent and reports "not applicable" on an empty knowledge store instead of a misleading zero.
+- **Automatic image cleanup on deploy.** Deploys now prune old container image tags automatically, keeping the most recent few for rollback.
 
 ## [2026.7.2] - 2026-07-03
 
