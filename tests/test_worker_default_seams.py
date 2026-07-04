@@ -238,8 +238,14 @@ def test_default_neo4j_drain_seam_executes_and_reports_unavailable(
     isolated_worker_env: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """``run_neo4j_drain()`` (deps=None) binds ``_default_neo4j_drain``, which
-    runs the REAL ``run_default_drain_tick``; with no Neo4j it returns
-    ``neo4j_available=False`` and the runner logs the skip.
+    runs the REAL ``run_default_drain_tick``; with a row pending and no Neo4j
+    it returns ``neo4j_available=False`` and the runner logs the skip.
+
+    A pending ``entity_signals`` row is staged first because the drain now
+    short-circuits an EMPTY queue before it ever probes Neo4j (the PLA-331
+    idle-skip — an idle vault must not spin up a driver every tick). With work
+    pending, the real seam builds the client, finds it unreachable, and takes
+    the "backend unavailable" branch.
 
     Behavioural assertion: the production drain seam ran the real tick and
     the runner took the ``neo4j_available is False`` branch (the
@@ -250,6 +256,26 @@ def test_default_neo4j_drain_seam_executes_and_reports_unavailable(
     seam stopped delegating to ``run_default_drain_tick`` no drain
     lifecycle log appears at all.
     """
+    import sqlite3
+
+    from kairix.core.db.schema import create_schema
+
+    # Stage a pending row at the resolved (tmp) index so the drain reaches the
+    # Neo4j client instead of idle-skipping — the idle-skip case is covered by
+    # tests/unit/test_neo4j_drain.py.
+    seed_conn = sqlite3.connect(str(kairix.paths.db_path()))
+    try:
+        create_schema(seed_conn)
+        seed_conn.execute(
+            "INSERT INTO entity_signals (kind, value, source_uri, modified_at, confidence, "
+            "sensitivity, pushed_to_neo4j, push_attempt_count) "
+            "VALUES ('person', 'agent-alpha', 'vault://x', '2026-05-25T10:00:00Z', 0.9, "
+            "'internal', 0, 0)"
+        )
+        seed_conn.commit()
+    finally:
+        seed_conn.close()
+
     with caplog.at_level(logging.INFO, logger="kairix.worker"):
         run_neo4j_drain()  # deps=None → production _default_neo4j_drain seam
 
