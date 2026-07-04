@@ -6,6 +6,13 @@ After=network.target
 After=neo4j.service
 # kairix works without Neo4j — do not hard-require it
 Wants=neo4j.service
+# Start after the secrets bundle (/run/secrets/kairix.env) has been fetched,
+# so the search/readiness path never resolves the provider key before the
+# tmpfs is written and degrades to BM25-only (#733). Soft dependency: kairix
+# still boots without it (loader now recovers when the bundle appears), so
+# Wants=, not Requires=.
+After=kairix-fetch-secrets.service
+Wants=kairix-fetch-secrets.service
 
 [Service]
 # ---------------------------------------------------------------------------
