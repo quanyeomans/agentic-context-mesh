@@ -397,3 +397,147 @@ def test_apply_collection_unchanged_when_only_source_added() -> None:
     assert second.created == 1
     sources = db.execute("SELECT COUNT(*) FROM topology_collection_sources").fetchone()
     assert sources[0] == 2
+
+
+# ---------------------------------------------------------------------------
+# Config-drift detection (read-only — issue #726 observability half)
+# ---------------------------------------------------------------------------
+
+_TWO_SOURCE_CONFIG = {
+    "topology": {
+        "connectors": [
+            {"id": "obs-conn", "kind": "obsidian", "name": "obs-conn"},
+            {"id": "sp-conn", "kind": "sharepoint", "name": "sp-conn"},
+        ],
+        "credentials": [
+            {"id": "m365-oauth", "kind": "oauth", "secret_name": "s-m365"},  # pragma: allowlist secret
+        ],
+        "cc_pairs": [
+            {"id": "obs-cp", "connector": "obs-conn", "credential": None, "name": "obsidian-personal"},
+            {"id": "sp-cp", "connector": "sp-conn", "credential": "m365-oauth", "name": "sharepoint-corp"},
+        ],
+        "collections": [
+            {"name": "obsidian-all", "sources": [{"cc_pair": "obs-cp", "path_filter": "*"}]},
+            {"name": "sharepoint-public", "sources": [{"cc_pair": "sp-cp", "path_filter": "*"}]},
+        ],
+    }
+}
+
+_ONE_SOURCE_CONFIG = {
+    "topology": {
+        "connectors": [{"id": "obs-conn", "kind": "obsidian", "name": "obs-conn"}],
+        "cc_pairs": [{"id": "obs-cp", "connector": "obs-conn", "credential": None, "name": "obsidian-personal"}],
+        "collections": [{"name": "obsidian-all", "sources": [{"cc_pair": "obs-cp", "path_filter": "*"}]}],
+    }
+}
+
+
+def test_detect_config_drift_flags_rows_absent_from_config() -> None:
+    """A store seeded with two sources, config with one → the dropped source drifts.
+
+    Sabotage proof: replace the ``stored_* - {...}`` subtraction in
+    ``detect_config_drift`` with ``tuple(sorted(stored_*))`` (drop the config
+    exclusion) — the ``obs-conn`` / ``obsidian-personal`` / ``obsidian-all``
+    still-present rows leak into the report and ``total == 3`` fails.
+    """
+    from kairix.core.connectors.topology_applier import detect_config_drift
+
+    db = _build_db()
+    apply_topology(db, parse_topology(_TWO_SOURCE_CONFIG))
+
+    report = detect_config_drift(db, parse_topology(_ONE_SOURCE_CONFIG))
+
+    assert report.has_drift is True
+    assert report.total == 3
+    assert report.connectors == ("sp-conn",)
+    assert report.cc_pairs == ("sharepoint-corp",)
+    assert report.collections == ("sharepoint-public",)
+
+
+def test_detect_config_drift_clean_when_config_matches_store() -> None:
+    """Store and config agree → no drift, no WARN line.
+
+    Sabotage proof: hard-code ``has_drift`` to return True — this assertion of
+    ``warn_line() is None`` fails.
+    """
+    from kairix.core.connectors.topology_applier import detect_config_drift
+
+    db = _build_db()
+    apply_topology(db, parse_topology(_TWO_SOURCE_CONFIG))
+
+    report = detect_config_drift(db, parse_topology(_TWO_SOURCE_CONFIG))
+
+    assert report.has_drift is False
+    assert report.total == 0
+    assert report.warn_line() is None
+
+
+def test_config_drift_warn_line_names_count_and_sample() -> None:
+    """The WARN line names the total and up to ``sample_size`` example ids."""
+    from kairix.core.connectors.topology_applier import ConfigDriftReport
+
+    report = ConfigDriftReport(
+        connectors=("conn-2",),
+        cc_pairs=("pair-2",),
+        collections=("coll-remove", "coll-remove-2"),
+    )
+
+    line = report.warn_line(sample_size=2)
+
+    assert line is not None
+    assert "config drift: 4 topology source(s)" in line
+    assert "still routed/synced until pruned" in line
+    # Sample is de-duplicated + sorted, capped at sample_size (2 shown of 4).
+    assert "coll-remove, coll-remove-2" in line
+
+
+def test_detect_config_drift_per_surface_no_cross_surface_masking() -> None:
+    """A name present on one surface must not mask a removed row of the same name.
+
+    ``shared`` is declared as a collection in the config but the store also has
+    a ``shared`` connector that the config dropped — the connector must still
+    surface as drift.
+    """
+    from kairix.core.connectors.topology_applier import detect_config_drift
+
+    seed = {
+        "topology": {
+            "connectors": [{"id": "shared", "kind": "obsidian", "name": "shared"}],
+            "cc_pairs": [{"id": "cp", "connector": "shared", "credential": None, "name": "cp"}],
+            "collections": [{"name": "shared", "sources": [{"cc_pair": "cp", "path_filter": "*"}]}],
+        }
+    }
+    current = {
+        "topology": {
+            "connectors": [],
+            "cc_pairs": [{"id": "cp", "connector": "shared", "credential": None, "name": "cp"}],
+            "collections": [{"name": "shared", "sources": [{"cc_pair": "cp", "path_filter": "*"}]}],
+        }
+    }
+    # The current config drops the connector but keeps a collection named
+    # "shared"; the cc_pair still references a connector that no longer exists,
+    # so we validate the drift detector, not the applier, by seeding first.
+    db = _build_db()
+    apply_topology(db, parse_topology(seed))
+
+    report = detect_config_drift(db, parse_topology(current))
+
+    assert report.connectors == ("shared",)
+    assert report.collections == ()  # collection "shared" still declared
+
+
+def test_detect_config_drift_legacy_db_missing_tables_is_clean() -> None:
+    """A DB without the topology_* tables degrades to no drift, never raises.
+
+    Sabotage proof: drop the ``except sqlite3.OperationalError`` guard in
+    ``_stored_topology_names`` — this call raises OperationalError instead of
+    returning a clean report.
+    """
+    from kairix.core.connectors.topology_applier import detect_config_drift
+
+    bare = sqlite3.connect(":memory:")  # no create_schema → no topology_* tables
+
+    report = detect_config_drift(bare, parse_topology(_ONE_SOURCE_CONFIG))
+
+    assert report.has_drift is False
+    assert report.total == 0

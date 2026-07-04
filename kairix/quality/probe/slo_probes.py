@@ -43,6 +43,7 @@ __all__ = [
     "build_synthetic_workload",
     "default_real_workload",
     "load_ground_truth_facts",
+    "select_remember_agent",
 ]
 
 
@@ -315,7 +316,8 @@ def build_synthetic_workload() -> tuple[tuple[CommandProbe, ...], list[RecallSui
     gt_facts = tuple(
         GroundTruthFact(entity=r["entity"], attribute=r["attribute"], value=r["value"]) for r in SYNTHETIC_FACTS
     )
-    recall_suites: list[RecallSuite] = [("synthetic-340", gt_facts, recall_fn)]
+    # The synthetic corpus always seeds the fact store, so it is populated.
+    recall_suites: list[RecallSuite] = [("synthetic-340", gt_facts, recall_fn, True)]
     return probes, recall_suites
 
 
@@ -356,6 +358,27 @@ def load_ground_truth_facts(suite_dir: Path) -> tuple[GroundTruthFact, ...]:
 # ---------------------------------------------------------------------------
 
 
+def select_remember_agent(config: dict[str, Any] | None) -> str:
+    """Pick a VALID agent for the real-mode ``remember`` probe.
+
+    Prefers a configured (non-built-in) agent name so the probe writes where
+    the operator's own agents write; falls back to the always-valid built-in
+    ``SHARED_AGENT`` when none are configured. The returned name is
+    guaranteed to be in :func:`kairix.core.classify.router.valid_agents`, so
+    the memory write resolves to a real path instead of dead-ending at an
+    ``InvalidAgent`` envelope — the #727 class where the hard-coded test-only
+    ``agent-alpha`` (never a configured agent) scored a non-resolvable
+    breadcrumb and reported ``remember 0%``.
+    """
+    from kairix.core.classify.router import SHARED_AGENT, VALID_AGENTS, valid_agents
+
+    allowed = valid_agents(config)
+    configured = sorted(allowed - VALID_AGENTS)
+    agent = configured[0] if configured else SHARED_AGENT
+    assert agent in allowed, f"selected remember agent {agent!r} must be a valid agent"
+    return agent
+
+
 def default_real_workload(
     *,
     paths: Any = None,
@@ -376,6 +399,12 @@ def default_real_workload(
 
     resolved = paths if paths is not None else KairixPaths.resolve()
     store = SQLiteFactStore(db_path=resolved.db_path)
+    # Empty-store guard (#727): a store with no facts makes recall report N/A,
+    # not a misleading 0.0 that reads like a retrieval regression.
+    store_populated = store.is_populated()
+    # #727: write via a VALID configured agent (or the built-in ``shared``),
+    # never the test-only ``agent-alpha`` that a real instance rejects.
+    remember_agent = select_remember_agent(None)
 
     def search_fn(query: str) -> Sequence[Any]:
         from kairix.core.factory import build_search_pipeline
@@ -389,7 +418,7 @@ def default_real_workload(
     def remember_fn(content: str) -> str | None:
         from kairix.use_cases.remember import remember
 
-        result = remember("agent-alpha", content, "note")
+        result = remember(remember_agent, content, "note")
         return getattr(result, "path", None)
 
     def brief_fn(topic: str) -> Sequence[Any]:
@@ -412,5 +441,5 @@ def default_real_workload(
             GroundTruthFact(entity=r["entity"], attribute=r["attribute"], value=r["value"]) for r in SYNTHETIC_FACTS
         )
     )
-    recall_suites: list[RecallSuite] = [("real-fact-store", gt_facts, recall_fn)]
+    recall_suites: list[RecallSuite] = [("real-fact-store", gt_facts, recall_fn, store_populated)]
     return probes, recall_suites

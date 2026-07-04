@@ -34,6 +34,10 @@ Sabotage-proofs (executed):
   * Mutated ``installer.verify`` to return ``ok=False`` unconditionally
     → ``test_init_verify_returns_ok_after_install`` ``out["ok"] is True``
     flips red. Restored.
+  * Reverted ``init_cli._print_install_human``'s ``file=sys.stderr`` back
+    to bare stdout ``print`` → ``test_init_install_report_goes_to_stderr_not_stdout``
+    ``stdout.strip() == ""`` flips red (report re-appears on stdout).
+    Restored (#728).
 """
 
 from __future__ import annotations
@@ -155,6 +159,41 @@ def test_init_system_mode_refuses_when_not_root() -> None:
 
     assert result.returncode == 1, f"expected exit 1, got {result.returncode}; stdout={result.stdout}"
     assert "system-mode install requires root" in result.stderr, f"affordance missing from stderr: {result.stderr!r}"
+
+
+def test_init_install_report_goes_to_stderr_not_stdout(tmp_path: Path) -> None:
+    """``kairix init`` emits its human report to stderr so stdout stays clean JSON-ready.
+
+    The container first-boot bootstrap (``/etc/cont-init.d/01-onboard-check``)
+    runs ``kairix init`` before the requested one-shot CMD, so both share the
+    container's stdout. When the install report landed on stdout it prepended
+    itself to a following ``kairix onboard check --json``, breaking the
+    release-smoke degraded-path ``json.load`` of the container's stdout (#728).
+    This asserts the report is on stderr and stdout carries nothing that would
+    corrupt a chained machine-readable one-shot.
+
+    No ``@_REQUIRES_USER_BUS`` gate: the systemd unit step is best-effort
+    (``install_unit`` catches a missing ``systemctl`` / unreachable bus and
+    logs a warning to stderr instead of raising), so the install completes and
+    prints its report on macOS dev boxes and CI runners without a user bus.
+    """
+    env = _subprocess_env(tmp_path)
+
+    result = subprocess.run(
+        [sys.executable, "-m", "kairix.cli", "init", "--user"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
+    # stdout must be free of the report — a chained ``... --json`` one-shot's
+    # machine output must be the only thing on the container's stdout.
+    assert "kairix install --" not in result.stdout, f"install report leaked to stdout: {result.stdout!r}"
+    assert result.stdout.strip() == "", f"stdout not clean; a chained JSON one-shot breaks: {result.stdout!r}"
+    # The operator still sees the diagnostic — it moved to stderr, not away.
+    assert "kairix install -- mode=user" in result.stderr, f"report missing from stderr: {result.stderr!r}"
 
 
 @_REQUIRES_USER_BUS

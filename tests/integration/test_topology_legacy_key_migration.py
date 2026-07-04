@@ -22,7 +22,7 @@ from typing import Any
 import pytest
 import yaml
 
-from kairix.config import LEGACY_TOPOLOGY_CONFIG_KEY, parse_topology
+from kairix.config import LEGACY_TOPOLOGY_CONFIG_KEY, TOPOLOGY_CONFIG_KEY, parse_topology
 from kairix.config_layers import load_merged_mapping
 from kairix.platform.setup.backends import write_config_updates
 from kairix.platform.setup.source_oauth import topology_updates_for_source
@@ -138,6 +138,55 @@ def test_wizard_migrates_legacy_key_and_writes_the_canonical_key(tmp_path: Path)
     parsed = parse_topology(load_merged_mapping(env=env))
     # The legacy Obsidian source survives AND the new Slack source is added.
     assert {c.kind for c in parsed.connectors} == {"obsidian", "slack"}
+
+
+def test_single_file_wizard_write_drops_stale_legacy_key(tmp_path: Path) -> None:
+    """Single-file (``KAIRIX_CONFIG_PATH``) wizard write drops the stale legacy key (#725).
+
+    An operator's single-file config written before the PLA-287 rename carries
+    its sources under the legacy ``topology_v2:`` key. The wizard's write path
+    deep-merges the canonical ``topology:`` update into that raw file; without
+    the #725 cleanup it leaves BOTH keys — a dead duplicate block plus a
+    foot-gun where hand-edits to the still-visible legacy block are silently
+    ignored on read.
+
+    This is the F84 write→read round-trip through the canonical layered reader:
+    after ``write_config_updates`` the FILE carries ``topology:`` and NOT
+    ``topology_v2:``, every non-topology key survives, and BOTH the operator's
+    legacy Obsidian source and the new Slack source still resolve through
+    ``parse_topology(load_merged_mapping(...))``.
+
+    Sabotage-proof: revert the ``merged.pop(LEGACY_TOPOLOGY_CONFIG_KEY, None)``
+    in ``update_config_file`` and the written file keeps the stale legacy key —
+    the ``LEGACY_TOPOLOGY_CONFIG_KEY not in on_disk`` assertion fails.
+    """
+    config_file = tmp_path / "kairix.config.yaml"
+    config_file.write_text(
+        yaml.safe_dump({"provider": "fake_provider", LEGACY_TOPOLOGY_CONFIG_KEY: _LEGACY_SECTION}),
+        encoding="utf-8",
+    )
+
+    existing = yaml.safe_load(config_file.read_text())
+    updates = topology_updates_for_source("slack", "alpha", ("C1",), existing)
+    # The wizard writes ONLY the canonical key going forward.
+    assert set(updates) == {"topology"}
+
+    # Single-file mode: KAIRIX_CONFIG_PATH is set, no overlay.
+    write_config_updates(updates, overlay_path=None, config_path=str(config_file))
+
+    on_disk = yaml.safe_load(config_file.read_text())
+    assert TOPOLOGY_CONFIG_KEY in on_disk
+    # The stale legacy sibling is gone — no dead duplicate block in the file.
+    assert LEGACY_TOPOLOGY_CONFIG_KEY not in on_disk
+    # Non-topology keys survive the write untouched.
+    assert on_disk["provider"] == "fake_provider"
+
+    # Both sources resolve through the canonical layered reader — the legacy
+    # Obsidian source survives (folded into the canonical block) and the new
+    # Slack source is added; no orphan.
+    parsed = parse_topology(load_merged_mapping(env={"KAIRIX_CONFIG_PATH": str(config_file)}))
+    assert {c.kind for c in parsed.connectors} == {"obsidian", "slack"}
+    assert {p.name for p in parsed.cc_pairs} == {"obsidian-main-pair", "slack-alpha"}
 
 
 def test_upgrade_base_canonical_does_not_shadow_operator_legacy_overlay(tmp_path: Path) -> None:

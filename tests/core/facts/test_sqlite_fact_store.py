@@ -846,3 +846,31 @@ def test_search_ignores_non_dict_vector_rows(tmp_path: Path) -> None:
 
     hits = store.search("onboarding")
     assert {h.record.id for h in hits} == {"f1"}
+
+
+# ---------------------------------------------------------------------------
+# is_populated — empty-store guard for the SLO harness (#727)
+# ---------------------------------------------------------------------------
+
+
+def test_is_populated_false_on_fresh_store(tmp_path: Path) -> None:
+    """A store whose schema was never initialised has no ``facts`` table → empty.
+
+    Sabotage-proof: make ``is_populated`` return ``True`` unconditionally →
+    this assertion flips to a failure, because a fresh store must read empty
+    so the SLO harness can tell it apart from a retrieval regression.
+    """
+    store = _make_store(tmp_path)
+    assert store.is_populated() is False
+
+
+def test_is_populated_true_after_add(tmp_path: Path) -> None:
+    """A single added fact flips ``is_populated`` to True.
+
+    Sabotage-proof: make ``is_populated`` return ``False`` unconditionally →
+    this assertion fails, because a populated store must be reported as such
+    (so recall scores a real number rather than N/A).
+    """
+    store = _make_store(tmp_path)
+    store.add(_make_record())
+    assert store.is_populated() is True

@@ -247,6 +247,24 @@ class SQLiteFactStore:
             if column_name not in existing_columns:
                 conn.execute(ddl)
 
+    def is_populated(self) -> bool:
+        """True when the store holds at least one fact row.
+
+        A missing ``facts`` table (schema never initialised) or an empty
+        table both return False. The SLO harness uses this to tell an
+        un-ingested store apart from a retrieval regression — an empty store
+        makes fact-recall report N/A rather than a misleading 0.0.
+        """
+        conn = self._connect()
+        try:
+            if not self._table_exists(conn, "facts"):
+                return False
+            # F63-bounded: existence probe — LIMIT 1, single row via fetchone.
+            row = conn.execute("SELECT 1 FROM facts LIMIT 1").fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
     # -- FactStore Protocol ---------------------------------------------------
 
     def add(self, fact: FactRecord) -> None:

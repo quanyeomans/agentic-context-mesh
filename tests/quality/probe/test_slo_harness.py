@@ -127,6 +127,38 @@ def test_measure_recall_empty_suite_is_zero() -> None:
     assert row.ndcg_at_k == 0.0
 
 
+def test_measure_recall_empty_store_reports_na_not_zero() -> None:
+    """An empty fact store (#727) yields a skipped N/A row, not a 0.0 regression.
+
+    Sabotage-proof: drop the ``store_populated`` guard in ``measure_recall``
+    → the row scores 0.0/0.0 with ``skipped=False`` and both the
+    ``skipped is True`` and ``recall_at_k is None`` assertions fail.
+    """
+    gt = [GroundTruthFact(entity="client-omega", attribute="primary-cloud", value="cloud-zeta")]
+    row = measure_recall("real-fact-store", gt, lambda _q: [], k=5, store_populated=False)
+    assert row.skipped is True
+    assert row.n_facts == 1
+    payload = row.to_dict()
+    assert payload["recall_at_k"] is None
+    assert payload["ndcg_at_k"] is None
+    assert payload["skipped"] is True
+
+
+def test_measure_recall_populated_store_reports_real_number() -> None:
+    """A populated store still scores a real recall number (not skipped)."""
+    gt = [GroundTruthFact(entity="client-omega", attribute="primary-cloud", value="cloud-zeta")]
+    row = measure_recall(
+        "real-fact-store",
+        gt,
+        lambda _q: [_hit("client-omega", "primary-cloud", "cloud-zeta")],
+        k=5,
+        store_populated=True,
+    )
+    assert row.skipped is False
+    assert row.recall_at_k == 1.0
+    assert row.to_dict()["recall_at_k"] == 1.0
+
+
 def test_measure_recall_ignores_hits_missing_fact_fields() -> None:
     """A retrieved object lacking entity/attribute/value is never a match.
 
@@ -209,7 +241,7 @@ def _report():
         _probe("recall", ("turn://t1", None), payloads=("e1",)),
     )
     gt = [GroundTruthFact(entity="client-omega", attribute="primary-cloud", value="cloud-zeta")]
-    suites = [("synthetic", gt, lambda _q: [_hit("client-omega", "primary-cloud", "cloud-zeta")])]
+    suites = [("synthetic", gt, lambda _q: [_hit("client-omega", "primary-cloud", "cloud-zeta")], True)]
     return build_report(probes=probes, recall_suites=suites, concurrency_n=4, recall_k=5)
 
 
@@ -254,3 +286,30 @@ def test_report_render_table_shows_each_section() -> None:
     assert "Affordance completeness" in table
     assert "synthetic" in table
     assert "search" in table
+
+
+def _empty_store_report():
+    probes = (_probe("recall", ("turn://t1",), payloads=("e1",)),)
+    gt = [GroundTruthFact(entity="client-omega", attribute="primary-cloud", value="cloud-zeta")]
+    suites = [("real-fact-store", gt, lambda _q: [], False)]
+    return build_report(probes=probes, recall_suites=suites, concurrency_n=2, recall_k=5)
+
+
+def test_render_table_shows_na_for_empty_store() -> None:
+    """An empty-store recall suite renders ``N/A``, never a misleading ``0.000``.
+
+    Sabotage-proof: drop the ``skipped`` branch in ``_render_recall_row`` →
+    the row prints ``0.000`` and both the ``N/A`` and the ``0.000 not in``
+    assertions fail. (Only the recall column uses 3-decimal formatting, so
+    ``0.000`` is unique to a non-skipped recall score.)
+    """
+    table = _empty_store_report().render_table()
+    assert "N/A" in table
+    assert "0.000" not in table
+
+
+def test_empty_store_report_json_recall_is_null() -> None:
+    """`kairix slo --format json` surfaces null recall for an empty store."""
+    payload = _empty_store_report().to_dict()
+    assert payload["recall"][0]["skipped"] is True
+    assert payload["recall"][0]["recall_at_k"] is None

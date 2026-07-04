@@ -634,3 +634,105 @@ def _upsert_collection_sources(
         )
         updated += 1
     return created, updated, unchanged
+
+
+# ---------------------------------------------------------------------------
+# Config-drift detection (read-only — issue #726 observability half)
+# ---------------------------------------------------------------------------
+
+# One scan query per surface whose row an operator config *removal* can
+# strand: :func:`apply_topology` is upsert-only, so a connector / cc_pair /
+# collection deleted from the config leaves its ``topology_*`` row behind and
+# it stays routed/synced until a deliberate prune. Each query carries a
+# ``LIMIT`` so the read stays bounded (F63); the ``topology_*`` tables are
+# operator-config-scale (one row per declared source), so the cap never
+# truncates a real operator's topology.
+_DRIFT_NAME_QUERIES: tuple[str, ...] = (
+    "SELECT name FROM topology_connectors LIMIT 10000",
+    "SELECT name FROM topology_cc_pairs LIMIT 10000",
+    "SELECT name FROM topology_collections LIMIT 10000",
+)
+
+
+@dataclass(frozen=True)
+class ConfigDriftReport:
+    """Read-only snapshot of ``topology_*`` rows absent from the current config.
+
+    ``apply_topology`` never deletes (issue #726) — a source removed from the
+    operator config keeps its row, so it stays routed/synced until a deliberate
+    prune. This report names the orphaned rows per surface so ``kairix worker
+    status`` can WARN on the drift. It is purely observational: nothing here
+    deletes a row or transitions a cc_pair status (the prune must respect the
+    F57 ``topology_cc_pairs.status`` lifecycle and is a separate cutover).
+
+    Each field is the sorted tuple of stored names (the operator-facing config
+    ids) on that surface that no longer appear in the parsed config.
+    """
+
+    connectors: tuple[str, ...] = ()
+    cc_pairs: tuple[str, ...] = ()
+    collections: tuple[str, ...] = ()
+
+    @property
+    def total(self) -> int:
+        """Number of stranded rows across every surface."""
+        return len(self.connectors) + len(self.cc_pairs) + len(self.collections)
+
+    @property
+    def has_drift(self) -> bool:
+        """True when at least one stored row has no matching config entry."""
+        return self.total > 0
+
+    @property
+    def sample_ids(self) -> tuple[str, ...]:
+        """De-duplicated, sorted example ids across surfaces (for the WARN line)."""
+        return tuple(sorted({*self.connectors, *self.cc_pairs, *self.collections}))
+
+    def warn_line(self, *, sample_size: int = 3) -> str | None:
+        """Render the single ``kairix worker status`` WARN line, or None when clean."""
+        if not self.has_drift:
+            return None
+        sample = ", ".join(self.sample_ids[:sample_size])
+        suffix = f" (e.g. {sample})" if sample else ""
+        return (
+            f"WARN config drift: {self.total} topology source(s) in the store "
+            f"are no longer in config (still routed/synced until pruned){suffix}"
+        )
+
+
+def _stored_topology_names(db: sqlite3.Connection) -> tuple[set[str], set[str], set[str]]:
+    """Read the stored id/name set for each drift-visible surface.
+
+    Returns ``(connectors, cc_pairs, collections)`` name sets. Best-effort: a
+    legacy DB missing one of the ``topology_*`` tables degrades to an empty set
+    for that surface rather than raising, so status never crashes on drift.
+    """
+    surfaces: list[set[str]] = []
+    for query in _DRIFT_NAME_QUERIES:
+        try:
+            # F63-bounded: topology_* tables are operator-config-scale (one row
+            # per declared source); each query also carries an explicit LIMIT.
+            rows = db.execute(query).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+        surfaces.append({str(row[0]) for row in rows if row[0] is not None})
+    return surfaces[0], surfaces[1], surfaces[2]
+
+
+def detect_config_drift(db: sqlite3.Connection, config: TopologyConfig) -> ConfigDriftReport:
+    """Compare stored ``topology_*`` rows against the parsed config (read-only).
+
+    A stored connector / cc_pair / collection whose name is not present in
+    ``config`` is drift: the operator removed it from config but the
+    upsert-only :func:`apply_topology` never pruned the row. The comparison is
+    per-surface (a name present as a collection does not mask a removed
+    connector of the same name).
+
+    Purely observational — no row is deleted or transitioned here.
+    """
+    stored_connectors, stored_cc_pairs, stored_collections = _stored_topology_names(db)
+    return ConfigDriftReport(
+        connectors=tuple(sorted(stored_connectors - {c.name for c in config.connectors})),
+        cc_pairs=tuple(sorted(stored_cc_pairs - {p.name for p in config.cc_pairs})),
+        collections=tuple(sorted(stored_collections - {c.name for c in config.collections})),
+    )

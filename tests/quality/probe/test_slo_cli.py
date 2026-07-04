@@ -23,7 +23,7 @@ pytestmark = pytest.mark.unit
 def _tiny_workload() -> tuple[tuple[CommandProbe, ...], list[Any]]:
     probe = CommandProbe(name="search", payloads=("q1", "q2"), run=lambda _p: CommandCall(breadcrumbs=("kb://a",)))
     gt = [GroundTruthFact(entity="client-omega", attribute="industry", value="logistics")]
-    suites = [("injected", gt, lambda _q: [])]
+    suites = [("injected", gt, lambda _q: [], True)]
     return (probe,), suites
 
 

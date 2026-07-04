@@ -129,19 +129,36 @@ def _to_jsonable(obj: Any) -> Any:
 
 
 def _print_install_human(report: Any) -> None:
-    """Render the install report as plain text for an interactive operator."""
-    print(f"kairix install -- mode={report.mode}")
+    """Render the install report to stderr for an interactive operator.
+
+    The report is a human diagnostic, not machine-readable output, so it
+    goes to ``stderr`` — the ``--json`` branch owns stdout. This matters
+    because the container's first-boot bootstrap (``/etc/cont-init.d``)
+    runs ``kairix init`` before the requested one-shot CMD, so both share
+    the container's stdout. Emitting the report on stdout prepended these
+    lines to a following ``kairix onboard check --json``, breaking
+    ``json.load`` of the container's stdout (#728). Routing to stderr
+    keeps stdout clean for any chained machine-readable one-shot while the
+    operator still sees the report on an interactive ``kairix init``.
+    """
+    print(f"kairix install -- mode={report.mode}", file=sys.stderr)
     if report.user:
-        print(f"  user: uid={report.user.get('uid')} gid={report.user.get('gid')} action={report.user.get('action')}")
+        print(
+            f"  user: uid={report.user.get('uid')} gid={report.user.get('gid')} action={report.user.get('action')}",
+            file=sys.stderr,
+        )
     for d in report.dirs:
-        print(f"  dir: {d.get('path')} action={d.get('action')}")
-    print(f"  config: {report.config.get('path')} action={report.config.get('action')}")
+        print(f"  dir: {d.get('path')} action={d.get('action')}", file=sys.stderr)
+    print(f"  config: {report.config.get('path')} action={report.config.get('action')}", file=sys.stderr)
     if report.systemd.get("action") == "skipped-container":
         # Container installs write no unit (#469) — s6 / the container
         # supervisor owns the service, so there is no path to print.
-        print("  systemd: action=skipped-container (no unit installed; the container supervisor runs the service)")
+        print(
+            "  systemd: action=skipped-container (no unit installed; the container supervisor runs the service)",
+            file=sys.stderr,
+        )
     else:
-        print(f"  systemd: {report.systemd.get('path')} mode={report.systemd.get('mode')}")
+        print(f"  systemd: {report.systemd.get('path')} mode={report.systemd.get('mode')}", file=sys.stderr)
 
 
 def _print_verify_human(report: Any) -> None:
