@@ -182,22 +182,35 @@ class AffordanceRow:
 
 @dataclass(frozen=True)
 class RecallRow:
-    """Fact-recall quality for one labelled suite at cut-off ``k``."""
+    """Fact-recall quality for one labelled suite at cut-off ``k``.
+
+    ``skipped`` is True when the metric could not be scored because the
+    queried fact store was empty (no ``facts``/``facts_fts`` table, or zero
+    rows). A skipped row reports N/A rather than 0.0, so an un-ingested
+    store reads as "nothing to recall" instead of a retrieval regression.
+    """
 
     suite: str
     k: int
     n_facts: int
     recall_at_k: float
     ndcg_at_k: float
+    skipped: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        """JSON-serialisable view of this recall row."""
+        """JSON-serialisable view of this recall row.
+
+        ``recall_at_k`` / ``ndcg_at_k`` serialise to ``None`` (not ``0.0``)
+        when the row is ``skipped`` for an empty store, so ``kairix slo
+        --format json`` surfaces N/A rather than a false zero.
+        """
         return {
             "suite": self.suite,
             "k": self.k,
             "n_facts": self.n_facts,
-            "recall_at_k": self.recall_at_k,
-            "ndcg_at_k": self.ndcg_at_k,
+            "recall_at_k": None if self.skipped else self.recall_at_k,
+            "ndcg_at_k": None if self.skipped else self.ndcg_at_k,
+            "skipped": self.skipped,
         }
 
 
@@ -335,6 +348,7 @@ def measure_recall(
     recall_fn: Callable[[str], Sequence[Any]],
     *,
     k: int,
+    store_populated: bool = True,
 ) -> RecallRow:
     """Score recall@k + NDCG@k of ``recall_fn`` against ``gt_facts``.
 
@@ -345,10 +359,17 @@ def measure_recall(
     each fact has exactly one relevant record, so the ideal DCG is 1.0
     and NDCG collapses to ``mean(1 / log2(rank + 2))`` over the facts
     that were retrieved (0 for misses).
+
+    ``store_populated`` is the empty-store guard: when the caller knows the
+    queried fact store has no ``facts``/``facts_fts`` table or zero rows,
+    pass ``False`` and the row is marked ``skipped`` (N/A) instead of
+    scoring 0.0 — an un-ingested store is not a retrieval regression.
     """
     n = len(gt_facts)
     if n == 0:
         return RecallRow(suite=suite, k=k, n_facts=0, recall_at_k=0.0, ndcg_at_k=0.0)
+    if not store_populated:
+        return RecallRow(suite=suite, k=k, n_facts=n, recall_at_k=0.0, ndcg_at_k=0.0, skipped=True)
 
     hits = 0
     dcg_sum = 0.0
@@ -372,8 +393,10 @@ def measure_recall(
 # ---------------------------------------------------------------------------
 
 
-# A recall suite is (suite_name, ground-truth facts, recall callable).
-RecallSuite = tuple[str, Sequence[GroundTruthFact], Callable[[str], Sequence[Any]]]
+# A recall suite is (suite_name, ground-truth facts, recall callable,
+# store_populated). ``store_populated`` is False when the queried fact store
+# is empty (no facts table / zero rows) so the recall row reports N/A.
+RecallSuite = tuple[str, Sequence[GroundTruthFact], Callable[[str], Sequence[Any]], bool]
 
 
 def build_report(
@@ -400,7 +423,10 @@ def build_report(
         latency_rows.extend(rows)
         affordance_rows.append(affordance)
 
-    recall_rows = [measure_recall(name, facts, fn, k=recall_k) for name, facts, fn in recall_suites]
+    recall_rows = [
+        measure_recall(name, facts, fn, k=recall_k, store_populated=populated)
+        for name, facts, fn, populated in recall_suites
+    ]
 
     return SLOReport(
         concurrency_n=concurrency_n,
@@ -433,8 +459,16 @@ def _render_latency(rows: Sequence[LatencyRow]) -> str:
 def _render_recall(rows: Sequence[RecallRow]) -> str:
     lines = [_RECALL_HEADER, f"  {'suite':<18} {'facts':>6} {'recall@k':>9} {'ndcg@k':>8}"]
     for row in rows:
-        lines.append(f"  {row.suite:<18} {row.n_facts:>6} {row.recall_at_k:>9.3f} {row.ndcg_at_k:>8.3f}")
+        lines.append(_render_recall_row(row))
     return "\n".join(lines)
+
+
+def _render_recall_row(row: RecallRow) -> str:
+    """One recall line — real scores, or ``N/A`` when the fact store was empty."""
+    if row.skipped:
+        na = "N/A"
+        return f"  {row.suite:<18} {row.n_facts:>6} {na:>9} {na:>8}   (fact store empty — nothing ingested yet)"
+    return f"  {row.suite:<18} {row.n_facts:>6} {row.recall_at_k:>9.3f} {row.ndcg_at_k:>8.3f}"
 
 
 def _render_affordance(rows: Sequence[AffordanceRow]) -> str:

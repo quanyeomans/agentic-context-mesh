@@ -14,14 +14,18 @@ from pathlib import Path
 
 import pytest
 
-from kairix.quality.probe.slo_harness import GroundTruthFact, build_report
+from kairix.core.classify.router import SHARED_AGENT, valid_agents
+from kairix.core.facts import SQLiteFactStore, StoredFactRecord
+from kairix.quality.probe.slo_harness import GroundTruthFact, build_report, is_resolvable_breadcrumb
 from kairix.quality.probe.slo_probes import (
     SYNTHETIC_FACTS,
     build_command_probes,
     build_synthetic_workload,
     default_real_workload,
     load_ground_truth_facts,
+    select_remember_agent,
 )
+from kairix.use_cases.remember import RememberDeps, remember
 from tests.fakes import FakeFactHit, FakeFactRecord, FakePaths
 
 pytestmark = pytest.mark.unit
@@ -257,6 +261,108 @@ def test_default_real_workload_loads_suite_dir_ground_truth(tmp_path: Path) -> N
     )
     paths = FakePaths(db_path=tmp_path / "facts.db", document_root=tmp_path / "vault")
     _probes, recall_suites = default_real_workload(paths=paths, suite_dir=tmp_path)
-    _name, facts, _fn = recall_suites[0]
+    _name, facts, _fn, _populated = recall_suites[0]
     assert len(facts) == 1
     assert facts[0].entity == "client-omega"
+
+
+# ---------------------------------------------------------------------------
+# Fix A (#727) — remember probe writes as a VALID agent, not test-only alpha
+# ---------------------------------------------------------------------------
+
+
+def test_select_remember_agent_prefers_configured_agent() -> None:
+    """A configured (non-built-in) agent is chosen — the probe writes where the
+    operator's own agents write."""
+    config = {"agents": {"delivery-lead": {"surfaces": ["memory"]}}}
+    agent = select_remember_agent(config)
+    assert agent == "delivery-lead"
+    assert agent in valid_agents(config)
+
+
+def test_select_remember_agent_falls_back_to_shared_builtin() -> None:
+    """With no configured agents, the always-valid ``shared`` built-in is chosen."""
+    agent = select_remember_agent({})
+    assert agent == SHARED_AGENT
+    assert agent in valid_agents({})
+
+
+def test_select_remember_agent_is_never_invalid_test_only_alpha() -> None:
+    """#727: the probe must never write as the test-only ``agent-alpha``.
+
+    Sabotage-proof: make ``select_remember_agent`` return ``"agent-alpha"`` →
+    both assertions fail, because ``agent-alpha`` is absent from
+    ``valid_agents`` for either config.
+    """
+    for config in ({}, {"agents": {"x-lead": {"surfaces": ["memory"]}}}):
+        agent = select_remember_agent(config)
+        assert agent != "agent-alpha"
+        assert agent in valid_agents(config)
+
+
+def test_remember_with_valid_agent_produces_resolvable_breadcrumb(tmp_path: Path) -> None:
+    """#727 consequence: a valid agent's write resolves; ``agent-alpha`` dead-ends.
+
+    Proves why the fix matters — the agent ``select_remember_agent`` returns
+    is accepted by ``remember`` (write succeeds → resolvable breadcrumb),
+    whereas the old hard-coded ``agent-alpha`` is rejected as ``InvalidAgent``
+    with an empty, non-resolvable path (recall/remember scored 0% off this).
+    Hermetic: every write lands under ``tmp_path`` via the ``RememberDeps``
+    seam (F1/F2-clean).
+    """
+    config: dict[str, object] = {}
+    deps = RememberDeps(
+        config_fn=lambda: config,
+        document_root_fn=lambda: tmp_path / "vault",
+        db_path_fn=lambda: tmp_path / "facts.db",
+        memory_fallback_root_fn=lambda: tmp_path / "data",
+    )
+    agent = select_remember_agent(config)
+
+    ok = remember(agent, "decided: pilot the smallest region first", "note", deps=deps)
+    assert ok.error == ""
+    assert is_resolvable_breadcrumb(ok.path)
+
+    bad = remember("agent-alpha", "decided: pilot the smallest region first", "note", deps=deps)
+    assert "InvalidAgent" in bad.error
+    assert not is_resolvable_breadcrumb(bad.path)
+
+
+# ---------------------------------------------------------------------------
+# Fix B (#727) — real workload flags an empty fact store so recall reads N/A
+# ---------------------------------------------------------------------------
+
+
+def test_default_real_workload_empty_store_marks_recall_suite_unpopulated(tmp_path: Path) -> None:
+    """A store with no facts flags the recall suite store-empty (recall → N/A).
+
+    Sabotage-proof: hard-code ``store_populated=True`` in the real workload →
+    this assertion fails, because a fresh store must surface as empty.
+    """
+    paths = FakePaths(db_path=tmp_path / "facts.db", document_root=tmp_path / "vault")
+    _probes, recall_suites = default_real_workload(paths=paths)
+    name, _facts, _fn, store_populated = recall_suites[0]
+    assert name == "real-fact-store"
+    assert store_populated is False
+
+
+def test_default_real_workload_populated_store_marks_recall_suite_populated(tmp_path: Path) -> None:
+    """A store holding a fact flags the recall suite populated (recall → real number)."""
+    db_path = tmp_path / "facts.db"
+    SQLiteFactStore(db_path=db_path).add(
+        StoredFactRecord(
+            id="f1",
+            entity="client-omega",
+            attribute="primary-cloud",
+            value="cloud-zeta",
+            confidence=0.9,
+            source_turn_ids=("t1",),
+            extracted_at="2026-01-01T00:00:00Z",
+            superseded_by=None,
+            namespace="shared",
+        )
+    )
+    paths = FakePaths(db_path=db_path, document_root=tmp_path / "vault")
+    _probes, recall_suites = default_real_workload(paths=paths)
+    _name, _facts, _fn, store_populated = recall_suites[0]
+    assert store_populated is True
