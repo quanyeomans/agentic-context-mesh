@@ -215,7 +215,7 @@ dev = [
 # and the marker keeps uv's universal resolver happy.
 [dependency-groups]
 fitness = [
-    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.7.1 ; python_version >= '3.12'",
+    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.8.0 ; python_version >= '3.12'",
 ]
 
 # Include the fitness group in every `uv sync` / `uv run` so the local gate
@@ -592,6 +592,18 @@ extensions = [".py"]
 min_length = 10
 min_occurrences = 3
 name = "no-duplicate-string"
+
+[tool.tc_fitness.core_checks.new_code_coverage]
+# Sonar-exact "Coverage on New Code >= 80%" mirrored locally: fail changed .py whose
+# ADDED lines are <80% covered (complements the repo --cov-fail-under floor + the
+# per-file floor by scoring new lines in isolation). Runs as a dedicated step AFTER
+# pytest writes coverage.xml (Makefile); in `tc-fitness run` it soft-skips (no report).
+floor_pct = 80.0
+coverage_report = "coverage.xml"
+base_ref = "origin/main"
+roots = ["kairix", "scripts", "tools"]
+extensions = [".py"]
+name = "new-code-coverage"
 
 [tool.tc_fitness.core_checks.no_commented_out_code]
 roots = ["kairix"]
