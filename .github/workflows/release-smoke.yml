@@ -154,8 +154,14 @@ jobs:
           DOCKER_TAG: ${{ steps.tag.outputs.docker_tag }}
         run: |
           # Expect non-zero exit (no secrets loaded) but clean JSON output.
+          # Capture STDOUT ONLY — the container first-boot bootstrap
+          # (/etc/cont-init.d runs `kairix init`) writes its human install
+          # report to stderr, and the requested one-shot's JSON is the only
+          # thing on stdout (#728). Folding stderr in with `2>&1` would
+          # re-prepend the bootstrap report and break `json.load`. Let stderr
+          # flow to the step log so a real traceback is still visible.
           docker run --rm "${IMAGE}:${DOCKER_TAG}" kairix onboard check --json \
-            > /tmp/onboard.json 2>&1 || true
+            > /tmp/onboard.json || true
           # If json.load fails, the degraded path crashed — fail the job.
           python -c "import json; json.load(open('/tmp/onboard.json')); print('onboard --json shape valid')"
 
