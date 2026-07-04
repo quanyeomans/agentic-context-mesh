@@ -17,7 +17,7 @@ Three valid resolutions for any baseline entry:
 tech debt that surfaces as multiple baseline entries with the same root
 cause.
 
-## State (as of 2026-06-24, post-3c1e1372)
+## State (as of 2026-07-04, post-419f8619)
 
 Snapshot freshness is enforced by
 [`scripts/checks/check_paydown_doc_currency.py`](../../scripts/checks/check_paydown_doc_currency.py).
