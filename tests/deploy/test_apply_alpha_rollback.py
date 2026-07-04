@@ -74,6 +74,16 @@ if sub == "exec":
         sys.stdout.write("Weighted total: %s\n" % os.environ.get("FAKE_WEIGHTED", "0.810"))
         sys.exit(0)
     sys.exit(0)
+if sub == "images":                       # prune stage: kairix image inventory
+    sys.stdout.write(os.environ.get("FAKE_IMAGES", ""))
+    sys.exit(0)
+if sub == "ps":                           # prune stage: refs held by containers
+    sys.stdout.write(os.environ.get("FAKE_PS_IMAGES", ""))
+    sys.exit(0)
+if sub == "rmi":                          # prune stage: remove an old tag
+    ref = argv[1] if len(argv) > 1 else ""
+    sys.exit(1 if ref in fset("FAKE_RMI_FAIL_REFS") else 0)
+# `image prune -f` (dangling sweep) and anything else: benign success.
 sys.exit(0)
 """
 
@@ -219,3 +229,89 @@ def test_rollback_digest_mismatch_exits_12(tmp_path):
     )
     assert proc.returncode == 12, proc.stderr
     assert "different digest" in proc.stderr
+
+
+# --- (f) image prune stage -------------------------------------------------
+#
+# Old ghcr.io/three-cubes/kairix tags accumulated to ~28 GB / 9 tags on the
+# production box before a manual cleanup (2026-07-04). The prune stage keeps the
+# 3 newest kairix images and drops older tags, but never one a container still
+# references, and never fails the (already-succeeded) deploy.
+
+REPO = "ghcr.io/three-cubes/kairix"
+# CreatedAt|ID|repo:tag rows. The script sorts newest-first by CreatedAt, so the
+# order here is deliberately shuffled to prove the sort — not the input order —
+# picks the survivors. Newest -> oldest: 7.4a1, 7.3a1, 7.2a1, 7.1a1, 6.30a1.
+_PRUNE_IMAGES = "\n".join(
+    [
+        f"2026-07-01 10:00:00 +0000 UTC|d002|{REPO}:2026.7.1a1",
+        f"2026-07-04 10:00:00 +0000 UTC|d005|{REPO}:2026.7.4a1",
+        f"2026-06-30 10:00:00 +0000 UTC|d001|{REPO}:2026.6.30a1",
+        f"2026-07-03 10:00:00 +0000 UTC|d004|{REPO}:2026.7.3a1",
+        f"2026-07-02 10:00:00 +0000 UTC|d003|{REPO}:2026.7.2a1",
+    ]
+)
+
+
+def _rmi_refs(dlog: str) -> list[str]:
+    """Tags passed to `docker rmi` in the fake-docker call log."""
+    return [ln.split("rmi ", 1)[1].strip() for ln in dlog.splitlines() if " rmi " in ln]
+
+
+def test_prune_keeps_newest_three_skips_inuse_drops_rest(tmp_path):
+    # newest 3 (7.4/7.3/7.2) kept; of the 2 older candidates, 7.1a1 is still
+    # referenced by a stopped container -> skipped; only 6.30a1 is removed.
+    inuse = f"{REPO}:2026.7.4a1\n{REPO}:2026.7.1a1"
+    proc, dlog, env_text = _run(tmp_path, "2026.7.4a1", FAKE_IMAGES=_PRUNE_IMAGES, FAKE_PS_IMAGES=inuse)
+    assert proc.returncode == 0, proc.stderr
+    removed = _rmi_refs(dlog)
+    assert removed == [f"{REPO}:2026.6.30a1"], f"only the oldest unreferenced tag: {removed}"
+    # newest three are never handed to rmi
+    for kept in ("2026.7.4a1", "2026.7.3a1", "2026.7.2a1"):
+        assert not any(kept in r for r in removed), f"{kept} must be kept: {removed}"
+    # the in-use older tag is skipped despite being outside the newest 3
+    assert not any("2026.7.1a1" in r for r in removed), f"in-use must be skipped: {removed}"
+    assert "keeping in-use image" in proc.stdout
+    # dangling sweep still runs, and a named OK verdict is emitted
+    assert any(" image prune -f" in ln for ln in dlog.splitlines()), dlog
+    assert "OK apply-alpha: image prune" in proc.stdout
+    # the deploy itself is untouched — new build stays pinned
+    assert "KAIRIX_IMAGE_TAG=2026.7.4a1" in env_text
+
+
+def test_prune_never_runs_on_regression(tmp_path):
+    # a step-(e) regression exits before the success-path prune — no image is
+    # removed on a failed deploy (prune is strictly success-only).
+    proc, dlog, _env = _run(tmp_path, NEW, FAKE_WEIGHTED="0.500", FAKE_IMAGES=_PRUNE_IMAGES)
+    assert proc.returncode == 1, proc.stderr
+    assert _rmi_refs(dlog) == [], "prune must not run on a regressed deploy"
+
+
+def test_prune_never_runs_when_deploy_rolls_back(tmp_path):
+    # a container-health failure rolls back and exits 10 via the trap, before
+    # the success-path prune — the old images (incl. rollback target) survive.
+    proc, dlog, _env = _run(tmp_path, NEW, FAKE_UP_FAIL_TAGS=NEW, FAKE_IMAGES=_PRUNE_IMAGES)
+    assert proc.returncode == 10, proc.stderr
+    assert _rmi_refs(dlog) == [], "prune must not run when the deploy rolled back"
+
+
+def test_prune_failure_does_not_fail_deploy(tmp_path):
+    # docker rmi failing on a candidate must NOT fail the already-succeeded
+    # deploy — it logs a WARN and exits 0.
+    proc, _dlog, _env = _run(
+        tmp_path,
+        "2026.7.4a1",
+        FAKE_IMAGES=_PRUNE_IMAGES,
+        FAKE_RMI_FAIL_REFS=f"{REPO}:2026.6.30a1,{REPO}:2026.7.1a1",
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "rmi failure" in proc.stderr
+    assert "::warning::apply-alpha: image prune" in proc.stderr
+
+
+def test_prune_no_images_is_noop(tmp_path):
+    # no kairix images present (fresh-ish host) -> nothing removed, deploy green.
+    proc, dlog, _env = _run(tmp_path, NEW, FAKE_IMAGES="")
+    assert proc.returncode == 0, proc.stderr
+    assert _rmi_refs(dlog) == []
+    assert "no ghcr.io/three-cubes/kairix images to prune" in proc.stdout
