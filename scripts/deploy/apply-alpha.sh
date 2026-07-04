@@ -203,6 +203,81 @@ on_exit() {
 	esac
 }
 
+# --- image prune (best-effort, success-path only) --------------------------
+#
+# Old ghcr.io/three-cubes/kairix image tags accumulate on the box — the
+# 2026-07-04 incident hit ~28 GB across 9 tags before a manual cleanup. Keep
+# the 3 NEWEST kairix images (the just-deployed one + 2 prior rollback targets,
+# so the rollback trap always has a cached image) and remove older tags. NEVER
+# remove an image any container references (running OR stopped): we skip refs
+# listed by `docker ps -a`, and `docker rmi` (no -f) additionally refuses to
+# delete an image still used by a container, so an in-use image is doubly safe.
+# Resilient by contract: called as `prune_old_images || true` (set -e suspended
+# for the body) AND every step guarded, so a prune failure logs a WARN and the
+# deploy — already validated healthy — still succeeds. Runs ONLY on the clean
+# success path (after the trap is disarmed), never inside the rollback trap.
+prune_old_images() {
+	_repo="ghcr.io/three-cubes/kairix"
+	_keep=3
+
+	# Refs held by ANY container (running or stopped). Empty on docker error —
+	# keep-3 plus rmi's own in-use refusal remain as guards.
+	_inuse="$(docker ps -a --format '{{.Image}}' 2>/dev/null || true)"  # in-use refs; empty on docker error still leaves keep-3 + rmi refusal as guards
+	# All kairix images as "CreatedAt|ID|repo:tag" rows. CreatedAt leads so a
+	# reverse lexical sort is newest-first; '|' can appear in none of the fields.
+	# ID lets us keep N DISTINCT images even when several tags share one digest.
+	_rows="$(docker images "$_repo" --format '{{.CreatedAt}}|{{.ID}}|{{.Repository}}:{{.Tag}}' 2>/dev/null || true)"  # image inventory; empty on docker error -> no-op below
+
+	if [ -z "$_rows" ]; then
+		echo "OK apply-alpha: image prune — no $_repo images to prune"
+		docker image prune -f >/dev/null 2>&1 || true  # dangling-only sweep is best-effort; must never fail the deploy
+		return 0
+	fi
+
+	_sorted="$(printf '%s\n' "$_rows" | sort -r)" || _sorted=""  # newest-first; a sort failure yields an empty list -> loop no-ops
+	_seen_ids=" "  # space-fenced list of kept distinct image IDs (word-boundary match)
+	_kept=0
+	_removed=0
+	_failed=0
+	# Feed the loop via a here-doc (not a pipe) so the counters below survive in
+	# the current shell rather than dying in a pipeline subshell.
+	while IFS='|' read -r _created _id _ref; do
+		[ -n "$_id" ] || continue
+		case "$_seen_ids" in
+			*" $_id "*) continue ;;  # another tag of an already-kept image — leave it
+		esac
+		if [ "$_kept" -lt "$_keep" ]; then
+			_seen_ids="${_seen_ids}${_id} "
+			_kept=$((_kept + 1))
+			continue
+		fi
+		# Removal candidate. Skip if a container still references this exact ref.
+		if printf '%s\n' "$_inuse" | grep -qxF "$_ref"; then
+			echo "apply-alpha: image prune — keeping in-use image $_ref"
+			continue
+		fi
+		if docker rmi "$_ref" >/dev/null 2>&1; then
+			_removed=$((_removed + 1))
+			echo "apply-alpha: image prune — removed $_ref"
+		else
+			_failed=$((_failed + 1))
+			echo "::warning::apply-alpha: image prune — could not remove $_ref (still referenced?); continuing" >&2
+		fi
+	done <<PRUNE_EOF
+$_sorted
+PRUNE_EOF
+
+	# Sweep dangling (untagged) layers left by the rmi calls / prior pulls.
+	docker image prune -f >/dev/null 2>&1 || true  # dangling-only sweep is best-effort; must never fail the deploy
+
+	if [ "$_failed" -gt 0 ]; then
+		echo "::warning::apply-alpha: image prune — kept $_kept, removed $_removed, $_failed rmi failure(s); deploy unaffected" >&2
+	else
+		echo "OK apply-alpha: image prune — kept newest $_kept $_repo image(s), removed $_removed old tag(s)"
+	fi
+	return 0
+}
+
 echo "apply-alpha: deploying image tag '$IMAGE_TAG' from $COMPOSE_DIR"
 
 # --- (a) refresh secrets (NON-FATAL) --------------------------------------
@@ -353,4 +428,11 @@ if [ "$verdict" = regress ]; then
 fi
 
 trap - EXIT  # clean success — disarm rollback
+
+# --- (f) prune stale kairix images (best-effort) ---------------------------
+# Only here, on the fully-validated success path with the rollback trap already
+# disarmed. `|| true` suspends set -e for the body so cleanup can never fail the
+# deploy that already succeeded.
+prune_old_images || true  # image prune is best-effort cleanup; the deploy already succeeded and must not fail on it
+
 printf 'alpha %s validated — weighted=%s\n' "$IMAGE_TAG" "$weighted"
