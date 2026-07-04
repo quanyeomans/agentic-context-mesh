@@ -129,6 +129,82 @@ def _default_dispatch_pool() -> ThreadPoolExecutor:
         return _DISPATCH_POOL
 
 
+# Process-shared thread pool for the CPU-bound cross-encoder rerank stage
+# (PLA-272). Rerank is the single largest search stage (~331ms on the
+# production probe) and — unlike bm25+vector, which the dispatch pool already
+# overlaps — it ran INLINE on the request thread. Under concurrent teaming load
+# that inline call was the serialisation point: a concurrency soak (N=1→20
+# distinct queries) saw latency scale linearly with N and throughput stay flat
+# (~2.5 req/s, effective concurrency ≈ 1).
+#
+# sentence-transformers/torch releases the GIL during the C/torch forward pass,
+# so concurrent rerank forward passes CAN run in parallel across cores — but
+# only when they go through a bounded, shared executor instead of contending
+# uncontrolled on the (up-to-32) transport worker threads. Routing rerank onto
+# a dedicated pool sized for the expected concurrent-search load caps the number
+# of simultaneous forward passes at the configured concurrency (rather than the
+# transport's worker ceiling), so concurrent requests' rerank overlaps on a
+# controlled set of cores instead of oversubscribing them.
+#
+# Sized from the SAME ``KAIRIX_MAX_CONCURRENCY`` signal as the dispatch pool
+# (:func:`_resolve_dispatch_concurrency`) — one rerank task per search, so the
+# worker count is the concurrency itself (the dispatch pool submits two futures
+# per search and so doubles it). Built LAZILY so the size resolves from
+# config/env at first use, and injectable via the ``rerank_pool`` seam on
+# SearchPipeline so tests exercise routing + sizing without touching process env
+# (F2-clean). Threads carry the ``search-rerank`` prefix so the pool stays
+# identifiable in py-spy / stack dumps, distinct from the ``search-dispatch``
+# pool. The single-request ranking is byte-for-byte unchanged — the reranker
+# runs the same input on a pool thread instead of the request thread; only the
+# concurrent overlap changes.
+_RERANK_POOL: ThreadPoolExecutor | None = None
+_RERANK_POOL_LOCK = threading.Lock()
+
+
+def rerank_workers_for(concurrency: int) -> int:
+    """Pool workers needed to rerank ``concurrency`` concurrent searches.
+
+    Each search runs exactly one rerank task (unlike dispatch, which submits
+    one BM25 + one vector future), so the worker count is the concurrency
+    itself — the shared pool then caps the number of simultaneous CPU-bound
+    cross-encoder forward passes at the configured concurrent-search load
+    rather than the transport's worker ceiling. Floored at 1 so a
+    misconfigured ``concurrency <= 1`` still yields a usable single-worker
+    pool.
+    """
+    return max(1, concurrency)
+
+
+def build_rerank_pool(concurrency: int) -> ThreadPoolExecutor:
+    """Build a rerank pool sized for ``concurrency`` concurrent searches.
+
+    ``max_workers`` comes from :func:`rerank_workers_for` so the size always
+    tracks the configured concurrency — never a hardcoded literal. The caller
+    owns the returned pool's lifecycle; :func:`_default_rerank_pool` reuses a
+    single process-wide instance.
+    """
+    return ThreadPoolExecutor(
+        max_workers=rerank_workers_for(concurrency),
+        thread_name_prefix="search-rerank",
+    )
+
+
+def _default_rerank_pool() -> ThreadPoolExecutor:
+    """Return the process-lifetime rerank pool, building it lazily.
+
+    Built on the first reranked search and reused for every subsequent rerank
+    so the per-worker thread-init cost is paid once and amortised. Sized from
+    :func:`_resolve_dispatch_concurrency` — the same ``KAIRIX_MAX_CONCURRENCY``
+    signal the dispatch pool uses — so the two pools scale together with the
+    operator's teaming load (PLA-272).
+    """
+    global _RERANK_POOL
+    with _RERANK_POOL_LOCK:
+        if _RERANK_POOL is None:
+            _RERANK_POOL = build_rerank_pool(_resolve_dispatch_concurrency())
+        return _RERANK_POOL
+
+
 @dataclass
 class SearchResult:
     """Full result from the search pipeline."""
@@ -211,6 +287,17 @@ class SearchPipeline:
     # the legacy fixed 2-worker ceiling (PLA-272). Tests inject a known-size
     # pool here to exercise sizing without touching process env (F2-clean).
     dispatch_pool: ThreadPoolExecutor | None = None
+    # Bounded executor for the CPU-bound cross-encoder rerank stage (PLA-272).
+    # When ``None`` (the default — what the factory and every existing test
+    # construct), the process-shared pool from :func:`_default_rerank_pool` is
+    # used, sized from the same ``KAIRIX_MAX_CONCURRENCY`` signal as the dispatch
+    # pool so concurrent teaming searches' rerank overlaps on a controlled set of
+    # cores instead of serialising on the request thread. The single-request
+    # ranking is byte-for-byte identical — the reranker runs the same input on a
+    # pool thread rather than inline; only the concurrent overlap changes. Tests
+    # inject a known-size pool here to exercise routing + sizing without touching
+    # process env (F2-clean).
+    rerank_pool: ThreadPoolExecutor | None = None
     # PLA-270 — optional tiered-context summary source (a ``SummaryLoader``).
     # When ``None`` (the default the factory and every direct test construct)
     # the budget stage serves the full ``L2`` snippet for every row —
@@ -686,6 +773,19 @@ class SearchPipeline:
         Failure-isolated: any rerank exception logs at WARNING and returns
         ``fused`` unchanged. The pipeline never raises because of rerank.
 
+        Concurrency (PLA-272): the CPU-bound cross-encoder forward pass is the
+        single largest search stage and used to run INLINE on the request
+        thread — under concurrent teaming load it was the serialisation point
+        (soak: effective concurrency ≈ 1). The reranker call is now routed
+        through a bounded, shared executor (:func:`_default_rerank_pool`, or the
+        injected ``rerank_pool`` seam) so concurrent requests' rerank overlaps
+        on a controlled set of cores. The cheap gating above stays inline; only
+        the forward pass is offloaded. Correctness is unchanged: the SAME
+        reranker runs the SAME ``fused`` input, so a single request's output
+        ranking is byte-for-byte identical — ``Future.result()`` returns the
+        reranker's value and re-raises its exceptions into the failure-isolation
+        handler exactly as the inline call did.
+
         Closes Issue 2 (Phase A) — dead-code-shaped lift. The rerank module
         + config + tests have all shipped; only the wiring into the pipeline
         was missing. The expected lift on the 2026-06-08 reflib eval is
@@ -698,8 +798,9 @@ class SearchPipeline:
         intent_matches = intent.value in self.config.rerank_intents
         if not force_enabled and not intent_matches:
             return fused
+        pool = self.rerank_pool if self.rerank_pool is not None else _default_rerank_pool()
         try:
-            return self.reranker(query, fused)
+            return pool.submit(self.reranker, query, fused).result()
         except Exception as e:
             _logger.warning("pipeline: rerank failed — %s — returning boosted order unchanged", e)
             return fused

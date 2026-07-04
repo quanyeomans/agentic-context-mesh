@@ -39,12 +39,15 @@ from typing import Any
 import pytest
 
 from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
+from kairix.core.search.config import RetrievalConfig
 from kairix.core.search.fusion import RRFFusion
 from kairix.core.search.pipeline import (
     DEFAULT_DISPATCH_CONCURRENCY,
     SearchPipeline,
     build_dispatch_pool,
+    build_rerank_pool,
     dispatch_workers_for,
+    rerank_workers_for,
 )
 from kairix.transport.embed_service import ProviderEmbeddingService
 from tests.fakes import (
@@ -741,3 +744,236 @@ def test_parallel_dispatch_preserves_embed_http_and_vector_ann_split_keys() -> N
     assert "vector" in result.stage_latency_ms
     assert "bm25" in result.stage_latency_ms
     assert "dispatch" in result.stage_latency_ms
+
+
+# ---------------------------------------------------------------------------
+# Fix 4 — rerank routed through a bounded, shared executor (PLA-272)
+#
+# Rerank is the single largest search stage (~331ms cross-encoder forward pass)
+# and — unlike bm25+vector, which the dispatch pool already overlaps — it ran
+# INLINE on the request thread. Under concurrent teaming load a concurrency soak
+# (N=1→20 distinct queries) saw latency scale linearly with N and throughput stay
+# flat (~2.5 req/s, effective concurrency ≈ 1). torch releases the GIL during the
+# forward pass, so routing rerank onto a dedicated pool sized for the expected
+# concurrent load lets concurrent requests' rerank overlap on a controlled set of
+# cores instead of serialising / oversubscribing. The size seam is the
+# ``concurrency`` argument to ``rerank_workers_for`` / ``build_rerank_pool``
+# (injected as a value, never read from process env — F2-clean), and the
+# SearchPipeline.rerank_pool field lets a caller inject its own pool. Quality is
+# unchanged: a single request's output ranking is byte-for-byte identical (the
+# same reranker runs the same input on a pool thread instead of inline).
+# ---------------------------------------------------------------------------
+
+
+def _rerank_pipeline(
+    *,
+    reranker: Any,
+    rerank_pool: ThreadPoolExecutor | None = None,
+    documents: list[dict[str, Any]] | None = None,
+) -> SearchPipeline:
+    """Build a SearchPipeline whose rerank stage fires on SEMANTIC intent.
+
+    Direct construction is sanctioned here — these are perf unit tests pinning
+    leaf behaviour against the protocol shape, not BDD step impls. ``skip_vector``
+    keeps the fused set to the bm25 docs so the reranked ordering is
+    deterministic; ``rerank_intents=("semantic",)`` matches the FakeClassifier
+    default intent so ``_maybe_rerank`` actually invokes the injected reranker.
+    """
+    docs = (
+        documents
+        if documents is not None
+        else [{"path": "p1.md", "collection": "c", "title": "T1", "content": "alpha"}]
+    )
+    return SearchPipeline(
+        classifier=FakeClassifier(),  # defaults to SEMANTIC
+        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
+        vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository()),
+        graph=FakeGraphRepository(available=True),
+        fusion=RRFFusion(k=60),
+        boosts=[],
+        logger=None,
+        config=RetrievalConfig(skip_vector=True, rerank_intents=("semantic",)),
+        reranker=reranker,
+        rerank_pool=rerank_pool,
+    )
+
+
+@pytest.mark.unit
+def test_rerank_pool_sized_from_configured_concurrency() -> None:
+    """The rerank pool scales with the injected concurrency value.
+
+    ``rerank_workers_for`` is the sizing seam: one rerank task per search, so
+    the worker count IS the configured concurrency (the dispatch pool submits
+    two futures per search and so doubles it). It grows monotonically with
+    concurrency and is floored at 1 so a misconfigured ``concurrency <= 1``
+    still yields a usable single-worker pool. ``build_rerank_pool`` then
+    constructs a real pool whose ``max_workers`` equals the computed size, so a
+    hardcoded ceiling is caught at the executor, not just in the helper.
+
+    Sabotage-proof (executed): in ``kairix/core/search/pipeline.py`` change
+    ``build_rerank_pool`` to ``ThreadPoolExecutor(max_workers=1, ...)`` (a
+    hardcode) and re-run — the ``pool._max_workers == rerank_workers_for(...)``
+    assert fails. Equivalently make ``rerank_workers_for`` ``return 1`` and the
+    monotonic-growth asserts fail. Restore to pass.
+    """
+    # Scales with the configured concurrency value (strict monotonic growth).
+    small = rerank_workers_for(2)
+    medium = rerank_workers_for(4)
+    large = rerank_workers_for(8)
+    assert small < medium < large, f"sizing must grow with concurrency; got {small}, {medium}, {large}"
+
+    # Floored at 1 for a misconfigured concurrency.
+    assert rerank_workers_for(0) == 1
+    assert rerank_workers_for(-5) == 1
+
+    # The built pool honours the computed size — guards against a hardcoded
+    # max_workers literal slipping into the executor construction.
+    pool = build_rerank_pool(concurrency=5)
+    try:
+        assert pool._max_workers == rerank_workers_for(5)
+        assert pool._max_workers == 5
+    finally:
+        pool.shutdown(wait=False)
+
+
+@pytest.mark.unit
+def test_rerank_single_request_ranking_is_deterministic_through_pool() -> None:
+    """Quality invariant: routing rerank through the pool does not change the
+    single-request output ranking.
+
+    A deterministic reranker assigns a fixed score per path and re-sorts. The
+    pipeline routes it through the (default, process-shared) rerank pool; the
+    resulting order must equal the reranker's intended order AND be identical
+    across repeated runs (no thread-relocation nondeterminism). This is the
+    "byte-for-byte ranking on a fixed input" guarantee — the concurrency fix is
+    purely a wall-clock/overlap optimisation and must not perturb quality.
+
+    Sabotage-proof: in ``SearchPipeline._maybe_rerank`` drop the ``.result()``
+    (``return pool.submit(self.reranker, query, fused)``) — a Future object is
+    returned instead of the reranked list, ``apply_budget`` finds no rows, and
+    the ordering assert below fails on an empty result.
+    """
+    # p3 scores highest, then p1, then p2 — a fixed, path-keyed order.
+    fixed_scores = {"p1.md": 2.0, "p2.md": 1.0, "p3.md": 3.0}
+    expected_order = ["p3.md", "p1.md", "p2.md"]
+
+    def _deterministic_reranker(query: str, fused: list[Any]) -> list[Any]:
+        for r in fused:
+            score = fixed_scores.get(r.path, 0.0)
+            r.rerank_score = score
+            r.boosted_score = score  # apply_budget sorts by boosted_score
+        return sorted(fused, key=lambda r: r.rerank_score, reverse=True)
+
+    docs = [
+        {"path": "p1.md", "collection": "c", "title": "T1", "content": "alpha shared"},
+        {"path": "p2.md", "collection": "c", "title": "T2", "content": "alpha shared"},
+        {"path": "p3.md", "collection": "c", "title": "T3", "content": "alpha shared"},
+    ]
+    pipeline = _rerank_pipeline(reranker=_deterministic_reranker, documents=docs)
+
+    orders: list[list[str]] = []
+    for _ in range(3):
+        result = pipeline.search("alpha")
+        orders.append([b.result.path for b in result.results])
+
+    # The reranked order is exactly the deterministic reranker's intended order.
+    assert orders[0] == expected_order, f"pool-routed rerank changed the ranking: {orders[0]} != {expected_order}"
+    # Identical across repeated runs — no thread-relocation nondeterminism.
+    assert orders[0] == orders[1] == orders[2], f"ranking not stable across runs: {orders}"
+
+
+class _ConcurrencyRecordingReranker:
+    """Reranker that records the peak number of overlapping invocations.
+
+    Increments an active counter on entry, holds a short window open (so
+    overlap is observable), decrements on exit — and records the worker-thread
+    name each call ran on. Returns the input unchanged: this test measures
+    concurrency, not ranking (the determinism test above owns quality).
+    """
+
+    def __init__(self, hold_s: float) -> None:
+        self._hold_s = hold_s
+        self._lock = threading.Lock()
+        self._active = 0
+        self.peak = 0
+        self.calls = 0
+        self.thread_names: list[str] = []
+
+    def __call__(self, query: str, fused: list[Any]) -> list[Any]:
+        with self._lock:
+            self._active += 1
+            self.peak = max(self.peak, self._active)
+            self.calls += 1
+            self.thread_names.append(threading.current_thread().name)
+        try:
+            time.sleep(self._hold_s)  # hold the window open so overlap is observable
+        finally:
+            with self._lock:
+                self._active -= 1
+        return fused
+
+
+@pytest.mark.unit
+def test_rerank_concurrent_calls_overlap_on_bounded_pool() -> None:
+    """Concurrent rerank calls overlap on the dedicated pool instead of
+    serialising on the request thread — bounded by the pool size.
+
+    Six searches fire concurrently through ONE pipeline that routes rerank
+    through an injected 2-worker pool. The instrumented reranker records the
+    peak overlap: with the pool, exactly two forward passes run at once (the
+    pool caps it), and every call runs on a pool thread. This is the durable
+    concurrency win — the CPU-bound rerank no longer serialises on the request
+    thread; it overlaps on a controlled set of cores.
+
+    Sabotage-proof (executed): in ``SearchPipeline._maybe_rerank`` revert the
+    routing — replace ``pool = self.rerank_pool if self.rerank_pool is not None
+    else _default_rerank_pool()`` + ``pool.submit(self.reranker, query,
+    fused).result()`` with the inline ``self.reranker(query, fused)``. The six
+    reranks then run inline on the six caller threads: ``peak`` jumps to 6 (the
+    ``peak <= 2`` bound fails) AND the calls run on the caller threads (the
+    ``search-rerank`` thread-name assert fails). Restore to pass.
+
+    Second sabotage (bounds the overlap limb): shrink the injected pool to
+    ``max_workers=1`` — the reranks serialise on the single worker, ``peak``
+    drops to 1, and the ``peak >= 2`` assert fails.
+    """
+    n_searches = 6
+    pool_size = 2
+    reranker = _ConcurrencyRecordingReranker(hold_s=0.1)
+    injected = ThreadPoolExecutor(max_workers=pool_size, thread_name_prefix="injected-rerank")
+    try:
+        pipeline = _rerank_pipeline(reranker=reranker, rerank_pool=injected)
+
+        errors: list[BaseException] = []
+
+        def _fire(i: int) -> None:
+            try:
+                pipeline.search(f"alpha query {i}")
+            except BaseException as exc:  # pragma: no cover — defensive: any search error fails the test
+                errors.append(exc)
+
+        threads = [threading.Thread(target=_fire, args=(i,)) for i in range(n_searches)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    finally:
+        injected.shutdown(wait=False)
+
+    assert not errors, f"a concurrent search raised: {errors}"
+    # Every search reached the rerank stage exactly once.
+    assert reranker.calls == n_searches, f"expected {n_searches} rerank calls; got {reranker.calls}"
+    # Overlap: more than one rerank ran at once (not serialised on the request thread).
+    assert reranker.peak >= 2, f"rerank did not overlap — peak concurrency was {reranker.peak} (serialised)"
+    # Bounded: the shared pool caps overlap at its worker count, so the inline
+    # revert (peak == n_searches) is caught here.
+    assert reranker.peak <= pool_size, (
+        f"rerank overlap {reranker.peak} exceeded the pool bound {pool_size} — routing was bypassed (ran inline)"
+    )
+    # Routing: every rerank ran on the injected pool's worker threads, not the
+    # caller threads — proves the rerank_pool seam is load-bearing.
+    assert reranker.thread_names, "reranker never ran"
+    assert all(name.startswith("injected-rerank") for name in reranker.thread_names), (
+        f"rerank ran off the injected pool — thread names {reranker.thread_names!r} lack the 'injected-rerank' "
+        f"prefix, so the rerank_pool routing was bypassed"
+    )
