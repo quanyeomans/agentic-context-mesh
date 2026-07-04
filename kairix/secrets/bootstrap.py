@@ -51,9 +51,12 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # One-shot guard. bootstrap_secrets() is idempotent at the underlying
-# load_secrets() level (skips keys already in env), but this lock
-# prevents redundant disk reads when multiple entry points construct
-# their loaders in parallel during boot.
+# load_secrets() level (skips keys already in env); the lock prevents
+# redundant disk reads when multiple entry points construct their loaders
+# in parallel during boot. The guard latches ONLY once hydration has
+# settled (a bundle was present) — an absent bundle leaves it un-latched so
+# a boot-race miss can recover on the next call rather than sticking the
+# process on BM25-only for its lifetime (#733).
 _BOOTSTRAP_LOCK = threading.Lock()
 _BOOTSTRAPPED: bool = False
 
@@ -86,8 +89,21 @@ def bootstrap_secrets(*, bundle_path: Path | None = None, force: bool = False) -
             return 0
         from kairix.secrets._legacy import load_secrets
 
+        # Check existence BEFORE the load so a bundle that appears mid-load is
+        # never mistaken for a settled-empty state (TOCTOU-safe: either the
+        # load caught it — count > 0 — or the next call sees it present).
+        present = _bundle_present(bundle_path)
         count = load_secrets(bundle_path)
-        _BOOTSTRAPPED = True
+        # Latch only once hydration has SETTLED. Settled means either we loaded
+        # secrets, or the bundle file exists (an intentionally-empty bundle, or
+        # every key already in env). When the bundle is still ABSENT we are in
+        # the boot race — the fetch-secrets sidecar has not written the tmpfs
+        # yet — so we deliberately DON'T latch. build_search_pipeline re-runs
+        # bootstrap before its pipeline-cache lookup, so the next build
+        # re-attempts hydration and recovers, instead of caching 'unavailable'
+        # for the whole process lifetime and serving BM25-only (#733).
+        if count or present:
+            _BOOTSTRAPPED = True
         if count:
             logger.info(
                 "secrets: bootstrap hydrated %d secret(s) from bundle %s",
@@ -95,6 +111,26 @@ def bootstrap_secrets(*, bundle_path: Path | None = None, force: bool = False) -
                 bundle_path or "$KAIRIX_SECRETS_FILE (default)",
             )
         return count
+
+
+def _bundle_present(bundle_path: Path | None) -> bool:
+    """Whether the operator secrets bundle exists at its resolved path.
+
+    Resolves the same path ``load_secrets`` uses (the explicit override, or
+    ``$KAIRIX_SECRETS_FILE`` → ``/run/secrets/kairix.env`` → XDG) and reports
+    existence. Used only to decide whether a boot-time hydration has settled;
+    an absent bundle keeps ``bootstrap_secrets`` un-latched so a later write
+    can recover. Never raises — an unreadable path counts as absent.
+    """
+    path = bundle_path
+    if path is None:
+        from kairix.secrets.store import resolve_bundle_path
+
+        path = resolve_bundle_path()
+    try:
+        return Path(path).exists()
+    except OSError:
+        return False
 
 
 def reset_for_tests() -> None:
