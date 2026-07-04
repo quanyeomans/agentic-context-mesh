@@ -100,6 +100,7 @@ test-ci:
 	  --junitxml=results-unit.xml \
 	  -v --tb=short
 	uv run python3 scripts/checks/check_per_file_coverage.py coverage.xml
+	uv run python -m tc_fitness.core_checks.new_code_coverage  # SGO-248: Sonar new-code floor, local
 
 # Fast-feedback tier (SGO-100) — the <60s inner-loop smoke. A lean, fail-fast
 # subset of the gate: package + CLI import smoke, ruff lint/format, a

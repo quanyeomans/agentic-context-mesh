@@ -52,6 +52,14 @@ CORE_BINDINGS: dict[str, dict[str, Any]] = {
         "min_occurrences": 3,
         "name": "no-duplicate-string",
     },
+    "new_code_coverage": {
+        "floor_pct": 80.0,
+        "coverage_report": "coverage.xml",
+        "base_ref": "origin/main",
+        "roots": ["kairix", "scripts", "tools"],
+        "extensions": _PY,
+        "name": "new-code-coverage",
+    },
     "no_commented_out_code": {
         "roots": _KAIRIX,
         "extensions": _PY,

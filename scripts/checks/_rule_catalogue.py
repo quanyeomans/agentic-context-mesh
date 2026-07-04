@@ -1031,6 +1031,14 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         summary="no string literal ≥10 chars duplicated ≥3 times in a module (Sonar S1192)",
     ),
     RuleEntry(
+        id="new_code_coverage",
+        gate="new-code-coverage",
+        check="core:new_code_coverage",
+        category="coverage",
+        scope="per-file",
+        summary="new-code coverage ≥ 80% on changed lines (Sonar new-code, local)",
+    ),
+    RuleEntry(
         id="F18",
         gate="no-commented-out-code",
         check="core:no_commented_out_code",
