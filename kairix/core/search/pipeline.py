@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -69,6 +70,38 @@ logger = logging.getLogger(__name__)
 # per-worker thread-init cost (~0.5-1ms) is still paid once and amortised
 # across every subsequent search because the singleton is reused.
 _FUTURES_PER_SEARCH = 2
+
+# CPU-aware default concurrency (PLA-272 follow-up). When
+# ``KAIRIX_MAX_CONCURRENCY`` is UNSET, the expected concurrent-search load —
+# and therefore the dispatch pool size — is derived from the host core count
+# so a bigger box (e.g. an 8-core D8as_v5) auto-uses more dispatch
+# parallelism without an operator env tweak, while a 1-2 core CI box stays
+# bounded. Each concurrent search still submits ``_FUTURES_PER_SEARCH``
+# futures, so the resolved concurrency multiplies into the pool size via
+# :func:`dispatch_workers_for`.
+#
+# Derivation: ``clamp(_CONCURRENCY_PER_CPU * cpu_count, floor, ceiling)``.
+# Both legs are I/O-bound (SQLite FTS5 + Azure embed HTTP), so a modest 2x
+# over-subscription of cores keeps several concurrent searches' two legs in
+# flight without pinning the box. The floor keeps a single-core box able to
+# overlap a few searches (pool never below ``2 * _MIN_DISPATCH_CONCURRENCY``);
+# the ceiling stops a 32/64-core host allocating an unbounded pool that just
+# adds thread-switch overhead the I/O-bound legs never cash in (pool never
+# above ``2 * _MAX_DISPATCH_CONCURRENCY``).
+#
+# The clamp applies ONLY to the auto-derived default. An explicit
+# ``KAIRIX_MAX_CONCURRENCY`` stays authoritative and un-clamped — an operator
+# who names a value owns its pool-size consequence (behaviour preserved from
+# PLA-272, where the env value fed ``dispatch_workers_for`` verbatim).
+_CONCURRENCY_PER_CPU = 2
+_MIN_DISPATCH_CONCURRENCY = 4
+_MAX_DISPATCH_CONCURRENCY = 32
+
+# Fallback used only when ``os.cpu_count()`` can't determine the core count
+# (it returns ``None`` on some constrained / containerised hosts). Equals a
+# 4-core box under the 2x rule — the historical fixed default (PLA-272) — so
+# an unknowable host keeps the prior behaviour rather than collapsing to the
+# floor.
 DEFAULT_DISPATCH_CONCURRENCY = 8
 
 _DISPATCH_POOL: ThreadPoolExecutor | None = None
@@ -102,16 +135,45 @@ def build_dispatch_pool(concurrency: int) -> ThreadPoolExecutor:
     )
 
 
-def _resolve_dispatch_concurrency() -> int:
+def cpu_aware_default_concurrency(cpu_count: int | None) -> int:
+    """Derive the default concurrent-search load from the host core count.
+
+    Public sizing seam (sibling of :func:`dispatch_workers_for`): ``cpu_count``
+    is passed in (``os.cpu_count()`` at the one production call site) so tests
+    exercise the scaling by value — a small core count yields a small load, an
+    8-core box a larger one — without patching the process. The result is
+    always clamped to ``[_MIN_DISPATCH_CONCURRENCY, _MAX_DISPATCH_CONCURRENCY]``
+    so a 1-2 core box can't over-allocate and a 32/64-core box can't
+    unbounded-explode the pool.
+
+    Returns :data:`DEFAULT_DISPATCH_CONCURRENCY` when ``cpu_count`` is
+    ``None`` (``os.cpu_count()`` can't determine the count) so an unknowable
+    host keeps the historical fixed default.
+    """
+    if cpu_count is None:
+        return DEFAULT_DISPATCH_CONCURRENCY
+    scaled = _CONCURRENCY_PER_CPU * max(1, cpu_count)
+    return min(_MAX_DISPATCH_CONCURRENCY, max(_MIN_DISPATCH_CONCURRENCY, scaled))
+
+
+def resolve_dispatch_concurrency() -> int:
     """Resolve the expected concurrent-search load, with env override (F4-clean).
 
-    Routes the env read through :mod:`kairix.paths` so no ``os.environ`` read
-    leaks into the search tier. Operators tune ``KAIRIX_MAX_CONCURRENCY`` to
-    match their teaming load (the number of agents firing searches at once).
+    Public seam so the resolution (env-override precedence + CPU-aware default)
+    is testable by value. The env read is routed through :mod:`kairix.paths`
+    (no direct process-env read leaks into the search tier). When the operator
+    knob is UNSET the default is CPU-aware (:func:`cpu_aware_default_concurrency`
+    over ``os.cpu_count()``) so a bigger box auto-scales dispatch parallelism;
+    when ``KAIRIX_MAX_CONCURRENCY`` is SET, ``read_int_env`` returns that value
+    verbatim and it stays authoritative (operators tune it to their teaming
+    load — the number of agents firing searches at once).
     """
     from kairix.paths import read_int_env
 
-    return read_int_env("KAIRIX_MAX_CONCURRENCY", default=DEFAULT_DISPATCH_CONCURRENCY)
+    return read_int_env(
+        "KAIRIX_MAX_CONCURRENCY",
+        default=cpu_aware_default_concurrency(os.cpu_count()),
+    )
 
 
 def _default_dispatch_pool() -> ThreadPoolExecutor:
@@ -119,13 +181,13 @@ def _default_dispatch_pool() -> ThreadPoolExecutor:
 
     Built on the first search and reused for every subsequent dispatch so the
     per-worker thread-init cost is paid once and amortised. Sized from
-    :func:`_resolve_dispatch_concurrency` so the pool matches the expected
+    :func:`resolve_dispatch_concurrency` so the pool matches the expected
     concurrent load instead of the legacy fixed two workers (PLA-272).
     """
     global _DISPATCH_POOL
     with _DISPATCH_POOL_LOCK:
         if _DISPATCH_POOL is None:
-            _DISPATCH_POOL = build_dispatch_pool(_resolve_dispatch_concurrency())
+            _DISPATCH_POOL = build_dispatch_pool(resolve_dispatch_concurrency())
         return _DISPATCH_POOL
 
 
@@ -147,7 +209,7 @@ def _default_dispatch_pool() -> ThreadPoolExecutor:
 # controlled set of cores instead of oversubscribing them.
 #
 # Sized from the SAME ``KAIRIX_MAX_CONCURRENCY`` signal as the dispatch pool
-# (:func:`_resolve_dispatch_concurrency`) — one rerank task per search, so the
+# (:func:`resolve_dispatch_concurrency`) — one rerank task per search, so the
 # worker count is the concurrency itself (the dispatch pool submits two futures
 # per search and so doubles it). Built LAZILY so the size resolves from
 # config/env at first use, and injectable via the ``rerank_pool`` seam on
@@ -194,14 +256,14 @@ def _default_rerank_pool() -> ThreadPoolExecutor:
 
     Built on the first reranked search and reused for every subsequent rerank
     so the per-worker thread-init cost is paid once and amortised. Sized from
-    :func:`_resolve_dispatch_concurrency` — the same ``KAIRIX_MAX_CONCURRENCY``
+    :func:`resolve_dispatch_concurrency` — the same ``KAIRIX_MAX_CONCURRENCY``
     signal the dispatch pool uses — so the two pools scale together with the
     operator's teaming load (PLA-272).
     """
     global _RERANK_POOL
     with _RERANK_POOL_LOCK:
         if _RERANK_POOL is None:
-            _RERANK_POOL = build_rerank_pool(_resolve_dispatch_concurrency())
+            _RERANK_POOL = build_rerank_pool(resolve_dispatch_concurrency())
         return _RERANK_POOL
 
 

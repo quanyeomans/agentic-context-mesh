@@ -31,10 +31,12 @@ test names the exact mutation):
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -46,9 +48,12 @@ from kairix.core.search.pipeline import (
     SearchPipeline,
     build_dispatch_pool,
     build_rerank_pool,
+    cpu_aware_default_concurrency,
     dispatch_workers_for,
     rerank_workers_for,
+    resolve_dispatch_concurrency,
 )
+from kairix.paths import read_int_env
 from kairix.transport.embed_service import ProviderEmbeddingService
 from tests.fakes import (
     FakeClassifier,
@@ -307,6 +312,128 @@ def test_dispatch_pool_sized_from_configured_concurrency() -> None:
         assert pool._max_workers > 2
     finally:
         pool.shutdown(wait=False)
+
+
+# ---------------------------------------------------------------------------
+# Concurrency bump — CPU-aware default concurrency (PLA-272 follow-up)
+#
+# When KAIRIX_MAX_CONCURRENCY is UNSET, the expected concurrent-search load
+# (and therefore the dispatch pool size) is derived from the host core count
+# so a bigger box (an incoming 8-core D8as_v5) auto-uses more dispatch
+# parallelism without an operator env tweak, while a 1-2 core CI box stays
+# bounded. cpu_aware_default_concurrency is the public sizing seam: the core
+# count is injected as a plain int (no process patching, F2-clean), so the
+# scaling / clamp behaviour is asserted by value. An explicit
+# KAIRIX_MAX_CONCURRENCY stays authoritative — it feeds read_int_env and wins
+# over the CPU-aware default (behaviour preserved from PLA-272).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_default_concurrency_scales_with_cpu_count() -> None:
+    """The CPU-aware default scales with cores and clears the legacy fixed 8.
+
+    A small core count yields a small load; an 8-core box yields a larger one
+    that exceeds the old fixed default, so the bigger box isn't capped at a
+    small fixed number. The core count is a plain-int argument (injection, not
+    ``setenv``), so the scaling is asserted directly.
+
+    Sabotage-proof (executed): in ``kairix/core/search/pipeline.py`` replace the
+    body of ``cpu_aware_default_concurrency`` with
+    ``return DEFAULT_DISPATCH_CONCURRENCY`` (drop the CPU-aware derivation) —
+    ``small < eight`` fails because both collapse to 8. Restore to pass.
+    """
+    small = cpu_aware_default_concurrency(1)  # 1-core CI box
+    eight = cpu_aware_default_concurrency(8)  # incoming 8-core D8as_v5
+
+    # A bigger box auto-uses more dispatch concurrency.
+    assert small < eight, f"8-core must out-scale a 1-core box; got {small} vs {eight}"
+    # The 8-core default clears the legacy fixed default so the bigger box
+    # isn't capped at the small fixed number (the reason for this change).
+    assert eight > DEFAULT_DISPATCH_CONCURRENCY, (
+        f"8-core default {eight} must exceed the legacy fixed {DEFAULT_DISPATCH_CONCURRENCY}"
+    )
+    # Non-decreasing across the realistic core range (small boxes floor, big
+    # boxes ceiling — never inverts).
+    seq = [cpu_aware_default_concurrency(c) for c in (1, 2, 4, 8, 16)]
+    assert seq == sorted(seq), f"concurrency must be non-decreasing in cores; got {seq}"
+
+
+@pytest.mark.unit
+def test_default_concurrency_and_pool_stay_within_floor_and_ceiling() -> None:
+    """The CPU-aware default (and the pool from it) can't over- or under-allocate.
+
+    A 1-2 core box must not get a huge pool; a 32/64-core box must not
+    unbounded-explode it. ``cpu_aware_default_concurrency`` clamps the load to a
+    fixed envelope, so ``dispatch_workers_for(default)`` stays within
+    ``[2*floor, 2*ceiling]`` for ANY core count — including absurd ones — while
+    clearing the legacy 2-worker pool on every host.
+
+    Sabotage-proof (executed): in ``kairix/core/search/pipeline.py`` drop the
+    ``min()/max()`` clamp (``return scaled``) — the saturation assert
+    (``cpu_aware_default_concurrency(64) == cpu_aware_default_concurrency(1000)``)
+    fails because the value grows without bound. Restore to pass.
+    """
+    floor_conc = cpu_aware_default_concurrency(1)
+    # Clamp saturates — a 64-core and a 1000-core host resolve to the SAME
+    # bounded load, so a huge box can't unbounded-explode the pool.
+    assert cpu_aware_default_concurrency(64) == cpu_aware_default_concurrency(1000), (
+        "clamp must saturate so a huge box can't unbounded-explode the pool"
+    )
+    ceiling_conc = cpu_aware_default_concurrency(1000)
+    assert floor_conc < ceiling_conc, f"floor {floor_conc} must sit below ceiling {ceiling_conc}"
+
+    floor_pool = dispatch_workers_for(floor_conc)
+    ceiling_pool = dispatch_workers_for(ceiling_conc)
+    for cpu in (1, 2, 3, 4, 8, 16, 32, 64, 256, 4096):
+        conc = cpu_aware_default_concurrency(cpu)
+        assert floor_conc <= conc <= ceiling_conc, f"cpu={cpu} -> {conc} escaped [{floor_conc}, {ceiling_conc}]"
+        workers = dispatch_workers_for(conc)
+        assert floor_pool <= workers <= ceiling_pool, f"cpu={cpu} pool {workers} escaped [{floor_pool}, {ceiling_pool}]"
+        # Clears the legacy fixed 2-worker pool on every host (PLA-272).
+        assert workers > 2
+
+    # None (os.cpu_count() undeterminable) falls back to the fixed default,
+    # which itself sits inside the envelope.
+    assert floor_conc <= cpu_aware_default_concurrency(None) <= ceiling_conc
+
+
+@pytest.mark.unit
+def test_explicit_env_override_is_authoritative_over_cpu_aware_default() -> None:
+    """An explicit KAIRIX_MAX_CONCURRENCY wins over the CPU-aware default.
+
+    ``resolve_dispatch_concurrency`` is the public resolver: when an operator
+    sets the env it returns that value verbatim (authoritative, un-clamped) and
+    the CPU-aware default is NOT used; when unset, the CPU-aware default flows
+    through. ``read_int_env``'s env-over-default precedence is independently
+    pinned in ``tests/test_paths.py::TestReadIntEnv``; this pins that the
+    resolver actually wires the env in front of the derived default.
+
+    F2/F1-clean: the env is set via ``patch.dict(os.environ, ...)`` (a scoped,
+    auto-restored stdlib-boundary edit — not ``monkeypatch.setenv`` and not an
+    ``@patch`` on a kairix target).
+
+    Sabotage-proof (executed): in ``kairix/core/search/pipeline.py`` make
+    ``resolve_dispatch_concurrency`` return
+    ``cpu_aware_default_concurrency(os.cpu_count())`` directly (dropping
+    ``read_int_env``) — the operator's out-of-band value is ignored and the
+    env-set assertion (``== 3``) fails. Restore to pass.
+    """
+    env_var = "KAIRIX_MAX_CONCURRENCY"
+    default_for_host = cpu_aware_default_concurrency(os.cpu_count())
+    # 3 is below the CPU-aware floor, so on ANY host it can only come from the
+    # env override — proving the operator value wins over the derived default.
+    assert default_for_host > 3
+
+    with patch.dict(os.environ, {env_var: "3"}):
+        assert resolve_dispatch_concurrency() == 3, "explicit override must win over the CPU-aware default"
+        # read_int_env is the sanctioned seam that delivers that precedence.
+        assert read_int_env(env_var, default=default_for_host) == 3
+
+    # Env unset -> the resolver falls back to the CPU-aware default for the host.
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop(env_var, None)
+        assert resolve_dispatch_concurrency() == default_for_host
 
 
 @pytest.mark.unit
