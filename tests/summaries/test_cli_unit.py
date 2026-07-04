@@ -278,6 +278,46 @@ def test_main_path_exits_1_when_file_missing(tmp_path: Path) -> None:
     assert "File not found" in stderr
 
 
+def test_summaries_cache_inside_allowed_roots_is_accepted(tmp_path: Path) -> None:
+    """``--summaries-cache`` under an allowed root (tmp) opens the DB and runs.
+
+    Legitimate-value half of the S8706 confinement contract: a cache path under
+    pytest's temp dir is accepted and ``--status`` reaches its coverage output.
+    """
+    doc_root = tmp_path / "vault"
+    doc_root.mkdir()
+    (doc_root / "a.md").write_text("# a", encoding="utf-8")
+    cache = tmp_path / "nested" / "summaries.db"
+
+    stdout, _stderr, code = _drive(
+        ["--status", "--summaries-cache", str(cache)],
+        document_root=doc_root,
+    )
+    assert code == 0
+    assert "Vault docs:" in stdout
+    assert cache.exists()
+
+
+def test_summaries_cache_outside_allowed_roots_is_rejected(tmp_path: Path) -> None:
+    """A ``--summaries-cache`` path that escapes every root raises before connect.
+
+    Sabotage: drop the ``confine_to_roots`` guard in ``_open_db`` and this
+    traversal reaches ``sqlite3.connect`` (pythonsecurity:S8706). ``/etc/...``
+    is not under cwd, home, the temp dir, or the configured summaries dir, so
+    confinement rejects it before any DB file is created.
+    """
+    from kairix.paths import PathTraversalError
+
+    doc_root = tmp_path / "vault"
+    doc_root.mkdir()
+    escape = Path("/etc") / "kairix-summaries-escape" / "s.db"
+
+    with pytest.raises(PathTraversalError):
+        sum_cli.main(["--status", "--summaries-cache", str(escape)], document_root=doc_root)
+
+    assert not escape.exists()
+
+
 def test_main_credential_failure_exits_1(tmp_path: Path) -> None:
     """When get_credentials raises, the CLI prints the error and exits 1."""
 

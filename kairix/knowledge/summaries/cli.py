@@ -103,9 +103,17 @@ def _discover_vault_docs(document_root: Path) -> list[str]:
 
 
 def _open_db(db_path: Path) -> sqlite3.Connection:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    from kairix.paths import agent_cli_roots, confine_to_roots, summaries_db_path
+
+    # ``--summaries-cache`` is a CLI-controllable path, so confine the SQLite
+    # target to the standard agent-CLI roots plus the configured summaries dir
+    # before connecting. ``confine_to_roots`` resolves + allow-lists and returns
+    # the path (raising PathTraversalError on a ``../`` escape before any DB
+    # file is created), which also clears the pythonsecurity:S8706 taint.
+    safe_db_path = confine_to_roots(db_path, agent_cli_roots(summaries_db_path().parent))
+    safe_db_path.parent.mkdir(parents=True, exist_ok=True)
     # F77-allow: operator CLI subcommand (summarise); per-invocation summary DB writer.
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(safe_db_path))
     from kairix.knowledge.summaries.staleness import init_summaries_db
 
     init_summaries_db(conn)

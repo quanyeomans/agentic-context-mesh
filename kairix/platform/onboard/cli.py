@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -468,6 +469,30 @@ def cmd_guide(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+# Agent names are short lowercase identifiers (builder, consultant, growth,
+# shape). ``kairix onboard verify --agent NAME`` forwards NAME into a
+# subprocess argv, so the value is pinned to this charset before it reaches
+# the child process.
+_AGENT_NAME_RE = re.compile(r"[a-z][a-z0-9-]{0,40}")
+
+
+def _validate_agent_name(name: str) -> str:
+    """Return ``name`` iff it is a safe agent identifier; raise otherwise.
+
+    ``cmd_verify`` forwards ``--agent NAME`` into a subprocess argv
+    (``verify-search.py --agent NAME``). Allow-listing the value to the
+    agent-name charset (``^[a-z][a-z0-9-]{0,40}$``) before it reaches the argv
+    closes the argument-injection vector pythonsecurity:S8705 flags — a value
+    carrying flag/shell metacharacters (``--foo``, ``a;b``) never reaches the
+    child. ``fullmatch`` (not ``$``) rejects a trailing-newline payload too.
+    """
+    if not _AGENT_NAME_RE.fullmatch(name):
+        raise ValueError(
+            f"invalid agent name {name!r}: expected a short lowercase identifier matching ^[a-z][a-z0-9-]{{0,40}}$"
+        )
+    return name
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
     """Run the acceptance test suite against the live deployment."""
     script_root = getattr(args, "_script_root", None) or Path(__file__).parent.parent.parent
@@ -480,7 +505,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
     cmd = [sys.executable, str(script)]
     if args.agent:
-        cmd += ["--agent", args.agent]
+        cmd += ["--agent", _validate_agent_name(args.agent)]
     if args.json:
         cmd += ["--json"]
 
