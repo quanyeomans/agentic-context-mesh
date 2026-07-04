@@ -18,7 +18,7 @@ The usual options: send your private knowledge to a vendor's cloud, burn tokens 
 
 ## What changes with kairix
 
-Kairix gives your agents a shared knowledge layer they can search, write to, and manage — without you becoming a platform team. Your files stay on your machine. Your agents and your team work from the same knowledge.
+Kairix gives your agents a shared knowledge layer they can search, write to, and manage — without you becoming a platform team. Your files stay on your machine. And it's not just for agents: you search the same knowledge store yourself, from the command line or your browser, so a decision an agent saves shows up in your next search — and a note you write shows up in the agent's. Humans and agents never drift onto different versions of the facts.
 
 **Your agents find answers instead of guessing.** One tool call returns ranked, relevant content — ~1,500 tokens instead of dumping 10,000–50,000 tokens of full documents into the prompt. In a 200K context window, that's 58 searches per session instead of 5. Your agents can actually research a topic instead of running out of room after the first question.
 
@@ -31,6 +31,10 @@ Kairix gives your agents a shared knowledge layer they can search, write to, and
 **Agents stop contradicting what you've already decided.** Before writing a new fact or decision, agents can check it against existing knowledge. Kairix flags conflicts: "this contradicts what was agreed in Q1" — before it gets saved, not after you discover the mess.
 
 **Agents know who people are without being told.** Kairix discovers people, companies, and relationships from your document structure and builds a knowledge graph automatically. When an agent asks about a client, they get the full picture — related contacts, recent decisions, open work — not just documents that mention the name.
+
+**Point kairix at where your work actually lives.** Beyond a folder of files, kairix connects to the sources your team already uses — SharePoint, Microsoft 365, Notion, Linear, Slack, GitHub — so your agents search the real thing, not a stale export you remembered to update. Each connector is opt-in: you switch it on and pilot it before it feeds live search, so nothing syncs until you say so.
+
+**Agents recall what was said, not just what was written.** Kairix turns meeting transcripts and chat into cited facts your agents can look up — so "what did we agree on that call?" has an answer with a source you can open. See [Conversational memory](#conversational-memory) below.
 
 **One tool call replaces pages of prompt instructions.** Without kairix, your agent's system prompt describes file paths, folder structures, and search strategies. With kairix, the instruction is: "search kairix before answering." The retrieval logic, entity awareness, and budget management happen behind the scenes.
 
@@ -82,7 +86,7 @@ Each search returns ranked content with the most relevant material first. The ag
 | First good result | usually the #1 hit |
 | Categories measured | recall, temporal, entity, conceptual, multi-hop, procedural |
 
-Measured against the packaged reference-library gold suite by an independent LLM judge using graded relevance — not self-reported. The full benchmark block — corpus, suite, per-strategy scores, and sweep date — is in the [roadmap](docs/project/ROADMAP.md), which both this page and the roadmap read from so the headline number can't drift.
+Measured against the packaged reference-library gold suite by an independent LLM judge using graded relevance — not self-reported. **This 96.5% is the clean, well-curated upper bound.** On a live production knowledge store the standing baseline is **Hit@5 91.3%**, and your own content lands somewhere in between. Both numbers — plus the full per-strategy scores, corpus, suite, and sweep date — live in the [roadmap](docs/project/ROADMAP.md); update this page whenever a new sweep lands there so the two stay in step.
 
 ---
 
@@ -95,7 +99,7 @@ Your agents (Claude, OpenClaw, LangGraph, CrewAI, or custom)
     ↓ ask questions via MCP tools
 Kairix (searches, ranks, and returns right-sized answers)
     ↓ reads from
-Your documents (notes, markdown, PDFs, exports — whatever you have)
+Your sources (a folder of files, or connected SharePoint / M365 / Notion / Linear / Slack / GitHub)
 ```
 
 It works with any agent platform that supports [MCP](https://modelcontextprotocol.io/) (Model Context Protocol). One tool call, one question — kairix handles the searching, ranking, entity lookup, and budget management behind the scenes.
