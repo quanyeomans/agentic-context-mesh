@@ -329,8 +329,8 @@ def _same_module_tests(paths: set[Path], found: set[str]) -> list[str]:
     A mutation to ``kairix/**/<mod>.py`` is most reliably killed by that
     module's own tests, which live in either ``test_<mod>.py`` OR the common
     aspect-suffixed form ``test_<mod>_<aspect>.py`` (e.g. a mutation to
-    ``topology_v2.py`` is killed by ``test_topology_v2_config_parser.py``; one
-    to ``topology_v2_applier.py`` by ``test_topology_v2_applier_unit.py``).
+    ``topology.py`` is killed by ``test_topology_config_parser.py``; one
+    to ``topology_applier.py`` by ``test_topology_applier_unit.py``).
     Both shapes count as same-module so they always survive the impacted-test
     cap: otherwise a co-mutated widely-imported file (e.g. ``factory.py``,
     imported by 100+ test files) evicts a small module's own tests via the

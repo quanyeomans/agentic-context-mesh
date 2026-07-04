@@ -53,8 +53,8 @@ Pass example:
   # kairix/core/features/registry.py
   REGISTRY = {
       # retire-extension: pending m365_calendar soak — see issue #382
-      "topology_v2_resolver": FeatureFlag(
-          name="topology_v2_resolver",
+      "topology_resolver": FeatureFlag(
+          name="topology_resolver",
           default=True,
           target_retire_in="v2026.12.31",
       ),
@@ -63,8 +63,8 @@ Pass example:
 Forbidden example:
   # kairix/core/features/registry.py
   REGISTRY = {
-      "topology_v2_resolver": FeatureFlag(
-          name="topology_v2_resolver",
+      "topology_resolver": FeatureFlag(
+          name="topology_resolver",
           default=True,
           target_retire_in="v2026.1.1",  # past deadline, no extension comment
       ),
