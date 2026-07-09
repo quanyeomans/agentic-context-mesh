@@ -1,0 +1,74 @@
+name: "auto-merge on green"
+
+# Lights-out merge: when the "1 · Quality gate" workflow (ci.yml) finishes for a
+# PR and its fan-in "CI gate" check-run is green, arm `gh pr merge --auto` as the
+# three-cubes-agent App. GitHub then merges ONLY once branch protection is fully
+# satisfied — that is BOTH required status checks ("CI gate" from ci.yml AND
+# "PR compliance check" from integration.yml) AND the required CODEOWNERS review,
+# which HOLDS any PR that touches a policy/config path (see .github/CODEOWNERS).
+# Work PRs merge unattended on green; control-plane PRs wait for a human. No human
+# account, no self-approve.
+#
+# Keyed off the "CI gate" fan-in CHECK-RUN (job `check` in ci.yml — the fan-in over
+# the whole quality matrix), not the umbrella workflow run, so a red informational
+# job (e.g. the SonarCloud analysis job) never blocks auto-merge. Arming on "CI
+# gate" is safe even though a second check ("PR compliance check") is also required:
+# `gh pr merge --auto` holds the merge until EVERY required context is green, so the
+# compliance gate is enforced by GitHub regardless of which check finishes last.
+#
+# Prerequisites (org-admin, one-time):
+#   - repo/org vars AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID for
+#     the WIF identity that mints the three-cubes-agent App token from Key Vault.
+#   - repo setting "Allow auto-merge" enabled (repos/three-cubes/kairix).
+#   - the "main" ruleset (id 17633482) set to required_approving_review_count: 0 +
+#     require_code_owner_review: true (so work auto-merges while owned paths hold).
+
+on:
+  workflow_run:
+    workflows: ["1 · Quality gate"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  resolve:
+    # Only PR-triggered gate runs are auto-mergeable (not push / merge_group).
+    if: ${{ github.event.workflow_run.event == 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      pr: ${{ steps.r.outputs.pr }}
+      sha: ${{ steps.r.outputs.sha }}
+    steps:
+      - name: Resolve PR number + head sha from the workflow_run
+        id: r
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          pr="$(gh api "repos/${REPO}/commits/${SHA}/pulls" \
+            -H 'Accept: application/vnd.github+json' --jq '.[0].number // empty')"
+          echo "pr=${pr}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "auto-merge: resolved PR #${pr:-none} @ ${SHA}"
+
+  merge:
+    needs: resolve
+    if: ${{ needs.resolve.outputs.pr != '' }}
+    permissions:
+      contents: read
+      id-token: write        # WIF federation to mint the App token
+      pull-requests: write   # enable auto-merge on the PR
+    uses: three-cubes/tc-pipelines/.github/workflows/auto-merge-on-green.yml@94622e57364457e73de11ef366dd9dbf0061d0c1 # v1.13.0
+    with:
+      fan-in-check-name: "CI gate"
+      merge-method: merge            # repo allows merge + squash; rebase disabled
+      enqueue: false
+      pr-number: ${{ needs.resolve.outputs.pr }}
+      head-sha: ${{ needs.resolve.outputs.sha }}
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
