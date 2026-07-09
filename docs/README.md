@@ -18,6 +18,7 @@ New to kairix? Read in this order:
 - `getting-started/` — quick-start guide for new users
 - `user-guide/` — end-user task guides, MCP tools reference, agent-and-human framing in [what-kairix-does-for-you.md](user-guide/what-kairix-does-for-you.md)
 - `architecture/` — ENGINEERING.md, fitness-functions.md, ADRs
+- `development/` — contributor how-tos: [improving a shared fitness gate or pipeline](development/how-to-improve-a-fitness-gate-or-pipeline.md), consuming a shared reusable workflow, the CI startup-failure runbook
 - `evaluation/` — EVALUATION.md (benchmark methodology, suite design)
 - `operations/` — OPERATIONS.md (deploy, monitor, secret rotation)
 - [`runbooks/`](runbooks/README.md) — incident-response playbooks (one per scenario); see `operations/runbooks/INDEX.md` for the docker-compose how-to set

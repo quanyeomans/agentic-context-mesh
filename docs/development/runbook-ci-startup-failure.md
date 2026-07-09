@@ -66,4 +66,6 @@ Re-pin `uses: <org>/<repo>/.github/workflows/<file>.yml@<live-ref>` to a tag or 
 ## See also
 
 - [how-to-consume-a-shared-reusable-workflow](how-to-consume-a-shared-reusable-workflow.md) — the upstream prevention: force a gated caller to run in the same PR so a broken `workflow_call` contract can't reach `main`.
-- The shared fitness/CI engine is consumed as a **pinned package dependency** (see `pyproject.toml`) configured through declarative factories, not local code patches — a version-pin mismatch between the dependency pin and any prose/docs is itself a cause of confusing CI behaviour. If the engine version moved, confirm the pin in `pyproject.toml` and the prose in [CLAUDE.md](../../../CLAUDE.md) agree before debugging further.
+- The shared fitness/CI engine is consumed as a **pinned package dependency** (see `pyproject.toml`) configured through declarative factories, not local code patches — a version-pin mismatch between the dependency pin and any prose/docs is itself a cause of confusing CI behaviour. If the engine version moved, confirm the pin in `pyproject.toml` and the prose in [CLAUDE.md](../../CLAUDE.md) agree before debugging further.
+- [how-to-improve-a-fitness-gate-or-pipeline](how-to-improve-a-fitness-gate-or-pipeline.md) — change a shared gate/pipeline and repin consumers safely.
+- [tc-pipelines `governance/STANDARDS.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md) — the canonical engineering-standards index.

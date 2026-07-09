@@ -25,15 +25,23 @@ tc-pipelines' `github-app-token@v1` (Key Vault → App creds, no GitHub-stored
 secret), so tags, releases, and dispatches are authored by the App.
 
 The **VM deploy uses the canonical tc-pipelines reusable workflow
-`azure-vm-deploy.yml@v1`** (WIF Azure login → OS-disk snapshot → `az vm
-run-command` the box-side apply script → smoke `systemctl is-active`),
-**replacing the bespoke HMAC-webhook** (retired 2026-06-29, PLA-252). The
-box-side apply logic is now the **single source** in
-[`scripts/deploy/apply-alpha.sh`](../../scripts/deploy/apply-alpha.sh); the
-manual fallback, when CI is unavailable, is to run that script directly on the
-box (`sh apply-alpha.sh <tag>` from the compose dir). This follows the org "canonical in
-tc-pipelines, don't reinvent" rule — use the shared deploy workflow and WIF
-login rather than re-implementing them per repo.
+`azure-vm-deploy.yml@v1`**, invoked by `release-vm-deploy.yml` on an **alpha
+prerelease** (not every merge). kairix's actual invocation sets
+**`skip-snapshot: 'true'`** — the CI identity lacks Disk Snapshot Contributor, so
+**recovery is re-pinning `KAIRIX_IMAGE_TAG`** to the previous image rather than a
+disk rollback — and passes **empty `smoke-units`**, because the oneshot
+`kairix.service` makes `systemctl is-active` the wrong probe. Health is verified
+**in-band by the box-side apply script**: `apply-alpha.sh` runs
+`kairix onboard check --json` plus the reference-library regression gate after the
+image flip. The box-side apply logic is the **single source** in
+[`scripts/deploy/apply-alpha.sh`](../../scripts/deploy/apply-alpha.sh); the manual
+fallback, when CI is unavailable, is to run that script directly on the box
+(`sh apply-alpha.sh <tag>` from the compose dir). This follows the org "canonical
+in tc-pipelines, don't reinvent" rule — use the shared deploy workflow and WIF
+login rather than re-implementing them per repo. It satisfies the authoritative
+"recovery point before apply, probe after apply" model as kairix implements it:
+the `KAIRIX_IMAGE_TAG` re-pin is the recovery point; `onboard check --json` + the
+reflib regression status is the probe.
 
 ---
 

@@ -23,7 +23,7 @@ Standards, quality gates, and compliance requirements for Kairix contributors.
 
 ## 1. Quality Gates
 
-Every merge to `main` must pass all four CI stages. No exceptions without a documented override (see §2.4).
+Every merge to `main` must pass the required CI gate (all Stage 0–5 jobs, fanned in as `CI gate`). There is no bypass — see §2.4.
 
 | Gate | Tool | Threshold | Blocks merge? |
 |---|---|---|---|
@@ -56,49 +56,55 @@ Configuration source-of-truth: `codecov.yml` in repo root (validated against `ht
 
 ### 2.1 Workflow overview
 
-Five stages run on every push and PR. Stages 3 and 4 run in parallel after Stage 2.
+Every push and PR runs the `1 · Quality gate` workflow (`ci.yml`). Stage 0 runs the shared fitness engine; the remaining stages fan out after Stage 1; a `check` fan-in job publishes the required **`CI gate`** status.
 
 ```
 push/PR
   │
-  ├── Stage 0: Architecture fitness (30s)   ← runs F1-F8 + F10-F23 atomic checks (F9 in Stage 5)
-  │     bash scripts/checks/run-all.sh --skip-coverage
+  ├── Stage 0: Architecture fitness (~30s)  ← F1-F8 + F10-F23 atomic checks (F9 in Stage 5)
+  │     uv run tc-fitness run
   │
   ├── Stage 1: Contracts (30s)              ← fast gate, fails fast
   │     pytest -m contract  → results-contracts.xml
   │     ↳ codecov/test-results-action (flag=contract)   [test analytics]
   │
   ├── Stage 2: Unit + Type (2-3min)         ← runs on py3.12
-  │     mypy --strict
-  │     ruff check + format
+  │     mypy --strict · ruff check + format
   │     pytest -m "unit or bdd or contract" --cov  → coverage.xml + results-unit.xml
   │     F7: per-file coverage floor
   │     ↳ codecov/codecov-action (flag=unit) [coverage]
   │     ↳ codecov/test-results-action (flag=unit) [test analytics]
   │
-  ├── Stage 3: Integration (5min)  ─┐
+  ├── Stage 3: Integration (5min)           ← real usearch
   │     pytest -m integration --cov  → coverage-integration.xml + results-integration.xml
   │     ↳ codecov/codecov-action (flag=integration)     [coverage]
-  │     ↳ codecov/test-results-action (flag=integration) [test analytics]
-  │                                  │ parallel with Stage 4
-  └── Stage 4: Security (5min)    ──┘
-        bandit (SAST)
-        pip-audit (CVE scan)
-        detect-secrets (secret scan)
-        SonarCloud scan (consumes coverage.xml from Stage 2)
-        artifact upload
+  │
+  ├── Stage 4: Security (5min)              ← parallel after Stage 1
+  │     bandit (SAST) · pip-audit (CVE) · detect-secrets · SonarCloud (advisory)
+  │
+  ├── Stage 4.5: F48 composed production-path e2e
+  │
+  └── Stage 5: Union coverage floor
+        F9 over the unit ∪ integration .coverage union
+        │
+        └── check: "CI gate"   ← fan-in over every required job; the branch-protection status
 ```
+
+The `2 · Pre-merge PR gates` workflow (`integration.yml`) publishes the second required status, **`PR compliance check`**.
 
 ### 2.2 Workflow files
 
 | File | Trigger | Purpose |
 |---|---|---|
-| `.github/workflows/ci.yml` | Every push + PR | Four-stage pipeline (all Python gates) |
+| `.github/workflows/ci.yml` | Every push + PR | `1 · Quality gate` — Stage 0 fitness + contract/unit/integration/e2e/coverage/security stages + the `CI gate` fan-in |
 | `.github/workflows/go-quality.yml` | Push/PR touching `services/**`, `tools/**`, `.golangci.yml` | Per-service Go gate: `gofmt -s` / `go vet` / `golangci-lint` / `go test -race -cover` (floor 80%) / cross-compile (linux+darwin × amd64+arm64) |
-| `.github/workflows/integration.yml` | PR to main | PR compliance checks (benchmark mention + secret scan). Integration tests themselves run as Stage 3 in `ci.yml`. |
+| `.github/workflows/integration.yml` | PR to main | `2 · Pre-merge PR gates` — publishes the required `PR compliance check` status (benchmark mention + secret scan). Integration tests themselves run as Stage 3 in `ci.yml`. |
+| `.github/workflows/auto-merge.yml` | `1 · Quality gate` completion | Arms `gh pr merge --auto` as the App when `CI gate` is green; CODEOWNERS control-plane PRs hold for a human |
 | `.github/workflows/benchmark-gate.yml` | Manual dispatch | Benchmark comparison (required for retrieval PRs) |
 | `.github/workflows/reflib-benchmark-gate.yml` | Manual dispatch | Reference library benchmark comparison |
 | `.github/workflows/dependency-review.yml` | PR | Dependency change review |
+| `.github/workflows/release.yml` | Manual dispatch (`5 · Release`) | Tag `main`, extract the `[Unreleased]` CHANGELOG as notes, create the GitHub Release (App-authored via WIF) |
+| `.github/workflows/release-vm-deploy.yml` | Alpha prerelease | Calls tc-pipelines `azure-vm-deploy.yml@v1` (snapshot skipped; `onboard check` probe) — see [ADR-017](ADR-017-deployment-architecture.md) |
 | `.github/workflows/docker-publish.yml` | Release/tag | Docker image build and publish |
 | `.github/workflows/publish-pypi.yml` | Release/tag | PyPI package publish |
 | `.github/dependabot.yml` | Weekly Monday 03:00 AEST | Automated dependency updates |
@@ -119,14 +125,13 @@ kairix search "test query" --agent <your-agent>
 
 **Rollback:** `pip install git+https://github.com/three-cubes/kairix@<previous-tag>`. All state is in SQLite/document store — safe.
 
-### 2.4 Override process (emergency only)
+**CI deploy plane (canonical).** Release/deploy workflows run as the `three-cubes-agent` App over Workload Identity Federation (a short-lived installation token minted from Key Vault). An alpha prerelease deploys the VM via the tc-pipelines `azure-vm-deploy.yml@v1` reusable — see [ADR-017](ADR-017-deployment-architecture.md). kairix specifics: **snapshot is skipped** (the CI identity lacks Disk Snapshot Contributor), **recovery is re-pinning `KAIRIX_IMAGE_TAG`**, and the post-apply probe is `apply-alpha.sh`'s in-band `kairix onboard check --json` plus the reference-library gate (not `systemctl is-active`, since `kairix.service` is a oneshot).
 
-If a gate must be bypassed:
-1. Document justification with specific business reason in the PR
-2. Risk assessment and consequences
-3. Mitigation plan with timeline to address
-4. Maintainer approval required
-5. Auto-expires: must be resolved in the next release cycle
+### 2.4 No gate bypass
+
+Gates are fixed, not bypassed. The `main` ruleset has **zero bypass actors** — there is no `--admin` rescue, even for an owner — and both required checks (`CI gate` + `PR compliance check`) must be green to merge. The only human gate is a **code-owner review** on a control-plane path in [`.github/CODEOWNERS`](../../.github/CODEOWNERS).
+
+When a gate is wrong, converge the fix **up** into the shared engine rather than silencing it locally: change the CORE check in `tc-fitness` (or the reusable workflow in `tc-pipelines`), release a new pinned tag, and repin. See [how-to-improve-a-fitness-gate-or-pipeline](../development/how-to-improve-a-fitness-gate-or-pipeline.md) and [tc-pipelines `governance/STANDARDS.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md).
 
 ---
 
@@ -415,6 +420,8 @@ chore(deps): bump requests from 2.31 to 2.32
 Types: `feat`, `fix`, `test`, `docs`, `refactor`, `chore`, `perf`
 Scope: module name or area (`embed`, `search`, `entities`, `ci`, `deps`)
 
+Author every commit as the canonical `three-cubes-agent` App identity with **no AI/LLM self-attribution** (no `Co-Authored-By: <model>`, no "Generated with", no robot emoji) — see [AGENTS.md](../../AGENTS.md); the `canonical_commit_identity` + `no_llm_attribution` gates enforce it.
+
 ---
 
 ## 6. Dependency Management
@@ -454,8 +461,10 @@ refactor/embed-staging-table   # internal restructure
 test/search-intent-classifier  # test additions
 docs/engineering-disciplines   # documentation
 chore/deps-bump-requests       # dependency updates
-agent/<short-desc>             # authored by the three-cubes-agent App (branch_naming-exempt)
+agent/<short-desc>             # authored by the three-cubes-agent App
 ```
+
+Branch prefixes are convention: kairix does not bind the `branch_naming` gate. The canonical cross-repo branch shape `<user>/<team>-<number>-<slug>`, enforced by `branch_naming` in repos that bind it, lives in [tc-pipelines `governance/STANDARDS.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md).
 
 ### 7.2 Version discipline
 
@@ -468,7 +477,7 @@ kairix uses CalVer: `YYYY.M.D` for stable releases on `main`, `YYYY.M.Da<N>` for
 | `main` | `2026.4.18a3` | Increment `aN` before each deploy to a test/staging host |
 | `main` | `2026.4.18` | Increment date component on each stable release |
 
-Installing from a branch ref (`@main`, `@main`) rather than a pinned tag does not override this — pip still resolves by version number. Pinned tags are the correct install target for reproducible environments.
+Installing from a branch ref (`@main`) rather than a pinned tag does not override this — pip still resolves by version number. Pinned tags are the correct install target for reproducible environments.
 
 ### 7.3 PR requirements
 
@@ -486,10 +495,10 @@ Installing from a branch ref (`@main`, `@main`) rather than a pinned tag does no
 
 **Merge strategy:** `--merge` only (never squash) — per-commit history is the audit trail. Green-gate PRs merge autonomously.
 
-### 7.3 Review requirements
+### 7.4 Review requirements
 
-- Zero required review on routine work (autonomous-on-green); code-owner review required only when the diff touches control-plane files (`.github/`, `pyproject.toml`, `scripts/checks/`).
-- All CI stages green (non-bypassable ruleset).
+- Zero required review on routine work (autonomous-on-green); code-owner review required only when the diff touches a control-plane path in [`.github/CODEOWNERS`](../../.github/CODEOWNERS) (CI/merge machinery, the gate definition, governance canon, deploy/runtime config).
+- Both required checks green — `CI gate` + `PR compliance check` (the ruleset has zero bypass actors).
 - No unresolved comments.
 
 ---
@@ -726,4 +735,5 @@ The Go quality gate (`go-quality.yml`) is independent of the Python `1 · Qualit
 |---|---|
 | Engineering standards | [`CLAUDE.md`](../../CLAUDE.md) |
 | Code quality patterns and boundaries | [`CONSTRAINTS.md`](../../CONSTRAINTS.md) |
-| Ralph pattern (agent delegation) | [Engineering hub](https://github.com/three-cubes/engineering-hub/tree/main/ralph) |
+| Shared engineering standards (canonical index) | [tc-pipelines `governance/STANDARDS.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md) |
+| Improve a shared gate or pipeline | [`how-to-improve-a-fitness-gate-or-pipeline.md`](../development/how-to-improve-a-fitness-gate-or-pipeline.md) |

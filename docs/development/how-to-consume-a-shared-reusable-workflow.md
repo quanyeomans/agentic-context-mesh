@@ -50,5 +50,7 @@ Do not name private sibling repositories, internal hostnames, or infra identifie
 ## See also
 
 - [runbook-ci-startup-failure](runbook-ci-startup-failure.md) — diagnose a CI run that fails with `startup_failure` before any step executes (broken `workflow_call` contract, bad `@<ref>` pin, invalid YAML).
-- [CI / Workflow Secret Hygiene](../../../SECURITY.md) — the caller-passes-secrets and no-private-infra rules in the security policy.
-- [Reusable-workflow callers: force a triggering change](../../architecture/local-first-feedback-loops.md) — the same discipline framed against the local-first feedback model.
+- [CI / Workflow Secret Hygiene](../../SECURITY.md) — the caller-passes-secrets and no-private-infra rules in the security policy.
+- [Reusable-workflow callers: force a triggering change](../architecture/local-first-feedback-loops.md) — the same discipline framed against the local-first feedback model.
+- [how-to-improve-a-fitness-gate-or-pipeline](how-to-improve-a-fitness-gate-or-pipeline.md) — the upstream change: tag a new reusable-workflow version and update consumers safely.
+- [tc-pipelines `governance/STANDARDS.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md) — the canonical engineering-standards index.

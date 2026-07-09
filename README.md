@@ -273,7 +273,9 @@ pytest tests/                      # bare test run
 ruff check kairix/ tests/          # lint only
 ```
 
-`scripts/safe-commit.sh` is the single entry point — it runs every gate the CI runs in the same order before letting the commit through; failing gates print the exact fix command. See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture and PR process, and [docs/architecture/fitness-functions.md](docs/architecture/fitness-functions.md) for the architecture fitness functions (F-series) that enforce structural invariants.
+`scripts/safe-commit.sh` is the single entry point — it runs every gate CI runs, in the same order, before letting the commit through; failing gates print the exact fix command.
+
+Branch off `main`, push, and open a PR **authored by the `three-cubes-agent` GitHub App** — never a human account. A green gate **auto-merges the PR unattended**: no human runs the merge. The exception is a diff that touches a control-plane path in [`.github/CODEOWNERS`](.github/CODEOWNERS) (CI/merge machinery, the gate definition, governance canon, deploy config) — that **holds for a `@three-cubes/maintainers` review**. The shared engineering standards live in [tc-pipelines `governance/STANDARDS.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md). [CONTRIBUTING.md](CONTRIBUTING.md) carries the full PR process; [docs/architecture/fitness-functions.md](docs/architecture/fitness-functions.md) documents the architecture fitness functions (F-series) that enforce structural invariants.
 
 ---
 
