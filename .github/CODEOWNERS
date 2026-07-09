@@ -1,13 +1,67 @@
-# Two-tier governance: autonomous work, HITL control plane (minimal).
+# Two-tier governance: AUTONOMOUS work, HITL control plane.
 # Standard: https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md
-# Only the gate's OWN definition is owned (@three-cubes/maintainers must approve).
-# Everything else — src, tests, docs, coverage baselines, lockfiles — auto-merges on a green gate.
-/.github/                  @three-cubes/maintainers
-/CODEOWNERS                @three-cubes/maintainers
-/.github/CODEOWNERS        @three-cubes/maintainers
-/pyproject.toml            @three-cubes/maintainers
-/scripts/checks/           @three-cubes/maintainers
-/scripts/safe-commit.sh    @three-cubes/maintainers
-/.pre-commit-config.yaml   @three-cubes/maintainers
-/sonar-project.properties  @three-cubes/maintainers
-/.gitattributes            @three-cubes/maintainers
+#
+# There is deliberately NO `*` default line. CODEOWNERS is last-match-wins: a path
+# is OWNED (→ a @three-cubes/maintainers review is REQUIRED, so it can NOT auto-
+# merge) only when a change to it could WEAKEN a control, or redefine how code
+# builds / tests / merges / deploys, who may approve, the security posture, or the
+# governance canon agents obey. Everything else — src (kairix/**), Go services,
+# tests, docs, ADR design notes, coverage baselines — is WORK and auto-merges on a
+# green gate with no human (the CI gate + PR compliance check + Sonar ratchet are
+# the control there).
+#
+# @three-cubes/maintainers MUST contain only humans — never the three-cubes-agent
+# App — so an agent can never approve a change to the gate that gates it.
+
+# ── A. Merge & CI machinery (defines HOW things merge + WHO reviews) ──────────
+# /.github/ covers workflows/ (incl. auto-merge.yml, ci.yml), rulesets/main.json,
+# dependabot.yml, codeql/, ISSUE_TEMPLATE, and CODEOWNERS itself.
+/.github/                          @three-cubes/maintainers
+/CODEOWNERS                        @three-cubes/maintainers
+/.github/CODEOWNERS                @three-cubes/maintainers
+
+# ── B. The gate definition (what "green" means — an agent must not weaken it) ─
+# Python deps + build, Go lint + module manifests, fitness checks, CI helpers,
+# the local-gate driver, and the Sonar / coverage / secret-scan baselines.
+/pyproject.toml                    @three-cubes/maintainers
+/uv.lock                           @three-cubes/maintainers
+/Makefile                          @three-cubes/maintainers
+/.golangci.yml                     @three-cubes/maintainers
+/services/**/go.mod                @three-cubes/maintainers
+/services/**/go.sum                @three-cubes/maintainers
+/scripts/checks/                   @three-cubes/maintainers
+/scripts/ci/                       @three-cubes/maintainers
+/scripts/safe-commit.sh            @three-cubes/maintainers
+/scripts/fetch-fitness-config.sh   @three-cubes/maintainers
+/.architecture/baseline/           @three-cubes/maintainers
+/.pre-commit-config.yaml           @three-cubes/maintainers
+/sonar-project.properties          @three-cubes/maintainers
+/codecov.yml                       @three-cubes/maintainers
+/.secrets.baseline                 @three-cubes/maintainers
+
+# ── C. Governance canon / policy (the highest-precedence rules agents obey) ───
+# Root canon markdowns + the ratified ADRs (non-ADR design notes in
+# docs/architecture/ stay WORK and auto-merge).
+/CLAUDE.md                         @three-cubes/maintainers
+/CONSTRAINTS.md                    @three-cubes/maintainers
+/CONTRIBUTING.md                   @three-cubes/maintainers
+/CODE_OF_CONDUCT.md                @three-cubes/maintainers
+/SECURITY.md                       @three-cubes/maintainers
+/LICENSE                           @three-cubes/maintainers
+/docs/architecture/ADR-*.md        @three-cubes/maintainers
+
+# ── D. Security-posture / scan-surface control ───────────────────────────────
+# These define what the confidential / private-infra scanners block — weakening
+# them weakens a security control, so a human must review.
+/.confidential-patterns            @three-cubes/maintainers
+/.private-infra-patterns           @three-cubes/maintainers
+
+# ── E. Deploy / apply / runtime-config control (mutates live privileged state) ─
+# Deploy + secret-fetch scripts, host systemd units, and the container/runtime
+# topology (Dockerfile + compose + docker/).
+/scripts/deploy/                   @three-cubes/maintainers
+/scripts/install/                  @three-cubes/maintainers
+/scripts/**/*.service              @three-cubes/maintainers
+/Dockerfile                        @three-cubes/maintainers
+/docker/                           @three-cubes/maintainers
+/docker-compose*.yml               @three-cubes/maintainers
