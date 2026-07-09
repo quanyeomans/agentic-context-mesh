@@ -215,7 +215,7 @@ dev = [
 # and the marker keeps uv's universal resolver happy.
 [dependency-groups]
 fitness = [
-    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.8.0 ; python_version >= '3.12'",
+    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.11.0 ; python_version >= '3.12'",
 ]
 
 # Include the fitness group in every `uv sync` / `uv run` so the local gate
@@ -687,3 +687,15 @@ allowed_emails = [
 ]
 cutover_ref = "f40aad21a773222ef1d407d3ed32d62ad5d52ba4"  # pragma: allowlist secret — cutover SHA
 name = "canonical-commit-identity"
+
+# SGO-270 Wave 2 — the root harness references the central engineering canon. As a
+# repo_type="product", kairix must carry the full root harness set (CLAUDE.md,
+# AGENTS.md, RESOLVER.md, ETHOS.md, SCORECARD.md, CONTRIBUTING.md), and at least one
+# harness file must carry BOTH the `Canonical standards` marker AND a link matching
+# `governance/STANDARDS` (CLAUDE.md's banner does). Drift detection stays OFF
+# (no banner_path) until a single canonical banner source is adopted repo-wide.
+[tool.tc_fitness.core_checks.harness_canon_reference]
+repo_type = "product"
+banner_marker = "Canonical standards"
+standards_ref_pattern = "governance/STANDARDS"
+name = "harness-canon-reference"

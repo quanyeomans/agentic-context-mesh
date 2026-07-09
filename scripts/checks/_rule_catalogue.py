@@ -1511,6 +1511,26 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         staged_class="always-run",
     ),
     RuleEntry(
+        id="SGO-270",
+        gate="harness-canon-reference",
+        check="core:harness_canon_reference",
+        category="process",
+        scope="cross-cutting",
+        summary=(
+            "the root harness references the central engineering canon — as a product "
+            "repo, kairix carries the full root harness set (CLAUDE.md, AGENTS.md, "
+            "RESOLVER.md, ETHOS.md, SCORECARD.md, CONTRIBUTING.md) and at least one "
+            "harness file carries BOTH the `Canonical standards` marker AND a link to "
+            "tc-pipelines governance/STANDARDS, so agents route to canon instead of "
+            "re-deriving a parallel standard (Golden Path convergence)"
+        ),
+        adr_origin="SGO-270 Wave 2 — harness canon alignment",
+        tags=("process",),
+        # Inspects a FIXED set of root harness files (presence + reference); no staged
+        # file scopes it. Always run. Drift detection stays OFF (no banner_path).
+        staged_class="always-run",
+    ),
+    RuleEntry(
         id="F99",
         gate="f99",
         check="f99_usage_guide_currency",
