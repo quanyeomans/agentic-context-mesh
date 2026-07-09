@@ -134,4 +134,16 @@ CORE_BINDINGS: dict[str, dict[str, Any]] = {
         "cutover_ref": _IDENTITY_CUTOVER_REF,
         "name": "canonical-commit-identity",
     },
+    # SGO-270 Wave 2 — the root harness references the central engineering canon.
+    # kairix is repo_type="product", so it must carry the full root harness set
+    # (CLAUDE.md, AGENTS.md, RESOLVER.md, ETHOS.md, SCORECARD.md, CONTRIBUTING.md),
+    # and at least one harness file must carry BOTH the `Canonical standards` marker
+    # AND a link matching `governance/STANDARDS`. Drift detection stays OFF (no
+    # banner_path) until a single canonical banner source is adopted repo-wide.
+    "harness_canon_reference": {
+        "repo_type": "product",
+        "banner_marker": "Canonical standards",
+        "standards_ref_pattern": "governance/STANDARDS",
+        "name": "harness-canon-reference",
+    },
 }
