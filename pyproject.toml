@@ -186,6 +186,11 @@ dev = [
     "pytest-cov>=7.1.0",
     "pytest-timeout>=2.3",
     "pytest-bdd>=7.0",
+    # Test-suite sharding for the unit tier (CI matrix `--splits N --group M`).
+    # Serial shards only — one process per runner. NEVER pytest-xdist / `-n`:
+    # the memory-runtime invariant tests (F77 sqlite single-writer, F95 cypher
+    # write-mode) race under intra-runner parallelism.
+    "pytest-split>=0.9",
     # Type checking (engineering hub: zero errors, strict mode)
     "mypy>=1.9",
     "types-requests>=2.33.0.20260408",
