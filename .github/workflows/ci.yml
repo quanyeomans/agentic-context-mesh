@@ -137,40 +137,39 @@ jobs:
   # time. See docs/architecture/fitness-functions.md.
   arch-fitness:
     name: "Stage 0 -- Architecture fitness"
-    runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.python == 'true'
     permissions:
       contents: read
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      # The fitness checks import kairix + the shared three-cubes-fitness
-      # package (tc_fitness, in the [dev] group). Running them under the
-      # bare system interpreter silently masks every import-dependent rule
-      # as a vacuous pass (this is the F53 false-green #499 phase 4 closes).
-      # Sync the venv via the org-shared composite, then run the gate under it.
-      - uses: three-cubes/tc-pipelines/actions/setup-uv-cached@34ce14004bcba06af6b549db233ad90c1ddc225e # v1
-        with:
-          python-version: "3.12"
-          sync-args: "--all-extras --all-groups"
-
-      # The org-canonical Python gate: `tc-fitness run` reads kairix's
-      # [tool.tc_fitness] block (pyproject.toml) and dispatches the SAME
-      # ALL_ENTRIES catalogue run-all.sh / safe-commit.sh run locally — the
-      # convergence surface tc-agent-zone also runs (and what the reusable
-      # tc-pipelines/python-quality-gate.yml@v1 invokes). Any core:<module>
-      # row runs in-process with its [tool.tc_fitness.core_checks.<module>]
-      # config injected. Stage 0 stays its own job — Stage 1..5 (contracts /
-      # integration / e2e / soak) are untouched.
-      - name: Architecture fitness functions (tc-fitness run — full catalogue)
-        env:
-          # F73 loads private-infra patterns from this secret. Empty/unset
-          # = detector no-ops (forks and external contributors still pass).
-          # The engine's subprocess dispatch inherits the job env, so F73's
-          # detector reads it exactly as it did under run-all.sh.
-          PRIVATE_INFRA_PATTERNS: ${{ secrets.PRIVATE_INFRA_PATTERNS }}
-        run: uv run tc-fitness run
+    # The org-canonical Python gate, now consumed via the shared reusable (as
+    # tc-agent-zone does), SHA-pinned to its tag. `tc-fitness run` reads kairix's
+    # [tool.tc_fitness] block and dispatches the SAME ALL_ENTRIES catalogue
+    # safe-commit.sh runs locally. Notes:
+    #  * sync-args is --all-extras --all-groups — kairix is a single package,
+    #    NOT the reusable's --locked --all-packages workspace default; the wrong
+    #    sync leaves tc_fitness unimportable and every rule vacuous-passes (F53).
+    #  * fetch-depth: 0 so canonical_commit_identity (cutover..HEAD) and the
+    #    no-attribution commit-range scan see full history (shallow => false pass).
+    #  * upload-coverage-artifact: false — tc-fitness run produces no coverage.xml
+    #    here, and it avoids the `coverage-data` artifact-name collision with the
+    #    unit-coverage job.
+    #  * PRIVATE_INFRA_PATTERNS (F73) is forwarded through the reusable's
+    #    private-infra-patterns secret so the detector stays ENFORCED, not a
+    #    silent no-op. Stage 1..5 (contracts / integration / e2e) are untouched.
+    uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@1b0cac3ebd4b497aa0741062cf70c560694fda7d # v1.14.0
+    with:
+      python-version: "3.12"
+      uv-version: "0.11.16"
+      sync-args: "--all-extras --all-groups"
+      ci-requirements-path: ""
+      fetch-depth: 0
+      pytest-shards: 1
+      run-node: false
+      run-no-attribution: true
+      upload-coverage-artifact: false
+    secrets:
+      gh-token: ${{ secrets.GITHUB_TOKEN }}
+      private-infra-patterns: ${{ secrets.PRIVATE_INFRA_PATTERNS }}
 
   contracts:
     name: "Stage 1 -- Contracts"
