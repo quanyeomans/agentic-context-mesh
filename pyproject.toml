@@ -220,7 +220,7 @@ dev = [
 # and the marker keeps uv's universal resolver happy.
 [dependency-groups]
 fitness = [
-    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.11.0 ; python_version >= '3.12'",
+    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.12.0 ; python_version >= '3.12'",
 ]
 
 # Include the fitness group in every `uv sync` / `uv run` so the local gate
@@ -704,3 +704,7 @@ repo_type = "product"
 banner_marker = "Canonical standards"
 standards_ref_pattern = "governance/STANDARDS"
 name = "harness-canon-reference"
+
+[tool.tc_fitness.core_checks.ci_consumes_shared_gate]
+workflows_dir = ".github/workflows"
+name = "ci-consumes-shared-gate"
