@@ -129,7 +129,7 @@ ocr = [
     # Operators install via ``brew install tesseract`` (macOS) /
     # ``apt install tesseract-ocr`` (Debian/Ubuntu).
     "pytesseract>=0.3.10,<1",
-    "opencv-python-headless>=4.8,<5",
+    "opencv-python-headless>=4.8,<6",
     "Pillow>=10.0,<13",
     "pdfplumber>=0.10,<1",
 ]
