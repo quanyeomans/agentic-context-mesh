@@ -1354,7 +1354,7 @@ requires-dist = [
 provides-extras = ["agents", "neo4j", "nlp", "rerank", "bedrock", "markitdown", "pdf-fallback", "docx", "ocr", "pptx", "xlsx", "caldav", "connect", "dev"]
 
 [package.metadata.requires-dev]
-fitness = [{ name = "three-cubes-fitness", marker = "python_full_version >= '3.12'", git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.11.0" }]
+fitness = [{ name = "three-cubes-fitness", marker = "python_full_version >= '3.12'", git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.12.0" }]
 
 [[package]]
 name = "langchain-core"
@@ -4056,8 +4056,8 @@ wheels = [
 
 [[package]]
 name = "three-cubes-fitness"
-version = "0.10.0"
-source = { git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.11.0#bb96446eac211aa4ff6da0eeda212311dd9335fc" }
+version = "0.12.0"
+source = { git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.12.0#da9a9328f193b66f6d14d09e98854455e37d4804" }
 
 [[package]]
 name = "tokenizers"

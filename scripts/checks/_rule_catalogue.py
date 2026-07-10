@@ -1531,6 +1531,24 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         staged_class="always-run",
     ),
     RuleEntry(
+        id="SGO-269",
+        gate="ci-consumes-shared-gate",
+        check="core:ci_consumes_shared_gate",
+        category="process",
+        scope="cross-cutting",
+        summary=(
+            "kairix's CI consumes the ONE shared quality gate — Stage-0 arch-fitness "
+            "runs the `tc-fitness run` engine via the python-quality-gate reusable — "
+            "rather than a hand-rolled fork, so the single standard is enforced "
+            "mechanically (Golden Path convergence)"
+        ),
+        adr_origin="SGO-269 — single-standard enforcement gate",
+        tags=("process",),
+        # Inspects .github/workflows (reusable consumption / engine invocation); no
+        # staged file scopes it. Always run.
+        staged_class="always-run",
+    ),
+    RuleEntry(
         id="F99",
         gate="f99",
         check="f99_usage_guide_currency",

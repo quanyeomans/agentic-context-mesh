@@ -146,4 +146,8 @@ CORE_BINDINGS: dict[str, dict[str, Any]] = {
         "standards_ref_pattern": "governance/STANDARDS",
         "name": "harness-canon-reference",
     },
+    "ci_consumes_shared_gate": {
+        "workflows_dir": ".github/workflows",
+        "name": "ci-consumes-shared-gate",
+    },
 }
