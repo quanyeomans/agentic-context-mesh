@@ -1,6 +1,7 @@
 # Architecture fitness functions — canonical reference
 
-**Status:** Authoritative. Linked from CLAUDE.md and the engineering hub.
+**Status:** Authoritative. Linked from CLAUDE.md and the canonical index at
+[tc-pipelines `governance/STANDARDS.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md).
 Point agents and contributors at this file.
 
 This document describes kairix's mechanical, blocking architecture
@@ -2916,7 +2917,7 @@ regressing.
 The runner machinery is no longer local to kairix. As of [EPIC #499](https://github.com/three-cubes/kairix/issues/499)
 (common-process convergence), kairix is a **pure consumer** of the shared
 [`three-cubes-fitness`](https://github.com/three-cubes/tc-fitness) package
-(`tc_fitness`, pinned `@v0.4.1` in `pyproject.toml`). The split is **shared
+(`tc_fitness`, pinned in `pyproject.toml`). The split is **shared
 machinery, per-repo domain**:
 
 | Concern | Lives where |
@@ -2949,7 +2950,7 @@ consuming repos — the shared layer is `tc_fitness` (lib + ratchet + catalogue
 schema + context + staged + runner) plus `three-cubes/tc-pipelines` (the
 `setup-uv-cached` composite + `python-quality-gate.yml` reusable workflow). The
 EPIC #499 convergence narrative is captured inline in the F81–F85 rule sections
-above. As of v0.4.1 BOTH consuming repos (kairix and the sibling repo) are pure
+above. Both consuming repos (kairix and the sibling repo) are pure
 consumers of the shared engine via these declarative factories — there are no
 remaining local injection seams. The schema stays **id-agnostic**: kairix uses
 F-numbers, the sibling uses descriptive names, both dispatch through the same
@@ -3133,8 +3134,8 @@ arch-fitness:
   steps:
     - uses: actions/checkout@...
     - uses: actions/setup-python@...
-    - name: Run F1-F6 + F8 (no test runtime needed)
-      run: bash scripts/checks/run-all.sh --skip-coverage
+    - name: Architecture fitness functions (tc-fitness run — full catalogue)
+      run: uv run tc-fitness run
 ```
 
 It depends only on the `changes` job (path filter) — runs in parallel
@@ -3180,6 +3181,8 @@ check:
     - unit-and-type
     - coverage
     - integration
+    - e2e-composed-path
+    - union-coverage
     - security
     - docker
 ```
@@ -3190,9 +3193,15 @@ gate. Branch protection rejects the merge.
 
 ### Branch protection
 
-The repo's branch protection on `main` and `main` requires the
-`CI gate` job to pass. No additional configuration is needed for
-fitness functions — they're transitively enforced via the gate.
+The `main` ruleset requires **both** status checks — **`CI gate`** (the `check`
+fan-in in `ci.yml`) and **`PR compliance check`** (`integration.yml`) — plus a
+**code-owner review** on any diff that touches a control-plane path in
+[`.github/CODEOWNERS`](../../.github/CODEOWNERS). It has **zero bypass actors**
+(no `--admin` rescue). A green gate **auto-merges the PR** (`auto-merge.yml` arms
+`gh pr merge --auto` as the App); control-plane PRs hold for a human. No
+additional configuration is needed for fitness functions — they're transitively
+enforced via `CI gate`. Shared canon:
+[tc-pipelines `governance/STANDARDS.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md).
 
 ### Failure UX
 
@@ -3312,7 +3321,18 @@ If you've genuinely exhausted alternatives:
 
 ## Adding a new fitness function
 
-Post-EPIC #499 the runner is catalogue-driven and shared (see "Shared
+**Decide where the rule belongs first.** A **kairix-domain** rule — one that
+encodes a kairix-specific invariant (a package boundary, a repo path convention,
+a retrieval-layer contract) — stays **local**, added as an F-numbered row via the
+playbook below. A **generically-useful** gate — one any Golden-Path repo would
+want — belongs as a **CORE check in the shared `tc-fitness` engine**, not forked
+here: author it there (`src/tc_fitness/core_checks/<name>` + a contract/unit test),
+release an additive immutable tag, then repin `three-cubes-fitness` in
+`pyproject.toml` and bind it via `[tool.tc_fitness.core_checks.<name>]`. Never fork
+a parallel gate in the consumer. See
+[how-to-improve-a-fitness-gate-or-pipeline](../development/how-to-improve-a-fitness-gate-or-pipeline.md).
+
+For a kairix-domain rule the runner is catalogue-driven and shared (see "Shared
 engine" above): a new rule is **one `RuleEntry` row + one check + one
 baseline**, not five hand-edited files. The playbook:
 
@@ -3417,6 +3437,9 @@ enforcement mechanism (review, runtime check, or human judgement):
 
 ## Cross-references
 
+- **[tc-pipelines `governance/STANDARDS.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md)** — the canonical engineering-standards index the harness references (`harness_canon_reference` gate).
+- **[`three-cubes-fitness` (`tc-fitness`)](https://github.com/three-cubes/tc-fitness)** — the shared gate engine kairix consumes; CORE checks live here, not forked locally.
+- **[`how-to-improve-a-fitness-gate-or-pipeline.md`](../development/how-to-improve-a-fitness-gate-or-pipeline.md)** — converge a gate/pipeline change UP into `tc-fitness` / `tc-pipelines`.
 - **CLAUDE.md** — engineering standards, including non-fitness-function
   guidance (commit hygiene, naming, agent collaboration).
 - **`docs/architecture/ENGINEERING.md`** — broader architecture rules

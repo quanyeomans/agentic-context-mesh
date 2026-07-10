@@ -39,7 +39,8 @@ This document tells you how to put all the pieces in place and connect them.
 ```toml
 dependencies = [
     # ...
-    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.3.0 ; python_version >= '3.12'",
+    # Pin the latest immutable tag — @vX.Y.Z shown illustratively, not the current pin.
+    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@vX.Y.Z ; python_version >= '3.12'",
 ]
 ```
 
@@ -105,18 +106,19 @@ Copy `scripts/safe-commit.sh`. It runs ruff/format/mypy/pytest then calls `bash 
 
 ### 5. Wire CI
 
-Copy `.github/workflows/ci.yml`'s job structure. The pipeline runs five stages:
+Copy `.github/workflows/ci.yml`'s job structure. The pipeline runs these stages:
 
 | Stage | Job | Purpose |
 |---|---|---|
-| **0** | `arch-fitness` | F1–F6, F8, F10–F13 (no test runtime needed) |
+| **0** | `arch-fitness` | `uv run tc-fitness run` — the full catalogue (no test runtime needed) |
 | **1** | `contracts` | `pytest -m contract` |
 | **2** | `unit-and-type` (py3.12) | mypy strict, ruff, `pytest -m "unit or bdd or contract" --cov`, F7 |
 | **3** | `integration` | `pytest -m integration --cov` |
-| **4** | `security` | bandit, pip-audit, SonarCloud |
+| **4** | `security` | bandit, pip-audit, detect-secrets |
+| **4.5** | `e2e-composed-path` | F48 composed production-path e2e |
 | **5** | `union-coverage` | downloads .coverage from Stages 2 and 3, runs F9 on the union |
 
-Plus a `check` fan-in job that gates branch protection on every required job's result.
+SonarCloud runs as its own `sonarcloud` job (advisory, not a required context), consuming the Stage 2 `coverage.xml`. A `check` fan-in job (`CI gate`) gates branch protection on every required job's result.
 
 ### 6. Wire Codecov
 
@@ -386,7 +388,7 @@ See `.pre-commit-config.yaml`. Architecture fitness function hooks are at the bo
 
 ### `.github/workflows/ci.yml`
 
-See `.github/workflows/ci.yml`. The five-stage pipeline, with all silencers rationaled (F10 ships clean) and all `uses:` pinned (G7).
+See `.github/workflows/ci.yml`. The seven-stage pipeline, with all silencers rationaled (F10 ships clean) and all `uses:` pinned (G7).
 
 ### `pyproject.toml` quality config
 
@@ -430,14 +432,25 @@ The `markers` list drives F8.
 
 ## Branch protection
 
-Required jobs (configure in repo Settings → Branches → branch protection rules):
+The `main` ruleset (`.github/rulesets/main.json`) requires **two** status checks:
 
-- `CI gate` — fan-in job; this is the single check the rule depends on
-- `Detect changes` — path filter
+- **`CI gate`** — the `check` fan-in job in `ci.yml`; it `needs:` every required job and fails if any failed, so it transitively enforces every fitness function and test stage.
+- **`PR compliance check`** — the `pr-gates` job in `integration.yml`.
 
-The `CI gate` job in `ci.yml` `needs:` every required job and fails the gate if any of them failed. Branch protection only needs to pin to that one check — it transitively enforces every fitness function and every test stage.
+It also requires a **code-owner review** on any diff that touches a control-plane path in [`.github/CODEOWNERS`](../../.github/CODEOWNERS) — the two-tier carve-out: control-plane paths hold for a human, everything else auto-merges on green. The ruleset has **zero bypass actors** (no `--admin` rescue). `Detect changes` is a path-filter job, not a required context.
 
-If you rename jobs (not workflow files), update the branch protection rule to match. Workflow renames are free (see G14).
+If you rename jobs (not workflow files), update the ruleset's required checks to match. Workflow renames are free (see G14). Shared canon: [tc-pipelines `governance/STANDARDS.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md).
+
+---
+
+## Improving the shared gate or pipeline
+
+This guide covers *adopting* the shared engine; to *improve* it, converge the change UP into its one home — never fork a parallel gate or workflow in the consumer:
+
+- **A gate** is a CORE check in `tc-fitness`: add `src/tc_fitness/core_checks/<name>` + a contract/unit test, release an **additive** immutable tag `vX.Y.Z` (existing signatures byte-identical; new surface opt-in with safe defaults), then repin `three-cubes-fitness` in `pyproject.toml` and bind it via `[tool.tc_fitness.core_checks.<name>]`.
+- **A pipeline** is a reusable workflow / composite in `tc-pipelines`: make the change, **SHA-pin every `uses:`** (Sonar `S7637` — see G7 and G16), tag it, then update consumers to the new tag and exercise the gated caller in the same PR.
+
+Full runbook: [`how-to-improve-a-fitness-gate-or-pipeline.md`](../development/how-to-improve-a-fitness-gate-or-pipeline.md). Canonical index: [tc-pipelines `governance/STANDARDS.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md).
 
 ---
 

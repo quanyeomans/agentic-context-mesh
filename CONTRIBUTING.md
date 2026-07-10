@@ -43,18 +43,17 @@ org variable is the canonical local source.
 
 ## Making changes
 
-Kairix is trunk-based on `main`. Routine work commits direct to `main` when `safe-commit.sh` is green.
+Kairix is trunk-based on `main`, and every change lands through a PR that **merges itself on green** — there is no routine direct push (the ruleset requires both status checks on every merge).
 
-1. Pull latest `main`
-2. Make your changes
-3. Commit via the gated script: `bash scripts/safe-commit.sh "your message"`
-4. The script runs lint, format, mypy, tests, security checks, and Sonar new-code parity. If any fail, fix and re-run.
-5. For docs/CHANGELOG-only edits, use `--fast` to skip the heavy test suite: `bash scripts/safe-commit.sh --fast "docs: …"`.
-6. Push to `main` once green.
+1. Branch off latest `main`.
+2. Make your changes.
+3. Commit via the gated script: `bash scripts/safe-commit.sh "your message"`. It runs lint, format, mypy, tests, security checks, and Sonar new-code parity — fix and re-run on any failure. For docs/CHANGELOG-only edits, `--fast` skips the heavy test suite.
+4. Push, then open a PR **authored by the `three-cubes-agent` GitHub App** (short-lived installation token via WIF / Key Vault; never a human account). A PR author can't approve their own PR, so App-authorship is what lets a human maintainer review a control-plane change.
+5. The PR **auto-merges the moment both required checks are green** — **`CI gate`** (the `check` fan-in in `1 · Quality gate`) and **`PR compliance check`** (`2 · Pre-merge PR gates`) — with no human running the merge.
 
-Open a PR for any change you want recorded as a reviewable unit. kairix is **autonomous-on-green**: a PR whose CI gate is green merges itself with **zero required review** on routine work. A non-bypassable two-tier ruleset requires **code-owner review only when the diff touches control-plane files** (`.github/`, `pyproject.toml`, `scripts/checks/`, and the other paths in `CODEOWNERS`). Never merge over a red gate. Branches are `feat/*` / `fix/*` for humans; the three-cubes-agent App authors PRs on `agent/*`-prefixed branches (exempt from the branch_naming self-gate, which otherwise enforces on every PR). Merge with `gh pr merge --merge` — never squash; per-commit history is the audit trail.
+A diff that touches a control-plane path in [`.github/CODEOWNERS`](.github/CODEOWNERS) (CI/merge machinery, the gate definition, governance canon, deploy/runtime config) **holds for a `@three-cubes/maintainers` review** instead of auto-merging; everything else (src, tests, feature docs) merges unattended. The `main` ruleset has **zero bypass actors** — no `--admin` rescue, even for an owner. Merge method is a **merge commit** (`--merge`); squash is disabled so per-commit history is the audit trail. Author every commit as the canonical `three-cubes-agent` App identity with **no AI/LLM self-attribution** — see [AGENTS.md](AGENTS.md); the `canonical_commit_identity` + `no_llm_attribution` gates enforce it.
 
-**Replay the exact CI gate locally before you push (canonical STANDARDS.md §5 inner-loop rule).** Run the same commands CI runs — `uv sync --all-extras --all-groups`, then `uv run pre-commit run --all-files` and `uv run tc-fitness run`. Never push or let a PR merge over a red gate; regenerate and stage any generated artifacts before committing. `safe-commit.sh` wraps this for the inner loop, but the gate above is the bar.
+**Replay the exact CI gate locally before you push (the inner-loop rule in [tc-pipelines `governance/STANDARDS.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md)).** Run the same commands CI runs — `uv sync --all-extras --all-groups`, then `uv run pre-commit run --all-files` and `uv run tc-fitness run`. Never push or let a PR merge over a red gate; regenerate and stage any generated artifacts before committing. `safe-commit.sh` wraps this for the inner loop, but the gate above is the bar.
 
 ## Running tests
 
@@ -134,13 +133,15 @@ tests/
 
 ## Branching model
 
-Trunk-based on `main`. The historical `develop` branch was retired in v2026.6.8.
+Trunk-based on `main` — every change targets `main` through a PR.
 
 | Branch | Purpose |
 |---|---|
-| `main` | **Default branch.** All work lands here — direct push or PR. Release tags point at `main` SHAs. |
-| `feat/*`, `fix/*` | Optional feature branches for grouped commits, release stabilisation, or external review — PR targets `main`. |
-| `agent/*` | Branches authored by the three-cubes-agent GitHub App. Exempt from the branch_naming self-gate; PR targets `main`. |
+| `main` | **Default branch.** All work lands here via PR; release tags point at `main` SHAs. |
+| `feat/*`, `fix/*` | Human feature branches for grouped commits, release stabilisation, or external review — PR targets `main`. |
+| `agent/*` | Branches authored by the `three-cubes-agent` GitHub App — PR targets `main`. |
+
+Branch prefixes are convention: kairix does not bind the `branch_naming` gate. The canonical cross-repo branch shape `<user>/<team>-<number>-<slug>`, enforced by `branch_naming` in repos that bind it, lives in [tc-pipelines `governance/STANDARDS.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md).
 
 The `raw.githubusercontent.com/.../main/...` URLs in [README.md](README.md) and [docker-compose.yml](docker-compose.yml) point at `main`, which serves both as default and as the last-released compose source.
 
@@ -150,10 +151,12 @@ CalVer: `YYYY.M.D`. Pre-release: `YYYY.M.DaN`.
 
 ## Cutting a release
 
-Releases are HITL — they ship to shared infra. Don't run release workflows without explicit per-action authorisation.
+Cut a release only with explicit per-action authorisation — releases ship to shared infra (HITL).
 
 1. Validate on the deployment target.
 2. Confirm `CHANGELOG.md` `[Unreleased]` section is fully populated (no empty sub-sections) and the version label matches CalVer (`vYYYY.M.D[aN]`).
 3. Trigger the **`5 · Release`** workflow (Actions tab → workflow_dispatch) with `version=vYYYY.M.D[aN]`. It tags `main` HEAD, extracts the `[Unreleased]` CHANGELOG section as release notes, and creates the GitHub Release. The release-created event then fires Docker + PyPI publish workflows automatically.
+
+An **alpha prerelease** triggers the VM deploy: `release-vm-deploy.yml` calls the tc-pipelines `azure-vm-deploy.yml@v1` reusable (see [ADR-017](docs/architecture/ADR-017-deployment-architecture.md)) — snapshot skipped, rollback by re-pinning `KAIRIX_IMAGE_TAG`, post-apply probe = `kairix onboard check`.
 
 See [scripts/release-checklist.md](scripts/release-checklist.md) for the full end-to-end checklist including post-deploy validation.

@@ -161,4 +161,4 @@ Tests that write scratch, probe, or fixture files MUST write them under pytest's
 - Scope each agent to specific files that don't overlap with other agents
 - Each agent runs `bash scripts/safe-commit.sh` and loops on failures until green
 - Target: 10-15 loops/hour per agent
-- Reference: [Ralph pattern](https://github.com/three-cubes/engineering-hub/tree/main/ralph)
+- Reference: [tc-pipelines `governance/STANDARDS.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md) — the shared engineering-standards canon

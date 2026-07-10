@@ -260,4 +260,6 @@ and
 - `scripts/safe-commit.sh` — local gate composition
 - `scripts/checks/check_sonar_new_code.py` — the parity script
 - `docs/architecture/fitness-functions.md` — F-rule canon (F16 cognitive complexity)
+- [`docs/development/how-to-improve-a-fitness-gate-or-pipeline.md`](../development/how-to-improve-a-fitness-gate-or-pipeline.md) — converge a gate/pipeline change UP into `tc-fitness` / `tc-pipelines`
+- [tc-pipelines `governance/STANDARDS.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md) — the canonical engineering-standards index
 - `feedback_quality_gate_no_overrides.md` (memory) — strict-gate policy this implements
