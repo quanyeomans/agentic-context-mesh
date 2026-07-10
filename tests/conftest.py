@@ -501,6 +501,23 @@ def _hermetic_data_dirs(tmp_path_factory):
     for clean_dir in (home, xdg_data, xdg_cache, xdg_config, documents):
         clean_dir.mkdir(parents=True, exist_ok=True)
 
+    # Lay down the ``kairix/`` data + cache subdirs exactly as ``kairix init``
+    # does (``kairix/install/dirs.py`` ``ensure_dirs``). The factory's read
+    # path (``build_search_pipeline`` → the topology resolver's
+    # ``sqlite3.connect``) opens the DB without creating its parent — the
+    # resolver issues SELECT-only queries and assumes init already laid the
+    # tree down — so the subdir must exist for the connect to create the DB
+    # file. Both data resolvers are covered: ``kairix.paths`` resolves the
+    # vector index under ``$XDG_DATA_HOME/kairix``, while
+    # ``kairix.core.db.get_db_path`` resolves the SQLite DB under
+    # ``$HOME/.local/share/kairix`` (it reads HOME, not XDG_DATA_HOME).
+    for kairix_subdir in (
+        xdg_data / "kairix",
+        xdg_cache / "kairix",
+        home / ".local" / "share" / "kairix",
+    ):
+        kairix_subdir.mkdir(parents=True, exist_ok=True)
+
     # ``Path.home()`` reads ``HOME`` on POSIX, so this redirects every
     # ``~/...`` fallback in kairix/paths.py; the XDG vars redirect the
     # XDG-first branches; KAIRIX_DOCUMENT_ROOT redirects the document root.
