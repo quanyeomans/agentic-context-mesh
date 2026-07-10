@@ -22,7 +22,7 @@ Everything in this document is the lived experience of getting the harness green
 The harness is **F1–F13** plus four supporting cross-cuts:
 
 - **Mechanical fitness functions** — file-level ratcheting baselines for forbidden patterns: monkeypatching internals (F1), env-var monkeypatching (F2), un-rationaled suppressions (F3 — covers `# noqa`/`# NOSONAR`/`# pragma: no cover`/`# type: ignore`/`# nosec`), env-var smuggling (F4), private-name imports in tests (F5), `*_fn=None` test-only kwargs (F6), unmarked tests (F8), un-rationaled CI silencers (F10), un-rationaled test skips (F11), BDD features without happy paths (F12), BDD scenarios that leak implementation symbols (F13).
-- **Holistic coverage gates** — F7 enforces 85% per-file on unit coverage; F9 enforces the same on the unit∪integration union.
+- **Holistic coverage gates** — F7 enforces 90% per-file on unit coverage; F9 enforces the same on the unit∪integration union.
 - **Codecov** — coverage flags (unit + integration with carryforward), test analytics (flaky/slow tracking), components for per-area dashboards.
 - **SonarCloud** — separate quality gate; reads the same `coverage.xml`.
 
@@ -39,8 +39,8 @@ This document tells you how to put all the pieces in place and connect them.
 ```toml
 dependencies = [
     # ...
-    # Pin the latest immutable tag — @vX.Y.Z shown illustratively, not the current pin.
-    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@vX.Y.Z ; python_version >= '3.12'",
+    # Pin an immutable tag; the current pin lives in pyproject.toml.
+    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@<immutable-tag> ; python_version >= '3.12'",
 ]
 ```
 
@@ -110,15 +110,16 @@ Copy `.github/workflows/ci.yml`'s job structure. The pipeline runs these stages:
 
 | Stage | Job | Purpose |
 |---|---|---|
-| **0** | `arch-fitness` | `uv run tc-fitness run` — the full catalogue (no test runtime needed) |
+| **0** | `arch-fitness` | consumes the tc-pipelines `python-quality-gate.yml` reusable — `tc-fitness run` over the full catalogue (no test runtime needed) |
 | **1** | `contracts` | `pytest -m contract` |
-| **2** | `unit-and-type` (py3.12) | mypy strict, ruff, `pytest -m "unit or bdd or contract" --cov`, F7 |
+| **2** | `unit-and-type` (py3.12, matrix `group` 1–4) | 4-way `pytest-split` shard: `pytest --splits 4 --group N -m "unit or bdd or contract" --cov` (`COVERAGE_FILE=.coverage.N`, `--cov-fail-under=0` per shard); mypy strict + ruff run once on shard 1 |
+| **2b** | `unit-coverage` | `coverage combine .coverage.1…4` → `coverage.xml`, `coverage report --fail-under=80`, then F7 90% per-file floor on the merged report |
 | **3** | `integration` | `pytest -m integration --cov` |
 | **4** | `security` | bandit, pip-audit, detect-secrets |
 | **4.5** | `e2e-composed-path` | F48 composed production-path e2e |
-| **5** | `union-coverage` | downloads .coverage from Stages 2 and 3, runs F9 on the union |
+| **5** | `union-coverage` | merges the unit + integration Cobertura XMLs → `coverage-union.xml`, runs F9 90% per-file floor on the union |
 
-SonarCloud runs as its own `sonarcloud` job (advisory, not a required context), consuming the Stage 2 `coverage.xml`. A `check` fan-in job (`CI gate`) gates branch protection on every required job's result.
+SonarCloud runs as its own `sonarcloud` job (advisory, not a required context), consuming the Stage 2b `coverage.xml`. A `check` fan-in job (`CI gate`) gates branch protection on every required job's result.
 
 ### 6. Wire Codecov
 
@@ -307,7 +308,7 @@ curl -sSL -X POST --data-binary "@codecov.yml" https://codecov.io/validate
 
 **Fix:** Set `patch.target: auto` in `codecov.yml`. `auto` couples the patch gate to the project's actual trajectory: patch must be ≥ current project base coverage. As files leave `.architecture/baseline/per-file-coverage-floor-files.txt`, the project average rises, and the patch bar rises with it automatically.
 
-The mechanical 85% floor stays as F7 / F9 (per-file, on coverage XML). Codecov patch is the no-regression guard, not a parallel mechanical gate.
+The mechanical 90% floor stays as F7 / F9 (per-file, on coverage XML). Codecov patch is the no-regression guard, not a parallel mechanical gate.
 
 ### G10. Codecov `ignore:` block creates a parallel omit list that drifts
 

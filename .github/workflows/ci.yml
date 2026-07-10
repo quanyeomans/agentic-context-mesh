@@ -752,7 +752,7 @@ jobs:
         run: |
           uv run python3 scripts/checks/merge_coverage_xml.py coverage.xml coverage-integration.xml coverage-union.xml
 
-      - name: F9 -- per-file 85% floor on union coverage
+      - name: F9 -- per-file 90% floor on union coverage
         run: |
           uv run python3 scripts/checks/check_per_file_coverage.py coverage-union.xml per-file-coverage-floor-union
 
