@@ -30,7 +30,7 @@ Every merge to `main` must pass the required CI gate (all Stage 0–5 jobs, fann
 | Type checking | mypy (strict) | Zero errors | ✅ Yes |
 | Linting | ruff | Zero errors | ✅ Yes |
 | Unit tests | pytest | 100% pass | ✅ Yes |
-| Test coverage (per-file) | F7 | ≥ 90% on every kairix/* file (ratcheted from 85% in v2026.5.15) | ✅ Yes |
+| Test coverage (per-file) | F7 | ≥ 90% on every kairix/* file | ✅ Yes |
 | Test coverage (aggregate) | pytest-cov | ≥ 88% overall (`fail_under`) | ✅ Yes |
 | SAST | bandit | Zero HIGH findings | ✅ Yes |
 | Dependency CVEs | pip-audit | Zero CVEs with fixes | ✅ Yes |
@@ -41,10 +41,10 @@ Every merge to `main` must pass the required CI gate (all Stage 0–5 jobs, fann
 
 **Architecture fitness functions (F1–F24)** are mechanical, blocking checks that encode rejected patterns (e.g. forbidden monkeypatching, internal-name imports in tests, unmarked tests, logging of secret-named variables, repo path-naming conventions, README resolver coverage, no production imports from `tests/`). They run at three layers — pre-commit, `safe-commit.sh`, and CI Stage 0 (F9 in Stage 5). Pre-existing violations are grandfathered in `.architecture/baseline/`; net-new violations block. Canonical reference: [`fitness-functions.md`](./fitness-functions.md).
 
-**Per-file coverage floor (mechanical, F7):** every `kairix/*` source file must clear 90% line coverage (ratcheted from 85% in v2026.5.15 after F7 baseline closed to zero). Pre-existing violations are grandfathered in `.architecture/baseline/per-file-coverage-floor-files.txt`; new files must land at ≥ 90% from day one. The aggregate 88% pytest-cov `fail_under` gate is a backstop.
+**Per-file coverage floor (mechanical, F7):** every `kairix/*` source file must clear 90% line coverage. Pre-existing violations are grandfathered in `.architecture/baseline/per-file-coverage-floor-files.txt`; new files must land at ≥ 90% from day one. The aggregate 88% pytest-cov `fail_under` gate is a backstop.
 
 **Codecov surfaces:**
-- **Coverage** — two flags upload from CI: `unit` (Stage 2: `pytest -m "unit or bdd or contract" --cov`) and `integration` (Stage 3: `pytest -m integration --cov`). Carryforward is enabled for both so the dashboard doesn't flap when only one stage runs. Patch target = 85% (matches F7). Components: Search / Agents / Knowledge / Quality / Core for per-area dashboards.
+- **Coverage** — two flags upload from CI: `unit` (Stage 2: `pytest -m "unit or bdd or contract" --cov`) and `integration` (Stage 3: `pytest -m integration --cov`). Carryforward is enabled for both so the dashboard doesn't flap when only one stage runs. Patch target = `auto` (patch must be ≥ current project base coverage; the mechanical per-file floor is F7 at 90%). Components: Search / Agents / Knowledge / Quality / Core for per-area dashboards.
 - **Test analytics** — JUnit XMLs from contracts, unit (3.12), and integration jobs upload via `codecov/test-results-action@v1`. Codecov tracks flaky tests, slow-test trends, and failure history across runs.
 - **Bundles** — not applicable; kairix is Python-only with no JS/TS frontend bundle.
 
