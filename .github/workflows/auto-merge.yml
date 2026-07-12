@@ -30,44 +30,21 @@ on:
 permissions: {}
 
 jobs:
-  resolve:
-    # Only PR-triggered gate runs are auto-mergeable (not push / merge_group).
-    if: ${{ github.event.workflow_run.event == 'pull_request' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      pr: ${{ steps.r.outputs.pr }}
-      sha: ${{ steps.r.outputs.sha }}
-    steps:
-      - name: Resolve PR number + head sha from the workflow_run
-        id: r
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.event.workflow_run.head_sha }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          pr="$(gh api "repos/${REPO}/commits/${SHA}/pulls" \
-            -H 'Accept: application/vnd.github+json' --jq '.[0].number // empty')"
-          echo "pr=${pr}" >> "$GITHUB_OUTPUT"
-          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
-          echo "auto-merge: resolved PR #${pr:-none} @ ${SHA}"
-
   merge:
-    needs: resolve
-    if: ${{ needs.resolve.outputs.pr != '' }}
+    # Only PR-triggered gate runs are auto-mergeable (not push / merge_group).
+    # The reusable resolves the PR from the workflow_run head sha itself
+    # (tc-pipelines v1.16.0+, via the App token it mints), so no local resolve job.
+    if: ${{ github.event.workflow_run.event == 'pull_request' }}
     permissions:
       contents: read
       id-token: write        # WIF federation to mint the App token
       pull-requests: write   # enable auto-merge on the PR
-    uses: three-cubes/tc-pipelines/.github/workflows/auto-merge-on-green.yml@94622e57364457e73de11ef366dd9dbf0061d0c1 # v1.13.0
+    uses: three-cubes/tc-pipelines/.github/workflows/auto-merge-on-green.yml@82e55fa008d8b2f5254ba3a2624c22b78036eeb5 # v1.16.0
     with:
       fan-in-check-name: "Quality gate"
       merge-method: merge            # repo allows merge + squash; rebase disabled
       enqueue: false
-      pr-number: ${{ needs.resolve.outputs.pr }}
-      head-sha: ${{ needs.resolve.outputs.sha }}
+      head-sha: ${{ github.event.workflow_run.head_sha }}
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
       azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
       azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
