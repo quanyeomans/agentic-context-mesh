@@ -3,21 +3,21 @@
 Motivation (EPIC #499 Phase 2 — the fan-in parity class)
 --------------------------------------------------------
 ``main`` branch protection requires exactly one status context from this
-workflow: **"CI gate"** (the terminal ``check`` job, whose ``needs:``
+workflow: **"Quality gate"** (the terminal ``check`` job, whose ``needs:``
 fan-in aggregates every blocking stage). A green merge is therefore only
 as safe as that fan-in is COMPLETE. If a job is defined in ``ci.yml`` but
-is NOT reachable from the ``CI gate`` aggregator's transitive ``needs:``
+is NOT reachable from the ``Quality gate`` aggregator's transitive ``needs:``
 closure, its failure does not block the merge — a red job ships
 silently. The class this prevents: someone adds a new stage (a license
 scan, a second security job, a schema-drift gate), wires its triggers,
 but forgets to add it to the ``check`` job's ``needs:`` list. CI shows it
 running and failing, branch protection waves the PR through anyway,
-because "CI gate" went green without ever waiting on the new job.
+because "Quality gate" went green without ever waiting on the new job.
 
 What F93 asserts
 ----------------
 Parse ``.github/workflows/ci.yml``. Identify the aggregator job — the one
-whose ``name:`` is ``CI gate``. Build the transitive ``needs:`` closure
+whose ``name:`` is ``Quality gate``. Build the transitive ``needs:`` closure
 rooted at that aggregator. Then assert: every job defined in the workflow
 is EITHER
 
@@ -48,7 +48,7 @@ distrust is worse than no detector):
     decision (add it to the aggregator's ``needs:`` and drop the marker).
   * **Workflows other than ci.yml.** Sibling workflows
     (fresh-install-smoke, soak-suite, release) have their own gating
-    story and are not aggregated by this ``CI gate`` job; F93 scopes to
+    story and are not aggregated by this ``Quality gate`` job; F93 scopes to
     the single workflow that produces the required context.
   * **The aggregator's own pass/fail logic.** Whether the ``check`` job's
     shell correctly fails on a failed dependency is F83's / the job's own
@@ -75,17 +75,17 @@ from tc_fitness import REPO_ROOT, gate
 
 WORKFLOW_REL = Path(".github/workflows/ci.yml")
 
-# The job whose name produces the required "CI gate" status context.
-AGGREGATOR_NAME = "CI gate"
+# The job whose name produces the required "Quality gate" status context.
+AGGREGATOR_NAME = "Quality gate"
 
 # The marker that declares a job legitimately outside the gate fan-in.
 INFORMATIONAL_MARKER = "# fan-in: informational"
 
-REMEDIATION = """F93: a CI job is not reachable from the "CI gate" aggregator and is
+REMEDIATION = """F93: a CI job is not reachable from the "Quality gate" aggregator and is
 not marked informational — a green merge could ship with that job
 failing.
 
-Branch protection on main requires exactly the "CI gate" status context
+Branch protection on main requires exactly the "Quality gate" status context
 (the terminal `check` job). Its `needs:` fan-in is what makes that one
 green light mean "every blocking stage passed". A job outside that
 transitive closure does NOT block the merge: it can run, fail, and the
@@ -93,7 +93,7 @@ PR still merges green.
 
 fix: decide whether the dangling job SHOULD gate the merge —
   * If yes (it is a real blocking stage): add the job's id to the
-    `check` (CI gate) job's `needs:` list. Add it to the aggregator's
+    `check` (Quality gate) job's `needs:` list. Add it to the aggregator's
     result-evaluation loop too so a failure actually fails the gate.
   * If no (it is advisory — publishes artefacts, posts a PR comment,
     races a webhook): add a marker comment on the lines directly above
@@ -101,7 +101,7 @@ fix: decide whether the dangling job SHOULD gate the merge —
         # fan-in: informational — <why this job is legitimately non-gating>
 next: re-run python3 scripts/checks/check_f93_ci_fanin_parity.py to
 confirm the gate goes green.
-run: bash scripts/safe-commit.sh "ci: wire <job> into the CI-gate fan-in (or mark it informational)"
+run: bash scripts/safe-commit.sh "ci: wire <job> into the Quality-gate fan-in (or mark it informational)"
 
 Pass example: .github/workflows/ci.yml
   # fan-in: informational — SonarCloud is advisory; not a required status
@@ -111,7 +111,7 @@ Pass example: .github/workflows/ci.yml
     needs: [changes, unit-and-type]
   ...
   check:
-    name: "CI gate"
+    name: "Quality gate"
     needs:
       - changes
       - unit-and-type
@@ -123,7 +123,7 @@ Forbidden example:
     name: "License scan"
     needs: [changes]
   check:
-    name: "CI gate"
+    name: "Quality gate"
     needs:
       - changes          # license-scan NOT listed, NOT marked informational
       - docker           # → a bad licence merges green."""
@@ -245,7 +245,7 @@ def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
 
     aggregator = _find_aggregator(jobs)
     if aggregator is None:
-        # The required "CI gate" context has no producing job — the whole
+        # The required "Quality gate" context has no producing job — the whole
         # fan-in premise is broken. Surface it as a single violation.
         return {Path(f"{WORKFLOW_REL}::no-aggregator-named-{AGGREGATOR_NAME.replace(' ', '-')}")}
 
@@ -260,7 +260,8 @@ def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
             continue
         if job_id in informational:
             continue
-        violations.add(Path(f"{WORKFLOW_REL}::{job_id}-not-in-CI-gate-fanin"))
+        slug = AGGREGATOR_NAME.replace(" ", "-")
+        violations.add(Path(f"{WORKFLOW_REL}::{job_id}-not-in-{slug}-fanin"))
     return violations
 
 

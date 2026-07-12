@@ -16,7 +16,7 @@ on:
       - "!CLAUDE.md"
   pull_request:
     branches: [main]
-    # No paths-ignore here, deliberately: the `CI gate` fan-in (job `check`) is a
+    # No paths-ignore here, deliberately: the `Quality gate` fan-in (job `check`) is a
     # REQUIRED status check in the branch ruleset, so this workflow MUST run on
     # every PR — including docs-only ones — to report it. GitHub never reports a
     # status for a path-skipped workflow, so a required check that's path-ignored
@@ -61,11 +61,6 @@ jobs:
               - 'kairix/**/*.py'
               - 'tests/**/*.py'
               - 'pyproject.toml'
-              # SonarCloud's rule set + exclusions live in sonar-project.properties;
-              # editing the file is a Python-quality-relevant change even though
-              # no .py touched. Without this entry, project.properties edits
-              # silently skip the sonarcloud job (#XXX — observed on 0b4095d9).
-              - 'sonar-project.properties'
               # The fitness machinery itself: a change to the CHECK SCRIPTS,
               # the safe-commit driver, the grandfathering baselines, or the
               # rule catalogue must always run Stage 0 arch-fitness (+
@@ -156,7 +151,7 @@ jobs:
     #  * PRIVATE_INFRA_PATTERNS (F73) is forwarded through the reusable's
     #    private-infra-patterns secret so the detector stays ENFORCED, not a
     #    silent no-op. Stage 1..5 (contracts / integration / e2e) are untouched.
-    uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@1b0cac3ebd4b497aa0741062cf70c560694fda7d # v1.14.0
+    uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@71692450a1f339685ea4d88ad707bc36e75f5ac6 # v1.15.0
     with:
       python-version: "3.12"
       uv-version: "0.11.16"
@@ -408,8 +403,8 @@ jobs:
   # a partial .coverage.<group>. This job fans in over ALL shards, combines them
   # into one report, and runs the F7 per-file 90% floor on the UNION — never a
   # single shard (a file exercised only in shard 3 reads 0% in shard 1). It also
-  # publishes the merged `coverage-data` artifact that the PR-comment (coverage),
-  # F9 (union-coverage), and SonarCloud jobs consume.
+  # publishes the merged `coverage-data` artifact that the PR-comment (coverage)
+  # and F9 (union-coverage) jobs consume.
   unit-coverage:
     name: "Stage 2b -- Unit coverage combine + F7 floor"
     runs-on: ubuntu-latest
@@ -462,7 +457,7 @@ jobs:
       - name: Upload merged coverage artifacts
         # Publishes the combined .coverage + merged coverage.xml under the
         # `coverage-data` name the downstream jobs already consume: the PR-comment
-        # (coverage) job reads .coverage; F9 (union-coverage) and SonarCloud read
+        # (coverage) job reads .coverage; F9 (union-coverage) reads
         # coverage.xml. `include-hidden-files: true` for the `.coverage` dotfile.
         # `!cancelled()` so the merged report is still available to debug a floor
         # failure.
@@ -832,105 +827,6 @@ jobs:
             pip-audit-report.md
           retention-days: 30
 
-  # ── Code quality: SonarCloud ───────────────────────────────────────────────
-  # Catches duplication, code smells, complexity, maintainability debt.
-  # This job uploads coverage.xml + test-result XML so Sonar sees richer
-  # signal than Automatic Analysis can derive from source alone. **Disable
-  # Automatic Analysis in the SonarCloud UI** (Administration → Analysis
-  # Method → "CI-based analysis") or this job conflicts with it and
-  # SonarCloud fails the analysis with "You are running CI analysis while
-  # Automatic Analysis is enabled."
-  #
-  # `sonar.qualitygate.wait=true` in sonar-project.properties makes this job
-  # block on the Quality Gate verdict and exit with it, so the GHA job
-  # conclusion IS the gate verdict (deterministic, in-pipeline). The external
-  # "SonarCloud Code Analysis" check posted by the SonarCloud GitHub App over
-  # webhook can race / temporarily disagree (#269); branch protection should
-  # gate on this `SonarCloud analysis` job, not the webhook-posted check.
-  # fan-in: informational — SonarCloud is advisory and intentionally NOT in
-  # the `check` (CI gate) fan-in. Branch protection requires exactly "CI gate"
-  # + "PR compliance check"; SonarCloud is not a separately
-  # required status context (the webhook-posted "SonarCloud Code Analysis"
-  # check can race / temporarily disagree with this job — #269). The Sonar
-  # per-file ratchet (check_sonar_new_code.py) is enforced locally via
-  # safe-commit.sh: it compares the project's current per-file open-issue
-  # counts against the committed baseline (.architecture/baseline/
-  # sonar-per-file*.json) deterministically — no live leak period, no skip
-  # flag (the KAIRIX_SKIP_SONAR_PARITY escape hatch was retired in #499
-  # Phase 2). It is not gated through this job's pass/fail.
-  #
-  # New Code definition = PREVIOUS_VERSION (#547). The server-side "New
-  # Code" window for main is set to "Previous version" (a one-time API
-  # action; tooling at scripts/sonar/reset_new_code.py via the
-  # 5b · SonarCloud new-code baseline reset workflow). This scan emits
-  # `sonar.projectVersion` (below) so each release bumps the version and
-  # rolls the leak period forward, instead of pre-existing debt drifting
-  # back into the "new code" set and failing the gate on old code.
-  # TODO(#499): confirm gating intent — the job header comment below still
-  # reads "branch protection should gate on this job"; reconcile that with the
-  # current branch-protection contexts before promoting Sonar to a hard gate.
-  sonarcloud:
-    name: "SonarCloud analysis"
-    runs-on: ubuntu-latest
-    # Depends on unit-coverage: Sonar reads the MERGED coverage.xml
-    # (sonar.python.coverage.reportPaths=coverage.xml) that unit-coverage
-    # publishes as `coverage-data`, not a single shard's.
-    needs: [changes, unit-coverage]
-    if: needs.changes.outputs.python == 'true'
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: test-results-unit-3.12-*  # one junit per shard; merge into CWD
-          merge-multiple: true
-        continue-on-error: true  # artifact missing on path-filtered runs; Sonar still scans without it
-
-      - name: Download coverage
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: coverage-data
-        continue-on-error: true  # artifact missing on path-filtered runs; Sonar still scans without it
-
-      - name: Derive project version for New Code boundary (#547)
-        id: ver
-        env:
-          HEAD_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          # The version boundary that drives PREVIOUS_VERSION new-code mode.
-          # setuptools-scm (the project's version source) resolves the nearest
-          # tag + dev distance; on a tagged commit it is the clean release. We
-          # fall back to `git describe` then the short SHA so the scan always
-          # has a non-empty version.
-          # F83: each capture is guarded with `|| VAR=""` so a transient
-          # resolver failure leaves the var empty (we fall through to the next
-          # source) rather than tripping errexit at the assignment (#483 class).
-          VERSION=""
-          VERSION="$(python3 -m setuptools_scm 2>/dev/null)" || VERSION=""
-          if [ -z "$VERSION" ]; then
-            VERSION="$(git describe --tags --always 2>/dev/null)" || VERSION=""
-          fi
-          if [ -z "$VERSION" ]; then
-            VERSION="${HEAD_SHA:0:12}"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "sonar.projectVersion = $VERSION"
-
-      - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          # PREVIOUS_VERSION new-code boundary (#547) — bumps per release so
-          # genuinely-old code drops out of the leak period.
-          args: >
-            -Dsonar.projectVersion=${{ steps.ver.outputs.version }}
-
   # ── Docker build verification ──────────────────────────────────────────────
   docker:
     name: "Docker build"
@@ -978,8 +874,13 @@ jobs:
           fi
 
   # ── Fan-in gate (branch protection target) ─────────────────────────────────
+  # Carries the BARE 'Quality gate' required context. A reusable-CALL job
+  # (arch-fitness → python-quality-gate.yml) only surfaces nested
+  # '<caller> / <job>' checks, never a bare name, so this plain aggregator
+  # fans in over every quality job — including the reusable's result — and
+  # publishes the single 'Quality gate' status branch protection gates on.
   check:
-    name: "CI gate"
+    name: "Quality gate"
     if: always()
     runs-on: ubuntu-latest
     needs:
@@ -995,6 +896,7 @@ jobs:
       - union-coverage
       - security
       - docker
+      - no-attribution
     permissions: {}
     steps:
       - name: Evaluate job results
@@ -1049,3 +951,42 @@ jobs:
             fi
           done
           echo "All required jobs passed or were skipped."
+
+  # ── no-attribution (dedicated required context) ────────────────────────────
+  # Rejects AI/LLM self-attribution residue in the PR's commits + title/body
+  # (Autonomous Delivery Platform SP-A, decision D1). Runs standalone on every
+  # PR so it surfaces as a BARE 'no-attribution' check-run — the reusable's
+  # in-gate scan only surfaces nested '<caller> / no-attribution'. Drives the
+  # engine's intrinsic no_llm_attribution module via the git+ pin.
+  no-attribution:
+    name: no-attribution
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # pinned (org standard)
+      - name: Reject AI/LLM self-attribution in commits + PR title/body
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          module="tc_fitness.core_checks.no_llm_attribution"
+          from="git+https://github.com/three-cubes/tc-fitness@v0.14.1"
+          workdir="$(mktemp -d)"; trap 'rm -rf "$workdir"' EXIT; rc=0
+          scan() { if ! uvx --from "$from" python -m "$module" --scan-file "$2"; then echo "::error::no-attribution: residue in $1." >&2; rc=1; fi; }
+          scan_advisory() { if ! uvx --from "$from" python -m "$module" --scan-file "$2"; then echo "::warning::no-attribution: possible residue in $1 (advisory)." >&2; fi; }
+          shas="$(git rev-list "${PR_BASE_SHA}..${PR_HEAD_SHA}")"
+          while IFS= read -r sha; do [[ -z "$sha" ]] && continue; git log -1 --format=%B "$sha" > "$workdir/c-$sha.txt"; scan "commit $sha" "$workdir/c-$sha.txt"; done <<< "$shas"
+          printf '%s' "$PR_TITLE" > "$workdir/t.txt"; scan "PR title" "$workdir/t.txt"
+          printf '%s' "$PR_BODY" > "$workdir/b.txt"; scan_advisory "PR body" "$workdir/b.txt"
+          exit "$rc"
