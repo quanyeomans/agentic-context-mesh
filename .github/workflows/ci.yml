@@ -896,6 +896,7 @@ jobs:
       - union-coverage
       - security
       - docker
+      - no-attribution
     permissions: {}
     steps:
       - name: Evaluate job results
