@@ -135,7 +135,9 @@ def _detect_skew_angle(img: np.ndarray) -> float:
         return 0.0
     angles: list[float] = []
     for line in lines:
-        x1, y1, x2, y2 = line[0]
+        # HoughLinesP returns (N, 1, 4) on opencv 4.x but (N, 4) on 5.x/6.x;
+        # ravel flattens either shape to the four endpoint coordinates.
+        x1, y1, x2, y2 = np.ravel(line)
         if x2 == x1:
             continue
         angle_deg = float(np.degrees(np.arctan2(y2 - y1, x2 - x1)))
