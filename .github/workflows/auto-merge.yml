@@ -1,17 +1,16 @@
 name: "auto-merge on green"
 
 # Lights-out merge: when the "1 · Quality gate" workflow (ci.yml) finishes for a
-# PR and its fan-in "CI gate" check-run is green, arm `gh pr merge --auto` as the
-# three-cubes-agent App. GitHub then merges ONLY once branch protection is fully
-# satisfied — that is BOTH required status checks ("CI gate" from ci.yml AND
+# PR and its fan-in "Quality gate" check-run is green, arm `gh pr merge --auto` as
+# the three-cubes-agent App. GitHub then merges ONLY once branch protection is fully
+# satisfied — that is BOTH required status checks ("Quality gate" from ci.yml AND
 # "PR compliance check" from integration.yml) AND the required CODEOWNERS review,
 # which HOLDS any PR that touches a policy/config path (see .github/CODEOWNERS).
 # Work PRs merge unattended on green; control-plane PRs wait for a human. No human
 # account, no self-approve.
 #
-# Keyed off the "CI gate" fan-in CHECK-RUN (job `check` in ci.yml — the fan-in over
-# the whole quality matrix), not the umbrella workflow run, so a red informational
-# job (e.g. the SonarCloud analysis job) never blocks auto-merge. Arming on "CI
+# Keyed off the "Quality gate" fan-in CHECK-RUN (job `check` in ci.yml — the fan-in
+# over the whole quality matrix), not the umbrella workflow run. Arming on "Quality
 # gate" is safe even though a second check ("PR compliance check") is also required:
 # `gh pr merge --auto` holds the merge until EVERY required context is green, so the
 # compliance gate is enforced by GitHub regardless of which check finishes last.
@@ -64,7 +63,7 @@ jobs:
       pull-requests: write   # enable auto-merge on the PR
     uses: three-cubes/tc-pipelines/.github/workflows/auto-merge-on-green.yml@94622e57364457e73de11ef366dd9dbf0061d0c1 # v1.13.0
     with:
-      fan-in-check-name: "CI gate"
+      fan-in-check-name: "Quality gate"
       merge-method: merge            # repo allows merge + squash; rebase disabled
       enqueue: false
       pr-number: ${{ needs.resolve.outputs.pr }}
