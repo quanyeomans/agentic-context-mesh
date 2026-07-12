@@ -1,0 +1,45 @@
+name: require-work-item
+
+# Enforce "no work without a work item" at the merge boundary (SP-C-5,
+# fail-closed). Calls the canonical tc-pipelines reusable over the secret-free
+# Key Vault (WIF) path; a thin aggregator surfaces the BARE `require-work-item`
+# status context the org ruleset gates on (a reusable call only surfaces
+# `<job> / require-work-item`, never a bare name).
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    uses: three-cubes/tc-pipelines/.github/workflows/require-work-item.yml@v1.15.0
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write # federate to Azure (WIF) to read the Linear key from Key Vault
+    with:
+      linear-key-vault: kv-tc-agents
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+  require-work-item:
+    name: require-work-item
+    needs: [gate]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Gate on the work-item result
+        env:
+          R: ${{ needs.gate.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$R" != "success" ]]; then
+            echo "::error::require-work-item: the work-item gate did not pass ($R)."
+            exit 1
+          fi
+          echo "require-work-item: PASS."
