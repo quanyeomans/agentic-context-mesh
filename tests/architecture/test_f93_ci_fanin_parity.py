@@ -1,7 +1,7 @@
 """Unit tests for F93 — the CI fan-in parity rule.
 
 F93 proves ``.github/workflows/ci.yml`` is internally honest: every job
-either sits in the ``CI gate`` aggregator's transitive ``needs:`` closure
+either sits in the ``Quality gate`` aggregator's transitive ``needs:`` closure
 (so its failure blocks the merge) or carries a
 ``# fan-in: informational`` marker. A job that is neither is a dangling
 job — it can run, fail, and the PR still merges green.
@@ -32,7 +32,7 @@ def _write_ci(repo_root: Path, text: str) -> None:
 
 
 # A minimal but realistic workflow: a `changes` root, one stage, and the
-# `check` aggregator (name "CI gate") fanning both in. `gated_stage` is in
+# `check` aggregator (name "Quality gate") fanning both in. `gated_stage` is in
 # the closure; the aggregator gates by definition.
 _GATED_ONLY = """\
 name: "1 · Quality gate"
@@ -47,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [changes]
   check:
-    name: "CI gate"
+    name: "Quality gate"
     needs:
       - changes
       - gated_stage
@@ -55,7 +55,7 @@ jobs:
 
 
 def test_job_in_closure_passes(tmp_path: Path) -> None:
-    """A job reachable from the CI-gate aggregator's needs: closure is
+    """A job reachable from the Quality-gate aggregator's needs: closure is
     gated — no violation."""
     _write_ci(tmp_path, _GATED_ONLY)
     assert f93.collect_violations(repo_root=tmp_path) == set()
@@ -80,7 +80,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [changes]
   check:
-    name: "CI gate"
+    name: "Quality gate"
     needs:
       - changes
       - gated_stage
@@ -92,7 +92,7 @@ def test_dangling_job_fails(tmp_path: Path) -> None:
     violation — a green merge could ship with it failing."""
     _write_ci(tmp_path, _WITH_DANGLING)
     violations = f93.collect_violations(repo_root=tmp_path)
-    assert violations == {Path(".github/workflows/ci.yml::dangling-not-in-CI-gate-fanin")}
+    assert violations == {Path(".github/workflows/ci.yml::dangling-not-in-Quality-gate-fanin")}
 
 
 # The same dangling job, now annotated with the informational marker in
@@ -115,7 +115,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [changes]
   check:
-    name: "CI gate"
+    name: "Quality gate"
     needs:
       - changes
       - gated_stage
@@ -145,7 +145,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [leaf]
   check:
-    name: "CI gate"
+    name: "Quality gate"
     needs:
       - mid
 """
@@ -167,7 +167,7 @@ jobs:
     name: "Detect changes"
     runs-on: ubuntu-latest
   check:
-    name: "CI gate"
+    name: "Quality gate"
     needs: changes
 """
     _write_ci(tmp_path, workflow)
@@ -175,7 +175,7 @@ jobs:
 
 
 def test_missing_aggregator_is_flagged(tmp_path: Path) -> None:
-    """No job named ``CI gate`` means the required status context has no
+    """No job named ``Quality gate`` means the required status context has no
     producer — the whole fan-in premise is broken; F93 surfaces it."""
     workflow = """\
 name: "1 · Quality gate"
@@ -192,7 +192,7 @@ jobs:
 """
     _write_ci(tmp_path, workflow)
     violations = f93.collect_violations(repo_root=tmp_path)
-    assert violations == {Path(".github/workflows/ci.yml::no-aggregator-named-CI-gate")}
+    assert violations == {Path(".github/workflows/ci.yml::no-aggregator-named-Quality-gate")}
 
 
 def test_missing_workflow_is_a_no_op(tmp_path: Path) -> None:
