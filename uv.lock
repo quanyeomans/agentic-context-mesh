@@ -1325,7 +1325,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.9" },
     { name = "neo4j", marker = "extra == 'neo4j'", specifier = ">=5.0,<7.0" },
     { name = "openai", specifier = ">=1.40,<3" },
-    { name = "opencv-python-headless", marker = "extra == 'ocr'", specifier = ">=4.8,<5" },
+    { name = "opencv-python-headless", marker = "extra == 'ocr'", specifier = ">=4.8,<6" },
     { name = "openpyxl", marker = "extra == 'xlsx'", specifier = ">=3.1,<4" },
     { name = "pdfplumber", marker = "extra == 'ocr'", specifier = ">=0.10,<1" },
     { name = "pdfplumber", marker = "extra == 'pdf-fallback'", specifier = ">=0.11.0,<1" },
