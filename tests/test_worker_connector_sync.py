@@ -41,9 +41,11 @@ import pytest
 
 from kairix.core.connectors.cc_pair import create_cc_pair
 from kairix.core.db.schema import create_schema
+from kairix.core.protocols import BronzeRef, DocMetadata, ExtractedDocument, Page
 from kairix.worker import (
     ConnectorSyncDeps,
     ConnectorSyncResult,
+    build_worker_silver_processor,
     run_connector_sync_pipeline,
 )
 
@@ -241,6 +243,67 @@ def test_runs_configured_obsidian_pipeline(tmp_path: Path) -> None:
         "chunks must land in the cc_pair-named collection (routing keys on cc_pair name, "
         f"not connector kind 'obsidian'); got {collections}."
     )
+
+
+@pytest.mark.integration
+def test_worker_silver_writes_document_pages_for_paged_extracts(tmp_path: Path) -> None:
+    """The worker's Silver construction wires the page writer used by production sync.
+
+    The factory-built connector pipeline already wires ``SqliteDocumentPagesWriter``;
+    production worker sync uses ``build_worker_silver_processor``. A paged
+    extraction must therefore write both ``documents_media`` and ``document_pages``
+    rows through the worker helper, otherwise PDF/PPTX/DOCX page citations never
+    become searchable in the live connector path.
+    """
+    db_path = tmp_path / "index.sqlite"
+    db = sqlite3.connect(str(db_path))
+    try:
+        create_schema(db)
+        silver = build_worker_silver_processor(db, read_flag=lambda _name: False)
+        raw = BronzeRef(
+            source_name="sharepoint",
+            item_id="deck.pptx",
+            raw_path=None,
+            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            fetched_at="2026-07-20T00:00:00Z",
+            content_hash="sha256-test-deck",
+        )
+        extracted = ExtractedDocument(
+            markdown="# Slide 1\n\nBody\n\n# Slide 2\n\nMore body\n",
+            pages=(
+                Page(page_number=1, text="Slide 1 body", has_images=False),
+                Page(page_number=2, text="Slide 2 body", has_images=True),
+            ),
+            images=(),
+            metadata=DocMetadata(
+                title="Deck",
+                author=None,
+                created_date=None,
+                language="en",
+                page_count=2,
+            ),
+            confidence=0.95,
+        )
+
+        silver.process(
+            raw,
+            extracted,
+            source_uri="https://sharepoint.example/deck.pptx",
+            source_modified_at="2026-07-20T00:00:00Z",
+            sensitivity="internal",
+            extractor_name="paged-test",
+            extractor_version="v1",
+        )
+
+        media_count = db.execute("SELECT COUNT(*) FROM documents_media").fetchone()[0]
+        page_rows = db.execute(
+            "SELECT page_number, extracted_text, has_images FROM document_pages ORDER BY page_number"
+        ).fetchall()
+    finally:
+        db.close()
+
+    assert media_count == 1
+    assert page_rows == [(1, "Slide 1 body", 0), (2, "Slide 2 body", 1)]
 
 
 @pytest.mark.integration

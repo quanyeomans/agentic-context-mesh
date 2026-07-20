@@ -70,6 +70,23 @@ def _delta_response(items: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _delta_page(
+    items: list[dict[str, Any]],
+    *,
+    next_link: str | None = None,
+    delta_link: str | None = None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "@odata.context": f"https://graph.microsoft.com/v1.0/$metadata#drives/{_DRIVE_ID}/root/delta",
+        "value": items,
+    }
+    if next_link is not None:
+        body["@odata.nextLink"] = next_link
+    if delta_link is not None:
+        body["@odata.deltaLink"] = delta_link
+    return body
+
+
 def _build_connector(handler: Any) -> SharePointConnector:
     transport = httpx.MockTransport(handler)
     shared = httpx.Client(transport=transport)
@@ -180,6 +197,48 @@ def test_next_cursor_round_trips_per_drive_delta_link() -> None:
     parsed = json.loads(cursor)
     assert _DRIVE_ID in parsed
     assert "deltatoken=unit" in parsed[_DRIVE_ID]
+
+
+def test_max_delta_pages_per_tick_yields_page_boundary_cursor() -> None:
+    """A page-capped tick stops at a Graph page boundary and resumes safely.
+
+    The connector must not compute the final ``deltaLink`` before all items have
+    been yielded to the pipeline. When a tick stops after one Graph page it
+    should persist that page's ``nextLink``; the next tick resumes at that URL
+    and only writes the final ``deltaLink`` after page 2 is yielded.
+    """
+    next_link = f"https://graph.microsoft.com/v1.0/drives/{_DRIVE_ID}/root/delta?$skiptoken=page-2"
+    final_delta = f"https://graph.microsoft.com/v1.0/drives/{_DRIVE_ID}/root/delta?$deltatoken=final"
+    seen_urls: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response(request)
+        if token is not None:
+            return token
+        url = str(request.url)
+        seen_urls.append(url)
+        if "skiptoken=page-2" in url:
+            return httpx.Response(200, json=_delta_page([_file_envelope("02PAGE2")], delta_link=final_delta))
+        return httpx.Response(200, json=_delta_page([_file_envelope("01PAGE1")], next_link=next_link))
+
+    connector = _build_connector_with_spec(
+        _handler,
+        SharePointDriveSpec(drive_id=_DRIVE_ID),
+        max_delta_pages_per_tick=1,
+    )
+
+    first_events = list(connector.list_changes(cursor=None))
+    first_cursor = connector.next_cursor()
+    assert [event.item_id for event in first_events] == ["01PAGE1"]
+    assert first_cursor is not None
+    assert json.loads(first_cursor)[_DRIVE_ID] == next_link
+
+    second_events = list(connector.list_changes(cursor=first_cursor))
+    second_cursor = connector.next_cursor()
+    assert [event.item_id for event in second_events] == ["02PAGE2"]
+    assert second_cursor is not None
+    assert json.loads(second_cursor)[_DRIVE_ID] == final_delta
+    assert any("skiptoken=page-2" in url for url in seen_urls)
 
 
 def test_list_changes_resumes_from_serialised_cursor() -> None:
@@ -842,7 +901,12 @@ def _make_handler_returning_empty_delta() -> Any:
     return handler
 
 
-def _build_connector_with_spec(handler: Any, spec: SharePointDriveSpec) -> SharePointConnector:
+def _build_connector_with_spec(
+    handler: Any,
+    spec: SharePointDriveSpec,
+    *,
+    max_delta_pages_per_tick: int | None = None,
+) -> SharePointConnector:
     transport = httpx.MockTransport(handler)
     shared = httpx.Client(transport=transport)
     auth = OAuth2ClientCredsAuth(
@@ -861,6 +925,7 @@ def _build_connector_with_spec(handler: Any, spec: SharePointDriveSpec) -> Share
         ),
         auth=auth,
         client_builder=lambda a: SharePointGraphClient(auth=a, http_client=shared),
+        max_delta_pages_per_tick=max_delta_pages_per_tick,
     )
 
 

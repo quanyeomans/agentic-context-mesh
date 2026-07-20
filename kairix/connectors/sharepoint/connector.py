@@ -263,10 +263,16 @@ class SharePointConnector:
       * ``default_sensitivity`` — connector-wide F39 tier; defaults to
         ``internal`` per ADR-005. Operators set the matching key in
         ``connector_specific_config`` to override.
+      * ``max_delta_pages_per_tick`` — optional Graph-page cap. When set, the
+        connector stops after that many delta pages and persists the page's
+        ``nextLink`` so the next worker tick resumes without skipping items.
     """
 
     name: str = CONNECTOR_NAME
-    per_tick_max_items: int = 500
+    # SharePoint cursors are Graph page links, not item offsets. The connector
+    # owns bounded yielding at page boundaries; the generic item-count pipeline
+    # budget must not cut a page after ``next_cursor`` has moved past it.
+    per_tick_max_items: int = 1_000_000
     disk_watermark_min_free_bytes: int | None = 5 * 1024**3  # 5 GiB — SharePoint blobs can be large
 
     def __init__(
@@ -279,7 +285,14 @@ class SharePointConnector:
         auth: OAuth2ClientCredsAuth | None = None,
         default_sensitivity: Sensitivity = DEFAULT_SENSITIVITY,
         secrets: SecretsResolver | None = None,
+        max_delta_pages_per_tick: int | None = None,
     ) -> None:
+        if max_delta_pages_per_tick is not None and max_delta_pages_per_tick < 1:
+            raise ValueError(
+                "sharepoint: max_delta_pages_per_tick must be a positive integer. "
+                "fix: set max_delta_pages_per_tick to an integer >= 1, or omit it to drain all pages. "
+                "next: use this knob for first-sync backfills where one SharePoint site is starving sibling connectors."
+            )
         site_specs = tuple(site_discovery or ())
         if not drives and not site_specs:
             raise ValueError(
@@ -296,6 +309,7 @@ class SharePointConnector:
         self._explicit_drives: tuple[SharePointDriveSpec, ...] = tuple(drives)
         self._site_specs: tuple[SiteDiscoverySpec, ...] = site_specs
         self._default_sensitivity: Sensitivity = default_sensitivity
+        self._max_delta_pages_per_tick = max_delta_pages_per_tick
 
         self._secrets: SecretsResolver = secrets if secrets is not None else SecretsLoader()
         resolved_auth: OAuth2ClientCredsAuth
@@ -596,6 +610,55 @@ class SharePointConnector:
         the whole drive cleanly.
         """
         drive_id = spec.drive_id
+        if not hasattr(self._graph, "fetch_delta_page") or not hasattr(self._graph, "initial_delta_url"):
+            return self._drain_drive_via_legacy_iterator(spec, start_url, events)
+
+        staged: list[ChangeEvent] = []
+        staged_cache: dict[str, DriveItemRef] = {}
+        url: str | None = start_url or self._graph.initial_delta_url(drive_id)
+        pages_seen = 0
+        last_delta_link: str | None = None
+        while url is not None:
+            page = self._graph.fetch_delta_page(url)
+            pages_seen += 1
+            for item in page.items:
+                if not self._item_passes_spec_filter(item, spec=spec):
+                    continue
+                event = self._item_to_event(item, drive_id=drive_id)
+                if event is None:
+                    continue
+                staged_cache[event.item_id] = item
+                staged.append(event)
+            if page.delta_link is not None:
+                last_delta_link = page.delta_link
+            if (
+                self._max_delta_pages_per_tick is not None
+                and pages_seen >= self._max_delta_pages_per_tick
+                and page.next_link is not None
+            ):
+                self._cache.update(staged_cache)
+                events.extend(staged)
+                return page.next_link
+            url = page.next_link
+        self._cache.update(staged_cache)
+        events.extend(staged)
+        return last_delta_link
+
+    def _drain_drive_via_legacy_iterator(
+        self,
+        spec: SharePointDriveSpec,
+        start_url: str | None,
+        events: list[ChangeEvent],
+    ) -> str | None:
+        """Legacy graph-client path for iterator-only seams.
+
+        The production Graph client exposes page-level delta calls so the
+        connector can stop on a safe ``nextLink`` boundary. Older tests and
+        embedders only provide ``iter_drive_items`` plus an optional
+        ``last_delta_link_for_drive`` accessor; keep that public protocol
+        working while preserving the same atomic per-drive staging.
+        """
+        drive_id = spec.drive_id
         staged: list[ChangeEvent] = []
         staged_cache: dict[str, DriveItemRef] = {}
         for item in self._graph.iter_drive_items(drive_id, start_url=start_url):
@@ -608,7 +671,8 @@ class SharePointConnector:
             staged.append(event)
         self._cache.update(staged_cache)
         events.extend(staged)
-        return self._graph.last_delta_link_for_drive(drive_id)
+        get_delta = getattr(self._graph, "last_delta_link_for_drive", None)
+        return cast(str | None, get_delta(drive_id)) if callable(get_delta) else None
 
     def _record_drive_failure(
         self,
@@ -1512,6 +1576,9 @@ def make_connector(config: Mapping[str, Any]) -> SharePointConnector:
         to auto-discover all of that site's drives at sync time (F42).
       * ``default_sensitivity`` (optional) — one of the F39 sensitivity
         literals; defaults to ``"internal"``.
+      * ``max_delta_pages_per_tick`` (optional) — positive integer Graph-page
+        cap for bounded first-sync backfills. Unlike the generic item-count
+        pipeline budget, this stops only at Graph cursor boundaries.
 
     This factory stays PURE — no Graph call, no credential resolution
     at parse time. Site-discovery entries are parsed into typed specs
@@ -1540,8 +1607,16 @@ def make_connector(config: Mapping[str, Any]) -> SharePointConnector:
             "next: see kairix/core/protocols.py Sensitivity for the literal set."
         )
     sensitivity = cast(Sensitivity, declared)
+    raw_page_budget = config.get("max_delta_pages_per_tick")
+    if raw_page_budget is not None and (not isinstance(raw_page_budget, int) or raw_page_budget < 1):
+        raise ValueError(
+            f"sharepoint: max_delta_pages_per_tick {raw_page_budget!r} must be a positive integer. "
+            "fix: set max_delta_pages_per_tick to an integer >= 1, or omit it to drain all pages. "
+            "next: use this instead of per_tick_max_items for SharePoint backfill throttling."
+        )
     return SharePointConnector(
         drives=list(drives),
         site_discovery=list(site_discovery),
         default_sensitivity=sensitivity,
+        max_delta_pages_per_tick=raw_page_budget,
     )

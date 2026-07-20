@@ -613,7 +613,7 @@ def _run_one_connector_batch(
     # legacy_chunk_writer remains the fallback when no cc_pair has been
     # registered for the entry.
     chunk_writer = resolve_chunk_writer_for_entry(db, name, cc_pair_id=cc_pair_id)
-    silver = _silver_with_registry(db)
+    silver = build_worker_silver_processor(db)
     pipeline = ConnectorPipeline(
         db=db,
         bronze=bronze_store,
@@ -1200,7 +1200,7 @@ def _build_reextract_components(
     # documents_media row that the original sync would have. Without
     # this, re-extracted documents flow through but the per-doc row is
     # silently skipped, leaving F40/F70 blind to recovered docs.
-    silver = _silver_with_registry(db)
+    silver = build_worker_silver_processor(db)
     # GH #371 — re-extract MUST tag with the same collection the sync
     # path uses. The previous ``entry.get("collection", "default")``
     # silently leaked ~1M SharePoint docs into the ``default`` collection.
@@ -1511,7 +1511,7 @@ def _default_deadletter_sweep() -> tuple[Any, ...]:
 
     conn = sqlite3.connect(str(db_path()), timeout=30.0)
     try:
-        silver = _silver_with_registry(conn)
+        silver = build_worker_silver_processor(conn)
         return drain_all_source_deadletters(conn, silver=silver)
     finally:
         conn.close()
@@ -1574,22 +1574,26 @@ _CHUNKER_REGISTRY_FLAG = "chunker_registry_dispatch_enabled"
 _RECHUNK_SWEEP_FLAG = "re_chunk_sweep_enabled"
 
 
-def _silver_with_registry(
+def build_worker_silver_processor(
     db: sqlite3.Connection,
     *,
     read_flag: Callable[[str], bool] = _default_flag_value,
 ) -> DefaultSilverProcessor:
-    """Construct Silver, wiring the per-type chunker registry when
+    """Construct the worker's Silver processor.
+
+    Wires the per-type chunker registry when
     ``chunker_registry_dispatch_enabled`` is ON (default OFF -> paragraph fallback).
 
-    Also wires the ``documents_media`` + ``silver_source`` writers so each
-    processed document records its extractor/chunker identity AND its source
-    markdown — the latter lets the re-chunk sweep (ADR-028 Wave F.4) re-chunk
-    from the original text without re-fetching from the remote connector.
+    Also wires the ``documents_media`` + ``document_pages`` + ``silver_source``
+    writers so each processed document records its extractor/chunker identity,
+    page-level text, and source markdown — the latter lets the re-chunk sweep
+    (ADR-028 Wave F.4) re-chunk from the original text without re-fetching from
+    the remote connector.
     """
     from kairix.core.connectors.chunker_registry import build_default_registry
     from kairix.core.connectors.silver import (
         DefaultSilverProcessor,
+        SqliteDocumentPagesWriter,
         SqliteDocumentsMediaWriter,
         SqliteSilverSourceWriter,
     )
@@ -1597,6 +1601,7 @@ def _silver_with_registry(
     registry = build_default_registry() if read_flag(_CHUNKER_REGISTRY_FLAG) else None
     return DefaultSilverProcessor(
         documents_media_writer=SqliteDocumentsMediaWriter(db),
+        document_pages_writer=SqliteDocumentPagesWriter(db),
         silver_source_writer=SqliteSilverSourceWriter(db),
         chunker_registry=registry,
     )
