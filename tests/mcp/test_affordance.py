@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -26,6 +27,7 @@ from kairix.agents.mcp.server import (
     tool_timeline,
     tool_usage_guide,
 )
+from kairix.agents.mcp.tools import retrieval as retrieval_tools
 from kairix.core.search.intent import QueryIntent
 from kairix.use_cases.search import SearchDeps, run_search
 
@@ -134,6 +136,18 @@ def test_tool_search_forwards_collection_to_use_case_search_seam() -> None:
 
     assert isinstance(result, dict)
     assert captured["collections"] == ["sharepoint"]
+
+
+@pytest.mark.unit
+def test_registered_mcp_search_forwards_collection_to_queue_aware_adapter() -> None:
+    """The registered warm-MCP search callable must expose and forward collection scope."""
+    binding = next(binding for binding in retrieval_tools.BINDINGS if binding.name == "search")
+    registered = binding.make(SimpleNamespace(readiness_check=lambda: True))
+    source = inspect.getsource(registered)
+
+    assert "collection" in inspect.signature(registered).parameters
+    assert "collection=collection" in source
+    assert "queue_aware=True" in source
 
 
 # ---------------------------------------------------------------------------
