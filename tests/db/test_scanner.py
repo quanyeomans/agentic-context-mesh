@@ -125,6 +125,55 @@ def test_scan_detects_updated_files(tmp_path: __import__("pathlib").Path) -> Non
 
 
 @pytest.mark.unit
+def test_scan_skips_empty_markdown_files(tmp_path: __import__("pathlib").Path) -> None:
+    """Empty files carry no retrievable content and are not active documents."""
+    vault = tmp_path / "vault"
+    area = vault / "02-Areas"
+    area.mkdir(parents=True)
+    (area / "empty.md").write_text("")
+    (area / "blank.md").write_text("\n  \t\n")
+    (area / "real.md").write_text("# Real\n\nIndexable content.")
+
+    db = sqlite3.connect(":memory:")
+    _setup_schema(db)
+
+    scanner = DocumentScanner(db, vault)
+    report = scanner.scan([CollectionConfig(name="test", path="02-Areas")])
+
+    assert report.new == 1
+    rows = db.execute("SELECT path FROM documents WHERE active = 1 ORDER BY path").fetchall()
+    assert rows == [("02-Areas/real.md",)]
+    assert db.execute("SELECT COUNT(*) FROM content WHERE hash = ?", (hash_content(""),)).fetchone()[0] == 0
+
+
+@pytest.mark.unit
+def test_scan_deactivates_document_that_becomes_empty(
+    tmp_path: __import__("pathlib").Path,
+) -> None:
+    """An indexed document that is truncated to empty is removed from the active set."""
+    vault = tmp_path / "vault"
+    area = vault / "02-Areas"
+    area.mkdir(parents=True)
+    doc = area / "doc.md"
+    doc.write_text("# Full\n\nIndexable content.")
+
+    db = sqlite3.connect(":memory:")
+    _setup_schema(db)
+
+    scanner = DocumentScanner(db, vault)
+    scanner.scan([CollectionConfig(name="test", path="02-Areas")])
+    assert db.execute("SELECT active FROM documents").fetchone()[0] == 1
+
+    doc.write_text("")
+    report = scanner.scan([CollectionConfig(name="test", path="02-Areas")])
+
+    assert report.removed == 1
+    assert report.updated == 0
+    assert db.execute("SELECT COUNT(*) FROM documents WHERE active = 1").fetchone()[0] == 0
+    assert db.execute("SELECT active FROM documents").fetchone()[0] == 0
+
+
+@pytest.mark.unit
 def test_scan_marks_removed_files_inactive(
     tmp_path: __import__("pathlib").Path,
 ) -> None:
