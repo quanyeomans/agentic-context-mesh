@@ -970,7 +970,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # pinned (org standard)
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # pinned (org standard)
       - name: Reject AI/LLM self-attribution in commits + PR title/body
         shell: bash
         env:
