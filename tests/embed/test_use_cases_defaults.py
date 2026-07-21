@@ -32,6 +32,7 @@ into a single deps object the test constructs once per scenario.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -453,6 +454,34 @@ def test_default_scan_documents_loads_shared_collections_from_config() -> None:
 
     names = sorted(c.name for c in scanner.collections_scanned)
     assert names == ["alpha", "beta"]
+
+
+def test_default_scan_documents_preserves_configured_collection_excludes() -> None:
+    """Configured collection excludes must reach ``DocumentScanner``.
+
+    The scanner owns exclude enforcement. If this wrapper rebuilds
+    ``CollectionConfig`` without the parsed exclude patterns, archive and
+    incomplete-file exclusions configured in ``kairix.config.yaml`` leak
+    back into the active document index.
+    """
+    cfg = SimpleNamespace(
+        shared=(
+            SimpleNamespace(
+                name="projects",
+                path="01-Projects",
+                glob="**/*.md",
+                exclude=("99-Archive/incomplete-and-empty-files",),
+            ),
+        ),
+    )
+    report = _FakeScanReport(new=0, updated=0, unchanged=5, errors=0)
+    deps, scanner, _ = _build_scan_deps(report=report, collections_cfg=cfg)
+
+    uc_mod.default_scan_documents(object(), [], deps=deps)
+
+    assert len(scanner.collections_scanned) == 1
+    assert scanner.collections_scanned[0].name == "projects"
+    assert scanner.collections_scanned[0].exclude == ["99-Archive/incomplete-and-empty-files"]
 
 
 def test_default_scan_documents_appends_reflib_when_present() -> None:

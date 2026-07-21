@@ -268,8 +268,8 @@ class TestLoadConfigContract:
 class TestParseCollectionsContract:
     """Contract: ``parse_collections(data)`` is a pure dict→object parser
     that returns None when no ``collections`` block exists, parses a list of
-    shared collections, captures ``agent_pattern``/``agent_paths``, and skips
-    malformed items.
+    shared collections, captures ``agent_pattern``/``agent_paths``, preserves
+    scan excludes, and skips malformed items.
     """
 
     def test_returns_none_when_collections_key_absent(self) -> None:
@@ -285,7 +285,7 @@ class TestParseCollectionsContract:
 
     def test_shared_collection_parsed_with_explicit_fields(self) -> None:
         """Claim: each shared item with a ``name`` becomes a CollectionDef,
-        carrying its path, glob, and retrieval override dict.
+        carrying its path, glob, exclude patterns, and retrieval override dict.
         """
         result = parse_collections(
             {
@@ -295,6 +295,7 @@ class TestParseCollectionsContract:
                             "name": "docs",
                             "path": "documents",
                             "glob": "**/*.txt",
+                            "exclude": ["documents/archive", "documents/tmp"],
                             "retrieval": {"vec_limit": 5},
                         },
                     ],
@@ -307,6 +308,7 @@ class TestParseCollectionsContract:
         assert item.name == "docs"
         assert item.path == "documents"
         assert item.glob == "**/*.txt"
+        assert item.exclude == ("documents/archive", "documents/tmp")
         assert item.retrieval_overrides == {"vec_limit": 5}
 
     def test_shared_collection_default_glob(self) -> None:

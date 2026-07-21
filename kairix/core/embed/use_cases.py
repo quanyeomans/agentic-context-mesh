@@ -417,7 +417,15 @@ def _build_scanner(  # pragma: no cover  # lazy-import DI-default delegation
 
     collections_cfg = d.load_collections_fn()
     if collections_cfg and collections_cfg.shared:
-        scan_collections = [CollectionConfig(name=c.name, path=c.path, glob=c.glob) for c in collections_cfg.shared]
+        scan_collections = [
+            CollectionConfig(
+                name=c.name,
+                path=c.path,
+                glob=c.glob,
+                exclude=list(getattr(c, "exclude", ())),
+            )
+            for c in collections_cfg.shared
+        ]
         logger.info("Using %d configured collections", len(scan_collections))
     else:
         scan_collections = [CollectionConfig(name="default", path=".")]
