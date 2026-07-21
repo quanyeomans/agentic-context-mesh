@@ -203,6 +203,7 @@ def tool_search(
             query,
             agent=agent,
             scope=scope,
+            collections=[collection] if collection is not None else None,
             budget=budget,
             limit=limit,
             agent_id=agent_id,
