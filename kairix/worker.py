@@ -336,6 +336,8 @@ class _SqliteChunkWriter:
         sequence, AND one ``documents_fts`` row so BM25 search finds it.
         Does NOT commit.
         """
+        for source_uri in sorted({chunk.source_uri for chunk in chunks}):
+            self.delete_by_source_uri(source_uri)
         written = 0
         now = _now_iso()
         for seq, chunk in enumerate(chunks):
@@ -419,15 +421,20 @@ class _SqliteChunkWriter:
         # patterns must keep that one-URI-per-source invariant or accept
         # a tighter LIMIT.
         rows = self._db.execute(
-            "SELECT id FROM documents WHERE collection = ? AND source_uri = ?",  # F63-bounded: one URI per source
+            "SELECT id, hash FROM documents WHERE collection = ? AND source_uri = ?",  # F63-bounded: one URI per source
             (self._collection, source_uri),
         ).fetchall()
-        for (doc_id,) in rows:
+        hashes = {str(row[1]) for row in rows}
+        for doc_id, _hash in rows:
             self._db.execute("DELETE FROM documents_fts WHERE rowid = ?", (doc_id,))
         cursor = self._db.execute(
             "DELETE FROM documents WHERE collection = ? AND source_uri = ?",
             (self._collection, source_uri),
         )
+        for content_hash in hashes:
+            row = self._db.execute("SELECT 1 FROM documents WHERE hash = ? LIMIT 1", (content_hash,)).fetchone()
+            if row is None:
+                self._db.execute("DELETE FROM content_vectors WHERE hash = ?", (content_hash,))
         return int(cursor.rowcount or 0)
 
 

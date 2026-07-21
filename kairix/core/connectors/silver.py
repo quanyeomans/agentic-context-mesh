@@ -415,6 +415,7 @@ class SqliteDocumentPagesWriter:
         """
         if not pages:
             return 0
+        self._db.execute("DELETE FROM document_pages WHERE hash = ?", (content_hash,))
         written = 0
         for page in pages:
             self._db.execute(
