@@ -125,6 +125,17 @@ class TestBudgetInference:
         assert self._budget_for("research everything", QueryIntent.SEMANTIC, explicit_budget=1000) == 1000
 
 
+@pytest.mark.unit
+def test_tool_search_forwards_collection_to_use_case_search_seam() -> None:
+    """MCP search collection scoping must reach the shared use-case seam."""
+    deps, captured = _capturing_deps(QueryIntent.SEMANTIC)
+
+    result = tool_search("Reverse Demo Guidance", collection="sharepoint", deps=deps)
+
+    assert isinstance(result, dict)
+    assert captured["collections"] == ["sharepoint"]
+
+
 # ---------------------------------------------------------------------------
 # AFF-2: Plain-language tool descriptions
 # ---------------------------------------------------------------------------

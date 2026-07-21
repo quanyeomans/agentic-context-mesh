@@ -143,6 +143,21 @@ def test_chunk_seq_projected_from_fused_result_into_hit() -> None:
 
 
 @pytest.mark.unit
+def test_run_search_forwards_explicit_collections_to_search_seam() -> None:
+    """A CLI/MCP collection filter must reach the pipeline, not stay adapter-local.
+
+    Sabotage-proof: remove ``collections=collections`` from the
+    ``_invoke_search_fn`` call in ``run_search`` and this test fails with
+    ``None``/missing collections, matching the warm-MCP leak found in PVT.
+    """
+    deps, captured = _build_deps()
+
+    run_search("q", collections=["sharepoint"], deps=deps)
+
+    assert captured["search"][0]["collections"] == ["sharepoint"]
+
+
+@pytest.mark.unit
 def test_chunk_seq_zero_is_preserved_through_projection() -> None:
     """seq=0 is a real first-chunk index, not a falsy 'missing'."""
     inner = _FakeInner(path="m365://doc.pdf#0", seq=0)

@@ -157,6 +157,7 @@ def tool_search(
     query: str,
     agent: str | None = None,
     scope: Scope = Scope.SHARED_AGENT,
+    collection: str | None = None,
     budget: int = 3000,
     limit: int = 10,
     max_tier: str = "L2",
@@ -176,6 +177,10 @@ def tool_search(
     context per hit: ``"L0"`` abstracts, ``"L1"`` overviews, or ``"L2"``
     full snippets (the default). Use a cheaper ceiling to triage many hits
     within a tight token budget, then re-query a promising hit at ``"L2"``.
+
+    ``collection`` restricts retrieval to one collection. It is the MCP-side
+    counterpart to the CLI's ``--collection`` flag and is forwarded through
+    the shared use-case seam so warm-MCP routing cannot silently broaden scope.
 
     ``queue_aware`` (ADR-029 G.1, folded in PLA-322) selects the queue-aware
     search path — a use-case-layer composition over the SAME ``run_search``.
@@ -208,6 +213,7 @@ def tool_search(
         query,
         agent=agent,
         scope=scope,
+        collections=[collection] if collection is not None else None,
         budget=budget,
         limit=limit,
         max_tier=max_tier,

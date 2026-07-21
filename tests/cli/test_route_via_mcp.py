@@ -336,6 +336,11 @@ def test_is_error_envelope_exits_non_zero(capsys: pytest.CaptureFixture[str]) ->
             ["agent-alpha plan", "--budget", "5000", "--limit", "3", "--json"],
             {"query": "agent-alpha plan", "budget": 5000, "limit": 3},
         ),
+        (
+            "search",
+            ["Reverse Demo Guidance", "--collection", "sharepoint", "--json"],
+            {"query": "Reverse Demo Guidance", "collection": "sharepoint"},
+        ),
         ("prep", ["topic-x", "--tier", "l1", "--json"], {"query": "topic-x", "tier": "l1"}),
         (
             "timeline",
@@ -720,6 +725,11 @@ def test_each_dispatch_is_independent() -> None:
             "search",
             ["q", "--agent", "agent-alpha", "--scope", "agent", "--json"],
             {"query": "q", "agent": "agent-alpha", "scope": "agent"},
+        ),
+        (
+            "search",
+            ["q", "--collection", "sharepoint", "--json"],
+            {"query": "q", "collection": "sharepoint"},
         ),
     ],
 )
