@@ -1,8 +1,8 @@
 """F96 contract: nested connector config round-trips losslessly (parse -> materialize).
 
 Guards the topology ``str()``-coercion bug class (kairix#621): any value in
-``connector_specific_config`` / ``extractor_config`` — including deeply nested
-lists/dicts, mixed scalars, unicode, None, large ints — must survive
+``connector_specific_config`` / ``extractor_config`` / ``extractor_chain_configs`` —
+including deeply nested lists/dicts, mixed scalars, unicode, None, large ints — must survive
 ``parse_topology`` -> ``config_pairs_to_mapping`` unchanged. A regression here
 silently strands any connector with nested config (SharePoint's ``drives:`` list
 was the production instance: it became a Python repr-string the connector
@@ -48,3 +48,8 @@ def test_connector_specific_config_round_trips(value: dict[str, Any]) -> None:
 @pytest.mark.parametrize("value", _ADVERSARIAL_CONFIGS)
 def test_extractor_config_round_trips(value: dict[str, Any]) -> None:
     assert _materialise("extractor_config", value) == value
+
+
+@pytest.mark.parametrize("value", _ADVERSARIAL_CONFIGS)
+def test_extractor_chain_configs_round_trips(value: dict[str, Any]) -> None:
+    assert _materialise("extractor_chain_configs", value) == value

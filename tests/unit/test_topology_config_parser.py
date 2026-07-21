@@ -235,6 +235,7 @@ def test_connector_extractor_fields_default_when_absent() -> None:
     assert c.extractor == "passthrough"
     assert c.extractor_chain == ()
     assert c.extractor_config == ()
+    assert c.extractor_chain_configs == ()
 
 
 def test_connector_extractor_fields_parse() -> None:
@@ -255,6 +256,14 @@ def test_connector_extractor_fields_parse() -> None:
                         "extractor": "markitdown",
                         "extractor_chain": ["markitdown", "passthrough"],
                         "extractor_config": {"max_pages": "50", "ocr": "true"},
+                        "extractor_chain_configs": {
+                            "gotenberg": {
+                                "config": {
+                                    "gotenberg_url": "http://gotenberg:3000",
+                                    "timeout_s": 30,
+                                }
+                            }
+                        },
                     }
                 ]
             }
@@ -267,6 +276,14 @@ def test_connector_extractor_fields_parse() -> None:
     # extractor_config is a sorted tuple of (key, json-value) pairs (F42);
     # read it back through the per-connector boundary materializer.
     assert config_pairs_to_mapping(c.extractor_config) == {"max_pages": "50", "ocr": "true"}
+    assert config_pairs_to_mapping(c.extractor_chain_configs) == {
+        "gotenberg": {
+            "config": {
+                "gotenberg_url": "http://gotenberg:3000",
+                "timeout_s": 30,
+            }
+        }
+    }
 
 
 def test_connector_extractor_config_must_be_mapping() -> None:
@@ -281,6 +298,25 @@ def test_connector_extractor_config_must_be_mapping() -> None:
                             "kind": "obsidian",
                             "name": "c1",
                             "extractor_config": "max_pages=50",
+                        }
+                    ]
+                }
+            }
+        )
+
+
+def test_connector_extractor_chain_configs_must_be_mapping() -> None:
+    """``connectors.*.extractor_chain_configs`` must be a mapping — list fails loud."""
+    with pytest.raises(TopologyParseError):
+        parse_topology(
+            {
+                "topology": {
+                    "connectors": [
+                        {
+                            "id": "c1",
+                            "kind": "sharepoint",
+                            "name": "c1",
+                            "extractor_chain_configs": ["gotenberg"],
                         }
                     ]
                 }

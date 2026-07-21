@@ -7,6 +7,14 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+### SharePoint documents keep source pages
+
+SharePoint connector configs can now pass per-extractor settings through an
+ordered extraction chain, including the Gotenberg service URL used inside
+Docker. This lets operators run native PPTX/XLSX/PDF extraction first, opt into
+DOCX-to-PDF conversion when page anchors matter, and keep MarkItDown as a
+fallback instead of losing page metadata for every indexed file.
+
 ## [2026.7.4] - 2026-07-04
 
 ### Search keeps up when your whole team is querying at once

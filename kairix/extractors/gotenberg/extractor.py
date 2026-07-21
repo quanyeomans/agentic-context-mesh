@@ -23,11 +23,14 @@ It is wired as an escalation tier between ``pdf_fallback`` and ``ocr``::
 Design choice (spec §"Decline vs raise"): :meth:`can_extract` returns
 ``False`` for mimes NOT in :data:`_GOTENBERG_MIMES` — crucially PDF /
 text / ``application/octet-stream`` — so this tier never shadows the
-PDF-native or passthrough tiers. When gotenberg is **unreachable**,
-**times out**, returns an **empty body**, or returns a **4xx/5xx**,
-:meth:`extract` RAISES (so the escalation orchestrator falls through to
-``ocr`` and, if every tier fails, the item dead-letters for retry). A
-transient gotenberg outage must stay retryable, never a silent skip.
+PDF-native or passthrough tiers. Modern Word OOXML is opt-in via
+``include_docx`` for deployments that prefer page anchors over the
+in-process heading-aware Word extractor. When gotenberg is
+**unreachable**, **times out**, returns an **empty body**, or returns a
+**4xx/5xx**, :meth:`extract` RAISES (so the escalation orchestrator
+falls through to the next tier and, if every tier fails, the item
+dead-letters for retry). A transient gotenberg outage must stay
+retryable, never a silent skip.
 
 Spec ref: ``docs/architecture/connector-ingestion-architecture.md`` §2
 ("extractors tree"), §3 ("Extractor Protocol"), §4 ("Three failures map
@@ -113,11 +116,11 @@ _MS_EXCEL = "application/vnd.ms-excel"
 _MS_POWERPOINT = "application/vnd.ms-powerpoint"
 _ODF_PREFIX = "application/vnd.oasis.opendocument."
 
-#: Modern OOXML (.docx / .pptx / .xlsx + their macro / template variants)
-#: are deliberately ABSENT: the in-process ``markitdown`` / ``pptx`` /
-#: ``docx`` / ``xlsx`` tiers handle those natively, so claiming them here
-#: would shadow a working extractor and (when gotenberg's HTTP service is
-#: absent) dead-letter a document that would otherwise index in-process.
+#: Modern OOXML (.pptx / .xlsx + their macro / template variants) are
+#: deliberately ABSENT: the in-process ``pptx`` / ``xlsx`` tiers already
+#: provide slide/sheet anchors. Modern Word OOXML is also absent from the
+#: default set, but can be claimed when ``GotenbergExtractorConfig.include_docx``
+#: is true for deployments that need page anchors on Word documents.
 _GOTENBERG_MIMES: frozenset[str] = frozenset(
     {
         # Legacy Microsoft Office binary formats (no in-process extractor).
@@ -141,6 +144,18 @@ _GOTENBERG_MIMES: frozenset[str] = frozenset(
     }
 )
 
+#: Modern Word OOXML mimes that Gotenberg can optionally convert for
+#: page-aware SharePoint indexing. Disabled by default so generic deployments
+#: keep the in-process heading-aware ``docx`` extractor path.
+_DOCX_MIMES: frozenset[str] = frozenset(
+    {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-word.document.macroenabled.12",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+        "application/vnd.ms-word.template.macroenabled.12",
+    }
+)
+
 #: Per-mime upload filename extension — gotenberg sniffs the format from
 #: the filename it receives, so we hand it the right suffix.
 _MIME_TO_EXTENSION: dict[str, str] = {
@@ -157,6 +172,10 @@ _MIME_TO_EXTENSION: dict[str, str] = {
     "application/x-mspublisher": ".pub",
     "application/rtf": ".rtf",
     "text/rtf": ".rtf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.ms-word.document.macroenabled.12": ".docm",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.template": ".dotx",
+    "application/vnd.ms-word.template.macroenabled.12": ".dotm",
 }
 
 #: Fallback upload filename when the mime carries no known extension —
@@ -172,15 +191,18 @@ class GotenbergExtractorConfig:
     service — defaults to the laptop / single-VM compose service; the
     deployment compose runs it as ``http://gotenberg:3000``.
     ``timeout_s`` is the per-convert deadline; ``max_file_size_mb`` is
-    the pre-HTTP size ceiling. Operators override any field via the
-    connector config (``extractor_chain_configs.gotenberg``); env
-    defaults flow through :func:`kairix.paths.gotenberg_extractor_config`
-    at factory time (F4 boundary).
+    the pre-HTTP size ceiling. ``include_docx`` opts into Word OOXML
+    conversion for page-aware indexing when the connector can depend on
+    Gotenberg. Operators override any field via the connector config
+    (``extractor_chain_configs.gotenberg``); env defaults flow through
+    :func:`kairix.paths.gotenberg_extractor_config` at factory time
+    (F4 boundary).
     """
 
     gotenberg_url: str = _DEFAULT_GOTENBERG_URL
     timeout_s: float = _DEFAULT_TIMEOUT_S
     max_file_size_mb: int = _DEFAULT_MAX_FILE_SIZE_MB
+    include_docx: bool = False
 
 
 def _upload_name(mime: MimeType) -> str:
@@ -253,7 +275,11 @@ class GotenbergExtractor:
         ``_magic_bytes`` is ``_``-prefixed (F19) — the mime allow-list
         is the only signal consulted.
         """
-        return isinstance(mime, str) and mime in _GOTENBERG_MIMES
+        if not isinstance(mime, str):
+            return False
+        if mime in _GOTENBERG_MIMES:
+            return True
+        return self._config.include_docx and mime in _DOCX_MIMES
 
     def extract(self, raw: bytes, mime: MimeType) -> ExtractedDocument:
         """Convert ``raw`` to PDF via gotenberg, then re-enter ``pdf_fallback``.

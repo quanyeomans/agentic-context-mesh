@@ -484,8 +484,9 @@ def _topology_entry_for_cc_pair(connector: Any, cc_pair: Any) -> dict[str, Any]:
         from ``CCPairConfig.name``;
       * ``config`` — the connector_specific_config mapping, read back as a
         dict at the per-connector boundary;
-      * ``extractor`` / ``extractor_chain`` / ``extractor_config`` — the
-        extractor wiring (D1) consumed by ``build_extractor_from_entry``.
+      * ``extractor`` / ``extractor_chain`` / ``extractor_config`` /
+        ``extractor_chain_configs`` — the extractor wiring (D1) consumed by
+        ``build_extractor_from_entry``.
     """
     from kairix.config.topology import config_pairs_to_mapping
 
@@ -496,6 +497,7 @@ def _topology_entry_for_cc_pair(connector: Any, cc_pair: Any) -> dict[str, Any]:
         "extractor": connector.extractor,
         "extractor_chain": list(connector.extractor_chain),
         "extractor_config": config_pairs_to_mapping(connector.extractor_config),
+        "extractor_chain_configs": config_pairs_to_mapping(connector.extractor_chain_configs),
     }
 
 

@@ -152,6 +152,86 @@ def _obsidian_topology(vault: Path, *, cc_pair_name: str = "obsidian-personal") 
     }
 
 
+@pytest.mark.integration
+def test_sync_pipeline_threads_extractor_chain_configs_to_chain_members(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The public sync pipeline must carry per-chain extractor config.
+
+    Gotenberg claims DOCX only when ``extractor_chain_configs.gotenberg``
+    reaches the registry with ``include_docx: true``. This test uses a real
+    Obsidian connector over a DOCX file, points Gotenberg at an invalid URL so
+    it raises immediately, then expects the chain to fall back to the real
+    DOCX extractor and index the file.
+
+    If the worker drops ``extractor_chain_configs`` while building the entry,
+    Gotenberg never claims DOCX, no warning is logged, and this regression pin
+    fails without importing private worker helpers (F5).
+    """
+    from docx import Document
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    doc_path = vault / "strategy.docx"
+    document = Document()
+    document.add_heading("Agent Exchange Strategy", level=1)
+    document.add_paragraph(
+        "This document is long enough for the heading-aware fallback extractor to pass quality checks. " * 4
+    )
+    document.save(doc_path)
+
+    mapping = {
+        "topology": {
+            "connectors": [
+                {
+                    "id": "obsidian-conn",
+                    "kind": "obsidian",
+                    "name": "Personal Obsidian Vault",
+                    "extractor_chain": ["gotenberg", "docx"],
+                    "extractor_chain_configs": {
+                        "gotenberg": {
+                            "config": {
+                                "gotenberg_url": "not-a-url",
+                                "timeout_s": 0.01,
+                                "include_docx": True,
+                            }
+                        }
+                    },
+                    "connector_specific_config": {
+                        "vault_root": str(vault),
+                        "collections": [{"name": "docx", "path": ".", "glob": "**/*.docx"}],
+                    },
+                }
+            ],
+            "cc_pairs": [
+                {
+                    "id": "obsidian-pair",
+                    "connector": "obsidian-conn",
+                    "credential": None,
+                    "name": "obsidian-personal",
+                }
+            ],
+        }
+    }
+    db_path = tmp_path / "index.sqlite"
+    deps = ConnectorSyncDeps(
+        disabled_fn=lambda: False,
+        config_mapping_fn=lambda: mapping,
+        db_factory=lambda: sqlite3.connect(str(db_path)),
+        bronze_root_resolver=lambda: tmp_path / "bronze",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="kairix.core.connectors.escalation"):
+        result = run_connector_sync_pipeline(deps)
+
+    assert result.synced == 1
+    assert result.failed == 0
+    assert any("gotenberg.extract raised RuntimeError" in record.getMessage() for record in caplog.records), (
+        "gotenberg must claim DOCX via extractor_chain_configs before DOCX fallback indexes it"
+    )
+
+
 @pytest.mark.unit
 def test_disabled_short_circuits(tmp_path: Path) -> None:
     """When ``deps.disabled_fn`` returns True, ``run_connector_sync_pipeline``
