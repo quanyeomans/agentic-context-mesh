@@ -60,6 +60,7 @@ from urllib.parse import urlparse
 from kairix.paths import mcp_endpoint, mcp_routing_enabled
 
 _COMPOSERS_LOADED = False
+_COLLECTION = "collection"
 
 
 def ensure_composers_loaded() -> None:
@@ -200,6 +201,8 @@ def _translate_search(argv: list[str]) -> dict[str, Any] | None:
         kwargs["budget"] = _int_or(flags.get("budget"), 3000)
     if "limit" in flags:
         kwargs["limit"] = _int_or(flags.get("limit"), 10)
+    if _COLLECTION in flags:
+        kwargs[_COLLECTION] = flags[_COLLECTION]
     return kwargs
 
 

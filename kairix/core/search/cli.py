@@ -21,10 +21,10 @@ Options:
 
 Adapter only — business logic lives in ``kairix.use_cases.search.run_search``.
 
-``--collection`` is plumbed at this adapter layer rather than through
-``run_search`` — the CLI binds a ``collections`` list onto the search
-callable inside ``SearchDeps`` so the use-case public signature stays
-single-collection-agnostic. Closes C3 Gap 3.
+``--collection`` is passed through the shared ``run_search`` use-case seam
+so in-process CLI and warm-MCP routing apply the same collection scope.
+The legacy dependency wrapper remains as a compatibility guard for tests
+and direct callers that still inspect the injected ``search_fn`` kwargs.
 """
 
 from __future__ import annotations
@@ -57,9 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Restrict retrieval to a single collection (e.g. reference-library). "
-            "Short-circuits scope-based collection resolution. The CLI threads "
-            "the flag through SearchDeps.search_fn; the use case signature is "
-            "unchanged."
+            "Short-circuits scope-based collection resolution."
         ),
     )
     parser.add_argument("--budget", type=int, default=3000, help="Token budget (default: 3000)")
@@ -103,7 +101,9 @@ def _bind_collection_to_deps(deps: SearchDeps | None, collection: str | None) ->
     Mirrors ``kairix.agents.prep.cli._bind_collection_to_deps``. When
     ``collection`` is None the input deps pass through; otherwise the
     existing ``search_fn`` is wrapped so every call carries the
-    collections list. The use case never sees the flag.
+    collections list. ``run_search`` also receives the same collections list
+    directly; this wrapper is retained for compatibility with direct CLI tests
+    and injected dependencies that assert on search seam kwargs.
     """
     if collection is None:
         return deps
@@ -240,11 +240,13 @@ def to_json_envelope(out: SearchOutput) -> dict[str, Any]:
 def main(argv: list[str] | None = None, *, deps: SearchDeps | None = None) -> None:
     args = build_parser().parse_args(argv)
     effective_deps = _bind_collection_to_deps(deps, args.collection)
+    collections = [args.collection] if args.collection is not None else None
 
     out = run_search(
         args.query,
         agent=args.agent,
         scope=Scope.parse(args.scope),
+        collections=collections,
         budget=args.budget,
         limit=args.limit,
         include_entity_card=args.include_entity_card,

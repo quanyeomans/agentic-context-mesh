@@ -123,6 +123,15 @@ def test_mcp_search_signature_exposes_limit() -> None:
 
 
 @pytest.mark.contract
+def test_mcp_search_signature_exposes_collection() -> None:
+    """The MCP search tool must expose the same single-collection scope as CLI."""
+    from kairix.agents.mcp.server import tool_search
+
+    params = set(inspect.signature(tool_search).parameters)
+    assert "collection" in params, "tool_search must expose collection for scoped retrieval"
+
+
+@pytest.mark.contract
 def test_both_surfaces_expose_max_tier() -> None:
     """PLA-270 — the tiered-context ceiling must be requestable from CLI AND MCP.
 

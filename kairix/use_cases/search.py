@@ -76,11 +76,9 @@ def _default_search(
     owns its own production wiring — eliminates the ``_search_defaults``
     indirection layer that the F7 coverage baseline had to grandfather.
 
-    ``collections``: when set (via the CLI's ``--collection`` flag, which
-    threads through ``SearchDeps._search_with_collection``), the value
-    is passed to ``pipeline.search`` so retrieval is restricted to the
-    listed collection set. Default ``None`` preserves scope-based
-    resolution.
+    ``collections``: when set by CLI/MCP callers, the value is passed to
+    ``pipeline.search`` so retrieval is restricted to the listed collection
+    set. Default ``None`` preserves scope-based resolution.
 
     ``intent``: when ``run_search`` has already classified the query (to
     size the token budget) it threads the result through so the pipeline
@@ -551,6 +549,7 @@ def run_search(
     *,
     agent: str | None = None,
     scope: Scope = Scope.SHARED_AGENT,
+    collections: list[str] | None = None,
     budget: int = _DEFAULT_BUDGET,
     limit: int = 10,
     include_entity_card: bool = True,
@@ -566,6 +565,9 @@ def run_search(
         query: User's natural-language query.
         agent: Agent name for collection scoping; None = no scoping.
         scope: Multi-agent scope.
+        collections: Explicit collection allow-list. ``None`` preserves
+            resolver/default scope behaviour; ``[]`` means an intentionally
+            empty resolved scope.
         budget: Token budget. Default 3000 triggers intent-based auto-scaling
             (1500 for entity/keyword, 5000 for research-style queries);
             any explicit non-default value is used unchanged.
@@ -593,14 +595,19 @@ def run_search(
         # pipeline so the query isn't classified twice (PLA-273).
         intent = _classify_for_request(query, deps.classify_fn)
         effective_budget = _infer_budget(query, budget, intent)
+        search_kwargs: dict[str, Any] = {
+            "query": query,
+            "agent": agent,
+            "scope": scope,
+            "budget": effective_budget,
+            "intent": intent,
+            "max_tier": max_tier,
+        }
+        if collections is not None:
+            search_kwargs["collections"] = collections
         sr = _invoke_search_fn(
             deps.search_fn,
-            query=query,
-            agent=agent,
-            scope=scope,
-            budget=effective_budget,
-            intent=intent,
-            max_tier=max_tier,
+            **search_kwargs,
         )
         intent_value = _intent_value(sr)
         hits: list[SearchHit] = [_budgeted_to_hit(b) for b in getattr(sr, "results", [])[:limit]]
