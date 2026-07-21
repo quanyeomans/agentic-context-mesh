@@ -228,9 +228,19 @@ class DocumentScanner:
             report.errors += 1
             return
 
+        old_hash = existing.get(rel_path)
+
+        if not text.strip():
+            if old_hash is not None:
+                self._db.execute(
+                    "UPDATE documents SET active = 0, modified_at = ? WHERE collection = ? AND path = ?",
+                    (now, config.name, rel_path),
+                )
+                report.removed += 1
+            return
+
         content_hash = _hash_content(text)
         title = extract_title(text, file_path)
-        old_hash = existing.get(rel_path)
 
         if old_hash == content_hash:
             report.unchanged += 1
