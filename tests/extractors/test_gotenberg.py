@@ -54,13 +54,12 @@ _EXPECTED_MAX_RETRIES = 4
 
 pytestmark = pytest.mark.unit
 
-# The convert-chain / failure-path tests drive a mime gotenberg actually
-# claims. The modern OOXML docx mime is NO LONGER claimed (it is handled
-# in-process by markitdown / docx), so we use a legacy-Office mime
+# The convert-chain / failure-path tests drive a mime gotenberg claims by
+# default. Modern OOXML docx is opt-in only, so we use a legacy-Office mime
 # (.doc) as the canonical "format with no in-process extractor" case.
 _DOC_MIME = "application/msword"
-#: Modern OOXML docx mime — gotenberg deliberately REFUSES this (the
-#: in-process markitdown / docx tiers own it). Asserted refused below.
+#: Modern OOXML docx mime — gotenberg refuses this by default (the in-process
+#: docx tier owns it), but can opt in when page anchors matter.
 _OOXML_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _PDF_MIME = "application/pdf"
 _PDF_BYTES = b"%PDF-1.7\n" + (b"converted-pdf-payload " * 8)
@@ -174,6 +173,7 @@ def test_factory_coerces_raw_dict_config() -> None:
     assert extractor._config.gotenberg_url == "http://gotenberg:3000"
     assert extractor._config.timeout_s == 5.0
     assert extractor._config.max_file_size_mb == 8
+    assert extractor._config.include_docx is False
 
     # The oversize gate reads ``max_file_size_mb`` off the coerced config
     # without AttributeError — an 8 MB ceiling rejects a 9 MB upload.
@@ -245,7 +245,7 @@ def test_can_extract_claims_legacy_office_odf_visio_mimes(mime: str) -> None:
     ],
 )
 def test_can_extract_refuses_ooxml_mimes(mime: str) -> None:
-    """Modern OOXML (docx/pptx/xlsx) is handled in-process — gotenberg refuses it.
+    """Modern OOXML is handled in-process by default — gotenberg refuses it.
 
     Sabotage proof: re-adding any OOXML mime to ``_GOTENBERG_MIMES`` makes
     gotenberg claim it, shadowing the in-process extractor and (in the
@@ -255,6 +255,21 @@ def test_can_extract_refuses_ooxml_mimes(mime: str) -> None:
     """
     extractor, _ = _make_extractor()
     assert extractor.can_extract(mime, b"PK\x03\x04") is False
+
+
+def test_can_extract_claims_docx_when_page_anchor_opt_in_enabled() -> None:
+    """SharePoint can opt into DOCX->PDF conversion to produce page anchors."""
+    extractor, _ = _make_extractor(config=GotenbergExtractorConfig(include_docx=True))
+
+    assert extractor.can_extract(_OOXML_DOCX_MIME, b"PK\x03\x04") is True
+
+
+def test_factory_raw_dict_can_enable_docx_page_anchor_opt_in() -> None:
+    extractor = make_extractor(config={"gotenberg_url": "http://gotenberg:3000", "include_docx": True})
+
+    assert isinstance(extractor, GotenbergExtractor)
+    assert extractor._config.include_docx is True
+    assert extractor.can_extract(_OOXML_DOCX_MIME, b"PK\x03\x04") is True
 
 
 @pytest.mark.parametrize(

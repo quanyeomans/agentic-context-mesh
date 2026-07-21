@@ -110,12 +110,12 @@ class TopologyParseError(ValueError):
 class ConnectorConfig:
     """One entry in the operator's ``connectors:`` block.
 
-    ``connector_specific_config`` and ``extractor_config`` are tuples of
-    ``(key, json-encoded-value)`` pairs so the dataclass stays frozen +
-    hashable; readers call :func:`config_pairs_to_mapping` at the
-    per-connector boundary to recover the original (possibly nested)
-    structure — e.g. SharePoint's ``drives:`` list survives as a list,
-    not a repr-string.
+    ``connector_specific_config``, ``extractor_config``, and
+    ``extractor_chain_configs`` are tuples of ``(key, json-encoded-value)``
+    pairs so the dataclass stays frozen + hashable; readers call
+    :func:`config_pairs_to_mapping` at the per-connector boundary to recover
+    the original (possibly nested) structure — e.g. SharePoint's ``drives:``
+    list survives as a list, not a repr-string.
     """
 
     id: str
@@ -129,6 +129,7 @@ class ConnectorConfig:
     extractor: str = "passthrough"
     extractor_chain: tuple[str, ...] = ()
     extractor_config: tuple[tuple[str, str], ...] = ()
+    extractor_chain_configs: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -344,6 +345,18 @@ def _parse_connector_specific_config(value: Any) -> tuple[tuple[str, str], ...]:
     return tuple((str(k), json.dumps(v, sort_keys=True, default=str)) for k, v in sorted(value.items()))
 
 
+def _parse_config_pairs(value: Any, *, field_name: str) -> tuple[tuple[str, str], ...]:
+    """Render a config mapping as a sorted tuple of ``(key, json)`` pairs."""
+    if value is None:
+        return ()
+    if not isinstance(value, dict):
+        raise TopologyParseError(
+            f"connectors[*].{field_name}: must be a mapping. "
+            "fix: use `key: value` pairs. next: run kairix config validate"
+        )
+    return tuple((str(k), json.dumps(v, sort_keys=True, default=str)) for k, v in sorted(value.items()))
+
+
 def _parse_extractor_config(value: Any) -> tuple[tuple[str, str], ...]:
     """Render an extractor_config mapping as a sorted tuple of (key, json) pairs.
 
@@ -352,30 +365,30 @@ def _parse_extractor_config(value: Any) -> tuple[tuple[str, str], ...]:
     are JSON-encoded so nested config round-trips losslessly. The ingest
     redirect reads it back via :func:`config_pairs_to_mapping`.
     """
-    if value is None:
-        return ()
-    if not isinstance(value, dict):
-        raise TopologyParseError(
-            "connectors[*].extractor_config: must be a mapping. "
-            "fix: use `key: value` pairs. next: run kairix config validate"
-        )
-    return tuple((str(k), json.dumps(v, sort_keys=True, default=str)) for k, v in sorted(value.items()))
+    return _parse_config_pairs(value, field_name="extractor_config")
+
+
+def _parse_extractor_chain_configs(value: Any) -> tuple[tuple[str, str], ...]:
+    """Render extractor_chain_configs as a sorted tuple of (name, json config)."""
+    return _parse_config_pairs(value, field_name="extractor_chain_configs")
 
 
 def config_pairs_to_mapping(pairs: tuple[tuple[str, str], ...]) -> dict[str, Any]:
     """Read a parsed ``(key, json-value)`` tuple back into a structured mapping.
 
-    The frozen :class:`ConnectorConfig` stores ``connector_specific_config``
-    and ``extractor_config`` as tuples of ``(key, json-encoded-value)`` pairs
-    so it stays hashable (F42). Readers at the per-connector boundary call
-    this to recover the original YAML structure — crucially, nested values
-    such as the SharePoint ``drives:`` list survive as a list, not a
-    repr-string (which the connector factory rejects as "not a list").
+    The frozen :class:`ConnectorConfig` stores ``connector_specific_config``,
+    ``extractor_config``, and ``extractor_chain_configs`` as tuples of
+    ``(key, json-encoded-value)`` pairs so it stays hashable (F42). Readers at
+    the per-connector boundary call this to recover the original YAML
+    structure — crucially, nested values such as the SharePoint ``drives:``
+    list survive as a list, not a repr-string (which the connector factory
+    rejects as "not a list").
 
     Contract: ``pairs`` MUST come from :func:`_parse_connector_specific_config`
-    / :func:`_parse_extractor_config` (i.e. each value is a JSON string). A
-    non-JSON value — e.g. a legacy ``str()``-coerced repr reconstructed from a
-    pre-fix DB row — raises a loud :class:`ValueError` naming the key rather
+    / :func:`_parse_extractor_config` /
+    :func:`_parse_extractor_chain_configs` (i.e. each value is a JSON string).
+    A non-JSON value — e.g. a legacy ``str()``-coerced repr reconstructed from
+    a pre-fix DB row — raises a loud :class:`ValueError` naming the key rather
     than corrupting the config silently.
     """
     mapping: dict[str, Any] = {}
@@ -417,6 +430,7 @@ def _parse_one_connector(prefix: str, raw: Any) -> ConnectorConfig:
         extractor=str(item.get("extractor") or "passthrough"),
         extractor_chain=_parse_extractor_chain(item.get("extractor_chain")),
         extractor_config=_parse_extractor_config(item.get("extractor_config")),
+        extractor_chain_configs=_parse_extractor_chain_configs(item.get("extractor_chain_configs")),
     )
 
 
