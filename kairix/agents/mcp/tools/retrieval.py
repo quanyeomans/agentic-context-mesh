@@ -226,6 +226,7 @@ def tool_search_queue_aware(
     query: str,
     agent: str | None = None,
     scope: Scope = Scope.SHARED_AGENT,
+    collection: str | None = None,
     budget: int = 3000,
     limit: int = 10,
     *,
@@ -248,6 +249,7 @@ def tool_search_queue_aware(
         query,
         agent=agent,
         scope=scope,
+        collections=[collection] if collection is not None else None,
         budget=budget,
         limit=limit,
         agent_id=agent_id,
@@ -410,6 +412,7 @@ def _make_search(ctx: RegistrationContext) -> Callable[..., Any]:
         query: str,
         agent: str | None = None,
         scope: Scope = DEFAULT_SCOPE,
+        collection: str | None = None,
         budget: int = 3000,
         limit: int = 10,
     ) -> Any:
@@ -423,7 +426,15 @@ def _make_search(ctx: RegistrationContext) -> Callable[..., Any]:
         """
         if cold := require_ready("search", ctx.readiness_check):
             return cold
-        return tool_search(query=query, agent=agent, scope=scope, budget=budget, limit=limit, queue_aware=True)
+        return tool_search(
+            query=query,
+            agent=agent,
+            scope=scope,
+            collection=collection,
+            budget=budget,
+            limit=limit,
+            queue_aware=True,
+        )
 
     return search
 

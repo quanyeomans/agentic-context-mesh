@@ -17,7 +17,7 @@ import pytest
 
 from kairix.core.health import HealthDeps
 from kairix.core.search.intent import QueryIntent
-from kairix.use_cases.search import SearchDeps, run_search_queue_aware
+from kairix.use_cases.search import QueueAwareSearchDeps, SearchDeps, run_search_queue_aware
 
 pytestmark = pytest.mark.unit
 
@@ -86,3 +86,27 @@ def test_default_queue_deps_off_branch_runs_use_case_and_serialises() -> None:
     assert result["results"][0]["source_uri"] == "sharepoint://site/deck.docx"
     # OFF branch: the response is the plain search envelope — no carry-along key.
     assert "carry_along" not in result
+
+
+def test_queue_aware_off_branch_forwards_explicit_collections_to_delegate() -> None:
+    """Explicit collection scope must survive queue-aware routing when the queue flag is OFF."""
+    captured: dict[str, object] = {}
+
+    def fake_search(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {"query": kwargs["query"], "results": []}
+
+    queue_deps = QueueAwareSearchDeps(
+        flag_reader=lambda _name: False,
+        search_fn=fake_search,
+        queue_db_factory=lambda: None,
+    )
+
+    result = run_search_queue_aware(
+        "Reverse Demo Guidance",
+        collections=["sharepoint"],
+        queue_deps=queue_deps,
+    )
+
+    assert isinstance(result, dict)
+    assert captured["collections"] == ["sharepoint"]

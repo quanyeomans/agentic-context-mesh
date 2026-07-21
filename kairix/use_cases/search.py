@@ -660,6 +660,7 @@ def _default_queue_search(
     query: str,
     agent: str | None = None,
     scope: Scope = Scope.SHARED_AGENT,
+    collections: list[str] | None = None,
     budget: int = _DEFAULT_BUDGET,
     limit: int = 10,
     *,
@@ -673,7 +674,9 @@ def _default_queue_search(
     (``tool_search``). The envelope dict it returns is exactly what carry-along
     augments and the dispatch decorator records as ``result_json``.
     """
-    return search_output_to_envelope(run_search(query, agent=agent, scope=scope, budget=budget, limit=limit, deps=deps))
+    return search_output_to_envelope(
+        run_search(query, agent=agent, scope=scope, collections=collections, budget=budget, limit=limit, deps=deps)
+    )
 
 
 @dataclass(frozen=True)
@@ -708,6 +711,7 @@ def run_search_queue_aware(
     *,
     agent: str | None = None,
     scope: Scope = Scope.SHARED_AGENT,
+    collections: list[str] | None = None,
     budget: int = _DEFAULT_BUDGET,
     limit: int = 10,
     agent_id: str | None = None,
@@ -746,7 +750,15 @@ def run_search_queue_aware(
     reader = resolved_deps.flag_reader
 
     if not reader("agent_query_queue"):
-        return delegate(query=query, agent=agent, scope=scope, budget=budget, limit=limit, deps=deps)
+        return delegate(
+            query=query,
+            agent=agent,
+            scope=scope,
+            collections=collections,
+            budget=budget,
+            limit=limit,
+            deps=deps,
+        )
 
     resolved_agent_id = agent_id or "unknown-agent"
 
@@ -755,6 +767,7 @@ def run_search_queue_aware(
         query: str,
         agent: str | None,
         scope: Scope,
+        collections: list[str] | None,
         budget: int,
         limit: int,
         *,
@@ -766,12 +779,21 @@ def run_search_queue_aware(
         # dedup hash + the pending_queries row owner; log it here so the
         # parameter has a real consumer (F19 — every named parameter load-bearing).
         logger.debug("tool_search dispatched for agent_id=%r", agent_id)
-        return delegate(query=query, agent=agent, scope=scope, budget=budget, limit=limit, deps=deps)
+        return delegate(
+            query=query,
+            agent=agent,
+            scope=scope,
+            collections=collections,
+            budget=budget,
+            limit=limit,
+            deps=deps,
+        )
 
     result: Any = _handler(
         query,
         agent,
         scope,
+        collections,
         budget,
         limit,
         agent_id=resolved_agent_id,
