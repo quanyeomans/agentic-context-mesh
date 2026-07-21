@@ -145,6 +145,59 @@ def test_pipeline_fuses_both_sources():
 
 
 @pytest.mark.unit
+def test_pipeline_enforces_collection_scope_after_fusion():
+    """Scoped searches must not emit out-of-scope rows from any backend.
+
+    The production SharePoint smoke exposed a lower-ranked Obsidian/default
+    leak under ``--collection sharepoint``. Backend adapters still receive the
+    collection filter, but the pipeline owns the final output invariant: a
+    scoped search response may only contain allowed collections even if a
+    backend or cached leg returns a stale/out-of-scope row.
+    """
+
+    class LeakyVectorRepository:
+        def __init__(self) -> None:
+            self.collections_seen: list[str] | None = None
+
+        def search(self, _query_vec, k: int, collections: list[str] | None = None):
+            self.collections_seen = collections
+            return [
+                {
+                    "path": "obsidian-leak.md",
+                    "title": "Out of scope",
+                    "snippet": "This row must be suppressed by the pipeline",
+                    "distance": 0.1,
+                    "collection": "obsidian",
+                    "source_page": None,
+                    "source_uri": "obsidian://obsidian-leak.md",
+                }
+            ][:k]
+
+    docs = [
+        {
+            "path": "sharepoint-doc.md",
+            "title": "SharePoint doc",
+            "content": "Reverse Demo Guidance scoped search regression",
+            "collection": "sharepoint",
+            "source_uri": "sharepoint://site/sharepoint-doc.md",
+        }
+    ]
+    vector_repo = LeakyVectorRepository()
+    pipeline = _test_pipeline(
+        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
+        vector=VectorSearchBackend(FakeEmbeddingService(), vector_repo),
+        fusion=RRFFusion(),
+    )
+
+    result = pipeline.search("Reverse Demo Guidance", collections=["sharepoint"])
+
+    assert vector_repo.collections_seen == ["sharepoint"]
+    assert result.fused_count == 1
+    assert result.results
+    assert {row.result.collection for row in result.results} == {"sharepoint"}
+
+
+@pytest.mark.unit
 def test_pipeline_applies_boosts():
     """Pipeline applies each boost in the chain."""
     boost_calls = []

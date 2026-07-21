@@ -37,6 +37,7 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Literal
 
 # Maximum number of example identifiers stored per gap — keeps logs
@@ -292,16 +293,46 @@ def _check_fts_without_documents(db: sqlite3.Connection) -> IntegrityGap | None:
     )
 
 
+def load_read_only_usearch_index(
+    *,
+    index_path: Path,
+    meta_path: Path,
+    db_path: Path,
+) -> Any:
+    """Load the on-disk usearch index for read-only integrity checks.
+
+    This intentionally bypasses ``open_default_usearch_index()`` because that
+    helper is a writer boundary and returns ``None`` when
+    ``KAIRIX_WORKER_WRITES_VEC_INDEX`` is unset. Preflight only needs a
+    read-only length comparison, so it must not depend on the worker write
+    safety flag.
+    """
+    if not index_path.exists():
+        return None
+    from kairix.core.search.vec_index import VectorIndex
+
+    idx = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_path, read_only=True)
+    _count, status = idx.load_or_recreate()
+    if status == "empty":
+        return None
+    return idx
+
+
 def _default_vector_store_loader() -> Any:
     """Production default for the vector-store loader injection seam.
 
-    Wraps :func:`kairix.core.embed.embed.open_default_usearch_index` so tests
-    can pass an alternate callable through ``check_integrity`` without
-    monkey-patching the embed module (F1-clean).
+    Loads the usearch index read-only from the same directory as the resolved
+    SQLite DB. Tests can still pass an alternate callable through
+    ``check_integrity`` without monkey-patching this module (F1-clean).
     """
-    from kairix.core.embed.embed import open_default_usearch_index
+    from kairix.paths import db_path as get_db_path
 
-    return open_default_usearch_index()
+    db_p = get_db_path()
+    return load_read_only_usearch_index(
+        index_path=db_p.parent / "vectors.usearch",
+        meta_path=db_p.parent / "vectors.meta.json",
+        db_path=db_p,
+    )
 
 
 # F71-truthfulness-exempt: the gap's ``count`` field carries the delta vs
