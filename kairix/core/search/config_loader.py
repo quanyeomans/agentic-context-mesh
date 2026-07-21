@@ -429,6 +429,7 @@ class CollectionDef:
     name: str
     path: str  # relative to document_root
     glob: str = "**/*.md"
+    exclude: tuple[str, ...] = ()
     in_default: bool = True
     retrieval_overrides: dict | None = None  # per-collection retrieval config (raw YAML dict)
     tier: str | None = None  # Issue #432 — source-tier classification
@@ -483,6 +484,18 @@ def _coerce_bool(value: object, *, key: str, default: bool) -> bool:
     )
 
 
+def _coerce_str_tuple(value: object, *, key: str) -> tuple[str, ...]:
+    """Strictly parse an optional YAML list of strings."""
+    if value is None:
+        return ()
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return tuple(value)
+    raise ConfigValidationError(
+        f"kairix.config.yaml: {key}={value!r} must be a list of strings, "
+        f"not {type(value).__name__}. Use YAML list syntax, e.g. `exclude: [archive/]`."
+    )
+
+
 def parse_collections(data: dict) -> CollectionsConfig | None:
     """Parse the collections: section from config. Returns None if not present."""
     collections = data.get("collections")
@@ -504,6 +517,10 @@ def parse_collections(data: dict) -> CollectionsConfig | None:
                 name=item["name"],
                 path=item.get("path", "."),
                 glob=item.get("glob", "**/*.md"),
+                exclude=_coerce_str_tuple(
+                    item.get("exclude"),
+                    key=f"collections.shared[{index}].exclude",
+                ),
                 in_default=in_default,
                 retrieval_overrides=item.get("retrieval"),
                 tier=item.get("tier"),  # Issue #432 — source-tier metadata
