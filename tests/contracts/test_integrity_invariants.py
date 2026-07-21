@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -651,6 +652,46 @@ def test_vector_store_check_index_missing_surfaces_info() -> None:
     assert gap is not None, f"expected info gap when index is None; got {report.gaps!r}"
     assert gap.severity == "info"
     assert "usearch-index-missing" in gap.sample
+
+
+def test_read_only_usearch_loader_opens_existing_ann_index(tmp_path: Path) -> None:
+    """Preflight must read an existing ANN index even when worker writes are off.
+
+    Production keeps ``KAIRIX_WORKER_WRITES_VEC_INDEX`` unset to avoid the
+    writer-side memory spike. The integrity audit is read-only and should still
+    compare the existing ``vectors.usearch`` length rather than reporting
+    ``usearch-index-missing``.
+    """
+    import numpy as np
+
+    from kairix.core.db.integrity import load_read_only_usearch_index
+    from kairix.core.search.vec_index import VectorIndex
+
+    db_path = tmp_path / "index.sqlite"
+    db = sqlite3.connect(str(db_path))
+    try:
+        create_schema(db)
+    finally:
+        db.close()
+
+    index_path = tmp_path / "vectors.usearch"
+    meta_path = tmp_path / "vectors.meta.json"
+    writer = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_path)
+    writer.build_from_vectors(
+        ["h-0_0", "h-1_0"],
+        np.array(
+            [
+                [1.0] + [0.0] * 1535,
+                [0.0, 1.0] + [0.0] * 1534,
+            ],
+            dtype=np.float32,
+        ),
+    )
+
+    idx = load_read_only_usearch_index(index_path=index_path, meta_path=meta_path, db_path=db_path)
+
+    assert idx is not None
+    assert len(idx) == 2
 
 
 def test_vector_store_check_loader_raises_surfaces_info() -> None:

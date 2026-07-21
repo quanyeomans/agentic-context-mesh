@@ -111,7 +111,8 @@ def _bind_collection_to_deps(deps: SearchDeps | None, collection: str | None) ->
     inner = base.search_fn
 
     def _search_with_collection(**kwargs: Any) -> Any:
-        kwargs.setdefault("collections", [collection])
+        if kwargs.get("collections") is None:
+            kwargs["collections"] = [collection]
         return inner(**kwargs)
 
     # SearchDeps is frozen — rebuild with the wrapped search_fn while

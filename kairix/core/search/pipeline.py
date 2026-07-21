@@ -451,6 +451,7 @@ class SearchPipeline:
         # 5. Fuse — intent-weighted when the fact layer is wired (Cap #5).
         t = time.monotonic()
         fused = self._fuse_with_intent(bm25_results, vec_results, fact_hits, intent)
+        fused = self._filter_by_collections(fused, collections)
         _stage("fuse", t)
 
         # 5b. Enrich each fused result with chunk_date metadata so the boost
@@ -779,6 +780,19 @@ class SearchPipeline:
             combined = _cross_layer_dedup(combined)
         return combined
 
+    def _filter_by_collections(self, fused: list[Any], collections: list[str] | None) -> list[Any]:
+        """Enforce the final collection-scope invariant after backend fusion.
+
+        Backend adapters receive the same ``collections`` filter, but scoped
+        output must stay correct even if a backend/cached leg returns stale or
+        out-of-scope rows. ``collections=[]`` is a real resolved scope ("no
+        readable collections"), so it intentionally filters to an empty list.
+        """
+        if collections is None:
+            return fused
+        allowed = set(collections)
+        return [row for row in fused if _read_collection(row) in allowed]
+
     def _enrich_chunk_dates(self, fused: list) -> None:
         """Fill in ``chunk_date`` on each fused result so date-aware boosts see it."""
         if not fused:
@@ -978,6 +992,13 @@ def _read_rrf_score(row: Any) -> float:
     if isinstance(row, dict):
         return float(row.get("rrf_score", row.get("score", 0.0)) or 0.0)
     return float(getattr(row, "rrf_score", 0.0) or 0.0)
+
+
+def _read_collection(row: Any) -> str:
+    """Read ``collection`` from a fused row that may be a dataclass or a dict."""
+    if isinstance(row, dict):
+        return str(row.get("collection", "") or "")
+    return str(getattr(row, "collection", "") or "")
 
 
 def _is_fact_row(row: Any) -> bool:
