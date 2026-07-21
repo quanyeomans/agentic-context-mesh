@@ -29,7 +29,7 @@ from kairix.agents.mcp.server import (
 )
 from kairix.agents.mcp.tools import retrieval as retrieval_tools
 from kairix.core.search.intent import QueryIntent
-from kairix.use_cases.search import SearchDeps, run_search
+from kairix.use_cases.search import QueueAwareSearchDeps, SearchDeps, run_search
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -133,6 +133,32 @@ def test_tool_search_forwards_collection_to_use_case_search_seam() -> None:
     deps, captured = _capturing_deps(QueryIntent.SEMANTIC)
 
     result = tool_search("Reverse Demo Guidance", collection="sharepoint", deps=deps)
+
+    assert isinstance(result, dict)
+    assert captured["collections"] == ["sharepoint"]
+
+
+@pytest.mark.unit
+def test_tool_search_queue_aware_forwards_collection_to_queue_delegate() -> None:
+    """The public queue-aware MCP search path must preserve explicit collection scope."""
+    captured: dict[str, Any] = {}
+
+    def fake_search(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"query": kwargs["query"], "results": []}
+
+    queue_deps = QueueAwareSearchDeps(
+        flag_reader=lambda _name: False,
+        search_fn=fake_search,
+        queue_db_factory=lambda: None,
+    )
+
+    result = tool_search(
+        "Reverse Demo Guidance",
+        collection="sharepoint",
+        queue_aware=True,
+        queue_deps=queue_deps,
+    )
 
     assert isinstance(result, dict)
     assert captured["collections"] == ["sharepoint"]
