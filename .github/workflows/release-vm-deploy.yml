@@ -195,7 +195,7 @@ jobs:
           apply-script: |
             set -eu
             printf %s '${{ needs.prep.outputs.script_b64 }}' | base64 -d > /tmp/apply-alpha.sh
-            sh /tmp/apply-alpha.sh '${{ needs.gate-alpha-tag.outputs.tag }}'
+            KAIRIX_COMPOSE_DIR="${KAIRIX_COMPOSE_DIR:-/etc/kairix}" sh /tmp/apply-alpha.sh '${{ needs.gate-alpha-tag.outputs.tag }}'
           # smoke-units intentionally EMPTY (the reusable workflow skips the
           # systemd smoke when this is blank). `systemctl is-active kairix.service`
           # is the WRONG probe here: kairix.service is a Type=oneshot wrapper

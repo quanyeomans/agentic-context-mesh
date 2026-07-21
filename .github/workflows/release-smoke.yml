@@ -139,12 +139,12 @@ jobs:
           docker run --rm --entrypoint python "${IMAGE}:${DOCKER_TAG}" \
             -c "import kairix; print(f'container import OK: {kairix.__version__}')"
 
-      - name: Verify CLI through entrypoint
+      - name: Verify CLI directly
         env:
           DOCKER_TAG: ${{ steps.tag.outputs.docker_tag }}
         run: |
-          docker run --rm "${IMAGE}:${DOCKER_TAG}" kairix --version
-          docker run --rm "${IMAGE}:${DOCKER_TAG}" kairix --help | head -5
+          docker run --rm --entrypoint /usr/local/bin/kairix "${IMAGE}:${DOCKER_TAG}" --version
+          docker run --rm --entrypoint /usr/local/bin/kairix "${IMAGE}:${DOCKER_TAG}" --help | head -5
 
       - name: Degraded-path - onboard check returns JSON not traceback
         # The v2026.5.15.1 regression: `tests.fakes` ImportError crashed the
@@ -160,7 +160,7 @@ jobs:
           # thing on stdout (#728). Folding stderr in with `2>&1` would
           # re-prepend the bootstrap report and break `json.load`. Let stderr
           # flow to the step log so a real traceback is still visible.
-          docker run --rm "${IMAGE}:${DOCKER_TAG}" kairix onboard check --json \
+          docker run --rm --entrypoint /usr/local/bin/kairix "${IMAGE}:${DOCKER_TAG}" onboard check --json \
             > /tmp/onboard.json || true
           # If json.load fails, the degraded path crashed — fail the job.
           python -c "import json; json.load(open('/tmp/onboard.json')); print('onboard --json shape valid')"
