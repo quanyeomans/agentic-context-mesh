@@ -17,8 +17,8 @@ The test skips cleanly when the Docker daemon is unavailable (developer
 laptop without Docker, CI Stage 2/3 jobs without docker-in-docker). It
 runs in CI Stage 4.5 under ``pytest -m e2e``.
 
-5-minute timeout covers cold image pulls + first-boot s6 init + healthcheck
-``start_period`` (60s) settling on both services.
+15-minute timeout covers cold image builds/pulls + first-boot s6 init +
+healthcheck ``start_period`` (60s) settling on both services.
 """
 
 from __future__ import annotations
@@ -74,6 +74,57 @@ def _docker_available() -> bool:
 _IMAGE_REGISTRY = "ghcr.io/three-cubes/kairix"
 _IMAGE_TAG_SUFFIX = "test-local"
 _LOCAL_IMAGE = f"{_IMAGE_REGISTRY}:{_IMAGE_TAG_SUFFIX}"
+_TEST_TIMEOUT_SECONDS = 900
+_DOCKER_BUILD_TIMEOUT_SECONDS = 480
+_COMPOSE_UP_TIMEOUT_SECONDS = 300
+_LOG_TAIL_CHARS = 12_000
+
+
+def _coerce_output(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return value
+
+
+def _tail(value: str | bytes | None, *, limit: int = _LOG_TAIL_CHARS) -> str:
+    text = _coerce_output(value)
+    if len(text) <= limit:
+        return text
+    return f"... trimmed to last {limit} chars ...\n{text[-limit:]}"
+
+
+def _build_local_image() -> None:
+    """Build the test image with bounded runtime and compact failure output."""
+    cmd = ["docker", "build", "-t", _LOCAL_IMAGE, "."]
+    try:
+        subprocess.run(
+            cmd,
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=_DOCKER_BUILD_TIMEOUT_SECONDS,
+            check=True,
+        )
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(
+            "docker build timed out while preparing the unified-container e2e image:\n"
+            f"cmd: {' '.join(cmd)}\n"
+            f"timeout_s: {_DOCKER_BUILD_TIMEOUT_SECONDS}\n"
+            f"stdout tail:\n{_tail(exc.stdout)}\n"
+            f"stderr tail:\n{_tail(exc.stderr)}",
+            pytrace=False,
+        )
+    except subprocess.CalledProcessError as exc:
+        pytest.fail(
+            "docker build failed while preparing the unified-container e2e image:\n"
+            f"cmd: {' '.join(cmd)}\n"
+            f"returncode: {exc.returncode}\n"
+            f"stdout tail:\n{_tail(exc.stdout)}\n"
+            f"stderr tail:\n{_tail(exc.stderr)}",
+            pytrace=False,
+        )
 
 
 def _compose(*args: str, check: bool = True, timeout: int = 180) -> subprocess.CompletedProcess[str]:
@@ -136,7 +187,7 @@ def _ensure_quickstart_files() -> list[Path]:
 
 
 @pytest.mark.docker
-@pytest.mark.timeout(300)
+@pytest.mark.timeout(_TEST_TIMEOUT_SECONDS)
 def test_compose_up_yields_two_services_both_healthy() -> None:
     """Compose-up brings up exactly 2 services; api is reachable; uid is 995.
 
@@ -161,11 +212,7 @@ def test_compose_up_yields_two_services_both_healthy() -> None:
     # Build the kairix image locally and tag it under the registry prefix
     # compose expects, then KAIRIX_IMAGE_TAG (set inside _compose) picks it up
     # — no public-registry round-trip.
-    subprocess.run(
-        ["docker", "build", "-t", _LOCAL_IMAGE, "."],
-        cwd=str(_REPO_ROOT),
-        check=True,
-    )
+    _build_local_image()
 
     created_stubs = _ensure_quickstart_files()
 
@@ -174,7 +221,7 @@ def test_compose_up_yields_two_services_both_healthy() -> None:
     # cover an image pull on a cold CI runner.
     try:
         try:
-            _compose("up", "-d", "--wait", timeout=240)
+            _compose("up", "-d", "--wait", timeout=_COMPOSE_UP_TIMEOUT_SECONDS)
         except subprocess.CalledProcessError as e:
             # Surface compose logs so a failing boot is diagnosable.
             logs = _compose("logs", "--no-color", check=False, timeout=60)
