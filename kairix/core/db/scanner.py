@@ -48,6 +48,18 @@ class CollectionConfig:
 
 
 @dataclass
+class ScanDiagnostic:
+    """One scanner diagnostic with an operator remediation hint."""
+
+    kind: str
+    path: str
+    rel_path: str
+    collection: str
+    message: str
+    remediation: str
+
+
+@dataclass
 class ScanReport:
     """Summary of a document scan operation."""
 
@@ -56,7 +68,10 @@ class ScanReport:
     removed: int = 0
     unchanged: int = 0
     errors: int = 0
+    permission_denied: int = 0
     collections_scanned: int = 0
+    unreadable_paths: list[str] = field(default_factory=list)
+    diagnostics: list[ScanDiagnostic] = field(default_factory=list)
 
     @property
     def total_processed(self) -> int:
@@ -66,7 +81,8 @@ class ScanReport:
         return (
             f"Scan: {self.new} new, {self.updated} updated, "
             f"{self.removed} removed, {self.unchanged} unchanged, "
-            f"{self.errors} errors ({self.collections_scanned} collections)"
+            f"{self.errors} errors, {self.permission_denied} permission denied "
+            f"({self.collections_scanned} collections)"
         )
 
 
@@ -108,6 +124,9 @@ class DocumentScanner:
             report.removed += col_report.removed
             report.unchanged += col_report.unchanged
             report.errors += col_report.errors
+            report.permission_denied += col_report.permission_denied
+            report.unreadable_paths.extend(col_report.unreadable_paths)
+            report.diagnostics.extend(col_report.diagnostics)
             report.collections_scanned += 1
 
         self._db.commit()
@@ -151,8 +170,7 @@ class DocumentScanner:
         try:
             text = file_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as e:
-            logger.warning("db.scanner: cannot read %s — %s", file_path, e)
-            report.errors += 1
+            self._record_read_error(report, file_path, "", "", e)
             return report, touched
         content_hash = _hash_content(text)
         already_active = (
@@ -224,8 +242,7 @@ class DocumentScanner:
         try:
             text = file_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as e:
-            logger.warning("db.scanner: cannot read %s — %s", file_path, e)
-            report.errors += 1
+            self._record_read_error(report, file_path, rel_path, config.name, e)
             return
 
         old_hash = existing.get(rel_path)
@@ -282,6 +299,38 @@ class DocumentScanner:
             report.new += 1
         else:
             report.updated += 1
+
+    def _record_read_error(
+        self,
+        report: ScanReport,
+        file_path: Path,
+        rel_path: str,
+        collection: str,
+        exc: OSError | UnicodeDecodeError,
+    ) -> None:
+        """Record one unreadable file without aborting the scan."""
+        path = str(file_path)
+        is_permission = isinstance(exc, PermissionError)
+        kind = "permission_denied" if is_permission else "read_error"
+        remediation = (
+            "fix: make the file readable by the kairix service account or exclude/quarantine the path; "
+            "next: rerun kairix embed; run: ls -l '<path>' && sudo chgrp -R <kairix-group> '<parent>'"
+        )
+        report.errors += 1
+        if is_permission:
+            report.permission_denied += 1
+        report.unreadable_paths.append(path)
+        report.diagnostics.append(
+            ScanDiagnostic(
+                kind=kind,
+                path=path,
+                rel_path=rel_path,
+                collection=collection,
+                message=str(exc),
+                remediation=remediation,
+            )
+        )
+        logger.warning("db.scanner: cannot read %s — %s; %s", file_path, exc, remediation)
 
     def _scan_collection(self, config: CollectionConfig) -> ScanReport:
         """Scan a single collection."""

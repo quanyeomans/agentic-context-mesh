@@ -74,9 +74,14 @@ Each gap line follows this shape:
 ## Auto-heal
 
 `--auto-heal` runs `rebuild_fts` for the `documents-without-fts`
-gap, then re-runs the audit. Other gaps need operator action via
-the per-gap remediation. Auto-heal is safe to run repeatedly — it
-is the same code path as `kairix embed rebuild-fts`.
+gap, then re-runs the audit. It can also prune orphan
+`content_vectors` rows into `content_vectors_pruned` through the
+maintenance scheduler.
+
+For production, take a database backup or VM snapshot before auto-healing
+orphan vectors. Orphan pruning is designed to be safe and idempotent, but
+the recovery contract is still backup first, prune second, verify third.
+Other gaps need operator action via the per-gap remediation.
 
 ## Worker boot integration
 

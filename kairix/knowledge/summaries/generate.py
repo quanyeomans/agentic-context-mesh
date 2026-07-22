@@ -213,7 +213,9 @@ def _summarise_one_file(
         logger.warning("generate_summaries: file not found — %s", path)
         return None
 
-    content = file_path.read_text(encoding="utf-8", errors="replace")
+    content = _read_summary_content(file_path, path)
+    if content is None:
+        return None
     now = datetime.now(timezone.utc).isoformat()
 
     l0 = generate_l0(path, content, api_key, endpoint, deployment, deps=deps)
@@ -232,6 +234,29 @@ def _summarise_one_file(
         generated_at=now,
         tokens_used=tokens_total,
     )
+
+
+def _read_summary_content(file_path: Path, display_path: str) -> str | None:
+    """Read a summary source file, returning None for known local read failures."""
+    try:
+        return file_path.read_text(encoding="utf-8", errors="replace")
+    except PermissionError as exc:
+        logger.warning(
+            "generate_summaries: cannot read %s — %s; "
+            "fix: make the file readable by the kairix service account or exclude/quarantine the path; "
+            "next: rerun kairix summarise after permission repair",
+            display_path,
+            exc,
+        )
+        return None
+    except OSError as exc:
+        logger.warning(
+            "generate_summaries: cannot read %s — %s; "
+            "fix: repair the local file/path or exclude/quarantine it; next: rerun kairix summarise",
+            display_path,
+            exc,
+        )
+        return None
 
 
 def generate_summaries(

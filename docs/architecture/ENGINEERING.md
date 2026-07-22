@@ -125,7 +125,7 @@ kairix search "test query" --agent <your-agent>
 
 **Rollback:** `pip install git+https://github.com/three-cubes/kairix@<previous-tag>`. All state is in SQLite/document store — safe.
 
-**CI deploy plane (canonical).** Release/deploy workflows run as the `three-cubes-agent` App over Workload Identity Federation (a short-lived installation token minted from Key Vault). An alpha prerelease deploys the VM via the tc-pipelines `azure-vm-deploy.yml@v1` reusable — see [ADR-017](ADR-017-deployment-architecture.md). kairix specifics: **snapshot is skipped** (the CI identity lacks Disk Snapshot Contributor), **recovery is re-pinning `KAIRIX_IMAGE_TAG`**, and the post-apply probe is `apply-alpha.sh`'s in-band `kairix onboard check --json` plus the reference-library gate (not `systemctl is-active`, since `kairix.service` is a oneshot).
+**CI deploy plane (canonical).** Release/deploy workflows run as the `three-cubes-agent` App over Workload Identity Federation (a short-lived installation token minted from Key Vault). An alpha prerelease deploys the VM via the tc-pipelines `azure-vm-deploy.yml@v1` reusable — see [ADR-017](ADR-017-deployment-architecture.md). kairix specifics today: **snapshot is skipped** because the CI identity lacks Disk Snapshot Contributor, **recovery is re-pinning `KAIRIX_IMAGE_TAG`**, and the post-apply probe is `apply-alpha.sh`'s in-band `kairix onboard check --json` plus the reference-library gate (not `systemctl is-active`, since `kairix.service` is a oneshot). Desired production posture: grant the deploy identity snapshot rights and fail closed on production snapshot skip.
 
 ### 2.4 No gate bypass
 

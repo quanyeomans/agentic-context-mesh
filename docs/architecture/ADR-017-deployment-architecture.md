@@ -43,6 +43,13 @@ login rather than re-implementing them per repo. It satisfies the authoritative
 the `KAIRIX_IMAGE_TAG` re-pin is the recovery point; `onboard check --json` + the
 reflib regression status is the probe.
 
+**2026-07-22 deployment-resilience amendment:** production deploys should snapshot
+before apply. The current `skip-snapshot: 'true'` setting is a known IAM gap, not
+the desired end state. Grant Disk Snapshot Contributor to the deploy identity,
+then flip the workflow to fail closed when a production deployment attempts to
+skip the snapshot. Until that role exists, alpha deploys recover by image-tag
+rollback only.
+
 ---
 
 ## Decision
