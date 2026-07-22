@@ -1,19 +1,19 @@
-# Worker memory + swap — re-enabling usearch writes after #335
+# Worker memory + swap — legacy USEARCH live-write recovery after #335
 
 **Audience:** operators running the kairix worker container on a single VM with bounded RAM.
 **Symptom:** worker container restart-loops, `docker logs app-kairix-1` shows `vec_index: converting immutable index to mutable (...)` followed by an immediate restart, vector index drifts further behind `content_vectors` every cycle.
 **Underlying cause:** [#335](https://github.com/three-cubes/kairix/issues/335) — usearch HNSW's incremental-add path needs the full graph resident; at 1M+ vectors that's ~6-8 GB which exceeds the worker's cgroup `mem_limit` (default 1 GB per ADR-019).
 
-This runbook gets the worker writing to usearch again without changing code or schema — by giving the cgroup enough RAM + swap to hold the mutable index.
+This runbook is the legacy live-write recovery path. The current operational strategy is to keep SQLite as the canonical document/vector-metadata store and treat USEARCH as a derived serving index that is caught up by a deliberate rebuild/catch-up path. Use this runbook only when an operator explicitly accepts the memory and swap trade-off of live USEARCH writes before the offline rebuild command is available.
 
 ## When to follow this
 
 - Production has 1M+ vectors in `content_vectors`
 - Worker is in restart loop with the symptom log line above
 - Host has at least 8 GB RAM total **and** at least 8 GB swap on SSD (verify steps below)
-- You want vector search on new content to stay current (no manual rebuilds)
+- You want vector search on new content to stay current by live worker writes and accept the memory/swap profile
 
-If the corpus is under 500k vectors and you don't see the restart loop, you don't need this runbook — the default `mem_limit: 1g` is fine.
+If the corpus is under 500k vectors and you don't see the restart loop, you don't need this runbook. If the corpus is large and USEARCH has drifted behind `content_vectors`, prefer the offline rebuild/catch-up path once shipped instead of keeping the worker in mutable-index mode permanently.
 
 ## What you'll change
 

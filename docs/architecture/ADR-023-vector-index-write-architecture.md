@@ -1,6 +1,6 @@
 # ADR-023 — Vector index write architecture (post-#335)
 
-**Status:** Accepted 2026-05-28 — operational fix first; architectural fallbacks specified for trigger conditions
+**Status:** Accepted 2026-05-28; amended 2026-07-22 — SQLite remains canonical and USEARCH catch-up should be deliberate/offline by default
 **Issues:** #335 (embed worker OOM on full vec_index rebuild)
 **Related:** ADR-019 (compose resource governance — the 1 GiB cgroup ceiling that surfaces #335), ADR-020 / ADR-021 (Wave E.5 — independent), [`docs/operations/runbooks/worker-memory-and-swap.md`](../operations/runbooks/worker-memory-and-swap.md)
 **Supersedes:** the initial proposed-state of this ADR (A1 / A2 / Hybrid framing) — superseded after researching the original usearch decision and modelling the scaling curve.
@@ -10,6 +10,8 @@
 `086a604d` shipped an interim env-gate (`KAIRIX_WORKER_WRITES_VEC_INDEX`, default OFF) that stops the worker's OOM loop by skipping the in-process usearch open + write entirely. SQLite `content_vectors` (metadata only) continues to advance; the on-disk `vectors.usearch` goes stale against new embeddings until the gate is re-enabled.
 
 The ADR's job is to specify what happens after the gate — does the architecture need to change, or is this an operational tuning problem?
+
+**2026-07-22 amendment:** production evidence showed SQLite `content_vectors` continuing to advance while the on-disk USEARCH index lagged substantially. The standing direction is now: keep SQLite as the canonical store for document/vector metadata, treat USEARCH as a derived serving index, and catch up drift with a deliberate offline rebuild/catch-up operation that takes a backup, builds a temporary index, verifies parity, and atomically swaps it. Live worker writes remain an operator escape hatch, not the default resilience strategy.
 
 ## Decision history
 

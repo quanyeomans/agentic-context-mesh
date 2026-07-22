@@ -96,6 +96,9 @@ def _hit(**kwargs: object) -> SearchHit:
         score=float(kwargs.get("score", 0.0)),  # type: ignore[arg-type]  # narrow to float at use site
         tier=kwargs.get("tier", ""),  # type: ignore[arg-type]  # narrow to str at use site
         collection=kwargs.get("collection", ""),  # type: ignore[arg-type]  # narrow to str at use site
+        source_uri=kwargs.get("source_uri", ""),  # type: ignore[arg-type]  # narrow to str at use site
+        source_page=kwargs.get("source_page"),  # type: ignore[arg-type]  # narrow to int|None at use site
+        seq=kwargs.get("seq"),  # type: ignore[arg-type]  # narrow to int|None at use site
     )
 
 
@@ -229,6 +232,46 @@ def test_to_json_envelope_serialises_all_fields() -> None:
     assert rendered_hit["snippet"] == "s"
     # Round-trip via json to confirm it's serialisable.
     assert json.loads(json.dumps(env)) == env
+
+
+def test_to_json_envelope_exposes_agent_source_affordances() -> None:
+    """Search rows expose a discoverable source link plus expand arguments.
+
+    Agents have historically had to infer which field to cite or feed into
+    ``expand``. The envelope now carries the canonical ``source_ref`` object,
+    a plain ``source_link`` alias, and a concrete expand action hint while
+    preserving the existing flat ``source_uri`` / ``seq`` fields.
+    """
+    hit = _hit(
+        path="sharepoint://site/deck#3",
+        title="Strategy Deck",
+        snippet="slide evidence",
+        score=0.9,
+        tier="L2",
+        collection="sharepoint",
+        source_uri="https://contoso.sharepoint.com/sites/demo/Strategy.pptx",
+        source_page=7,
+        seq=3,
+    )
+    env = to_json_envelope(SearchOutput(query="q", intent="semantic", results=[hit]))
+
+    row = env["results"][0]
+    assert row["source_uri"] == "https://contoso.sharepoint.com/sites/demo/Strategy.pptx"
+    assert row["source_link"] == "https://contoso.sharepoint.com/sites/demo/Strategy.pptx"
+    assert row["source_ref"] == {
+        "source_uri": "https://contoso.sharepoint.com/sites/demo/Strategy.pptx",
+        "path": "sharepoint://site/deck#3",
+        "title": "Strategy Deck",
+        "collection": "sharepoint",
+        "source_page": 7,
+        "locator": None,
+    }
+    assert row["actions"]["expand"] == {
+        "tool": "expand",
+        "source_uri": "https://contoso.sharepoint.com/sites/demo/Strategy.pptx",
+        "seq": 3,
+        "token_budget": 2000,
+    }
 
 
 def test_to_json_envelope_includes_error_field_when_set() -> None:

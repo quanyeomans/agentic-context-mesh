@@ -56,9 +56,12 @@ _KEY_SOURCE_PAGE = "source_page"
 # PLA-274 — breadcrumb envelope keys; read by the writer
 # (``search_output_to_envelope``) AND the reader (``SearchHit.from_envelope``).
 _KEY_SOURCE_URI = "source_uri"
+_KEY_SOURCE_LINK = "source_link"
+_KEY_SOURCE_REF = "source_ref"
 _KEY_LOCATOR = "locator"
 # PLA-270 — chunk-sequence envelope key; same writer↔reader coupling.
 _KEY_SEQ = "seq"
+_KEY_ACTIONS = "actions"
 
 
 def _default_search(
@@ -180,6 +183,8 @@ class SearchHit:
         keys back to their dataclass-default zero values so flat search
         rows rebuild identically.
         """
+        raw_ref = hit.get(_KEY_SOURCE_REF)
+        source_ref = SourceRef.from_envelope(raw_ref) if isinstance(raw_ref, dict) else None
         raw_page = hit.get(_KEY_SOURCE_PAGE)
         entity_raw = hit.get("entity") or {}
         # Coerce the entity dict's values to str to match the
@@ -190,7 +195,7 @@ class SearchHit:
         raw_locator = hit.get(_KEY_LOCATOR)
         raw_seq = hit.get(_KEY_SEQ)
         return cls(
-            path=str(hit.get("path", "")),
+            path=str(hit.get("path") or (source_ref.path if source_ref is not None else "")),
             title=str(hit.get("title", "")),
             snippet=str(hit.get("snippet", "")),
             score=float(hit.get("score", 0.0)),
@@ -200,8 +205,13 @@ class SearchHit:
             source=str(hit.get("source", "")),
             entity=entity,
             source_page=int(raw_page) if isinstance(raw_page, int) else None,
-            source_uri=str(hit.get(_KEY_SOURCE_URI, "") or ""),
-            locator=str(raw_locator) if raw_locator else None,
+            source_uri=str(
+                hit.get(_KEY_SOURCE_URI)
+                or hit.get(_KEY_SOURCE_LINK)
+                or (source_ref.source_uri if source_ref is not None else "")
+                or ""
+            ),
+            locator=str(raw_locator or (source_ref.locator if source_ref is not None else "") or "") or None,
             seq=int(raw_seq) if isinstance(raw_seq, int) else None,
         )
 
@@ -378,6 +388,53 @@ def _budgeted_to_hit(b: Any) -> SearchHit:
     )
 
 
+def _expand_action_for_hit(hit: SearchHit, source_ref: SourceRef) -> dict[str, Any]:
+    """Return the concrete expand arguments an agent can copy from a hit."""
+    return {
+        "tool": "expand",
+        _KEY_SOURCE_URI: source_ref.source_uri,
+        _KEY_SEQ: hit.seq,
+        "token_budget": 2000,
+    }
+
+
+def _hit_to_envelope(hit: SearchHit) -> dict[str, Any]:
+    """Project one ``SearchHit`` to the shared agent-facing result dict."""
+    ref = hit.source_ref()
+    return {
+        "path": hit.path,
+        "title": hit.title,
+        "snippet": hit.snippet,
+        "score": hit.score,
+        "tier": hit.tier,
+        "tokens": hit.tokens,
+        _KEY_COLLECTION: hit.collection,
+        # MM-3 — per-page citation surfaced to MCP / CLI callers.
+        # ``None`` for non-paged documents.
+        _KEY_SOURCE_PAGE: hit.source_page,
+        # PLA-274 — the canonical resolvable breadcrumb. ``path`` stays
+        # for display; ``source_uri`` is what an agent cites/re-opens.
+        # ``locator`` is the within-document anchor for non-paged docs.
+        # These keys mirror ``SourceRef`` so the per-hit dict round-trips
+        # through ``SourceRef.from_envelope`` losslessly.
+        _KEY_SOURCE_URI: ref.source_uri,
+        _KEY_SOURCE_LINK: ref.source_uri,
+        _KEY_SOURCE_REF: ref.to_envelope(),
+        _KEY_LOCATOR: ref.locator,
+        # PLA-270 — the typed chunk-sequence expansion key. ``None``
+        # for non-chunked rows; PLA-268's chunk-expansion tool reads
+        # ``seq`` + ``source_uri`` rather than re-parsing ``#N``.
+        _KEY_SEQ: hit.seq,
+        _KEY_ACTIONS: {"expand": _expand_action_for_hit(hit, ref)},
+        **({"source": hit.source, "entity": hit.entity} if hit.source else {}),
+        # ADR-036 §Q7 — entity-summary chunks from the projector
+        # carry source_uri='entity://<QID>'; the MCP renderer + any
+        # downstream agent can gate on this flag to render a
+        # Wikidata badge or treat the row as external context.
+        **({"entity_summary": True} if hit.path.startswith("entity://") else {}),
+    }
+
+
 def search_output_to_envelope(out: SearchOutput) -> dict[str, Any]:
     """Project a ``SearchOutput`` to the JSON envelope MCP callers receive.
 
@@ -389,38 +446,7 @@ def search_output_to_envelope(out: SearchOutput) -> dict[str, Any]:
     return {
         "query": out.query,
         "intent": out.intent,
-        "results": [
-            {
-                "path": h.path,
-                "title": h.title,
-                "snippet": h.snippet,
-                "score": h.score,
-                "tier": h.tier,
-                "tokens": h.tokens,
-                _KEY_COLLECTION: h.collection,
-                # MM-3 — per-page citation surfaced to MCP / CLI callers.
-                # ``None`` for non-paged documents.
-                _KEY_SOURCE_PAGE: h.source_page,
-                # PLA-274 — the canonical resolvable breadcrumb. ``path`` stays
-                # for display; ``source_uri`` is what an agent cites/re-opens.
-                # ``locator`` is the within-document anchor for non-paged docs.
-                # These keys mirror ``SourceRef`` so the per-hit dict round-trips
-                # through ``SourceRef.from_envelope`` losslessly.
-                _KEY_SOURCE_URI: h.source_ref().source_uri,
-                _KEY_LOCATOR: h.source_ref().locator,
-                # PLA-270 — the typed chunk-sequence expansion key. ``None``
-                # for non-chunked rows; PLA-268's chunk-expansion tool reads
-                # ``seq`` + ``source_uri`` rather than re-parsing ``#N``.
-                _KEY_SEQ: h.seq,
-                **({"source": h.source, "entity": h.entity} if h.source else {}),
-                # ADR-036 §Q7 — entity-summary chunks from the projector
-                # carry source_uri='entity://<QID>'; the MCP renderer + any
-                # downstream agent can gate on this flag to render a
-                # Wikidata badge or treat the row as external context.
-                **({"entity_summary": True} if h.path.startswith("entity://") else {}),
-            }
-            for h in out.results
-        ],
+        "results": [_hit_to_envelope(h) for h in out.results],
         _KEY_BM25_COUNT: out.bm25_count,
         _KEY_VEC_COUNT: out.vec_count,
         _KEY_FUSED_COUNT: out.fused_count,

@@ -1,6 +1,7 @@
 """Tests for kairix.core.db.scanner — document store file discovery, hashing, and ingestion."""
 
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -292,6 +293,41 @@ def test_scan_allows_update_to_existing_path(
     # Content should be the new version
     row = db.execute("SELECT doc FROM content ORDER BY created_at DESC LIMIT 1").fetchone()
     assert "Version 2" in row[0]
+
+
+@pytest.mark.unit
+def test_scan_reports_unreadable_files_with_remediation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Permission-denied files are skipped with operator-readable diagnostics."""
+    vault = tmp_path / "vault"
+    docs = vault / "docs"
+    docs.mkdir(parents=True)
+    locked = docs / "locked.md"
+    locked.write_text("# Locked\n\nUnreadable from the kairix service account.")
+
+    original_read_text = Path.read_text
+
+    def _read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path == locked:
+            raise PermissionError("permission denied")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _read_text)
+    db = sqlite3.connect(":memory:")
+    _setup_schema(db)
+
+    scanner = DocumentScanner(db, vault)
+    report = scanner.scan([CollectionConfig(name="docs", path="docs")])
+
+    assert report.errors == 1
+    assert report.permission_denied == 1
+    assert report.unreadable_paths == [str(locked)]
+    assert "fix:" in report.diagnostics[0].remediation
+    assert "locked.md" in caplog.text
+    assert db.execute("SELECT COUNT(*) FROM documents WHERE active = 1").fetchone()[0] == 0
 
 
 # ---------------------------------------------------------------------------

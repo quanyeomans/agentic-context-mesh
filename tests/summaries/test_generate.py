@@ -4,6 +4,8 @@ Tests for kairix.knowledge.summaries.generate
 Uses ``SummariesDeps(chat=...)`` for dependency injection — no monkey-patching needed.
 """
 
+from pathlib import Path
+
 import pytest
 
 from kairix.knowledge.summaries.generate import (
@@ -211,3 +213,41 @@ def test_generate_summaries_logs_per_file_failure(caplog, tmp_path):
         deps=SummariesDeps(chat=boom),
     )
     assert result == []
+
+
+@pytest.mark.unit
+def test_generate_summaries_skips_unreadable_file_before_chat(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Unreadable local files do not repeatedly consume model calls."""
+    locked = tmp_path / "locked.md"
+    locked.write_text("content")
+    original_read_text = Path.read_text
+    called = False
+
+    def _read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path == locked:
+            raise PermissionError("permission denied")
+        return original_read_text(path, *args, **kwargs)
+
+    def _chat(_msgs: list[dict], max_tokens: int = 150) -> str:
+        nonlocal called
+        called = True
+        return "should not be called"
+
+    monkeypatch.setattr(Path, "read_text", _read_text)
+
+    result = generate_summaries(
+        [str(locked)],
+        api_key="k",
+        endpoint="https://ep",
+        sleep_ms=0,
+        deps=SummariesDeps(chat=_chat),
+    )
+
+    assert result == []
+    assert called is False
+    assert "generate_summaries: cannot read" in caplog.text
+    assert "fix:" in caplog.text

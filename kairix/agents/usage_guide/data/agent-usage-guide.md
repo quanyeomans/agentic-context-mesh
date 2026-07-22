@@ -41,13 +41,13 @@ Always start with `search`. It finds the most relevant snippets across the knowl
 
 ```bash
 kairix search "how we decided to handle retries" --agent builder --json
-# take the top hit's source_uri + seq from the results, then:
+# take the top hit's actions.expand.source_uri + actions.expand.seq, then:
 kairix expand "<source_uri>" <seq> --token-budget 2000
 ```
 
 `search → expand` is the intended pattern for any question you are going to answer or cite. Search gives you the lead; expand gives you the surrounding evidence. Do not answer from a single thin snippet when expand can hand you the full passage cheaply — it reads straight from the index, so there is no re-search cost.
 
-**Wire `source_uri` into every final answer.** Each result — from search, briefings, fact lookups, timelines, research, and contradiction checks — carries a `source_uri` you can show a human or hand back to `expand`. Cite it so the reader can open the original evidence.
+**Wire `source_link` / `source_ref` into every final answer.** Each search result carries the plain `source_link` alias, the structured `source_ref` object, and the older flat `source_uri` / `seq` fields. Use `source_link` when showing a human the source, and use `actions.expand` when you need more surrounding evidence. If a client only exposes `source_uri`, it is the same canonical pointer.
 
 ### Write loop: remember + ingest_chat
 
@@ -161,9 +161,9 @@ A healthy search result in JSON format (`--json`) has:
 Key fields to check:
 - `vec_failed: false` — vector search is working. If `true`, you're on BM25-only.
 - `vec_count > 0` — vectors returned. If 0 with `vec_failed: false`, the query had no semantic matches.
-- `results` — list of ranked documents with `path`, `score`, and `snippet`
+- `results` — list of ranked documents with `path`, `score`, `snippet`, `source_link`, `source_ref`, and `actions.expand`
 
-Every result carries a `source_uri` — a source link you can open back to the original. The same pointer is on results from search, briefings, fact lookups, timelines, research, and contradiction checks, so you can always show a human where an answer came from, or feed it to `expand` to read more around a hit.
+Every result carries a source pointer you can open back to the original. For search, prefer `source_link` for human-readable citation and `actions.expand` for the next tool call. The nested `source_ref` object contains the same canonical pointer plus display path, title, collection, page and locator metadata where available.
 
 ---
 
