@@ -104,7 +104,7 @@ The `2 · Pre-merge PR gates` workflow (`integration.yml`) publishes the second 
 | `.github/workflows/reflib-benchmark-gate.yml` | Manual dispatch | Reference library benchmark comparison |
 | `.github/workflows/dependency-review.yml` | PR | Dependency change review |
 | `.github/workflows/release.yml` | Manual dispatch (`5 · Release`) | Tag `main`, extract the `[Unreleased]` CHANGELOG as notes, create the GitHub Release (App-authored via WIF) |
-| `.github/workflows/release-vm-deploy.yml` | Alpha prerelease | Calls tc-pipelines `azure-vm-deploy.yml@v1` (snapshot skipped; `onboard check` probe) — see [ADR-017](ADR-017-deployment-architecture.md) |
+| `.github/workflows/release-vm-deploy.yml` | Alpha prerelease | Calls tc-pipelines `azure-vm-deploy.yml@v1` (snapshot required; `onboard check` probe) — see [ADR-017](ADR-017-deployment-architecture.md) |
 | `.github/workflows/docker-publish.yml` | Release/tag | Docker image build and publish |
 | `.github/workflows/publish-pypi.yml` | Release/tag | PyPI package publish |
 | `.github/dependabot.yml` | Weekly Monday 03:00 AEST | Automated dependency updates |
@@ -125,7 +125,7 @@ kairix search "test query" --agent <your-agent>
 
 **Rollback:** `pip install git+https://github.com/three-cubes/kairix@<previous-tag>`. All state is in SQLite/document store — safe.
 
-**CI deploy plane (canonical).** Release/deploy workflows run as the `three-cubes-agent` App over Workload Identity Federation (a short-lived installation token minted from Key Vault). An alpha prerelease deploys the VM via the tc-pipelines `azure-vm-deploy.yml@v1` reusable — see [ADR-017](ADR-017-deployment-architecture.md). kairix specifics today: **snapshot is skipped** because the CI identity lacks Disk Snapshot Contributor, **recovery is re-pinning `KAIRIX_IMAGE_TAG`**, and the post-apply probe is `apply-alpha.sh`'s in-band `kairix onboard check --json` plus the reference-library gate (not `systemctl is-active`, since `kairix.service` is a oneshot). Desired production posture: grant the deploy identity snapshot rights and fail closed on production snapshot skip.
+**CI deploy plane (canonical).** Release/deploy workflows run as the `three-cubes-agent` App over Workload Identity Federation (a short-lived installation token minted from Key Vault). An alpha prerelease deploys the VM via the tc-pipelines `azure-vm-deploy.yml@v1` reusable — see [ADR-017](ADR-017-deployment-architecture.md). kairix requires a pre-apply OS-disk snapshot from the reusable workflow, uses `apply-alpha.sh` to re-pin `KAIRIX_IMAGE_TAG` for container rollback when health/onboard fails, writes the VM ops compose overlay in the active `/etc/kairix` compose root, and verifies post-apply health through `kairix onboard check --json` plus the reference-library gate (not `systemctl is-active`, since `kairix.service` is a oneshot). If snapshot creation fails, fix the Azure deploy identity role assignment rather than bypassing the snapshot step.
 
 ### 2.4 No gate bypass
 

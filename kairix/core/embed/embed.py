@@ -516,6 +516,32 @@ def _apply_reflib_index_mode(
     return rows
 
 
+def _dedupe_chunks_by_hash_seq(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse duplicate chunk identities before embedding.
+
+    ``content_vectors`` is keyed by ``(hash, seq)`` and SQLite uses
+    ``INSERT OR REPLACE`` at that identity. USEARCH has no matching
+    upsert/delete path, so feeding duplicate ``hash_seq`` values inflates the
+    ANN index while SQLite collapses to one row. Duplicate active document rows
+    with the same content hash are the known producer.
+    """
+    seen: set[tuple[str, int]] = set()
+    deduped: list[dict[str, Any]] = []
+    for chunk in chunks:
+        key = (str(chunk["hash"]), int(chunk["seq"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(chunk)
+    skipped = len(chunks) - len(deduped)
+    if skipped:
+        logger.info(
+            "embed: skipped %d duplicate chunk identity row(s) before vector writes",
+            skipped,
+        )
+    return deduped
+
+
 def _gather_pending_chunks(
     db: sqlite3.Connection,
     force: bool,
@@ -618,7 +644,7 @@ def _gather_pending_chunks(
                 }
             )
 
-    return all_chunks, len(rows)
+    return _dedupe_chunks_by_hash_seq(all_chunks), len(rows)
 
 
 def _split_batch_against_cache(

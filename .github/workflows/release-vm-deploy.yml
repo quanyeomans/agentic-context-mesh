@@ -7,11 +7,11 @@ name: "2b · Release (VM alpha-deploy + reflib gate)"
 #
 # Deploy plane (2026-06 migration): the VM deploy now runs over the
 # canonical tc-pipelines reusable workflow `azure-vm-deploy.yml@v1`
-# (WIF login -> [disk snapshot, skipped for kairix] -> `az vm run-command`
+# (WIF login -> disk snapshot -> `az vm run-command`
 # the apply script -> smoke `systemctl is-active`), replacing the bespoke
-# HMAC-webhook POST. Snapshot is skipped (skip-snapshot: 'true') because the
-# kairix CI identity lacks Disk Snapshot Contributor; rollback is by
-# re-pinning the previous KAIRIX_IMAGE_TAG, not a disk snapshot.
+# HMAC-webhook POST. The workflow requires a VM disk snapshot before apply;
+# rollback of the kairix container itself is still by re-pinning the previous
+# KAIRIX_IMAGE_TAG inside apply-alpha.sh.
 # The box-side apply logic is the single source in
 # scripts/deploy/apply-alpha.sh (the bespoke Go HMAC-webhook it replaced is
 # retired). This is the "canonical in tc-pipelines, don't reinvent" pattern:
@@ -179,8 +179,10 @@ jobs:
       # settings (gh variable set ...) before dispatching this workflow.
       resource-group: ${{ vars.KAIRIX_DEPLOY_RESOURCE_GROUP }}
       op-tag: kairix-alpha
-      # skip-snapshot: the kairix CI identity holds VM Contributor but NOT Disk Snapshot Contributor — kairix rolls back by re-pinning the previous image tag (KAIRIX_IMAGE_TAG), not a VM disk snapshot, so the snapshot step is intentionally skipped.
-      skip-snapshot: 'true'
+      # Production safety gate: the reusable workflow must take an OS-disk
+      # snapshot before running the box-side apply script. If Azure IAM drifts
+      # and snapshot creation fails, the deploy fails before mutating the VM.
+      skip-snapshot: 'false'
       # Surface the box-side apply output (apply-alpha's KAIRIX_REFLIB marker) as
       # the deploy-vm `apply-output` job output, so post-reflib-status can put the
       # achieved weighted/baseline in the commit-status description.

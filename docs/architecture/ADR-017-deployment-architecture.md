@@ -26,29 +26,43 @@ secret), so tags, releases, and dispatches are authored by the App.
 
 The **VM deploy uses the canonical tc-pipelines reusable workflow
 `azure-vm-deploy.yml@v1`**, invoked by `release-vm-deploy.yml` on an **alpha
-prerelease** (not every merge). kairix's actual invocation sets
-**`skip-snapshot: 'true'`** — the CI identity lacks Disk Snapshot Contributor, so
-**recovery is re-pinning `KAIRIX_IMAGE_TAG`** to the previous image rather than a
-disk rollback — and passes **empty `smoke-units`**, because the oneshot
+prerelease** (not every merge). kairix's invocation requires the reusable
+workflow to take an OS-disk snapshot before it runs the box-side apply script.
+The deploy identity must therefore hold **Disk Snapshot Contributor** on the
+deploy resource group. Container-level recovery is still handled by re-pinning
+`KAIRIX_IMAGE_TAG` to the previous image if apply-alpha detects a failed
+container health/onboard transition. The workflow also passes **empty
+`smoke-units`**, because the oneshot
 `kairix.service` makes `systemctl is-active` the wrong probe. Health is verified
 **in-band by the box-side apply script**: `apply-alpha.sh` runs
 `kairix onboard check --json` plus the reference-library regression gate after the
 image flip. The box-side apply logic is the **single source** in
 [`scripts/deploy/apply-alpha.sh`](../../scripts/deploy/apply-alpha.sh); the manual
-fallback, when CI is unavailable, is to run that script directly on the box
+fallback, when CI is unavailable, is to take a VM/database backup first and then
+run that script directly on the box
 (`sh apply-alpha.sh <tag>` from the compose dir). This follows the org "canonical
 in tc-pipelines, don't reinvent" rule — use the shared deploy workflow and WIF
 login rather than re-implementing them per repo. It satisfies the authoritative
-"recovery point before apply, probe after apply" model as kairix implements it:
-the `KAIRIX_IMAGE_TAG` re-pin is the recovery point; `onboard check --json` + the
-reflib regression status is the probe.
+"recovery point before apply, probe after apply" model: the VM disk snapshot is
+the infrastructure recovery point; the `KAIRIX_IMAGE_TAG` re-pin is the container
+rollback path; `onboard check --json` + the reflib regression status is the
+post-apply probe.
 
-**2026-07-22 deployment-resilience amendment:** production deploys should snapshot
-before apply. The current `skip-snapshot: 'true'` setting is a known IAM gap, not
-the desired end state. Grant Disk Snapshot Contributor to the deploy identity,
-then flip the workflow to fail closed when a production deployment attempts to
-skip the snapshot. Until that role exists, alpha deploys recover by image-tag
-rollback only.
+**2026-07-23 deployment-resilience amendment:** alpha VM deploys now fail closed
+if the reusable workflow cannot create the pre-apply OS-disk snapshot. If that
+happens, fix the Azure role assignment for the deploy identity rather than
+re-enabling snapshot skip.
+
+**Customer-Zero VM compose root:** the active VM stack is selected from Docker
+compose labels, not directory convention. The current OpenClaw/Kairix VM runs
+from `/etc/kairix`; `/opt/kairix/app` is legacy state and must not be used as the
+authoritative deploy root. `apply-alpha.sh` writes a small
+`docker-compose.kairix-vm-ops.yml` overlay into the active compose directory and
+stacks it after any local override. That overlay enables
+`KAIRIX_WORKER_WRITES_VEC_INDEX` by default for the dogfood corpus so post-deploy
+catch-up runs rebuild SQLite metadata and the USEARCH serving index together.
+Operators can set `KAIRIX_WORKER_WRITES_VEC_INDEX=0` in `.env` before a very
+large corpus rebuild if the worker-memory runbook says the host is undersized.
 
 ---
 

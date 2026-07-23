@@ -185,6 +185,18 @@ def test_emits_reflib_marker_on_pass(tmp_path):
     assert "KAIRIX_REFLIB verdict=pass weighted=0.810 baseline=0.808 tolerance=0.05" in proc.stdout, proc.stdout
 
 
+def test_writes_vm_ops_override_for_vector_index_gate(tmp_path):
+    proc, dlog, _env = _run(tmp_path, NEW)
+    assert proc.returncode == 0, proc.stderr
+
+    override = tmp_path / "compose" / "docker-compose.kairix-vm-ops.yml"
+    text = override.read_text()
+    assert 'KAIRIX_WORKER_WRITES_VEC_INDEX: "${KAIRIX_WORKER_WRITES_VEC_INDEX:-1}"' in text
+
+    ups = [ln for ln in dlog.splitlines() if " up " in ln]
+    assert ups and "-f docker-compose.kairix-vm-ops.yml" in ups[0]
+
+
 def test_emits_reflib_marker_on_regression(tmp_path):
     # On a regression the marker must STILL be emitted (verdict=regress) so the
     # workflow can post state=failure with the achieved weighted score, not just

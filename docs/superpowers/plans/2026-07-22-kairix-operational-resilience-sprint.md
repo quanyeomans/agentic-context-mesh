@@ -7,7 +7,7 @@ Maximise agent affordance and operational resilience for Kairix-backed agents by
 ## Accepted decisions
 
 1. SQLite remains the operational source of truth for document and vector metadata. USEARCH is a derived serving index and must be caught up via a deliberate rebuild/catch-up path, not by blindly enabling worker live writes under memory pressure.
-2. VM deploy snapshots should be mandatory for production deployments. The current alpha workflow still skips snapshots because the GitHub/Azure identity lacks Disk Snapshot Contributor; resolving that IAM gap is required before the workflow can safely fail closed.
+2. VM deploy snapshots are mandatory for production deployments. The alpha workflow must fail closed if the GitHub/Azure deploy identity cannot create the pre-apply OS-disk snapshot.
 3. Local document permission failures are expected in a multi-agent estate. Kairix must diagnose and skip unreadable files without breaking scan/embed/summary, and operators need a repeatable ownership/mode repair path.
 4. Orphan `content_vectors` rows may be pruned only after a database backup or VM snapshot has been taken.
 5. Backlogs should be reduced aggressively once permissions/exclusions are fixed: FTS gaps first, then embed/summary gaps, then USEARCH catch-up.
@@ -18,8 +18,8 @@ Maximise agent affordance and operational resilience for Kairix-backed agents by
 - Search affordance: the shared CLI/MCP search envelope keeps the existing `source_uri`, `locator`, and `seq` fields and adds `source_link`, `source_ref`, and `actions.expand`.
 - Permission resilience: scanner and summariser treat unreadable local files as recoverable diagnostics, not fatal batch failures. The runtime records counts, paths and F21-style remediation hints so operators can repair ownership/modes or exclude/quarantine noisy trees.
 - Orphan cleanup: use existing maintenance/preflight pruning only after an operator-visible backup step. The next implementation slice should add an explicit backup acknowledgement or backup command wrapper around pruning.
-- USEARCH catch-up: do not set `KAIRIX_WORKER_WRITES_VEC_INDEX=1` as the default recovery. The next implementation slice should provide an offline rebuild command that takes a DB backup/lock, rebuilds or re-embeds into a temporary USEARCH index, verifies parity, then atomically swaps the index.
-- Snapshot policy: update Azure IAM for the deploy identity, then change the alpha VM workflow to fail closed when a production deploy attempts `skip-snapshot: true`.
+- USEARCH catch-up: do not blindly set `KAIRIX_WORKER_WRITES_VEC_INDEX=1` for a large corpus under memory pressure. For the current Customer-Zero VM corpus, `apply-alpha.sh` writes a VM ops compose overlay that enables USEARCH writes by default so post-deploy force/catch-up runs update SQLite metadata and the serving index together. A future large-corpus slice should still provide an offline rebuild command that takes a DB backup/lock, rebuilds or re-embeds into a temporary USEARCH index, verifies parity, then atomically swaps the index.
+- Snapshot policy: keep the alpha VM workflow fail-closed on snapshot creation. If IAM drifts, repair the deploy identity role assignment instead of bypassing the snapshot.
 
 ## Implementation slices
 
@@ -39,18 +39,20 @@ Maximise agent affordance and operational resilience for Kairix-backed agents by
 
 ### Slice 3 — deploy plane
 
-- Grant Disk Snapshot Contributor to the GitHub/Azure deploy identity.
-- Flip the VM alpha workflow from snapshot-skip to snapshot-required by default.
+- Keep Disk Snapshot Contributor on the GitHub/Azure deploy identity at the deploy resource-group scope.
+- Keep the VM alpha workflow snapshot-required by default.
+- Keep the active VM compose root converged through `apply-alpha.sh`'s `docker-compose.kairix-vm-ops.yml` overlay; verify Docker compose labels rather than assuming `/opt/kairix/app`.
 - Add PVT evidence to release notes: snapshot id, deployed image tag, onboard check, scoped search, preflight, orphan count, USEARCH parity.
 
 ## Verification
 
 - Unit: focused tests for search envelope affordance and permission-skip behavior.
-- Integration: `kairix worker preflight --json`, `kairix embed rebuild-fts`, `kairix search --collection sharepoint --json`.
+- Integration: `kairix worker preflight --json`, `kairix embed rebuild-fts`, `kairix search --collection sharepoint --json`, and duplicate active-hash SQL when USEARCH parity drifts high after a force rebuild.
 - VM PVT after merge: confirm deployed Kairix version, healthy container, scoped search returns only requested collection, preflight has no fatal gaps, permission diagnostics are visible rather than raw tracebacks.
 
 ## Open risks
 
 - USEARCH cannot be rebuilt purely from current `content_vectors` metadata because vector bytes are not the canonical persisted value. The offline catch-up path must either re-embed or read from the embedding cache, then write a temporary serving index.
-- Snapshot enforcement depends on Azure IAM outside the repo.
+- Duplicate active document hashes can inflate USEARCH unless the embed run de-duplicates `(hash, seq)` identities before vector writes. Keep this covered by the duplicate-hash embed regression test.
+- Snapshot enforcement depends on Azure IAM outside the repo; if role assignment drifts, the deploy should fail before apply.
 - Permission remediation must be careful not to widen access to secrets or unrelated private documents.
