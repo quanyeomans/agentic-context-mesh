@@ -62,6 +62,7 @@ COMPOSE_DIR="${KAIRIX_COMPOSE_DIR:-/opt/kairix/app}"
 COMPOSE_SERVICE="kairix"
 CONTAINER="app-kairix-1"
 BENCHMARK_SUITE="reflib"
+VM_OPS_OVERRIDE="docker-compose.kairix-vm-ops.yml"
 REGRESSION_TOLERANCE="${KAIRIX_REGRESSION_TOLERANCE:-0.05}"
 # Standing reflib weighted-total baseline (ROADMAP); overridable via env. Kept
 # always-set so the regression gate stays armed on every deploy — an unset
@@ -72,6 +73,33 @@ BASELINE_WEIGHTED="${KAIRIX_BASELINE_WEIGHTED:-0.808}"
 cd "$COMPOSE_DIR" || {
 	echo "FAIL apply-alpha: compose dir $COMPOSE_DIR not found" >&2
 	exit 1
+}
+
+write_vm_ops_override() {
+	_ops_tmp="$(mktemp "${COMPOSE_DIR}/.kairix-vm-ops.XXXXXX")" || {
+		echo "FAIL apply-alpha: could not create VM ops override temp file" >&2
+		exit 1
+	}
+	if ! cat >"$_ops_tmp" <<'COMPOSE_EOF'
+services:
+  kairix:
+    environment:
+      # Customer-Zero VM overlay: keep the USEARCH ANN index in lock-step
+      # with content_vectors during alpha deploys and post-deploy catch-up.
+      # Operators can set KAIRIX_WORKER_WRITES_VEC_INDEX=0 in .env to disable
+      # the in-process writer before a very large corpus rebuild.
+      KAIRIX_WORKER_WRITES_VEC_INDEX: "${KAIRIX_WORKER_WRITES_VEC_INDEX:-1}"
+COMPOSE_EOF
+	then
+		rm -f "$_ops_tmp"
+		echo "FAIL apply-alpha: could not write VM ops override" >&2
+		exit 1
+	fi
+	if ! mv "$_ops_tmp" "$VM_OPS_OVERRIDE"; then
+		rm -f "$_ops_tmp"
+		echo "FAIL apply-alpha: could not install VM ops override" >&2
+		exit 1
+	fi
 }
 
 # --- rollback state: capture the prior known-good image before we mutate -----
@@ -113,8 +141,10 @@ fi
 # deploys :latest and drops the secrets wiring. Include the override only when
 # present so a unified host shipping the base alone still works. IMAGE_TAG is
 # already captured above, so reusing the positional params here is safe.
+write_vm_ops_override
 set -- -f docker-compose.yml
 [ -f docker-compose.override.yml ] && set -- "$@" -f docker-compose.override.yml
+set -- "$@" -f "$VM_OPS_OVERRIDE"
 
 # --- rollback machinery ----------------------------------------------------
 #

@@ -147,6 +147,21 @@ def _seed_documents(db: sqlite3.Connection, n_docs: int) -> None:
     db.commit()
 
 
+def _seed_duplicate_hash_documents(db: sqlite3.Connection) -> None:
+    """Seed two active document rows that point at the same content hash."""
+    db.execute("CREATE TABLE documents (hash TEXT, path TEXT, active INTEGER DEFAULT 1)")
+    db.execute("CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT)")
+    db.execute(
+        "CREATE TABLE content_vectors"
+        " (hash TEXT, seq INTEGER, pos INTEGER, model TEXT, embedded_at INTEGER, chunk_date TEXT,"
+        " PRIMARY KEY (hash, seq))"
+    )
+    db.execute("INSERT INTO content (hash, doc) VALUES (?, ?)", ("shared-hash", "short duplicate body"))
+    db.execute("INSERT INTO documents (hash, path, active) VALUES (?, ?, 1)", ("shared-hash", "docs/a.md"))
+    db.execute("INSERT INTO documents (hash, path, active) VALUES (?, ?, 1)", ("shared-hash", "docs/b.md"))
+    db.commit()
+
+
 def _build_deps(dims: int = 1536) -> EmbedDependencies:
     """Build an ``EmbedDependencies`` that fakes every external call.
 
@@ -205,6 +220,37 @@ def test_writer_opened_once_per_run() -> None:
     )
     assert writer.exit_count == 1, f"writer exit_count={writer.exit_count}, expected 1"
     assert writer.add_batch_count == 5, f"expected 5 add_batch calls (one per batch); got {writer.add_batch_count}"
+
+
+def test_run_embed_deduplicates_duplicate_document_hashes_before_vec_index() -> None:
+    """Duplicate active ``documents`` rows must not inflate the USEARCH index.
+
+    The live VM had duplicate active rows for the same content hash. The force
+    embed loop selected both rows, SQLite collapsed them to one
+    ``content_vectors`` row via ``PRIMARY KEY(hash, seq)``, but USEARCH received
+    both vectors and preflight reported ``usearch > content_vectors`` drift.
+
+    Sabotage: remove chunk de-duplication from ``_gather_pending_chunks`` and
+    this test fails with ``embedded=2`` / ``len(vec_index)=2`` while SQLite has
+    only one row.
+    """
+    db = sqlite3.connect(":memory:")
+    _seed_duplicate_hash_documents(db)
+    fake_vec_index = _FakeVecIndex()
+
+    result = run_embed(
+        db,
+        force=True,
+        batch_size=10,
+        deps=_build_deps(),
+        vec_writer=VecIndexBatchWriter(fake_vec_index),
+    )
+
+    row = db.execute("SELECT COUNT(*) FROM content_vectors").fetchone()
+    sqlite_vectors = int(row[0]) if row else 0
+    assert result["embedded"] == 1
+    assert sqlite_vectors == 1
+    assert len(fake_vec_index) == sqlite_vectors
 
 
 def test_incremental_save_fires_every_n_batches() -> None:

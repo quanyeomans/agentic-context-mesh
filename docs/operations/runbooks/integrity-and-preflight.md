@@ -83,6 +83,63 @@ orphan vectors. Orphan pruning is designed to be safe and idempotent, but
 the recovery contract is still backup first, prune second, verify third.
 Other gaps need operator action via the per-gap remediation.
 
+For the OpenClaw VM, the normal recovery point is the pre-apply OS-disk
+snapshot created by `release-vm-deploy.yml` through the shared
+`azure-vm-deploy.yml@v1` workflow. If the workflow cannot create that snapshot,
+fix the Azure deploy identity role assignment before running cleanup; do not
+fall back to snapshot bypass for production cleanup. A one-off operator snapshot
+is acceptable for manual maintenance windows when it is named in the PVT record.
+
+Recommended cleanup sequence after a green deploy:
+
+```bash
+kairix worker preflight --json
+kairix worker preflight --auto-heal
+kairix worker preflight --json
+kairix embed
+kairix worker preflight --json
+```
+
+Only run orphan pruning or USEARCH catch-up after the backup/snapshot step has
+completed. If `vector-store-vs-content-vectors` remains high after `kairix embed`,
+pause and diagnose the derived USEARCH index rather than pruning more metadata.
+
+### USEARCH parity after force rebuild
+
+`content_vectors` is SQLite metadata; the vector bytes live in USEARCH. For the
+OpenClaw/Kairix VM, alpha deploys create `docker-compose.kairix-vm-ops.yml` in
+the active `/etc/kairix` compose root so `KAIRIX_WORKER_WRITES_VEC_INDEX` is
+enabled for the kairix container. Verify the gate before a catch-up run:
+
+```bash
+cd /etc/kairix
+docker compose -f docker-compose.yml -f docker-compose.kairix-vm-ops.yml \
+  exec -T kairix python3 -c 'from kairix.paths import worker_writes_vec_index; print(worker_writes_vec_index())'
+```
+
+If the output is `False`, do not expect `kairix embed embed --force` to rebuild
+USEARCH; it will only rebuild SQLite `content_vectors`. Fix the compose overlay
+or deploy `apply-alpha.sh`, then recreate the container and rerun the force
+embed.
+
+If preflight reports `usearch > content_vectors` after a force rebuild, check
+for duplicate active document hashes:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.kairix-vm-ops.yml exec -T kairix python3 - <<'PY'
+import sqlite3
+from kairix.paths import db_path
+db = sqlite3.connect(str(db_path()))
+print(db.execute("SELECT COUNT(*) FROM documents WHERE active = 1").fetchone()[0])
+print(db.execute("SELECT COUNT(DISTINCT hash) FROM documents WHERE active = 1").fetchone()[0])
+PY
+```
+
+The embed pipeline de-duplicates chunk identities by `(hash, seq)` before
+provider calls and USEARCH writes. A deployed image with that fix should rebuild
+USEARCH to match SQLite, then `kairix worker preflight --json` should no longer
+surface `vector-store-vs-content-vectors` beyond the 5% tolerance.
+
 ## Worker boot integration
 
 The worker calls `_run_preflight_at_boot()` immediately before the

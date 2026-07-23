@@ -156,6 +156,14 @@ Expected:
 
 The `count` should DROP cycle-over-cycle as the worker catches up. At the current backlog (~961k vectors behind), expect several embed cycles to fully reconcile.
 
+If the drift changes direction and reports `usearch > content_vectors` after a
+force rebuild, do not keep re-running the same command. Check for duplicate
+active document hashes and confirm the deployed image includes the embed
+dedupe fix that collapses `(hash, seq)` before USEARCH writes. The
+Customer-Zero VM deploy path writes `docker-compose.kairix-vm-ops.yml` in
+`/etc/kairix`; include that overlay when checking the live gate or running
+manual compose commands.
+
 ## When to revisit
 
 | Scenario | Action |

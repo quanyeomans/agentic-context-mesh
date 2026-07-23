@@ -50,24 +50,30 @@ The workflow:
 
 An **alpha prerelease** deploys to the VM automatically: `release-vm-deploy.yml`
 calls the tc-pipelines `azure-vm-deploy.yml@v1` reusable (see
-[ADR-017](../docs/architecture/ADR-017-deployment-architecture.md)) — snapshot
-skipped, rollback by re-pinning `KAIRIX_IMAGE_TAG`, and the post-apply probe is
-`apply-alpha.sh`'s in-band `kairix onboard check --json` plus the reference-library
-gate. The manual fallback, when CI is unavailable, is to pull the tagged image and
-restart the container on the box:
+[ADR-017](../docs/architecture/ADR-017-deployment-architecture.md)) — pre-apply
+OS-disk snapshot required, container rollback by re-pinning `KAIRIX_IMAGE_TAG`,
+and the post-apply probe is `apply-alpha.sh`'s in-band
+`kairix onboard check --json` plus the reference-library gate. The manual
+fallback, when CI is unavailable, is to take an operator-approved VM/database
+backup first, then run the same apply script from the active compose root on the
+box. Verify the active root from Docker compose labels; the Customer-Zero VM
+uses `/etc/kairix`, while `/opt/kairix/app` is legacy state.
 
 ```bash
 # Substitute <your-deploy-host> with the SSH alias / hostname that targets your
 # kairix VM (e.g. an entry in ~/.ssh/config, or a DNS name).
 
-# Pull the image on the VM
-ssh <your-deploy-host> 'docker pull ghcr.io/three-cubes/kairix:vYYYY.M.D'
+# Confirm the active compose root.
+ssh <your-deploy-host> "docker inspect app-kairix-1 --format '{{ index .Config.Labels \"com.docker.compose.project.working_dir\" }}'"
 
-# Restart the kairix container (preserves /data/kairix mounts)
-ssh <your-deploy-host> 'cd /opt/kairix && docker compose pull && docker compose up -d'
+# Run the same apply path the workflow uses. It writes
+# docker-compose.kairix-vm-ops.yml, pins KAIRIX_IMAGE_TAG, recreates the
+# container, runs onboard, and gates on the reflib score.
+scp scripts/deploy/apply-alpha.sh <your-deploy-host>:/tmp/apply-alpha.sh
+ssh <your-deploy-host> 'cd /etc/kairix && sh /tmp/apply-alpha.sh vYYYY.M.DaN'
 
 # Verify health
-ssh <your-deploy-host> 'curl -fsS http://127.0.0.1:8182/healthz'
+ssh <your-deploy-host> 'cd /etc/kairix && docker compose -f docker-compose.yml -f docker-compose.kairix-vm-ops.yml exec -T kairix kairix worker preflight --json'
 ```
 
 ## UAT
