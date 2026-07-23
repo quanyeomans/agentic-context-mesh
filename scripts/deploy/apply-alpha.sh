@@ -63,6 +63,7 @@ COMPOSE_SERVICE="kairix"
 CONTAINER="app-kairix-1"
 BENCHMARK_SUITE="reflib"
 VM_OPS_OVERRIDE="docker-compose.kairix-vm-ops.yml"
+AGENT_MEMORY_TARGET="/data/documents/04-Agent-Knowledge"
 REGRESSION_TOLERANCE="${KAIRIX_REGRESSION_TOLERANCE:-0.05}"
 # Standing reflib weighted-total baseline (ROADMAP); overridable via env. Kept
 # always-set so the regression gate stays armed on every deploy — an unset
@@ -75,12 +76,47 @@ cd "$COMPOSE_DIR" || {
 	exit 1
 }
 
+resolve_agent_memory_host_path() {
+	if [ -n "${KAIRIX_AGENT_MEMORY_HOST_PATH:-}" ]; then
+		printf '%s\n' "$KAIRIX_AGENT_MEMORY_HOST_PATH"
+		return
+	fi
+
+	# Prefer an existing nested bind. This keeps re-deploys stable after an
+	# operator has already supplied the correct writable memory surface.
+	_existing_memory_mount="$(
+		docker inspect "$CONTAINER" \
+			--format '{{range .Mounts}}{{if eq .Destination "/data/documents/04-Agent-Knowledge"}}{{.Source}}{{end}}{{end}}' \
+			2>/dev/null || true
+	)"
+	if [ -n "$_existing_memory_mount" ]; then
+		printf '%s\n' "$_existing_memory_mount"
+		return
+	fi
+
+	# Otherwise derive the writable subtree from the active document-root bind,
+	# rather than assuming a Customer-Zero-specific host path.
+	_document_mount="$(
+		docker inspect "$CONTAINER" \
+			--format '{{range .Mounts}}{{if eq .Destination "/data/documents"}}{{.Source}}{{end}}{{end}}' \
+			2>/dev/null || true
+	)"
+	if [ -n "$_document_mount" ]; then
+		printf '%s/04-Agent-Knowledge\n' "${_document_mount%/}"
+		return
+	fi
+
+	# Fresh/manual fallback that matches the stock compose layout.
+	printf '%s\n' "./documents/04-Agent-Knowledge"
+}
+
 write_vm_ops_override() {
+	_agent_memory_host_path="$(resolve_agent_memory_host_path)"
 	_ops_tmp="$(mktemp "${COMPOSE_DIR}/.kairix-vm-ops.XXXXXX")" || {
 		echo "FAIL apply-alpha: could not create VM ops override temp file" >&2
 		exit 1
 	}
-	if ! cat >"$_ops_tmp" <<'COMPOSE_EOF'
+	if ! cat >"$_ops_tmp" <<COMPOSE_EOF
 services:
   kairix:
     environment:
@@ -88,7 +124,16 @@ services:
       # with content_vectors during alpha deploys and post-deploy catch-up.
       # Operators can set KAIRIX_WORKER_WRITES_VEC_INDEX=0 in .env to disable
       # the in-process writer before a very large corpus rebuild.
-      KAIRIX_WORKER_WRITES_VEC_INDEX: "${KAIRIX_WORKER_WRITES_VEC_INDEX:-1}"
+      KAIRIX_WORKER_WRITES_VEC_INDEX: "\${KAIRIX_WORKER_WRITES_VEC_INDEX:-1}"
+    volumes:
+      # The document vault may be read-only for scanner safety, but agent memory
+      # must stay writable so recall/briefing writes do not fall back to the
+      # private data dir. Source comes from KAIRIX_AGENT_MEMORY_HOST_PATH, an
+      # existing nested bind, or the active /data/documents bind.
+      - type: bind
+        source: $_agent_memory_host_path
+        target: $AGENT_MEMORY_TARGET
+        read_only: false
 COMPOSE_EOF
 	then
 		rm -f "$_ops_tmp"

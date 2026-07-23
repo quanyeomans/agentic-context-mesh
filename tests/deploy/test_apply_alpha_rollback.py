@@ -46,7 +46,13 @@ def cur_digest():
 
 sub = argv[0] if argv else ""
 if sub == "inspect":
-    fmt = argv[2] if len(argv) > 2 else ""
+    fmt = " ".join(argv)
+    if "Mounts" in fmt:
+        if "/data/documents/04-Agent-Knowledge" in fmt:
+            sys.stdout.write(os.environ.get("FAKE_AGENT_MEMORY_MOUNT_SOURCE", ""))
+        elif "/data/documents" in fmt:
+            sys.stdout.write(os.environ.get("FAKE_DOCUMENT_MOUNT_SOURCE", ""))
+        sys.exit(0)
     if "Config" in fmt:           # {{ index .Config.Image }} -> image reference
         sys.stdout.write(os.environ.get("FAKE_LIVE_REF", ""))
     else:                          # {{ .Image }} -> resolved digest of running ctr
@@ -192,9 +198,30 @@ def test_writes_vm_ops_override_for_vector_index_gate(tmp_path):
     override = tmp_path / "compose" / "docker-compose.kairix-vm-ops.yml"
     text = override.read_text()
     assert 'KAIRIX_WORKER_WRITES_VEC_INDEX: "${KAIRIX_WORKER_WRITES_VEC_INDEX:-1}"' in text
+    assert "source: ./documents/04-Agent-Knowledge" in text
+    assert "target: /data/documents/04-Agent-Knowledge" in text
+    assert "read_only: false" in text
 
     ups = [ln for ln in dlog.splitlines() if " up " in ln]
     assert ups and "-f docker-compose.kairix-vm-ops.yml" in ups[0]
+
+
+def test_vm_ops_override_derives_agent_memory_from_document_mount(tmp_path):
+    proc, _dlog, _env = _run(tmp_path, NEW, FAKE_DOCUMENT_MOUNT_SOURCE="/data/obsidian-vault")
+    assert proc.returncode == 0, proc.stderr
+
+    text = (tmp_path / "compose" / "docker-compose.kairix-vm-ops.yml").read_text()
+    assert "source: /data/obsidian-vault/04-Agent-Knowledge" in text
+    assert "target: /data/documents/04-Agent-Knowledge" in text
+
+
+def test_vm_ops_override_honours_agent_memory_host_path_override(tmp_path):
+    proc, _dlog, _env = _run(tmp_path, NEW, KAIRIX_AGENT_MEMORY_HOST_PATH="/srv/kairix-agent-memory")
+    assert proc.returncode == 0, proc.stderr
+
+    text = (tmp_path / "compose" / "docker-compose.kairix-vm-ops.yml").read_text()
+    assert "source: /srv/kairix-agent-memory" in text
+    assert "target: /data/documents/04-Agent-Knowledge" in text
 
 
 def test_emits_reflib_marker_on_regression(tmp_path):
