@@ -151,7 +151,7 @@ jobs:
     #  * PRIVATE_INFRA_PATTERNS (F73) is forwarded through the reusable's
     #    private-infra-patterns secret so the detector stays ENFORCED, not a
     #    silent no-op. Stage 1..5 (contracts / integration / e2e) are untouched.
-    uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@71692450a1f339685ea4d88ad707bc36e75f5ac6 # v1.15.0
+    uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@b9d6408868eec5be56dbe57581aa086a95095d46 # v1.16.1
     with:
       python-version: "3.12"
       uv-version: "0.11.16"
