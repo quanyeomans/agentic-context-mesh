@@ -43,7 +43,7 @@ permissions:
 jobs:
   fresh-install-smoke:
     name: "Fresh install smoke"
-    uses: three-cubes/tc-pipelines/.github/workflows/fresh-install-smoke.yml@v1
+    uses: three-cubes/tc-pipelines/.github/workflows/fresh-install-smoke.yml@0541f75d6a3491ff83e643bc752d9722f17d865e # v1.19.1
     with:
       image-name: ghcr.io/three-cubes/kairix
       image-tag: fresh-smoke
