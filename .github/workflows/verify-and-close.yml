@@ -60,7 +60,7 @@ permissions:
 jobs:
   verify-and-close:
     name: verify-and-close
-    uses: three-cubes/tc-pipelines/.github/workflows/verify-and-close.yml@v1
+    uses: three-cubes/tc-pipelines/.github/workflows/verify-and-close.yml@0541f75d6a3491ff83e643bc752d9722f17d865e # v1.19.1
     with:
       # fetch-depth: 0 so setuptools-scm can derive a real version from tags on
       # the source install below (the reusable defaults to a shallow depth-1
