@@ -73,6 +73,8 @@ jobs:
               - 'scripts/safe-commit.sh'
               - '.architecture/baseline/**'
               - '**/_rule_catalogue.py'
+              # A caller change must execute the reusable workflow it changes.
+              - '.github/workflows/ci.yml'
             docker:
               - 'Dockerfile'
               - 'docker-compose*.yml'
