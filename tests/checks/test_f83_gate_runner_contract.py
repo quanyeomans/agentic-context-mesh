@@ -41,7 +41,8 @@ fi
     assert _pipefail_unsafe_quiet_probes(source) == []
 
 
-def test_safe_commit_has_no_unsafe_quiet_output_probes() -> None:
-    source = (_REPO_ROOT / "scripts" / "safe-commit.sh").read_text(encoding="utf-8")
+@pytest.mark.parametrize("script", ["safe-commit.sh", "preflight.sh"])
+def test_canonical_commit_gates_have_no_unsafe_quiet_output_probes(script: str) -> None:
+    source = (_REPO_ROOT / "scripts" / script).read_text(encoding="utf-8")
 
     assert _pipefail_unsafe_quiet_probes(source) == []
